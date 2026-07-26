@@ -10,6 +10,7 @@ type Scenario = "safe" | "standard" | "growth";
 type Offer = {
   title: string;
   price: number;
+  category: string;
   format: string;
   promise: string;
 };
@@ -43,22 +44,46 @@ const niches: Record<NicheKey, NicheData> = {
     base: { reach: 12400, visits: 523, leads: 128, sales: 14 },
     offers: [
       {
+        title: "AI仕事術・はじめの10テンプレ",
+        price: 980,
+        category: "入門商品",
+        format: "PDF",
+        promise: "まず1週間試せる業務別の基本セット",
+      },
+      {
         title: "残業を減らすAIテンプレ30",
         price: 4980,
+        category: "デジタル教材",
         format: "Notion + PDF",
         promise: "明日から使える業務別プロンプト30個",
       },
       {
         title: "90分 AI業務棚卸し",
         price: 19800,
+        category: "個別支援",
         format: "オンライン相談",
         promise: "自分の仕事でAI化できる作業を特定",
       },
       {
         title: "週刊 AI仕事術ラボ",
         price: 1480,
+        category: "月額商品",
         format: "月額メンバー",
         promise: "毎週1つ、仕事に組み込める実践レシピ",
+      },
+      {
+        title: "チーム向けAI活用研修",
+        price: 79800,
+        category: "法人研修",
+        format: "120分研修",
+        promise: "部署共通のAI活用ルールと型を整備",
+      },
+      {
+        title: "業務AI化 伴走パック",
+        price: 198000,
+        category: "導入支援",
+        format: "6週間サポート",
+        promise: "3業務の設計から社内定着まで伴走",
       },
     ],
     drafts: {
@@ -107,22 +132,46 @@ const niches: Record<NicheKey, NicheData> = {
     base: { reach: 9800, visits: 486, leads: 104, sales: 11 },
     offers: [
       {
+        title: "転職準備チェックリスト",
+        price: 780,
+        category: "入門商品",
+        format: "PDF",
+        promise: "応募前に整える12項目を30分で確認",
+      },
+      {
         title: "強み発掘ワークブック",
         price: 2980,
+        category: "デジタル教材",
         format: "PDF + 記入例",
         promise: "経験を採用側に伝わる実績へ変換",
       },
       {
         title: "職務経歴書レビュー",
         price: 12800,
+        category: "個別支援",
         format: "個別添削",
         promise: "60分で応募できる状態まで整理",
       },
       {
         title: "転職伴走ルーム",
         price: 3980,
+        category: "月額商品",
         format: "月額コミュニティ",
         promise: "週次レビューで転職活動を止めない",
+      },
+      {
+        title: "面接対策 3回パック",
+        price: 29800,
+        category: "継続支援",
+        format: "個別セッション",
+        promise: "想定質問から模擬面接まで段階的に対策",
+      },
+      {
+        title: "若手向けキャリア研修",
+        price: 120000,
+        category: "法人研修",
+        format: "半日ワークショップ",
+        promise: "強みの棚卸しと社内キャリア設計を支援",
       },
     ],
     drafts: {
@@ -171,22 +220,46 @@ const niches: Record<NicheKey, NicheData> = {
     base: { reach: 15200, visits: 612, leads: 146, sales: 16 },
     offers: [
       {
+        title: "3日間 デスク運動ミニ動画",
+        price: 680,
+        category: "入門商品",
+        format: "ショート動画",
+        promise: "着替えなしで始める3日間のお試し版",
+      },
+      {
         title: "1日8分 在宅運動プラン",
         price: 2480,
+        category: "動画教材",
         format: "動画 + カレンダー",
         promise: "器具なしで21日間続けられる設計",
       },
       {
         title: "習慣設計セッション",
         price: 9800,
+        category: "個別支援",
         format: "オンライン相談",
         promise: "生活に合わせた運動トリガーを設計",
       },
       {
         title: "朝8分チャレンジ",
         price: 980,
+        category: "月額商品",
         format: "月額グループ",
         promise: "毎朝の配信と記録で一緒に継続",
+      },
+      {
+        title: "8週間 習慣コーチング",
+        price: 39800,
+        category: "継続支援",
+        format: "個別伴走",
+        promise: "生活リズムに合わせて運動習慣を定着",
+      },
+      {
+        title: "在宅チーム健康プログラム",
+        price: 148000,
+        category: "法人プラン",
+        format: "8週間・チーム導入",
+        promise: "在宅勤務者の運動不足をチームで改善",
       },
     ],
     drafts: {
@@ -241,7 +314,7 @@ const number = (value: number) => new Intl.NumberFormat("ja-JP").format(value);
 
 export default function Home() {
   const [niche, setNiche] = useState<NicheKey>("ai");
-  const [offerIndex, setOfferIndex] = useState(0);
+  const [offerIndex, setOfferIndex] = useState(1);
   const [platform, setPlatform] = useState<Platform>("x");
   const [stage, setStage] = useState<Stage>("discover");
   const [scenario, setScenario] = useState<Scenario>("standard");
@@ -263,12 +336,22 @@ export default function Home() {
     [data, factor],
   );
   const revenue = metrics.sales * offer.price;
-  const drafts = data.drafts[platform][stage];
+  const salesDrafts =
+    platform === "x"
+      ? [
+          `${data.audience}向けに「${offer.title}」を作りました。\n\n${offer.promise}。\n${offer.format}で、価格は¥${number(offer.price)}です。\n\n詳しい内容と最初のステップは、プロフィールのリンクから確認できます。`,
+          `情報を集めるだけで終わらせず、実際に一歩進めたい方へ。\n\n「${offer.title}」では、${offer.promise}。\n\n${offer.category}として¥${number(offer.price)}で案内しています。自分に合うか、プロフィールから内容を見てみてください。`,
+        ]
+      : [
+          `ストーリーズ3枚\n\n1：${data.audience}へ\n2：「${offer.title}」— ${offer.promise}\n3：${offer.format}／¥${number(offer.price)}／リンク『内容を見る』`,
+          `リール構成（20秒）\n\n1：よくある悩みを2秒で提示\n2：解決までの流れを3場面で見せる\n3：「${offer.title}」を表示\n4：${offer.promise}\n5：『プロフィールから詳細へ』`,
+        ];
+  const drafts = stage === "sell" ? salesDrafts : data.drafts[platform][stage];
   const draft = drafts[variant % drafts.length];
 
   const changeNiche = (next: NicheKey) => {
     setNiche(next);
-    setOfferIndex(0);
+    setOfferIndex(1);
     setVariant(0);
     setAdopted(false);
     setScheduled(false);
@@ -284,22 +367,22 @@ export default function Home() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brandMark">R</span>
-          <span>RevenuePilot</span>
-          <span className="demoBadge">INTERACTIVE DEMO</span>
+          <span className="brandMark">発</span>
+          <span>売れる発信ナビ</span>
+          <span className="demoBadge">操作デモ</span>
         </div>
         <div className="topActions">
-          <span className="sync"><i />デモデータ同期済み</span>
+          <span className="sync"><i />サンプルデータを表示中</span>
           <button className="avatar" aria-label="アカウントメニュー">YM</button>
         </div>
       </header>
 
       <section className="pageHead">
         <div>
-          <p className="eyebrow">REVENUE COMMAND CENTER</p>
-          <h1>フォロワーではなく、売上を伸ばす。</h1>
+          <p className="eyebrow">SNS収益化ダッシュボード</p>
+          <h1>SNSを、売上の入口にする。</h1>
           <p className="subtitle">
-            読者の悩みから商品を決め、投稿ごとの売上まで一気通貫で設計します。
+            誰に何を売るかを決め、投稿づくりから売上分析まで一緒に案内します。
           </p>
         </div>
         <label className="nichePicker">
@@ -359,8 +442,8 @@ export default function Home() {
           </article>
 
           <article className="panel">
-            <PanelHeading step="STEP 2 · OFFER" title="商品を選ぶ">
-              <span className="greenPill">AI推奨</span>
+            <PanelHeading step="STEP 2 · OFFER" title="売り方に合う商品を選ぶ">
+              <span className="greenPill">6つの収益モデル</span>
             </PanelHeading>
             <div className="offerList">
               {data.offers.map((item, index) => (
@@ -369,12 +452,14 @@ export default function Home() {
                   key={item.title}
                   onClick={() => {
                     setOfferIndex(index);
+                    setVariant(0);
                     setAdopted(false);
                   }}
                   aria-pressed={offerIndex === index}
                 >
                   <span className="radio" />
                   <span className="offerCopy">
+                    <span className="offerCategory">{item.category}</span>
                     <strong>{item.title}</strong>
                     <small>{item.promise}</small>
                   </span>
@@ -491,7 +576,7 @@ export default function Home() {
           <div className="guard">
             <span>✓</span>
             <div>
-              <strong>Revenue Guard</strong>
+              <strong>安心チェック</strong>
               <p>重複・誤情報・規約リスクを投稿前に確認</p>
             </div>
           </div>
@@ -525,7 +610,7 @@ export default function Home() {
           </table>
         </div>
         <div className="learning">
-          <span className="brandMark">R</span>
+          <span className="brandMark">学</span>
           <p>
             <strong>今週の学習：</strong>
             「失敗→改善→数値」の構成は、ノウハウ単体より購入率が1.8倍。
@@ -536,7 +621,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>RevenuePilot — Concept Demo</span>
+        <span>売れる発信ナビ — 操作デモ</span>
         <span>数値・投稿は体験用のサンプルです</span>
       </footer>
     </main>
