@@ -22,29 +22,26 @@ async function render() {
   );
 }
 
-test("renders the creator deal assistant", async () => {
+test("renders the Torudake Reel product experience", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(
-    html,
-    /<title>案件レスキュー \| PR案件の条件確認から入金まで<\/title>/,
-  );
-  assert.match(html, /そのPR案件、/);
-  assert.match(html, /案件を読み取る/);
-  assert.match(html, /案件診断/);
-  assert.match(html, /このまま返信/);
-  assert.match(html, /進行中の案件に追加/);
+  assert.match(html, /<title>撮るだけリール｜話して送るだけの自動動画編集<\/title>/);
+  assert.match(html, /話して送るだけ。/);
+  assert.match(html, /編集は、もうしない。/);
+  assert.match(html, /動画を選んで無料で試す/);
+  assert.match(html, /あなたがするのは、/);
+  assert.match(html, /まず1本、完成を見てから。/);
 });
 
 test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="案件レスキュー"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜話して送るだけの自動動画編集"/);
   assert.match(html, /property="og:image"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
-  assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project/);
+  assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project|30秒ジャッジ/);
 });
