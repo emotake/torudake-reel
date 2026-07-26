@@ -16,20 +16,20 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     "https://revenuepilot-demo-jp.emotake-1027-a.chatgpt.site",
   ),
-  title: "売れる発信ナビ | SNSから商品と売上をつくる",
+  title: "案件レスキュー | PR案件の条件確認から入金まで",
   description:
-    "発信ジャンルから商品を考え、SNS投稿、売上予測、成果分析までつなぐ操作デモ。",
+    "インフルエンサー向け。DMや契約書からPR案件の見落とし、交渉ポイント、返信文を整理する操作デモ。",
   openGraph: {
-    title: "売れる発信ナビ",
-    description: "SNSを、売上の入口にする。",
+    title: "案件レスキュー",
+    description: "そのPR案件、受けて大丈夫？",
     type: "website",
     locale: "ja_JP",
-    images: [{ url: "/og.png", width: 1200, height: 630 }],
+    images: [{ url: "/og.png", width: 1792, height: 896 }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "売れる発信ナビ",
-    description: "SNSを、売上の入口にする。",
+    title: "案件レスキュー",
+    description: "PR案件の条件確認から、交渉・入金まで。",
     images: ["/og.png"],
   },
 };
