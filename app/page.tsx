@@ -2,10 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Stage = "start" | "setup" | "processing" | "result";
+type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = "follow" | "sales" | "reach";
 type Tone = "natural" | "trust" | "punchy";
 type PreviewMode = "before" | "after";
+type TransferStatus = "idle" | "uploading" | "done" | "error";
+
+type UploadedPart = {
+  partNumber: number;
+  etag: string;
+};
+
+type TransferReceipt = {
+  id: string;
+  code: string;
+  expiresAt: number;
+};
 
 type TranscriptLine = {
   id: number;
@@ -37,6 +49,8 @@ const initialTranscript: TranscriptLine[] = [
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const transferInputRef = useRef<HTMLInputElement>(null);
+  const transferAbortRef = useRef<AbortController | null>(null);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
   const [tone, setTone] = useState<Tone>("natural");
@@ -48,6 +62,13 @@ export default function Home() {
   const [transcript, setTranscript] =
     useState<TranscriptLine[]>(initialTranscript);
   const [toast, setToast] = useState("");
+  const [transferFile, setTransferFile] = useState<File | null>(null);
+  const [transferStatus, setTransferStatus] =
+    useState<TransferStatus>("idle");
+  const [transferProgress, setTransferProgress] = useState(0);
+  const [transferReceipt, setTransferReceipt] =
+    useState<TransferReceipt | null>(null);
+  const [transferError, setTransferError] = useState("");
 
   useEffect(() => {
     if (!file) {
@@ -109,12 +130,199 @@ export default function Home() {
   }
 
   function reset() {
+    transferAbortRef.current?.abort();
+    transferAbortRef.current = null;
     setFile(null);
     setStage("start");
     setProgress(0);
     setPreviewMode("after");
     setTranscript(initialTranscript);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function openTransfer() {
+    setStage("transfer");
+    setTransferError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function chooseTransferFile(selected?: File) {
+    if (!selected) return;
+    const looksLikeVideo =
+      selected.type.startsWith("video/") ||
+      /\.(mp4|mov|m4v|webm)$/i.test(selected.name);
+    if (!looksLikeVideo) {
+      setTransferError("MP4・MOV・M4V・WebMの動画を選んでください。");
+      return;
+    }
+    if (selected.size > 1024 * 1024 * 1024) {
+      setTransferError("動画は1GB以下にしてください。");
+      return;
+    }
+    setTransferFile(selected);
+    setTransferStatus("idle");
+    setTransferProgress(0);
+    setTransferReceipt(null);
+    setTransferError("");
+  }
+
+  async function startTransfer() {
+    if (!transferFile || transferStatus === "uploading") return;
+
+    const controller = new AbortController();
+    transferAbortRef.current = controller;
+    setTransferStatus("uploading");
+    setTransferProgress(1);
+    setTransferError("");
+    setTransferReceipt(null);
+
+    let activeReceipt: TransferReceipt | null = null;
+
+    try {
+      const initResponse = await fetch("/api/transfers/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: transferFile.name,
+          contentType: transferFile.type || "video/mp4",
+          size: transferFile.size,
+        }),
+        signal: controller.signal,
+      });
+      const initData = (await initResponse.json()) as {
+        id?: string;
+        code?: string;
+        uploadId?: string;
+        chunkSize?: number;
+        expiresAt?: number;
+        error?: string;
+      };
+      if (
+        !initResponse.ok ||
+        !initData.id ||
+        !initData.code ||
+        !initData.uploadId ||
+        !initData.chunkSize ||
+        !initData.expiresAt
+      ) {
+        throw new Error(initData.error || "アップロードを開始できませんでした。");
+      }
+
+      activeReceipt = {
+        id: initData.id,
+        code: initData.code,
+        expiresAt: initData.expiresAt,
+      };
+      setTransferReceipt(activeReceipt);
+
+      const partCount = Math.ceil(transferFile.size / initData.chunkSize);
+      const uploadedParts: UploadedPart[] = [];
+      let uploadedBytes = 0;
+
+      for (let startPart = 1; startPart <= partCount; startPart += 3) {
+        const batch = Array.from(
+          { length: Math.min(3, partCount - startPart + 1) },
+          (_, index) => startPart + index,
+        );
+
+        const results = await Promise.all(
+          batch.map(async (partNumber) => {
+            const start = (partNumber - 1) * initData.chunkSize!;
+            const end = Math.min(start + initData.chunkSize!, transferFile.size);
+            const response = await fetch(
+              `/api/transfers/${encodeURIComponent(initData.id!)}/part?partNumber=${partNumber}&uploadId=${encodeURIComponent(initData.uploadId!)}&code=${encodeURIComponent(initData.code!)}`,
+              {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/octet-stream",
+                  "Content-Length": String(end - start),
+                },
+                body: transferFile.slice(start, end),
+                signal: controller.signal,
+              },
+            );
+            const data = (await response.json()) as {
+              partNumber?: number;
+              etag?: string;
+              error?: string;
+            };
+            if (!response.ok || !data.partNumber || !data.etag) {
+              throw new Error(data.error || "動画の送信中にエラーが発生しました。");
+            }
+            return {
+              part: { partNumber: data.partNumber, etag: data.etag },
+              bytes: end - start,
+            };
+          }),
+        );
+
+        results.forEach((result) => {
+          uploadedParts.push(result.part);
+          uploadedBytes += result.bytes;
+        });
+        setTransferProgress(
+          Math.min(96, Math.round((uploadedBytes / transferFile.size) * 95)),
+        );
+      }
+
+      const completeResponse = await fetch(
+        `/api/transfers/${encodeURIComponent(initData.id)}/complete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: initData.code,
+            uploadId: initData.uploadId,
+            parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
+          }),
+          signal: controller.signal,
+        },
+      );
+      const completeData = (await completeResponse.json()) as {
+        error?: string;
+      };
+      if (!completeResponse.ok) {
+        throw new Error(completeData.error || "アップロードを確定できませんでした。");
+      }
+
+      setTransferProgress(100);
+      setTransferStatus("done");
+    } catch (error) {
+      if (activeReceipt) {
+        await fetch(
+          `/api/transfers/${encodeURIComponent(activeReceipt.id)}?code=${encodeURIComponent(activeReceipt.code)}`,
+          { method: "DELETE" },
+        ).catch(() => undefined);
+      }
+      const message =
+        error instanceof DOMException && error.name === "AbortError"
+          ? "アップロードを中止しました。"
+          : error instanceof Error
+            ? error.message
+            : "アップロードに失敗しました。";
+      setTransferError(message);
+      setTransferStatus("error");
+      setTransferReceipt(null);
+    } finally {
+      transferAbortRef.current = null;
+    }
+  }
+
+  async function deleteTransfer() {
+    if (!transferReceipt) return;
+    const response = await fetch(
+      `/api/transfers/${encodeURIComponent(transferReceipt.id)}?code=${encodeURIComponent(transferReceipt.code)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      setTransferError("動画を削除できませんでした。");
+      return;
+    }
+    setTransferFile(null);
+    setTransferReceipt(null);
+    setTransferProgress(0);
+    setTransferStatus("idle");
+    notify("動画を削除しました");
   }
 
   return (
@@ -145,18 +353,27 @@ export default function Home() {
         )}
 
         <div className="topActions">
-          {stage !== "start" && (
+          {stage !== "start" && stage !== "transfer" && (
             <button className="quietButton" onClick={reset}>
               新しく作る
+            </button>
+          )}
+          {stage === "start" && (
+            <button className="transferButton" onClick={openTransfer}>
+              動画を預ける
             </button>
           )}
           <button
             className="trialButton"
             onClick={() =>
-              stage === "start" ? inputRef.current?.click() : notify("保存機能は次の工程で接続します")
+              stage === "start"
+                ? inputRef.current?.click()
+                : stage === "transfer"
+                  ? reset()
+                  : notify("保存機能は次の工程で接続します")
             }
           >
-            無料で試す
+            {stage === "transfer" ? "サービスを見る" : "無料で試す"}
           </button>
         </div>
       </header>
@@ -168,11 +385,35 @@ export default function Home() {
         accept="video/mp4,video/quicktime,video/webm,video/*"
         onChange={(event) => chooseFile(event.target.files?.[0])}
       />
+      <input
+        ref={transferInputRef}
+        className="visuallyHidden"
+        type="file"
+        accept="video/mp4,video/quicktime,video/x-m4v,video/webm,video/*"
+        onChange={(event) => chooseTransferFile(event.target.files?.[0])}
+      />
 
       {stage === "start" && (
         <Landing
           openPicker={() => inputRef.current?.click()}
           useSample={useSample}
+          openTransfer={openTransfer}
+        />
+      )}
+
+      {stage === "transfer" && (
+        <TransferPortal
+          file={transferFile}
+          status={transferStatus}
+          progress={transferProgress}
+          receipt={transferReceipt}
+          error={transferError}
+          chooseFile={chooseTransferFile}
+          openPicker={() => transferInputRef.current?.click()}
+          startUpload={startTransfer}
+          cancelUpload={() => transferAbortRef.current?.abort()}
+          deleteUpload={deleteTransfer}
+          notify={notify}
         />
       )}
 
@@ -235,12 +476,226 @@ export default function Home() {
   );
 }
 
+function TransferPortal({
+  file,
+  status,
+  progress,
+  receipt,
+  error,
+  chooseFile,
+  openPicker,
+  startUpload,
+  cancelUpload,
+  deleteUpload,
+  notify,
+}: {
+  file: File | null;
+  status: TransferStatus;
+  progress: number;
+  receipt: TransferReceipt | null;
+  error: string;
+  chooseFile: (file?: File) => void;
+  openPicker: () => void;
+  startUpload: () => void;
+  cancelUpload: () => void;
+  deleteUpload: () => void;
+  notify: (message: string) => void;
+}) {
+  const expiresLabel = receipt
+    ? new Intl.DateTimeFormat("ja-JP", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(receipt.expiresAt)
+    : "";
+
+  async function copyCode() {
+    if (!receipt) return;
+    await navigator.clipboard.writeText(receipt.code);
+    notify("受け渡しコードをコピーしました");
+  }
+
+  return (
+    <section className="transferPage">
+      <div className="transferHeading">
+        <div>
+          <p className="eyebrow">PRIVATE VIDEO TRANSFER</p>
+          <h1>
+            テスト動画を、
+            <br />
+            <em>安全に受け渡す。</em>
+          </h1>
+          <p>
+            この限定ページから動画を預けて、表示されたコードをCodexのチャットへ送ってください。
+          </p>
+        </div>
+        <div className="transferSecurity">
+          <span>●</span>
+          <p>
+            <strong>限定公開ページ</strong>
+            受け取り確認後すぐ削除・最長72時間
+          </p>
+        </div>
+      </div>
+
+      <div className="transferLayout">
+        <div className="transferCard">
+          {status === "done" && receipt ? (
+            <div className="transferComplete">
+              <span className="completeMark">✓</span>
+              <p className="eyebrow">UPLOAD COMPLETE</p>
+              <h2>動画をお預かりしました</h2>
+              <p className="completeLead">
+                下のコードをコピーし、このCodexチャットにそのまま貼り付けてください。
+              </p>
+              <button className="receiptCode" onClick={copyCode}>
+                <span>受け渡しコード</span>
+                <strong>{receipt.code}</strong>
+                <i>コピー</i>
+              </button>
+              <div className="nextStep">
+                <span>1</span>
+                コードをコピー
+                <i>→</i>
+                <span>2</span>
+                チャットへ貼り付け
+                <i>→</i>
+                <span>3</span>
+                こちらで動画を確認
+              </div>
+              <div className="receiptMeta">
+                <span>ファイル</span>
+                <strong>{file?.name}</strong>
+                <span>保管期限</span>
+                <strong>{expiresLabel}</strong>
+              </div>
+              <button className="deleteTransfer" onClick={deleteUpload}>
+                今すぐ動画を削除する
+              </button>
+            </div>
+          ) : (
+            <>
+              <div
+                className={`transferDropzone ${file ? "hasFile" : ""} ${status === "uploading" ? "isUploading" : ""}`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (status !== "uploading") {
+                    chooseFile(event.dataTransfer.files?.[0]);
+                  }
+                }}
+              >
+                {file ? (
+                  <>
+                    <span className="videoFileIcon">▶</span>
+                    <div className="chosenTransferFile">
+                      <strong>{file.name}</strong>
+                      <span>
+                        {(file.size / 1024 / 1024).toFixed(1)} MB・
+                        {file.type || "動画"}
+                      </span>
+                    </div>
+                    {status !== "uploading" && (
+                      <button onClick={openPicker}>変更</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="uploadCloud">↑</span>
+                    <h2>ここに動画をドロップ</h2>
+                    <p>または、端末から動画ファイルを選択</p>
+                    <button onClick={openPicker}>動画を選ぶ</button>
+                    <small>MP4・MOV・M4V・WebM / 最大1GB</small>
+                  </>
+                )}
+              </div>
+
+              {status === "uploading" && (
+                <div className="realUploadProgress" aria-live="polite">
+                  <div>
+                    <span>暗号化して送信中</span>
+                    <strong>{progress}%</strong>
+                  </div>
+                  <div className="realProgressTrack">
+                    <i style={{ width: `${progress}%` }} />
+                  </div>
+                  <p>画面を閉じずにお待ちください。大きな動画は数分かかります。</p>
+                  <button onClick={cancelUpload}>アップロードを中止</button>
+                </div>
+              )}
+
+              {error && (
+                <div className="transferError" role="alert">
+                  <span>!</span>
+                  <p>
+                    <strong>送信できませんでした</strong>
+                    {error}
+                  </p>
+                </div>
+              )}
+
+              {status !== "uploading" && (
+                <button
+                  className="sendVideoButton"
+                  disabled={!file}
+                  onClick={startUpload}
+                >
+                  <span>この動画を安全に送る</span>
+                  <i>→</i>
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        <aside className="transferGuide">
+          <p className="eyebrow">HOW TO SEND</p>
+          <h2>受け渡しは3ステップ</h2>
+          <ol>
+            <li>
+              <span>01</span>
+              <p>
+                <strong>動画を選んで送信</strong>
+                分割して送るため、大きなファイルにも対応します。
+              </p>
+            </li>
+            <li>
+              <span>02</span>
+              <p>
+                <strong>表示されたコードをコピー</strong>
+                動画そのものをチャットへ添付する必要はありません。
+              </p>
+            </li>
+            <li>
+              <span>03</span>
+              <p>
+                <strong>このチャットにコードを貼る</strong>
+                こちらで受け取り、編集テストに使用します。
+              </p>
+            </li>
+          </ol>
+          <div className="privacyNote">
+            <span>🔒</span>
+            <p>
+              <strong>動画の取り扱い</strong>
+              サービス開発の編集テスト以外には使用しません。受け取り後に削除し、未受け取りでも最長72時間で期限切れになります。
+            </p>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
 function Landing({
   openPicker,
   useSample,
+  openTransfer,
 }: {
   openPicker: () => void;
   useSample: () => void;
+  openTransfer: () => void;
 }) {
   return (
     <>
@@ -274,6 +729,10 @@ function Landing({
             <span>✓ 体験版では動画を送信しません</span>
             <span>✓ スマホ動画対応</span>
           </div>
+          <button className="transferLink" onClick={openTransfer}>
+            <span>実際のテスト動画を開発者へ送る</span>
+            <i>安全な受け渡し画面へ →</i>
+          </button>
         </div>
 
         <div className="heroVisual" aria-label="編集前と編集後のイメージ">

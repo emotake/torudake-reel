@@ -32,6 +32,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /話して送るだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
+  assert.match(html, /動画を預ける/);
+  assert.match(html, /安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /まず1本、完成を見てから。/);
 });

@@ -152,7 +152,8 @@ a {
 }
 
 .trialButton,
-.quietButton {
+.quietButton,
+.transferButton {
   min-height: 39px;
   padding: 0 17px;
   border-radius: 10px;
@@ -170,6 +171,12 @@ a {
 .quietButton {
   border: 1px solid var(--line);
   background: white;
+}
+
+.transferButton {
+  border: 1px solid #b9dfc8;
+  background: #effcf4;
+  color: var(--mint-dark);
 }
 
 .workspaceStatus {
@@ -334,6 +341,29 @@ a {
   color: #6e7889;
   font-size: 9px;
   font-weight: 600;
+}
+
+.transferLink {
+  display: flex;
+  width: min(100%, 440px);
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
+  margin-top: 17px;
+  padding: 11px 13px;
+  border: 1px dashed #a9cfb8;
+  border-radius: 10px;
+  background: #f3fff7;
+  color: var(--mint-dark);
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.transferLink i {
+  color: #5f7f6d;
+  font-size: 8px;
+  font-style: normal;
 }
 
 .heroVisual {
@@ -1264,6 +1294,554 @@ footer small {
 
 footer > small {
   text-align: right;
+}
+
+/* Private transfer */
+
+.transferPage {
+  width: min(1160px, calc(100% - 48px));
+  min-height: calc(100vh - 220px);
+  margin: 0 auto;
+  padding: 58px 0 90px;
+}
+
+.transferHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 50px;
+  align-items: flex-end;
+  margin-bottom: 34px;
+}
+
+.transferHeading h1 {
+  margin: 0;
+  font-size: clamp(40px, 4.7vw, 62px);
+  line-height: 1.18;
+  letter-spacing: -0.06em;
+}
+
+.transferHeading h1 em {
+  color: var(--coral);
+  font-style: normal;
+}
+
+.transferHeading > div:first-child > p:last-child {
+  max-width: 670px;
+  margin: 17px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.transferSecurity {
+  display: flex;
+  min-width: 250px;
+  gap: 10px;
+  align-items: center;
+  padding: 13px 15px;
+  border: 1px solid #cfe8d9;
+  border-radius: 12px;
+  background: #f3fff7;
+}
+
+.transferSecurity > span {
+  color: #31c878;
+  font-size: 13px;
+  text-shadow: 0 0 0 5px rgba(49, 200, 120, 0.12);
+}
+
+.transferSecurity p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: #5f7f6d;
+  font-size: 8px;
+}
+
+.transferSecurity strong {
+  color: var(--mint-dark);
+  font-size: 10px;
+}
+
+.transferLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(310px, 0.58fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.transferCard,
+.transferGuide {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 16px 50px rgba(16, 24, 40, 0.07);
+}
+
+.transferCard {
+  min-height: 480px;
+  padding: 25px;
+}
+
+.transferDropzone {
+  display: flex;
+  min-height: 320px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 30px;
+  border: 2px dashed #c9c4ba;
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at center, rgba(185, 245, 208, 0.15), transparent 52%),
+    var(--paper);
+  text-align: center;
+  transition: 160ms ease;
+}
+
+.transferDropzone:hover {
+  border-color: #91c7a5;
+  background-color: #f9fff9;
+}
+
+.transferDropzone.hasFile {
+  min-height: 160px;
+  align-items: center;
+  justify-content: flex-start;
+  flex-direction: row;
+  gap: 16px;
+  border-style: solid;
+  text-align: left;
+}
+
+.transferDropzone.isUploading {
+  opacity: 0.72;
+}
+
+.uploadCloud {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 19px;
+  background: var(--mint);
+  color: var(--ink);
+  font-family: "DM Sans", sans-serif;
+  font-size: 26px;
+  font-weight: 900;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.transferDropzone h2 {
+  margin: 22px 0 7px;
+  font-size: 21px;
+}
+
+.transferDropzone > p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.transferDropzone > button {
+  min-height: 41px;
+  padding: 0 18px;
+  border: 1px solid var(--ink);
+  border-radius: 9px;
+  background: var(--ink);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.transferDropzone > small {
+  margin-top: 13px;
+  color: #89909d;
+  font-size: 8px;
+}
+
+.videoFileIcon {
+  display: grid;
+  width: 54px;
+  height: 66px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--coral);
+  color: white;
+  font-size: 13px;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.chosenTransferFile {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 5px;
+}
+
+.chosenTransferFile strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chosenTransferFile span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.transferDropzone.hasFile > button {
+  border-color: var(--line);
+  background: white;
+  color: var(--ink);
+}
+
+.sendVideoButton {
+  display: flex;
+  width: 100%;
+  min-height: 57px;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding: 0 13px 0 21px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--coral);
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 12px 25px rgba(255, 90, 60, 0.2);
+}
+
+.sendVideoButton:disabled {
+  background: #d8d4cc;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.sendVideoButton i {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  font-style: normal;
+}
+
+.realUploadProgress {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #cfe8d9;
+  border-radius: 12px;
+  background: #f3fff7;
+}
+
+.realUploadProgress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--mint-dark);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.realUploadProgress strong {
+  font-family: "DM Sans", sans-serif;
+  font-size: 17px;
+}
+
+.realProgressTrack {
+  height: 9px;
+  overflow: hidden;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: #d9ede1;
+}
+
+.realProgressTrack i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #31c878, var(--mint-dark));
+  transition: width 180ms ease;
+}
+
+.realUploadProgress p {
+  margin: 10px 0 0;
+  color: #5f7f6d;
+  font-size: 8px;
+}
+
+.realUploadProgress > button,
+.deleteTransfer {
+  margin-top: 11px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--muted);
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.transferError {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #ffc7bd;
+  border-radius: 10px;
+  background: #fff4f1;
+  color: #9d2d1b;
+}
+
+.transferError > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--coral);
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.transferError p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 8px;
+}
+
+.transferError strong {
+  font-size: 9px;
+}
+
+.transferGuide {
+  padding: 25px;
+}
+
+.transferGuide h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.transferGuide ol {
+  display: grid;
+  gap: 22px;
+  margin: 25px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transferGuide li {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 11px;
+}
+
+.transferGuide li > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--ink);
+  color: white;
+  font-family: "DM Sans", sans-serif;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.transferGuide li:nth-child(2) > span {
+  background: var(--coral);
+}
+
+.transferGuide li:nth-child(3) > span {
+  background: var(--mint);
+  color: var(--mint-dark);
+}
+
+.transferGuide li p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.transferGuide li strong {
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.privacyNote {
+  display: flex;
+  gap: 10px;
+  margin-top: 27px;
+  padding: 14px;
+  border-radius: 11px;
+  background: var(--cream);
+}
+
+.privacyNote > span {
+  font-size: 15px;
+}
+
+.privacyNote p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.65;
+}
+
+.privacyNote strong {
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.transferComplete {
+  display: flex;
+  min-height: 430px;
+  align-items: center;
+  flex-direction: column;
+  padding: 24px 18px 10px;
+  text-align: center;
+}
+
+.completeMark {
+  display: grid;
+  width: 67px;
+  height: 67px;
+  place-items: center;
+  margin-bottom: 19px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--mint-dark);
+  font-size: 26px;
+  font-weight: 900;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.transferComplete .eyebrow {
+  margin-bottom: 7px;
+}
+
+.transferComplete h2 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.completeLead {
+  margin: 9px 0 19px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.receiptCode {
+  display: grid;
+  width: min(100%, 520px);
+  grid-template-columns: 1fr auto;
+  gap: 5px 15px;
+  align-items: center;
+  padding: 14px 15px 14px 18px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: var(--paper);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.receiptCode span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.receiptCode strong {
+  overflow: hidden;
+  font-family: "DM Sans", monospace;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+
+.receiptCode i {
+  grid-row: 2;
+  grid-column: 2;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: white;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.nextStep {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 23px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.nextStep span {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--mint-dark);
+  font-family: "DM Sans", sans-serif;
+  font-size: 7px;
+}
+
+.nextStep i {
+  color: #b2aca2;
+  font-style: normal;
+}
+
+.receiptMeta {
+  display: grid;
+  width: min(100%, 520px);
+  grid-template-columns: auto 1fr;
+  gap: 6px 13px;
+  margin-top: 23px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--cream);
+  text-align: left;
+}
+
+.receiptMeta span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.receiptMeta strong {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Workspace */
@@ -2523,6 +3101,25 @@ footer > small {
     grid-template-columns: 1fr;
   }
 
+  .transferHeading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .transferLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .transferGuide {
+    order: -1;
+  }
+
+  .transferGuide ol {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 13px;
+  }
+
   .sourceCard {
     position: static;
     display: grid;
@@ -2565,7 +3162,8 @@ footer > small {
   }
 
   .brandText small,
-  .topActions .quietButton {
+  .topActions .quietButton,
+  .topActions .transferButton {
     display: none;
   }
 
@@ -2581,7 +3179,8 @@ footer > small {
   .priceSection,
   .bottomCta,
   .workspace,
-  .resultPage {
+  .resultPage,
+  .transferPage {
     width: min(100% - 24px, 650px);
   }
 
@@ -2616,6 +3215,12 @@ footer > small {
   .trustRow {
     display: grid;
     gap: 7px;
+  }
+
+  .transferLink {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .heroVisual {
@@ -2739,9 +3344,60 @@ footer > small {
   }
 
   .workspaceHeading,
-  .resultHeading {
+  .resultHeading,
+  .transferHeading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .transferPage {
+    padding: 40px 0 65px;
+  }
+
+  .transferHeading h1 {
+    font-size: 40px;
+  }
+
+  .transferSecurity {
+    width: 100%;
+  }
+
+  .transferCard,
+  .transferGuide {
+    padding: 17px;
+    border-radius: 15px;
+  }
+
+  .transferGuide ol {
+    grid-template-columns: 1fr;
+  }
+
+  .transferDropzone {
+    min-height: 280px;
+    padding: 20px;
+  }
+
+  .transferDropzone.hasFile {
+    display: grid;
+    min-height: 180px;
+    grid-template-columns: 55px 1fr;
+    align-content: center;
+  }
+
+  .transferDropzone.hasFile > button {
+    grid-column: 1 / -1;
+  }
+
+  .receiptCode {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .receiptCode strong {
+    font-size: 10px;
+  }
+
+  .nextStep i {
+    display: none;
   }
 
   .setupGrid {
