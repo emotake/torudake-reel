@@ -2925,6 +2925,81 @@ footer > small {
   font-style: normal;
 }
 
+.handoffPrompt {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 17px;
+  align-items: center;
+  margin-top: 18px;
+  padding: 20px;
+  border: 2px solid var(--mint-dark);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 8% 50%, rgba(185, 245, 208, 0.52), transparent 24%),
+    #f3fff7;
+  box-shadow: 5px 5px 0 var(--mint-dark);
+}
+
+.handoffPromptIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--mint);
+  color: var(--mint-dark);
+  font-family: "DM Sans", sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.handoffPrompt .eyebrow {
+  margin-bottom: 4px;
+  color: var(--mint-dark);
+  font-size: 7px;
+}
+
+.handoffPrompt h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.handoffPrompt p:last-child {
+  margin: 6px 0 0;
+  color: #5f7468;
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.handoffPrompt p strong {
+  color: var(--ink);
+}
+
+.handoffPrompt > button {
+  display: inline-flex;
+  min-height: 47px;
+  gap: 14px;
+  align-items: center;
+  padding: 0 11px 0 17px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--mint-dark);
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.handoffPrompt > button i {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  font-style: normal;
+}
+
 .exportBar {
   display: flex;
   justify-content: space-between;
@@ -3492,6 +3567,21 @@ footer > small {
   .deliverables {
     grid-template-columns: 1fr;
     padding: 16px;
+  }
+
+  .handoffPrompt {
+    grid-template-columns: 42px 1fr;
+    padding: 16px;
+  }
+
+  .handoffPromptIcon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .handoffPrompt > button {
+    grid-column: 1 / -1;
+    justify-content: space-between;
   }
 
   .deliverableCards {

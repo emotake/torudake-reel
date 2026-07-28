@@ -146,6 +146,13 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function openTransferWithCurrentVideo() {
+    if (file) {
+      chooseTransferFile(file);
+    }
+    openTransfer();
+  }
+
   function chooseTransferFile(selected?: File) {
     if (!selected) return;
     const looksLikeVideo =
@@ -449,6 +456,7 @@ export default function Home() {
           length={length}
           notify={notify}
           reset={reset}
+          openTransfer={openTransferWithCurrentVideo}
         />
       )}
 
@@ -1205,6 +1213,7 @@ function ResultWorkspace({
   length,
   notify,
   reset,
+  openTransfer,
 }: {
   file: File | null;
   videoUrl: string;
@@ -1217,6 +1226,7 @@ function ResultWorkspace({
   length: number;
   notify: (message: string) => void;
   reset: () => void;
+  openTransfer: () => void;
 }) {
   function toggleLine(id: number) {
     setTranscript(
@@ -1391,12 +1401,28 @@ function ResultWorkspace({
         </div>
       </div>
 
+      <div className="handoffPrompt">
+        <div className="handoffPromptIcon">↑</div>
+        <div>
+          <p className="eyebrow">SEND YOUR TEST VIDEO</p>
+          <h2>この動画は、まだ送信されていません。</h2>
+          <p>
+            現在の画面は操作デモです。実際の動画を開発用に送ると、完了後に
+            <strong>「tr_」から始まる受け渡しコード</strong>が発行されます。
+          </p>
+        </div>
+        <button onClick={openTransfer}>
+          <span>受け渡し画面へ進む</span>
+          <i>→</i>
+        </button>
+      </div>
+
       <div className="exportBar">
         <div>
           <span className="exportIcon">▶</span>
           <p>
             <strong>{file?.name?.replace(/\.[^.]+$/, "") ?? "sample_talking_video"}_edited.mp4</strong>
-            <small>9:16・1080p・約{length}秒・透かしなし</small>
+            <small>操作デモ・動画はまだ送信されていません</small>
           </p>
         </div>
         <div className="exportActions">
@@ -1404,13 +1430,11 @@ function ResultWorkspace({
             別の動画を作る
           </button>
           <button
-            className="mainCta"
-            onClick={() =>
-              notify("実動画の書き出しは、次の開発工程で接続します")
-            }
+            className="mainCta reviewCta"
+            onClick={openTransfer}
           >
-            <span>1080pで書き出す</span>
-            <i>↓</i>
+            <span>動画を送ってコードを発行</span>
+            <i>→</i>
           </button>
         </div>
       </div>
