@@ -1,6 +1,13 @@
 import { env } from "cloudflare:workers";
 import { buildCaptionSegments, type RawCaptionSegment } from "../../../lib/captions";
-import { isSupportedVideo, jsonError, safeFileName } from "../../../lib/transfers";
+import {
+  findTransfer,
+  getMediaBucket,
+  isSupportedVideo,
+  jsonError,
+  removeTransfer,
+  safeFileName,
+} from "../../../lib/transfers";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 
@@ -29,6 +36,10 @@ function transcriptionError(status: number) {
 }
 
 export async function POST(request: Request) {
+  let temporaryTransfer:
+    | Awaited<ReturnType<typeof findTransfer>>
+    | undefined = undefined;
+
   try {
     const apiKey = (
       env as unknown as {
@@ -43,10 +54,75 @@ export async function POST(request: Request) {
       );
     }
 
-    const requestData = await request.formData();
-    const file = requestData.get("file");
+    let file: File | null = null;
+    const requestContentType =
+      request.headers.get("content-type")?.toLowerCase() ?? "";
 
-    if (!(file instanceof File) || file.size <= 0) {
+    if (requestContentType.includes("application/json")) {
+      const payload = (await request.json()) as {
+        id?: string;
+        code?: string;
+      };
+      const id = payload.id?.trim() ?? "";
+      const code = payload.code?.trim() ?? "";
+      if (!id || !code) {
+        return jsonError("字幕生成用の動画情報が正しくありません。");
+      }
+
+      const transfer = await findTransfer(id, code);
+      if (!transfer || transfer.status === "deleted") {
+        return jsonError("字幕生成用の動画が見つかりません。", 404);
+      }
+      if (transfer.status !== "complete" || transfer.expiresAt < Date.now()) {
+        return jsonError("動画のアップロードが未完了または期限切れです。", 410);
+      }
+
+      const authenticatedEmail =
+        request.headers.get("oai-authenticated-user-email")?.trim() ?? "";
+      if (
+        transfer.ownerEmail &&
+        transfer.ownerEmail.toLowerCase() !== authenticatedEmail.toLowerCase()
+      ) {
+        return jsonError("この動画を字幕生成に使用する権限がありません。", 403);
+      }
+      if (transfer.size > MAX_TRANSCRIPTION_BYTES) {
+        return jsonError(
+          "字幕の自動生成は25MBまでです。動画を短くするか圧縮してお試しください。",
+          413,
+        );
+      }
+      if (!isSupportedVideo(transfer.fileName, transfer.contentType)) {
+        return jsonError("MP4・MOV・M4V・WebMの動画を選んでください。");
+      }
+
+      temporaryTransfer = transfer;
+      const storedObject = await getMediaBucket().get(transfer.objectKey);
+      if (!storedObject) {
+        return jsonError("字幕生成用の動画を読み込めませんでした。", 410);
+      }
+      if (
+        storedObject.size <= 0 ||
+        storedObject.size > MAX_TRANSCRIPTION_BYTES
+      ) {
+        return jsonError(
+          "字幕の自動生成は25MBまでです。動画を短くするか圧縮してお試しください。",
+          413,
+        );
+      }
+
+      const fileBytes = await new Response(storedObject.body).arrayBuffer();
+      file = new File([fileBytes], transfer.fileName, {
+        type: transfer.contentType || "video/mp4",
+      });
+    } else {
+      const requestData = await request.formData();
+      const uploadedFile = requestData.get("file");
+      if (uploadedFile instanceof File) {
+        file = uploadedFile;
+      }
+    }
+
+    if (!file || file.size <= 0) {
       return jsonError("字幕を付ける動画を選んでください。");
     }
     if (file.size > MAX_TRANSCRIPTION_BYTES) {
@@ -133,5 +209,11 @@ export async function POST(request: Request) {
       "動画を読み取れませんでした。もう一度お試しください。",
       500,
     );
+  } finally {
+    if (temporaryTransfer) {
+      await removeTransfer(temporaryTransfer).catch((cleanupError) => {
+        console.error("temporary transcription upload cleanup failed", cleanupError);
+      });
+    }
   }
 }

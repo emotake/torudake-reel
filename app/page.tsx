@@ -27,6 +27,162 @@ type TransferReceipt = {
 
 type TranscriptLine = CaptionSegment;
 
+type ApiPayload = {
+  error?: string;
+};
+
+async function readApiResponse<T extends ApiPayload>(
+  response: Response,
+  fallbackMessage: string,
+) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const responseText = (await response.text()).trim();
+    throw new Error(
+      response.status === 413
+        ? "動画の送信サイズが上限を超えました。動画を短くするか圧縮してお試しください。"
+        : responseText || fallbackMessage,
+    );
+  }
+
+  let payload: T;
+  try {
+    payload = (await response.json()) as T;
+  } catch {
+    throw new Error(fallbackMessage);
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error || fallbackMessage);
+  }
+  return payload;
+}
+
+async function uploadVideoInChunks(
+  selectedFile: File,
+  controller: AbortController,
+  onProgress: (progress: number) => void,
+) {
+  let activeReceipt: TransferReceipt | null = null;
+
+  try {
+    const initResponse = await fetch("/api/transfers/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: selectedFile.name,
+        contentType: selectedFile.type || "video/mp4",
+        size: selectedFile.size,
+      }),
+      signal: controller.signal,
+    });
+    const initData = await readApiResponse<
+      ApiPayload & {
+        id?: string;
+        code?: string;
+        uploadId?: string;
+        chunkSize?: number;
+        expiresAt?: number;
+      }
+    >(initResponse, "アップロードを開始できませんでした。");
+
+    if (
+      !initData.id ||
+      !initData.code ||
+      !initData.uploadId ||
+      !initData.chunkSize ||
+      !initData.expiresAt
+    ) {
+      throw new Error("アップロードの準備情報が正しくありません。");
+    }
+
+    activeReceipt = {
+      id: initData.id,
+      code: initData.code,
+      expiresAt: initData.expiresAt,
+    };
+
+    const partCount = Math.ceil(selectedFile.size / initData.chunkSize);
+    const uploadedParts: UploadedPart[] = [];
+    let uploadedBytes = 0;
+
+    for (let startPart = 1; startPart <= partCount; startPart += 3) {
+      const batch = Array.from(
+        { length: Math.min(3, partCount - startPart + 1) },
+        (_, index) => startPart + index,
+      );
+
+      const results = await Promise.all(
+        batch.map(async (partNumber) => {
+          const start = (partNumber - 1) * initData.chunkSize!;
+          const end = Math.min(start + initData.chunkSize!, selectedFile.size);
+          const response = await fetch(
+            `/api/transfers/${encodeURIComponent(initData.id!)}/part?partNumber=${partNumber}&uploadId=${encodeURIComponent(initData.uploadId!)}&code=${encodeURIComponent(initData.code!)}`,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/octet-stream",
+                "Content-Length": String(end - start),
+              },
+              body: selectedFile.slice(start, end),
+              signal: controller.signal,
+            },
+          );
+          const data = await readApiResponse<
+            ApiPayload & {
+              partNumber?: number;
+              etag?: string;
+            }
+          >(response, "動画の送信中にエラーが発生しました。");
+          if (!data.partNumber || !data.etag) {
+            throw new Error("アップロード結果が正しくありません。");
+          }
+          return {
+            part: { partNumber: data.partNumber, etag: data.etag },
+            bytes: end - start,
+          };
+        }),
+      );
+
+      results.forEach((result) => {
+        uploadedParts.push(result.part);
+        uploadedBytes += result.bytes;
+      });
+      onProgress(
+        Math.min(96, Math.round((uploadedBytes / selectedFile.size) * 95)),
+      );
+    }
+
+    const completeResponse = await fetch(
+      `/api/transfers/${encodeURIComponent(initData.id)}/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: initData.code,
+          uploadId: initData.uploadId,
+          parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
+        }),
+        signal: controller.signal,
+      },
+    );
+    await readApiResponse<ApiPayload>(
+      completeResponse,
+      "アップロードを確定できませんでした。",
+    );
+    onProgress(100);
+    return activeReceipt;
+  } catch (error) {
+    if (activeReceipt) {
+      await fetch(
+        `/api/transfers/${encodeURIComponent(activeReceipt.id)}?code=${encodeURIComponent(activeReceipt.code)}`,
+        { method: "DELETE" },
+      ).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
   { id: "follow", icon: "＋", title: "フォローを増やす", note: "結論を先に見せる" },
   { id: "sales", icon: "↗", title: "商品を紹介する", note: "信頼とCTAを重視" },
@@ -139,38 +295,48 @@ export default function Home() {
     setProgress(4);
     setStage("processing");
 
-    const progressTimer = window.setInterval(() => {
-      setProgress((current) =>
-        Math.min(current + (current < 42 ? 7 : current < 72 ? 4 : 2), 88),
-      );
-    }, 500);
+    let progressTimer: number | undefined;
 
     try {
       let nextTranscript = initialTranscript;
 
       if (file) {
-        const formData = new FormData();
-        formData.set("file", file, file.name);
+        const controller = new AbortController();
+        const receipt = await uploadVideoInChunks(
+          file,
+          controller,
+          (uploadProgress) => {
+            setProgress(Math.max(4, Math.round(uploadProgress * 0.44)));
+          },
+        );
+        setProgress(48);
+        progressTimer = window.setInterval(() => {
+          setProgress((current) => Math.min(current + 2, 88));
+        }, 600);
+
         const response = await fetch("/api/transcribe", {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: receipt.id, code: receipt.code }),
         });
-        const payload = (await response.json()) as {
-          error?: string;
-          segments?: TranscriptLine[];
-        };
+        const payload = await readApiResponse<
+          ApiPayload & { segments?: TranscriptLine[] }
+        >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
-        if (!response.ok || !payload.segments?.length) {
-          throw new Error(
-            payload.error ?? "字幕を生成できませんでした。もう一度お試しください。",
-          );
+        if (!payload.segments?.length) {
+          throw new Error("字幕を生成できませんでした。もう一度お試しください。");
         }
         nextTranscript = payload.segments;
       } else {
+        progressTimer = window.setInterval(() => {
+          setProgress((current) => Math.min(current + 7, 88));
+        }, 500);
         await new Promise((resolve) => window.setTimeout(resolve, 1200));
       }
 
-      window.clearInterval(progressTimer);
+      if (progressTimer !== undefined) {
+        window.clearInterval(progressTimer);
+      }
       setTranscript(nextTranscript);
       setProgress(100);
       window.setTimeout(() => {
@@ -178,7 +344,9 @@ export default function Home() {
         setStage("result");
       }, 320);
     } catch (error) {
-      window.clearInterval(progressTimer);
+      if (progressTimer !== undefined) {
+        window.clearInterval(progressTimer);
+      }
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -244,124 +412,15 @@ export default function Home() {
     setTransferError("");
     setTransferReceipt(null);
 
-    let activeReceipt: TransferReceipt | null = null;
-
     try {
-      const initResponse = await fetch("/api/transfers/init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: transferFile.name,
-          contentType: transferFile.type || "video/mp4",
-          size: transferFile.size,
-        }),
-        signal: controller.signal,
-      });
-      const initData = (await initResponse.json()) as {
-        id?: string;
-        code?: string;
-        uploadId?: string;
-        chunkSize?: number;
-        expiresAt?: number;
-        error?: string;
-      };
-      if (
-        !initResponse.ok ||
-        !initData.id ||
-        !initData.code ||
-        !initData.uploadId ||
-        !initData.chunkSize ||
-        !initData.expiresAt
-      ) {
-        throw new Error(initData.error || "アップロードを開始できませんでした。");
-      }
-
-      activeReceipt = {
-        id: initData.id,
-        code: initData.code,
-        expiresAt: initData.expiresAt,
-      };
-      setTransferReceipt(activeReceipt);
-
-      const partCount = Math.ceil(transferFile.size / initData.chunkSize);
-      const uploadedParts: UploadedPart[] = [];
-      let uploadedBytes = 0;
-
-      for (let startPart = 1; startPart <= partCount; startPart += 3) {
-        const batch = Array.from(
-          { length: Math.min(3, partCount - startPart + 1) },
-          (_, index) => startPart + index,
-        );
-
-        const results = await Promise.all(
-          batch.map(async (partNumber) => {
-            const start = (partNumber - 1) * initData.chunkSize!;
-            const end = Math.min(start + initData.chunkSize!, transferFile.size);
-            const response = await fetch(
-              `/api/transfers/${encodeURIComponent(initData.id!)}/part?partNumber=${partNumber}&uploadId=${encodeURIComponent(initData.uploadId!)}&code=${encodeURIComponent(initData.code!)}`,
-              {
-                method: "PUT",
-                headers: {
-                  "Content-Type": "application/octet-stream",
-                  "Content-Length": String(end - start),
-                },
-                body: transferFile.slice(start, end),
-                signal: controller.signal,
-              },
-            );
-            const data = (await response.json()) as {
-              partNumber?: number;
-              etag?: string;
-              error?: string;
-            };
-            if (!response.ok || !data.partNumber || !data.etag) {
-              throw new Error(data.error || "動画の送信中にエラーが発生しました。");
-            }
-            return {
-              part: { partNumber: data.partNumber, etag: data.etag },
-              bytes: end - start,
-            };
-          }),
-        );
-
-        results.forEach((result) => {
-          uploadedParts.push(result.part);
-          uploadedBytes += result.bytes;
-        });
-        setTransferProgress(
-          Math.min(96, Math.round((uploadedBytes / transferFile.size) * 95)),
-        );
-      }
-
-      const completeResponse = await fetch(
-        `/api/transfers/${encodeURIComponent(initData.id)}/complete`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code: initData.code,
-            uploadId: initData.uploadId,
-            parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
-          }),
-          signal: controller.signal,
-        },
+      const receipt = await uploadVideoInChunks(
+        transferFile,
+        controller,
+        setTransferProgress,
       );
-      const completeData = (await completeResponse.json()) as {
-        error?: string;
-      };
-      if (!completeResponse.ok) {
-        throw new Error(completeData.error || "アップロードを確定できませんでした。");
-      }
-
-      setTransferProgress(100);
+      setTransferReceipt(receipt);
       setTransferStatus("done");
     } catch (error) {
-      if (activeReceipt) {
-        await fetch(
-          `/api/transfers/${encodeURIComponent(activeReceipt.id)}?code=${encodeURIComponent(activeReceipt.code)}`,
-          { method: "DELETE" },
-        ).catch(() => undefined);
-      }
       const message =
         error instanceof DOMException && error.name === "AbortError"
           ? "アップロードを中止しました。"
@@ -1103,7 +1162,7 @@ function SetupWorkspace({
           </div>
           <div className="localNote">
             <span>●</span>
-            字幕生成時だけ音声認識処理へ送信します。受け渡し領域には保存しません。
+            字幕生成のため動画を一時保管し、処理完了後に削除します。
           </div>
         </aside>
 
