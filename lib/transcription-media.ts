@@ -3,7 +3,13 @@ const TARGET_AUDIO_CHUNK_BYTES = 18 * 1024 * 1024;
 const ABSOLUTE_MAX_AUDIO_CHUNK_BYTES = 24 * 1024 * 1024;
 const MIN_AUDIO_CHUNK_SECONDS = 10;
 
-type DirectCopyAudioCodec = "aac" | "mp3" | "opus" | "vorbis";
+type DirectCopyAudioCodec =
+  | "aac"
+  | "mp3"
+  | "opus"
+  | "vorbis"
+  | "ac3"
+  | "eac3";
 
 export type TranscriptionAudioChunk = {
   file: File;
@@ -11,7 +17,12 @@ export type TranscriptionAudioChunk = {
 };
 
 export function getDirectCopyAudioOutput(codec: string | null) {
-  if (codec === "aac" || codec === "mp3") {
+  if (
+    codec === "aac" ||
+    codec === "mp3" ||
+    codec === "ac3" ||
+    codec === "eac3"
+  ) {
     return {
       extension: "m4a",
       kind: "mp4" as const,
@@ -26,6 +37,25 @@ export function getDirectCopyAudioOutput(codec: string | null) {
     };
   }
   return null;
+}
+
+export function getAudioCodecPriority(codec: string | null) {
+  switch (codec) {
+    case "aac":
+      return 0;
+    case "mp3":
+      return 1;
+    case "opus":
+      return 2;
+    case "vorbis":
+      return 3;
+    case "ac3":
+      return 4;
+    case "eac3":
+      return 5;
+    default:
+      return Number.POSITIVE_INFINITY;
+  }
 }
 
 export function getSafeAudioChunkSeconds(bitrate: number | null) {
@@ -78,12 +108,33 @@ export async function* extractTranscriptionAudioChunks(
       throw new Error("動画の形式を読み取れませんでした。");
     }
 
-    const audioTrack = await input.getPrimaryAudioTrack();
-    if (!audioTrack) {
+    const audioTracks = await input.getAudioTracks();
+    if (audioTracks.length === 0) {
       throw new Error("動画に音声が見つかりませんでした。");
     }
 
-    const codec = (await audioTrack.getCodec()) as DirectCopyAudioCodec | null;
+    const audioCandidates = await Promise.all(
+      audioTracks.map(async (track) => ({
+        codec: (await track
+          .getCodec()
+          .catch(() => null)) as DirectCopyAudioCodec | null,
+        track,
+      })),
+    );
+    const selectedAudio = audioCandidates
+      .filter((candidate) => getDirectCopyAudioOutput(candidate.codec))
+      .sort(
+        (left, right) =>
+          getAudioCodecPriority(left.codec) -
+          getAudioCodecPriority(right.codec),
+      )[0];
+    if (!selectedAudio) {
+      throw new Error(
+        "互換音声トラックが見つかりませんでした（空間オーディオのみの動画には未対応です）。",
+      );
+    }
+
+    const { codec, track: audioTrack } = selectedAudio;
     const outputSpec = getDirectCopyAudioOutput(codec);
     if (!outputSpec || !codec) {
       throw new Error("動画の音声形式を直接取り出せませんでした。");

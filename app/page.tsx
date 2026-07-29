@@ -219,6 +219,7 @@ async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
 ) {
+  let extractionDetail = "";
   try {
     onProgress(8);
     const { extractTranscriptionAudioChunks } = await import(
@@ -248,6 +249,10 @@ async function transcribeLargeVideo(
       return mergedSegments;
     }
   } catch (transmuxError) {
+    extractionDetail =
+      transmuxError instanceof Error
+        ? transmuxError.message.replace(/\s+/g, " ").slice(0, 160)
+        : "音声トラックの解析に失敗しました";
     console.warn(
       "Direct audio extraction failed; falling back to browser decoding.",
       transmuxError,
@@ -277,7 +282,9 @@ async function transcribeLargeVideo(
     decodedAudio = await audioContext.decodeAudioData(sourceBytes);
   } catch {
     throw new Error(
-      "動画から音声を取り出せませんでした。iPhoneでは「設定 → カメラ → フォーマット → 互換性優先」で撮影するか、MP4へ変換してお試しください。",
+      `動画から音声を取り出せませんでした。音声抽出の詳細：${
+        extractionDetail || "ブラウザーが動画の音声形式に対応していません"
+      }`,
     );
   } finally {
     await audioContext.close().catch(() => undefined);
