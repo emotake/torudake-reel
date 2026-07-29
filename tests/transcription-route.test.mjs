@@ -149,6 +149,191 @@ test("uses the full transcript when timed segments are omitted", async () => {
   }
 });
 
+test("falls back to Whisper timestamps when the diarization model errors", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  const requestedModels = [];
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      const model = init.body.get("model");
+      requestedModels.push(model);
+
+      if (model === "gpt-4o-transcribe-diarize") {
+        return Response.json(
+          {
+            error: {
+              code: "model_error",
+              type: "model_error",
+              message: "The transcription model failed.",
+            },
+          },
+          {
+            status: 500,
+            headers: { "x-request-id": "primary-model-error" },
+          },
+        );
+      }
+
+      assert.equal(model, "whisper-1");
+      assert.equal(init.body.get("language"), "ja");
+      assert.equal(init.body.get("response_format"), "verbose_json");
+      assert.equal(init.body.get("chunking_strategy"), null);
+      assert.deepEqual(
+        init.body.getAll("timestamp_granularities[]"),
+        ["segment"],
+      );
+      return Response.json({
+        duration: 5.2,
+        language: "ja",
+        text: "代替処理で字幕を生成しました。",
+        segments: [
+          {
+            start: 0,
+            end: 5.2,
+            text: "代替処理で字幕を生成しました。",
+          },
+        ],
+      });
+    }
+
+    return nativeFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("timed-fallback-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.mp4", {
+        type: "video/mp4",
+      }),
+    );
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(requestedModels, [
+      "gpt-4o-transcribe-diarize",
+      "whisper-1",
+    ]);
+    const payload = await response.json();
+    assert.equal(payload.duration, 5.2);
+    assert.equal(
+      payload.segments.map((segment) => segment.text).join(""),
+      "代替処理で字幕を生成しました。",
+    );
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("retries a temporary timed transcription failure once", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  let primaryCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      assert.equal(init.body.get("model"), "gpt-4o-transcribe-diarize");
+      primaryCalls += 1;
+      if (primaryCalls === 1) {
+        return Response.json(
+          {
+            error: {
+              code: "server_busy",
+              type: "server_error",
+              message: "Please retry.",
+            },
+          },
+          { status: 503 },
+        );
+      }
+      return Response.json({
+        duration: 3,
+        language: "ja",
+        text: "再試行で成功しました。",
+        segments: [
+          { start: 0, end: 3, speaker: "A", text: "再試行で成功しました。" },
+        ],
+      });
+    }
+
+    return nativeFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("timed-retry-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.wav", {
+        type: "audio/wav",
+      }),
+    );
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(primaryCalls, 2);
+    const payload = await response.json();
+    assert.equal(
+      payload.segments.map((segment) => segment.text).join(""),
+      "再試行で成功しました。",
+    );
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
 test("uses a second high-accuracy pass only when requested", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",

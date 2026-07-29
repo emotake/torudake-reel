@@ -18,6 +18,8 @@ import {
 } from "../../../lib/transfers";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 45_000;
+const TRANSCRIPTION_RETRY_DELAY_MS = 350;
 
 type TranscriptionResponse = {
   duration?: number;
@@ -90,37 +92,76 @@ function getRawSegments(transcription: TranscriptionResponse) {
 async function requestTranscription(
   apiKey: string,
   file: File,
-  mode: "timed" | "refine",
+  mode: "timed" | "timed-fallback" | "refine",
 ): Promise<TranscriptionCallResult> {
   const formData = new FormData();
+  const isTimedPrimary = mode === "timed";
+  const isTimedFallback = mode === "timed-fallback";
   formData.set("file", file, safeFileName(file.name));
   formData.set(
     "model",
-    mode === "timed"
+    isTimedPrimary
       ? "gpt-4o-transcribe-diarize"
-      : "gpt-4o-transcribe",
+      : isTimedFallback
+        ? "whisper-1"
+        : "gpt-4o-transcribe",
   );
   formData.set("language", "ja");
   formData.set(
     "response_format",
-    mode === "timed" ? "diarized_json" : "json",
+    isTimedPrimary
+      ? "diarized_json"
+      : isTimedFallback
+        ? "verbose_json"
+        : "json",
   );
-  formData.set("chunking_strategy", "auto");
   formData.set("temperature", "0");
+  if (isTimedPrimary) {
+    formData.set("chunking_strategy", "auto");
+  }
+  if (isTimedFallback) {
+    formData.append("timestamp_granularities[]", "segment");
+  }
   if (mode === "refine") {
     formData.set("prompt", HIGH_ACCURACY_PROMPT);
   }
 
-  const response = await fetch(
-    "https://api.openai.com/v1/audio/transcriptions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: formData,
-    },
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    TRANSCRIPTION_REQUEST_TIMEOUT_MS,
   );
+  let response: Response;
+
+  try {
+    response = await fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      status: 504,
+      requestId: null,
+      error: {
+        code: controller.signal.aborted ? "request_timeout" : "request_failed",
+        type: "transcription_request_error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The transcription request failed.",
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const errorResponse = (await response
@@ -138,6 +179,41 @@ async function requestTranscription(
     ok: true,
     transcription: (await response.json()) as TranscriptionResponse,
   };
+}
+
+function canUseTimedFallback(result: TranscriptionCallResult) {
+  return !result.ok && result.status >= 500 && result.status <= 599;
+}
+
+function shouldRetryTimedPrimary(result: TranscriptionCallResult) {
+  if (result.ok) return false;
+  if (result.error?.code === "model_error") return false;
+  if (result.error?.code === "request_timeout") return false;
+  return result.status === 502 || result.status === 503 || result.status === 504;
+}
+
+async function requestTimedTranscription(apiKey: string, file: File) {
+  let result = await requestTranscription(apiKey, file, "timed");
+
+  if (shouldRetryTimedPrimary(result)) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, TRANSCRIPTION_RETRY_DELAY_MS),
+    );
+    result = await requestTranscription(apiKey, file, "timed");
+  }
+
+  if (canUseTimedFallback(result)) {
+    console.warn(
+      "OpenAI timed transcription fallback activated",
+      result.status,
+      result.requestId,
+      result.error?.code,
+      result.error?.type,
+    );
+    return requestTranscription(apiKey, file, "timed-fallback");
+  }
+
+  return result;
 }
 
 function transcriptionError(
@@ -275,7 +351,7 @@ export async function POST(request: Request) {
       return jsonError("対応している動画または音声ファイルを選んでください。");
     }
 
-    const timedResult = await requestTranscription(apiKey, file, "timed");
+    const timedResult = await requestTimedTranscription(apiKey, file);
     if (!timedResult.ok) {
       console.error(
         "OpenAI transcription failed",
