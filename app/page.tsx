@@ -38,6 +38,14 @@ type ApiPayload = {
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 
+function needsBrowserAudioExtraction(selectedFile: File) {
+  return (
+    selectedFile.size > DIRECT_TRANSCRIPTION_BYTES ||
+    selectedFile.type.toLowerCase() === "video/quicktime" ||
+    /\.(mov|m4v)$/i.test(selectedFile.name)
+  );
+}
+
 async function readApiResponse<T extends ApiPayload>(
   response: Response,
   fallbackMessage: string,
@@ -211,6 +219,41 @@ async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
 ) {
+  try {
+    onProgress(8);
+    const { extractTranscriptionAudioChunks } = await import(
+      "../lib/transcription-media"
+    );
+    const mergedSegments: TranscriptLine[] = [];
+    let completedChunks = 0;
+
+    for await (const chunk of extractTranscriptionAudioChunks(selectedFile)) {
+      onProgress(Math.min(84, 14 + completedChunks * 10));
+      const chunkSegments = await transcribeMediaFile(chunk.file);
+
+      for (const segment of chunkSegments) {
+        mergedSegments.push({
+          ...segment,
+          id: mergedSegments.length + 1,
+          start:
+            Math.round((segment.start + chunk.startSeconds) * 1000) / 1000,
+          end: Math.round((segment.end + chunk.startSeconds) * 1000) / 1000,
+        });
+      }
+      completedChunks += 1;
+      onProgress(Math.min(88, 20 + completedChunks * 10));
+    }
+
+    if (mergedSegments.length > 0) {
+      return mergedSegments;
+    }
+  } catch (transmuxError) {
+    console.warn(
+      "Direct audio extraction failed; falling back to browser decoding.",
+      transmuxError,
+    );
+  }
+
   const AudioContextConstructor =
     window.AudioContext ??
     (
@@ -221,7 +264,7 @@ async function transcribeLargeVideo(
 
   if (!AudioContextConstructor) {
     throw new Error(
-      "このブラウザでは大きな動画の音声を処理できません。最新版のChromeまたはEdgeでお試しください。",
+      "このブラウザでは動画の音声を処理できません。iPhoneでは最新版のSafariでお試しください。",
     );
   }
 
@@ -234,7 +277,7 @@ async function transcribeLargeVideo(
     decodedAudio = await audioContext.decodeAudioData(sourceBytes);
   } catch {
     throw new Error(
-      "動画から音声を取り出せませんでした。MP4またはWebM形式に変換してお試しください。",
+      "動画から音声を取り出せませんでした。iPhoneでは「設定 → カメラ → フォーマット → 互換性優先」で撮影するか、MP4へ変換してお試しください。",
     );
   } finally {
     await audioContext.close().catch(() => undefined);
@@ -411,7 +454,7 @@ export default function Home() {
       let nextTranscript = initialTranscript;
 
       if (file) {
-        if (file.size > DIRECT_TRANSCRIPTION_BYTES) {
+        if (needsBrowserAudioExtraction(file)) {
           nextTranscript = await transcribeLargeVideo(file, setProgress);
         } else {
           const controller = new AbortController();
@@ -1276,7 +1319,7 @@ function SetupWorkspace({
           </div>
           <div className="localNote">
             <span>●</span>
-            25MBを超える動画は端末内で音声だけを軽量化して字幕を生成します（最大500MB）。
+            iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。
           </div>
         </aside>
 
