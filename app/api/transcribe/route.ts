@@ -96,32 +96,32 @@ async function requestTranscription(
   mode: "timed" | "timed-fallback" | "refine",
 ): Promise<TranscriptionCallResult> {
   const formData = new FormData();
-  const isTimedPrimary = mode === "timed";
-  const isTimedFallback = mode === "timed-fallback";
+  const isWhisperTimedPrimary = mode === "timed";
+  const isDiarizedTimedFallback = mode === "timed-fallback";
   formData.set("file", file, safeFileName(file.name));
   formData.set(
     "model",
-    isTimedPrimary
-      ? "gpt-4o-transcribe-diarize"
-      : isTimedFallback
-        ? "whisper-1"
+    isWhisperTimedPrimary
+      ? "whisper-1"
+      : isDiarizedTimedFallback
+        ? "gpt-4o-transcribe-diarize"
         : "gpt-4o-transcribe",
   );
   formData.set("language", "ja");
   formData.set(
     "response_format",
-    isTimedPrimary
-      ? "diarized_json"
-      : isTimedFallback
-        ? "verbose_json"
+    isWhisperTimedPrimary
+      ? "verbose_json"
+      : isDiarizedTimedFallback
+        ? "diarized_json"
         : "json",
   );
   formData.set("temperature", "0");
-  if (isTimedPrimary) {
-    formData.set("chunking_strategy", "auto");
-  }
-  if (isTimedFallback) {
+  if (isWhisperTimedPrimary) {
     formData.append("timestamp_granularities[]", "segment");
+  }
+  if (isDiarizedTimedFallback) {
+    formData.set("chunking_strategy", "auto");
   }
   if (mode === "refine") {
     formData.set("prompt", HIGH_ACCURACY_PROMPT);

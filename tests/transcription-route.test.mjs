@@ -17,12 +17,15 @@ test("turns an audio transcription into timestamped captions", async () => {
       assert.equal(init?.method, "POST");
       assert.equal(init?.headers?.Authorization, "Bearer test-key");
       assert.ok(init?.body instanceof FormData);
-      assert.equal(init.body.get("model"), "gpt-4o-transcribe-diarize");
+      assert.equal(init.body.get("model"), "whisper-1");
       assert.equal(init.body.get("language"), "ja");
-      assert.equal(init.body.get("response_format"), "diarized_json");
-      assert.equal(init.body.get("chunking_strategy"), "auto");
+      assert.equal(init.body.get("response_format"), "verbose_json");
+      assert.equal(init.body.get("chunking_strategy"), null);
       assert.equal(init.body.get("temperature"), "0");
-      assert.deepEqual(init.body.getAll("timestamp_granularities[]"), []);
+      assert.deepEqual(
+        init.body.getAll("timestamp_granularities[]"),
+        ["segment"],
+      );
 
       return Response.json({
         duration: 4.5,
@@ -149,7 +152,7 @@ test("uses the full transcript when timed segments are omitted", async () => {
   }
 });
 
-test("falls back to Whisper timestamps when the diarization model errors", async () => {
+test("falls back to diarization when Whisper timestamping errors", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
   };
@@ -166,7 +169,7 @@ test("falls back to Whisper timestamps when the diarization model errors", async
       const model = init.body.get("model");
       requestedModels.push(model);
 
-      if (model === "gpt-4o-transcribe-diarize") {
+      if (model === "whisper-1") {
         return Response.json(
           {
             error: {
@@ -182,14 +185,11 @@ test("falls back to Whisper timestamps when the diarization model errors", async
         );
       }
 
-      assert.equal(model, "whisper-1");
+      assert.equal(model, "gpt-4o-transcribe-diarize");
       assert.equal(init.body.get("language"), "ja");
-      assert.equal(init.body.get("response_format"), "verbose_json");
-      assert.equal(init.body.get("chunking_strategy"), null);
-      assert.deepEqual(
-        init.body.getAll("timestamp_granularities[]"),
-        ["segment"],
-      );
+      assert.equal(init.body.get("response_format"), "diarized_json");
+      assert.equal(init.body.get("chunking_strategy"), "auto");
+      assert.deepEqual(init.body.getAll("timestamp_granularities[]"), []);
       return Response.json({
         duration: 5.2,
         language: "ja",
@@ -237,8 +237,8 @@ test("falls back to Whisper timestamps when the diarization model errors", async
 
     assert.equal(response.status, 200);
     assert.deepEqual(requestedModels, [
-      "gpt-4o-transcribe-diarize",
       "whisper-1",
+      "gpt-4o-transcribe-diarize",
     ]);
     const payload = await response.json();
     assert.equal(payload.duration, 5.2);
@@ -266,7 +266,7 @@ test("retries a temporary timed transcription failure once", async () => {
         : new URL(input.url);
 
     if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
-      assert.equal(init.body.get("model"), "gpt-4o-transcribe-diarize");
+      assert.equal(init.body.get("model"), "whisper-1");
       primaryCalls += 1;
       if (primaryCalls === 1) {
         return Response.json(
@@ -351,7 +351,7 @@ test("uses a second high-accuracy pass only when requested", async () => {
       const model = init.body.get("model");
       requestedModels.push(model);
 
-      if (model === "gpt-4o-transcribe-diarize") {
+      if (model === "whisper-1") {
         return Response.json({
           duration: 6,
           language: "ja",
@@ -409,7 +409,7 @@ test("uses a second high-accuracy pass only when requested", async () => {
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.deepEqual(requestedModels, [
-      "gpt-4o-transcribe-diarize",
+      "whisper-1",
       "gpt-4o-transcribe",
     ]);
     assert.equal(payload.refined, true);
@@ -440,7 +440,7 @@ test("keeps the timed transcript when a high-accuracy pass omits speech", async 
 
     if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
       const model = init.body.get("model");
-      if (model === "gpt-4o-transcribe-diarize") {
+      if (model === "whisper-1") {
         return Response.json({
           duration: 12,
           language: "ja",
