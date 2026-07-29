@@ -203,7 +203,9 @@ export async function POST(request: Request) {
     }
 
     const transcription = (await response.json()) as TranscriptionResponse;
-    const rawSegments: RawCaptionSegment[] = (transcription.segments ?? [])
+    const transcriptionText = transcription.text?.trim() ?? "";
+    const transcriptionDuration = Number(transcription.duration);
+    let rawSegments: RawCaptionSegment[] = (transcription.segments ?? [])
       .map((segment) => ({
         start: Number(segment.start),
         end: Number(segment.end),
@@ -216,21 +218,49 @@ export async function POST(request: Request) {
           segment.end > segment.start &&
           Boolean(segment.text),
       );
+    if (
+      rawSegments.length === 0 &&
+      transcriptionText &&
+      Number.isFinite(transcriptionDuration) &&
+      transcriptionDuration > 0
+    ) {
+      rawSegments = [
+        {
+          start: 0,
+          end: transcriptionDuration,
+          text: transcriptionText,
+        },
+      ];
+    }
     const segments = buildCaptionSegments(rawSegments, 14);
 
     if (segments.length === 0) {
-      return jsonError(
-        "音声を字幕にできませんでした。声が聞こえる動画でお試しください。",
-        422,
+      return Response.json(
+        {
+          text: transcriptionText,
+          language: transcription.language ?? "ja",
+          duration:
+            Number.isFinite(transcriptionDuration) &&
+            transcriptionDuration > 0
+              ? transcriptionDuration
+              : 0,
+          segments: [],
+          silent: true,
+        },
+        {
+          headers: {
+            "Cache-Control": "private, no-store",
+          },
+        },
       );
     }
 
     return Response.json(
       {
-        text: transcription.text?.trim() ?? "",
+        text: transcriptionText,
         language: transcription.language ?? "ja",
         duration:
-          Number(transcription.duration) || segments.at(-1)?.end || 0,
+          transcriptionDuration || segments.at(-1)?.end || 0,
         segments,
       },
       {

@@ -251,9 +251,10 @@ async function transcribeMediaFile(mediaFile: File) {
     body: formData,
   });
   const payload = await readApiResponse<
-    ApiPayload & { segments?: TranscriptLine[] }
+    ApiPayload & { segments?: TranscriptLine[]; silent?: boolean }
   >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
+  if (payload.silent) return [];
   if (!payload.segments?.length) {
     throw new Error("字幕を生成できませんでした。もう一度お試しください。");
   }
@@ -323,6 +324,9 @@ async function transcribeLargeVideo(
       }
     }
   } catch (transmuxError) {
+    if (transmuxError instanceof ApiRequestError) {
+      throw transmuxError;
+    }
     extractionDetail =
       transmuxError instanceof Error
         ? transmuxError.message.replace(/\s+/g, " ").slice(0, 160)
@@ -409,7 +413,9 @@ async function transcribeLargeVideo(
   }
 
   if (mergedSegments.length === 0) {
-    throw new Error("字幕を生成できませんでした。もう一度お試しください。");
+    throw new Error(
+      "音声を字幕にできませんでした。声が聞こえる区間がある動画でお試しください。",
+    );
   }
   return mergedSegments;
 }

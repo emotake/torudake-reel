@@ -83,6 +83,137 @@ test("turns an audio transcription into timestamped captions", async () => {
   }
 });
 
+test("uses the full transcript when timed segments are omitted", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      return Response.json({
+        duration: 5,
+        text: "本文だけ返っても、字幕として表示できます。",
+      });
+    }
+
+    return nativeFetch(input);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("text-fallback-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.m4a", {
+        type: "audio/mp4",
+      }),
+    );
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.silent, undefined);
+    assert.ok(payload.segments.length > 0);
+    assert.equal(
+      payload.segments.map((segment) => segment.text).join(""),
+      "本文だけ返っても、字幕として表示できます。",
+    );
+    assert.equal(payload.segments[0].start, 0);
+    assert.equal(payload.segments.at(-1).end, 5);
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("marks a silent audio chunk as skippable", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      return Response.json({
+        duration: 4,
+        text: "",
+        segments: [],
+      });
+    }
+
+    return nativeFetch(input);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("silent-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "silence.wav", {
+        type: "audio/wav",
+      }),
+    );
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      text: "",
+      language: "ja",
+      duration: 4,
+      segments: [],
+      silent: true,
+    });
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
 test("explains when the OpenAI API credit is exhausted", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
