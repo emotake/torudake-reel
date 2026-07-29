@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   buildCaptionSegments,
   buildCaptionSegmentsFromWords,
-  clampCaptionsToDuration,
   selectCaptionHighlight,
 } from "../lib/captions.ts";
 
@@ -86,18 +85,4 @@ test("highlights only visually useful keywords", () => {
   assert.equal(selectCaptionHighlight("大切なポイントです"), "ポイント");
   assert.equal(selectCaptionHighlight("成功率は80%です"), "80%");
   assert.equal(selectCaptionHighlight("自然な話し方です"), undefined);
-});
-
-test("clamps generated captions to the selected output duration", () => {
-  const captions = clampCaptionsToDuration(
-    [
-      { id: 4, start: 28, end: 31, text: "last visible", removed: false },
-      { id: 5, start: 31, end: 34, text: "outside", removed: false },
-    ],
-    30,
-  );
-
-  assert.deepEqual(captions, [
-    { id: 1, start: 28, end: 30, text: "last visible", removed: false },
-  ]);
 });

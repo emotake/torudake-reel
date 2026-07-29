@@ -2701,6 +2701,7 @@ footer > small {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  cursor: pointer;
 }
 
 .resultSample,
@@ -2897,6 +2898,12 @@ footer > small {
   height: 24px;
   gap: 3px;
   align-items: center;
+  cursor: pointer;
+}
+
+.timelinePreview > div:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 3px;
 }
 
 .timelinePreview i {

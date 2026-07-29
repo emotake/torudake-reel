@@ -91,10 +91,7 @@ function safeBaseName(fileName: string) {
 
 export async function* extractTranscriptionAudioChunks(
   sourceFile: File,
-  options: {
-    maxChunkBytes?: number;
-    maxDurationSeconds?: number;
-  } = {},
+  options: { maxChunkBytes?: number } = {},
 ): AsyncGenerator<TranscriptionAudioChunk> {
   const {
     BlobSource,
@@ -152,20 +149,12 @@ export async function* extractTranscriptionAudioChunks(
       throw new Error("動画の音声形式を直接取り出せませんでした。");
     }
 
-    const sourceDuration =
+    const duration =
       (await audioTrack.getDurationFromMetadata()) ??
       (await audioTrack.computeDuration());
-    if (!Number.isFinite(sourceDuration) || sourceDuration <= 0) {
+    if (!Number.isFinite(duration) || duration <= 0) {
       throw new Error("動画に音声が見つかりませんでした。");
     }
-    const duration = Math.min(
-      sourceDuration,
-      options.maxDurationSeconds &&
-      Number.isFinite(options.maxDurationSeconds) &&
-      options.maxDurationSeconds > 0
-        ? options.maxDurationSeconds
-        : sourceDuration,
-    );
 
     const bitrate =
       (await audioTrack.getAverageBitrate()) ??

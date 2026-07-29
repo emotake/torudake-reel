@@ -4,11 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captionsToSrt,
   captionsToVtt,
-  clampCaptionsToDuration,
   formatCaptionClock,
   selectCaptionHighlight,
   type CaptionSegment,
 } from "../lib/captions";
+import {
+  buildEditRanges,
+  createNaturalEdit,
+  editedTimeToSourceTime,
+  getEditedDuration,
+  remapCaptionsToEditedTimeline,
+  sourceTimeToEditedTime,
+} from "../lib/edit-plan";
 import {
   encodeMonoWavChunk,
   TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
@@ -72,51 +79,6 @@ function needsBrowserAudioExtraction(selectedFile: File) {
     selectedFile.type.toLowerCase() === "video/quicktime" ||
     /\.(mov|m4v)$/i.test(selectedFile.name)
   );
-}
-
-async function readVideoDuration(selectedFile: File) {
-  const sourceUrl = URL.createObjectURL(selectedFile);
-  const video = document.createElement("video");
-  video.preload = "metadata";
-  video.muted = true;
-  video.playsInline = true;
-
-  try {
-    return await new Promise<number>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error("動画の長さを確認できませんでした。"));
-      }, 8000);
-      const finish = (callback: () => void) => {
-        window.clearTimeout(timeout);
-        video.removeAttribute("src");
-        video.load();
-        callback();
-      };
-
-      video.addEventListener(
-        "loadedmetadata",
-        () => {
-          const duration = video.duration;
-          finish(() => {
-            if (Number.isFinite(duration) && duration > 0) {
-              resolve(duration);
-            } else {
-              reject(new Error("動画の長さを確認できませんでした。"));
-            }
-          });
-        },
-        { once: true },
-      );
-      video.addEventListener(
-        "error",
-        () => finish(() => reject(new Error("動画の長さを確認できませんでした。"))),
-        { once: true },
-      );
-      video.src = sourceUrl;
-    });
-  } finally {
-    URL.revokeObjectURL(sourceUrl);
-  }
 }
 
 async function readApiResponse<T extends ApiPayload>(
@@ -295,7 +257,6 @@ async function transcribeMediaFile(mediaFile: File) {
 async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
-  maxDurationSeconds: number,
 ) {
   let extractionDetail = "";
   try {
@@ -314,7 +275,7 @@ async function transcribeLargeVideo(
 
         for await (const chunk of extractTranscriptionAudioChunks(
           selectedFile,
-          { maxChunkBytes, maxDurationSeconds },
+          { maxChunkBytes },
         )) {
           onProgress(Math.min(84, 14 + completedChunks * 6));
           const chunkSegments = await transcribeMediaFile(chunk.file);
@@ -401,10 +362,7 @@ async function transcribeLargeVideo(
     throw new Error("動画に音声が見つかりませんでした。");
   }
 
-  const transcriptionDuration = Math.min(
-    decodedAudio.duration,
-    maxDurationSeconds,
-  );
+  const transcriptionDuration = decodedAudio.duration;
   const chunkCount = Math.ceil(
     transcriptionDuration / TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
   );
@@ -573,15 +531,10 @@ export default function Home() {
       let nextTranscript = initialTranscript;
 
       if (file) {
-        const sourceDuration = await readVideoDuration(file).catch(() => null);
-        const needsDurationTrim =
-          sourceDuration !== null && sourceDuration > length + 0.05;
-
-        if (needsBrowserAudioExtraction(file) || needsDurationTrim) {
+        if (needsBrowserAudioExtraction(file)) {
           nextTranscript = await transcribeLargeVideo(
             file,
             setProgress,
-            length,
           );
         } else {
           const controller = new AbortController();
@@ -611,7 +564,6 @@ export default function Home() {
           }
           nextTranscript = payload.segments;
         }
-        nextTranscript = clampCaptionsToDuration(nextTranscript, length);
       } else {
         progressTimer = window.setInterval(() => {
           setProgress((current) => Math.min(current + 7, 88));
@@ -619,6 +571,7 @@ export default function Home() {
         await new Promise((resolve) => window.setTimeout(resolve, 1200));
       }
 
+      nextTranscript = createNaturalEdit(nextTranscript, length, goal);
       if (progressTimer !== undefined) {
         window.clearInterval(progressTimer);
       }
@@ -1521,6 +1474,9 @@ function SetupWorkspace({
                 </button>
               ))}
             </div>
+            <p className="optionCostNote">
+              自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。
+            </p>
           </fieldset>
 
           <div className="editSummary">
@@ -1556,11 +1512,11 @@ function Processing({
   progress: number;
 }) {
   const steps = [
-    { threshold: 18, label: "音声を読み取り中", note: "動画から日本語の音声を確認" },
-    { threshold: 42, label: "文字起こし中", note: "話した言葉を正確に字幕化" },
+    { threshold: 18, label: "全体を読み取り中", note: "元動画の内容を最後まで確認" },
+    { threshold: 42, label: "文字起こし中", note: "話した言葉と時刻を正確に取得" },
     { threshold: 68, label: "時刻を合わせています", note: "発話の開始と終了を同期" },
-    { threshold: 88, label: "字幕を整形中", note: "読みやすい長さで分割" },
-    { threshold: 100, label: "仕上げ中", note: "字幕プレビューを準備" },
+    { threshold: 88, label: "自然に再構成中", note: "文の切れ目で指定時間へ編集" },
+    { threshold: 100, label: "仕上げ中", note: "カットと字幕プレビューを準備" },
   ];
   const activeIndex = steps.findIndex((step) => progress <= step.threshold);
 
@@ -1585,7 +1541,7 @@ function Processing({
           <p className="eyebrow">AI EDITING</p>
           <h1>投稿できる状態に整えています。</h1>
           <p>
-            {file?.name ?? "サンプル動画"}の音声から、時刻付き字幕を作成しています。
+            {file?.name ?? "サンプル動画"}を全体から読み取り、話の流れを保った短い動画へ再構成しています。
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -1650,9 +1606,22 @@ function ResultWorkspace({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(length);
+  const [sourceDuration, setSourceDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const editRanges = useMemo(
+    () => buildEditRanges(transcript),
+    [transcript],
+  );
+  const editedTranscript = useMemo(
+    () => remapCaptionsToEditedTimeline(transcript, editRanges),
+    [editRanges, transcript],
+  );
+  const editDuration = getEditedDuration(editRanges);
+  const editedCurrentTime = sourceTimeToEditedTime(
+    editRanges,
+    currentTime,
+  );
   const activeCaption =
     keptLines.find(
       (line) => currentTime >= line.start && currentTime < line.end,
@@ -1683,8 +1652,69 @@ function ResultWorkspace({
   function seekTo(seconds: number) {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(seconds, duration));
+    video.currentTime = Math.max(
+      0,
+      Math.min(seconds, sourceDuration || seconds),
+    );
     setCurrentTime(video.currentTime);
+  }
+
+  function seekToEditedTime(seconds: number) {
+    seekTo(
+      editedTimeToSourceTime(
+        editRanges,
+        Math.max(0, Math.min(seconds, editDuration)),
+      ),
+    );
+  }
+
+  function moveToNextKeptRange(video: HTMLVideoElement) {
+    if (editRanges.length === 0) {
+      video.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    const currentRangeIndex = editRanges.findIndex(
+      (range) =>
+        video.currentTime >= range.start - 0.03 &&
+        video.currentTime < range.end - 0.03,
+    );
+    if (currentRangeIndex >= 0) return;
+
+    const nextRange = editRanges.find(
+      (range) => range.start > video.currentTime + 0.01,
+    );
+    if (nextRange) {
+      video.currentTime = nextRange.start;
+      setCurrentTime(nextRange.start);
+      return;
+    }
+
+    video.pause();
+    video.currentTime = editRanges.at(-1)!.end;
+    setCurrentTime(editRanges.at(-1)!.end);
+    setIsPlaying(false);
+  }
+
+  function handleVideoTimeUpdate(video: HTMLVideoElement) {
+    if (editRanges.length === 0) {
+      video.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    const currentRangeIndex = editRanges.findIndex(
+      (range) =>
+        video.currentTime >= range.start - 0.03 &&
+        video.currentTime < range.end - 0.03,
+    );
+    if (currentRangeIndex >= 0) {
+      setCurrentTime(video.currentTime);
+      return;
+    }
+
+    moveToNextKeptRange(video);
   }
 
   async function togglePlayback() {
@@ -1693,10 +1723,23 @@ function ResultWorkspace({
       notify("実際の動画を選ぶと再生できます");
       return;
     }
+    if (editRanges.length === 0) {
+      notify("残す文を1つ以上選んでください");
+      return;
+    }
     if (video.paused) {
-      if (video.currentTime >= duration - 0.05) {
-        video.currentTime = 0;
-        setCurrentTime(0);
+      const isInsideKeptRange = editRanges.some(
+        (range) =>
+          video.currentTime >= range.start &&
+          video.currentTime < range.end - 0.05,
+      );
+      if (!isInsideKeptRange) {
+        const nextRange =
+          editRanges.find(
+            (range) => range.start > video.currentTime + 0.01,
+          ) ?? editRanges[0];
+        video.currentTime = nextRange.start;
+        setCurrentTime(nextRange.start);
       }
       await video.play();
     } else {
@@ -1717,7 +1760,10 @@ function ResultWorkspace({
   }
 
   async function copyTranscript() {
-    const text = keptLines.map((line) => line.text.trim()).filter(Boolean).join("\n");
+    const text = editedTranscript
+      .map((line) => line.text.trim())
+      .filter(Boolean)
+      .join("\n");
     await navigator.clipboard.writeText(text);
     notify("字幕テキストをコピーしました");
   }
@@ -1725,6 +1771,19 @@ function ResultWorkspace({
   async function exportCaptionedVideo() {
     const video = videoRef.current;
     if (!video || !file || isExporting) return;
+    const playableRanges = editRanges
+      .map((range) => ({
+        start: Math.max(0, range.start),
+        end: Math.min(
+          range.end,
+          sourceDuration || video.duration || range.end,
+        ),
+      }))
+      .filter((range) => range.end > range.start);
+    if (playableRanges.length === 0) {
+      notify("残す文を1つ以上選んでください");
+      return;
+    }
 
     const capturableVideo = video as HTMLVideoElement & {
       captureStream?: () => MediaStream;
@@ -1751,14 +1810,19 @@ function ResultWorkspace({
       wasPlaying: !video.paused,
     };
     let animationFrame = 0;
+    let keepDrawing = true;
+    let sourceStream: MediaStream | null = null;
 
     try {
       video.pause();
       video.loop = false;
       video.muted = false;
-      video.currentTime = 0;
+      video.currentTime = playableRanges[0].start;
       await new Promise<void>((resolve) => {
-        if (video.readyState >= 2 && video.currentTime === 0) {
+        if (
+          video.readyState >= 2 &&
+          Math.abs(video.currentTime - playableRanges[0].start) < 0.03
+        ) {
           resolve();
           return;
         }
@@ -1884,13 +1948,13 @@ function ResultWorkspace({
           });
         }
 
-        if (!video.ended && video.currentTime < length) {
+        if (keepDrawing) {
           animationFrame = window.requestAnimationFrame(drawFrame);
         }
       };
 
       const outputStream = canvas.captureStream(30);
-      const sourceStream = captureVideoStream.call(capturableVideo);
+      sourceStream = captureVideoStream.call(capturableVideo);
       sourceStream
         .getAudioTracks()
         .forEach((track) => outputStream.addTrack(track));
@@ -1919,26 +1983,32 @@ function ResultWorkspace({
           { once: true },
         );
       });
-      const exportDuration = Math.min(
-        Number.isFinite(video.duration) ? video.duration : length,
-        length,
-      );
       const ended = new Promise<void>((resolve) => {
-        const finishAtSelectedLength = () => {
+        let rangeIndex = 0;
+        const finishNaturalEdit = () => {
+          const currentRange = playableRanges[rangeIndex];
           if (
-            video.ended ||
-            video.currentTime >= exportDuration - 0.03
+            !video.ended &&
+            video.currentTime < currentRange.end - 0.03
           ) {
-            video.removeEventListener(
-              "timeupdate",
-              finishAtSelectedLength,
-            );
-            video.removeEventListener("ended", finishAtSelectedLength);
-            resolve();
+            return;
           }
+
+          if (rangeIndex < playableRanges.length - 1) {
+            rangeIndex += 1;
+            video.currentTime = playableRanges[rangeIndex].start;
+            return;
+          }
+
+          video.removeEventListener(
+            "timeupdate",
+            finishNaturalEdit,
+          );
+          video.removeEventListener("ended", finishNaturalEdit);
+          resolve();
         };
-        video.addEventListener("timeupdate", finishAtSelectedLength);
-        video.addEventListener("ended", finishAtSelectedLength);
+        video.addEventListener("timeupdate", finishNaturalEdit);
+        video.addEventListener("ended", finishNaturalEdit);
       });
 
       recorder.start(1000);
@@ -1946,6 +2016,7 @@ function ResultWorkspace({
       await video.play();
       await ended;
       video.pause();
+      keepDrawing = false;
       recorder.stop();
       await stopped;
 
@@ -1968,7 +2039,9 @@ function ResultWorkspace({
           : "動画の書き出しに失敗しました",
       );
     } finally {
+      keepDrawing = false;
       window.cancelAnimationFrame(animationFrame);
+      sourceStream?.getTracks().forEach((track) => track.stop());
       video.pause();
       video.loop = previous.loop;
       video.muted = previous.muted;
@@ -1985,15 +2058,17 @@ function ResultWorkspace({
         <div>
           <p className="completePill">
             <span>✓</span>
-            字幕生成が完了しました
+            全体の自動編集が完了しました
           </p>
-          <h1>再生しながら、字幕を確認できます。</h1>
-          <p>字幕の文章はその場で直せます。不要な字幕は左のボタンで外せます。</p>
+          <h1>話の流れを残して、自然な長さにつなぎ直しました。</h1>
+          <p>
+            元動画全体から、言い淀み・重複・長い間を外し、文の切れ目で再構成しています。
+          </p>
         </div>
         <div className="timeSaved">
-          <span>生成した字幕</span>
-          <strong>{keptLines.length}枚</strong>
-          <small>動画に合わせて時刻を自動設定</small>
+          <span>仕上がり時間</span>
+          <strong>{formatCaptionClock(editDuration)}</strong>
+          <small>全体から約{length}秒へ自動構成</small>
         </div>
       </div>
 
@@ -2041,28 +2116,37 @@ function ResultWorkspace({
               <video
                 ref={videoRef}
                 src={videoUrl}
-                controls
                 playsInline
                 preload="metadata"
+                tabIndex={0}
+                aria-label="自動編集後の動画プレビュー"
+                onClick={() => void togglePlayback()}
+                onKeyDown={(event) => {
+                  if (event.key === " " || event.key === "Enter") {
+                    event.preventDefault();
+                    void togglePlayback();
+                  }
+                }}
                 onLoadedMetadata={(event) => {
                   const sourceDuration = event.currentTarget.duration;
-                  setDuration(
+                  setSourceDuration(
                     Number.isFinite(sourceDuration) && sourceDuration > 0
-                      ? Math.min(sourceDuration, length)
-                      : length,
+                      ? sourceDuration
+                      : 0,
                   );
-                }}
-                onTimeUpdate={(event) => {
-                  const video = event.currentTarget;
-                  if (video.currentTime >= duration - 0.03) {
-                    video.pause();
-                    video.currentTime = duration;
-                    setCurrentTime(duration);
-                    setIsPlaying(false);
-                    return;
+                  if (
+                    editRanges[0] &&
+                    event.currentTarget.currentTime <
+                      editRanges[0].start
+                  ) {
+                    event.currentTarget.currentTime =
+                      editRanges[0].start;
+                    setCurrentTime(editRanges[0].start);
                   }
-                  setCurrentTime(video.currentTime);
                 }}
+                onTimeUpdate={(event) =>
+                  handleVideoTimeUpdate(event.currentTarget)
+                }
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
@@ -2083,7 +2167,9 @@ function ResultWorkspace({
             <span className="videoState">
               {previewMode === "after" ? "字幕ON" : "字幕OFF"}
             </span>
-            <span className="outputRange">{length}秒版</span>
+            <span className="outputRange">
+              約{length}秒版・実尺{formatCaptionClock(editDuration)}
+            </span>
           </div>
 
           <div className="timelinePreview">
@@ -2094,22 +2180,48 @@ function ResultWorkspace({
             >
               {isPlaying ? "Ⅱ" : "▶"}
             </button>
-            <div>
-              {transcript.map((line) => (
+            <div
+              role="slider"
+              tabIndex={0}
+              aria-label="自動編集後の再生位置"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(1, Math.round(editDuration))}
+              aria-valuenow={Math.round(editedCurrentTime)}
+              onClick={(event) => {
+                const bounds =
+                  event.currentTarget.getBoundingClientRect();
+                const ratio =
+                  (event.clientX - bounds.left) /
+                  Math.max(bounds.width, 1);
+                seekToEditedTime(ratio * editDuration);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  seekToEditedTime(editedCurrentTime - 2);
+                }
+                if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  seekToEditedTime(editedCurrentTime + 2);
+                }
+              }}
+            >
+              {keptLines.map((line) => (
                 <i
                   key={line.id}
-                  className={line.removed ? "removed" : "kept"}
+                  className="kept"
                   style={{ flex: Math.max(line.end - line.start, 0.2) }}
                 />
               ))}
               <b
                 style={{
-                  left: `${Math.min(100, (currentTime / Math.max(duration, 0.1)) * 100)}%`,
+                  left: `${Math.min(100, (editedCurrentTime / Math.max(editDuration, 0.1)) * 100)}%`,
                 }}
               />
             </div>
             <span>
-              {formatCaptionClock(currentTime)} / {formatCaptionClock(duration)}
+              {formatCaptionClock(editedCurrentTime)} /{" "}
+              {formatCaptionClock(editDuration)}
             </span>
           </div>
         </div>
@@ -2123,7 +2235,7 @@ function ResultWorkspace({
             <span>自動保存</span>
           </div>
           <p className="editHelp">
-            時刻を押すと該当位置へ移動します。左のボタンで字幕の表示・非表示を切り替えられます。
+            グレーの文は自動カット候補です。左のボタンで動画へ戻す・外すを切り替えられます。
           </p>
           <div className="transcriptList">
             {transcript.map((line) => (
@@ -2143,7 +2255,9 @@ function ResultWorkspace({
                     onClick={() => seekTo(line.start)}
                     type="button"
                   >
-                    {formatCaptionClock(line.start)}–{formatCaptionClock(line.end)}
+                    {line.removed ? "元動画 " : ""}
+                    {formatCaptionClock(line.start)}–
+                    {formatCaptionClock(line.end)}
                   </button>
                   <input
                     value={line.text}
@@ -2157,7 +2271,7 @@ function ResultWorkspace({
           </div>
           <div className="cutSummary">
             <div>
-              <span>非表示</span>
+              <span>自動カット</span>
               <strong>{removedCount}枚</strong>
             </div>
             <div>
@@ -2165,8 +2279,8 @@ function ResultWorkspace({
               <strong>{keptLines.length}枚</strong>
             </div>
             <div>
-              <span>動画時間</span>
-              <strong>{formatCaptionClock(duration)}</strong>
+              <span>仕上がり</span>
+              <strong>{formatCaptionClock(editDuration)}</strong>
             </div>
           </div>
         </aside>
@@ -2190,7 +2304,7 @@ function ResultWorkspace({
             onClick={() =>
               downloadText(
                 `${exportName}.srt`,
-                captionsToSrt(transcript),
+                captionsToSrt(editedTranscript),
                 "application/x-subrip",
               )
             }
@@ -2206,7 +2320,7 @@ function ResultWorkspace({
             onClick={() =>
               downloadText(
                 `${exportName}.vtt`,
-                captionsToVtt(transcript),
+                captionsToVtt(editedTranscript),
                 "text/vtt",
               )
             }
