@@ -17,26 +17,20 @@ test("turns an audio transcription into timestamped captions", async () => {
       assert.equal(init?.method, "POST");
       assert.equal(init?.headers?.Authorization, "Bearer test-key");
       assert.ok(init?.body instanceof FormData);
-      assert.equal(init.body.get("model"), "whisper-1");
-      assert.equal(init.body.get("response_format"), "verbose_json");
-      assert.deepEqual(
-        init.body.getAll("timestamp_granularities[]"),
-        ["segment", "word"],
-      );
+      assert.equal(init.body.get("model"), "gpt-4o-transcribe-diarize");
+      assert.equal(init.body.get("language"), "ja");
+      assert.equal(init.body.get("response_format"), "diarized_json");
+      assert.equal(init.body.get("chunking_strategy"), "auto");
+      assert.equal(init.body.get("temperature"), "0");
+      assert.deepEqual(init.body.getAll("timestamp_granularities[]"), []);
 
       return Response.json({
         duration: 4.5,
         language: "ja",
         text: "これは字幕です。次の字幕です。",
         segments: [
-          { start: 0, end: 2, text: "これは字幕です。" },
-          { start: 2, end: 4.5, text: "次の字幕です。" },
-        ],
-        words: [
-          { start: 0, end: 0.6, word: "これは" },
-          { start: 0.6, end: 2, word: "字幕です。" },
-          { start: 2, end: 3, word: "次の" },
-          { start: 3, end: 4.5, word: "字幕です。" },
+          { start: 0, end: 2, speaker: "A", text: "これは字幕です。" },
+          { start: 2, end: 4.5, speaker: "A", text: "次の字幕です。" },
         ],
       });
     }

@@ -2125,70 +2125,115 @@ footer > small {
 }
 
 .optionCards.toneCards {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 }
 
-.toneLines {
-  display: flex;
-  height: 38px;
-  gap: 4px;
-  align-items: center;
+.tonePreview {
+  display: grid;
+  width: 100%;
+  min-height: 66px;
+  align-content: center;
+  justify-items: center;
   margin-bottom: 9px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #fffdfa;
+  color: #172033;
+  box-shadow: 0 7px 18px #10182812;
+  text-align: center;
 }
 
-.toneLines i {
-  width: 5px;
-  border-radius: 99px;
-  background: var(--ink);
+.tonePreview small {
+  margin: 0;
+  color: inherit;
+  font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 6px;
+  font-weight: 600;
+  letter-spacing: .08em;
 }
 
-.toneLines i:first-child {
-  height: 16px;
+.tonePreview strong {
+  margin-top: 1px;
+  color: inherit;
+  font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 10px !important;
+  line-height: 1.25;
 }
 
-.toneLines i:nth-child(2) {
-  height: 28px;
+.tonePreview.editorial {
+  border: 1px solid #eaded3;
+  border-left: 3px solid #e45f4d;
 }
 
-.toneLines i:last-child {
-  height: 20px;
+.tonePreview.editorial strong {
+  text-decoration: underline;
+  text-decoration-color: #e45f4d;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
-.toneLines.trust {
-  gap: 7px;
+.tonePreview.cinema {
+  background: linear-gradient(145deg, #354052, #151c28);
+  color: white;
+  box-shadow: none;
+  text-shadow: 0 2px 4px #000a;
 }
 
-.toneLines.trust i {
-  height: 15px;
+.tonePreview.cinema strong {
+  color: #f4d57a;
 }
 
-.toneLines.punchy {
-  gap: 2px;
+.tonePreview.studio {
+  border-bottom: 3px solid #d5a850;
+  background: #172033;
+  color: white;
 }
 
-.toneLines.punchy i:first-child {
-  height: 26px;
+.tonePreview.studio strong {
+  color: #ffd26a;
 }
 
-.toneLines.punchy i:nth-child(2) {
-  height: 14px;
+.tonePreview.glass {
+  border: 1px solid #8fe3cc;
+  background: linear-gradient(135deg, #15353be8, #14232ee8);
+  color: #f6fffc;
 }
 
-.toneLines.punchy i:last-child {
-  height: 31px;
+.tonePreview.glass strong {
+  color: #9ff3dc;
+  letter-spacing: .04em;
 }
 
-.toneLines.outline {
-  gap: 5px;
-  padding: 0 7px;
-  border-radius: 7px;
-  background: var(--ink);
+.tonePreview.mono {
+  border: 2px solid #181818;
+  border-radius: 2px;
+  background: #f7f5ef;
+  color: #181818;
+  box-shadow: 3px 3px 0 #181818;
 }
 
-.toneLines.outline i {
-  height: 18px;
-  border: 1px solid white;
-  background: transparent;
+.tonePreview.mono strong {
+  padding: 0 3px;
+  background: #181818;
+  color: white;
+}
+
+.tonePreview.signature {
+  border: 1px solid #c7a273;
+  background: #fff3e5;
+  color: #49352d;
+}
+
+.tonePreview.signature small {
+  color: #9b6c48;
+  font-family: Georgia, "Yu Mincho", serif;
+  font-style: italic;
+}
+
+.tonePreview.signature strong {
+  color: #d95a48;
+  font-family: Georgia, "Yu Mincho", serif;
+  letter-spacing: .03em;
 }
 
 .optionCostNote {
@@ -2660,33 +2705,46 @@ footer > small {
   height: 23px;
   place-items: center;
   border-radius: 6px;
-  background: #fff4ef;
-  color: var(--coral);
+  border: 1px solid #eaded3;
+  background: #fffdfa;
+  color: #d94f3b;
   font-family: "DM Sans", sans-serif;
   font-size: 8px;
   font-style: normal;
   font-weight: 900;
 }
 
-.patternSwatch.trust {
-  background: #eafff7;
-  color: var(--mint-dark);
+.patternSwatch.cinema {
+  border-color: #151c28;
+  background: #1d2736;
+  color: #f4d57a;
+  text-shadow: 0 1px 2px #000;
 }
 
-.patternSwatch.punchy {
-  border: 2px solid var(--ink);
-  background: var(--mint);
-  color: var(--ink);
+.patternSwatch.studio {
+  border-bottom: 3px solid #d5a850;
+  background: #172033;
+  color: #ffd26a;
 }
 
-.patternSwatch.outline {
-  background: var(--ink);
-  color: white;
-  text-shadow:
-    -1px -1px 0 #000,
-    1px -1px 0 #000,
-    -1px 1px 0 #000,
-    1px 1px 0 #000;
+.patternSwatch.glass {
+  border-color: #8fe3cc;
+  background: #15353b;
+  color: #9ff3dc;
+}
+
+.patternSwatch.mono {
+  border: 2px solid #181818;
+  border-radius: 2px;
+  background: #f7f5ef;
+  color: #181818;
+}
+
+.patternSwatch.signature {
+  border-color: #c7a273;
+  background: #fff3e5;
+  color: #d95a48;
+  font-family: Georgia, serif;
 }
 
 .resultVideo {
@@ -2740,16 +2798,18 @@ footer > small {
   bottom: 45px;
   left: 28px;
   z-index: 9;
-  padding: 11px 16px;
-  border-radius: 10px;
-  background: rgba(255,255,255,.94);
-  box-shadow: 0 12px 28px #10182838;
+  padding: 13px 18px 14px;
+  border: 1px solid #eaded3;
+  border-left: 4px solid #e45f4d;
+  border-radius: 8px;
+  background: rgba(255,252,248,.96);
+  box-shadow: 0 14px 34px #10182832;
   backdrop-filter: blur(10px);
-  color: var(--ink);
+  color: #172033;
   font-size: 14px;
-  font-weight: 900;
-  line-height: 1.55;
-  letter-spacing: .025em;
+  font-weight: 800;
+  line-height: 1.58;
+  letter-spacing: .035em;
   text-align: center;
   animation: captionPop .2s cubic-bezier(.2,.8,.2,1);
 }
@@ -2757,55 +2817,116 @@ footer > small {
 .resultCaption strong {
   display: inline-block;
   margin: 0 .08em;
-  padding: .02em .3em .08em;
-  border-radius: .34em;
-  background: var(--coral);
-  box-shadow: 0 3px 0 #cf4937;
-  color: white;
-  line-height: 1.25;
-  transform: translateY(-.03em);
-}
-
-.resultCaption.trust {
-  border-left: 5px solid var(--mint-dark);
-  border-radius: 3px;
-}
-
-.resultCaption.trust strong {
-  background: var(--mint-dark);
-  box-shadow: 0 3px 0 #116d61;
-}
-
-.resultCaption.punchy {
-  border: 4px solid var(--ink);
-  background: var(--mint);
-  color: var(--ink);
-  transform: rotate(-1deg);
-}
-
-.resultCaption.punchy strong {
-  background: var(--ink);
-  box-shadow: 0 3px 0 #000;
-}
-
-.resultCaption.outline {
-  background: rgba(0,0,0,.16);
+  padding: 0 .08em .02em;
+  border-radius: 0;
+  background: linear-gradient(transparent 67%, #ef9c8f80 0);
   box-shadow: none;
-  color: white;
-  text-shadow:
-    -2px -2px 0 #101828,
-    2px -2px 0 #101828,
-    -2px 2px 0 #101828,
-    2px 2px 0 #101828,
-    0 3px 7px #000a;
-  backdrop-filter: none;
+  color: #c94736;
+  line-height: 1.25;
+  transform: none;
 }
 
-.resultCaption.outline strong {
-  padding: 0 .1em;
+.resultCaption.cinema {
+  border: 0;
   background: transparent;
   box-shadow: none;
-  color: #ffd84d;
+  backdrop-filter: none;
+  color: white;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-shadow:
+    -2px -2px 0 #10151f,
+    2px -2px 0 #10151f,
+    -2px 2px 0 #10151f,
+    2px 2px 0 #10151f,
+    0 4px 10px #000c;
+}
+
+.resultCaption.cinema strong {
+  background: transparent;
+  color: #f4d57a;
+}
+
+.resultCaption.studio {
+  border: 1px solid #ffffff26;
+  border-bottom: 4px solid #d5a850;
+  border-radius: 5px;
+  background: rgba(19,27,40,.94);
+  color: white;
+  box-shadow: 0 14px 34px #0007;
+  backdrop-filter: blur(8px);
+}
+
+.resultCaption.studio strong {
+  background: transparent;
+  color: #ffd26a;
+}
+
+.resultCaption.glass {
+  border: 1px solid #8fe3cc9c;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #15353bd9, #14232edb);
+  box-shadow: 0 16px 38px #06111670;
+  color: #f8fffd;
+  backdrop-filter: blur(15px) saturate(125%);
+  font-weight: 750;
+}
+
+.resultCaption.glass strong {
+  background: transparent;
+  color: #9ff3dc;
+}
+
+.resultCaption.mono {
+  border: 2px solid #181818;
+  border-radius: 2px;
+  background: rgba(248,246,240,.97);
+  box-shadow: 6px 6px 0 #181818;
+  color: #181818;
+  backdrop-filter: none;
+  font-weight: 850;
+  letter-spacing: .02em;
+}
+
+.resultCaption.mono strong {
+  padding: 0 .2em .04em;
+  background: #181818;
+  color: white;
+}
+
+.resultCaption.signature {
+  border: 1px solid #bf9660;
+  border-radius: 12px 2px 12px 2px;
+  background: rgba(255,243,229,.96);
+  box-shadow: 0 15px 38px #4b2c1d42;
+  color: #3e2d28;
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: .045em;
+}
+
+.resultCaption.signature::before,
+.resultCaption.signature::after {
+  position: absolute;
+  width: 22px;
+  height: 1px;
+  background: #bf9660;
+  content: "";
+}
+
+.resultCaption.signature::before {
+  top: 7px;
+  left: 9px;
+}
+
+.resultCaption.signature::after {
+  right: 9px;
+  bottom: 7px;
+}
+
+.resultCaption.signature strong {
+  background: linear-gradient(transparent 68%, #dc776c55 0);
+  color: #d95a48;
 }
 
 @keyframes captionPop {

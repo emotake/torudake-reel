@@ -23,7 +23,13 @@ import {
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = "follow" | "sales" | "reach";
-type Tone = "natural" | "trust" | "punchy" | "outline";
+type Tone =
+  | "editorial"
+  | "cinema"
+  | "studio"
+  | "glass"
+  | "mono"
+  | "signature";
 type PreviewMode = "before" | "after";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
 
@@ -415,10 +421,12 @@ const goals: { id: Goal; icon: string; title: string; note: string }[] = [
 ];
 
 const tones: { id: Tone; title: string; note: string }[] = [
-  { id: "natural", title: "クリーン", note: "白ベースで読みやすく" },
-  { id: "trust", title: "信頼感", note: "ミントの落ち着いた印象" },
-  { id: "punchy", title: "ポップ", note: "太枠でテンポよく" },
-  { id: "outline", title: "黒縁", note: "動画になじむ定番字幕" },
+  { id: "editorial", title: "エディトリアル", note: "余白を生かした上品な誌面調" },
+  { id: "cinema", title: "シネマ", note: "映像を隠さない映画字幕" },
+  { id: "studio", title: "スタジオ", note: "端正で信頼感のある番組調" },
+  { id: "glass", title: "グラス", note: "透明感のあるモダンな帯" },
+  { id: "mono", title: "モノクロ", note: "余計な色を省いたミニマル" },
+  { id: "signature", title: "シグネチャー", note: "温度感のあるブランド調" },
 ];
 
 const initialTranscript: TranscriptLine[] = [
@@ -450,7 +458,7 @@ export default function Home() {
   const transferAbortRef = useRef<AbortController | null>(null);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
-  const [tone, setTone] = useState<Tone>("natural");
+  const [tone, setTone] = useState<Tone>("editorial");
   const [length, setLength] = useState(60);
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
@@ -1439,10 +1447,9 @@ function SetupWorkspace({
                   className={tone === item.id ? "selected" : ""}
                   onClick={() => setTone(item.id)}
                 >
-                  <span className={`toneLines ${item.id}`}>
-                    <i />
-                    <i />
-                    <i />
+                  <span className={`tonePreview ${item.id}`}>
+                    <small>言葉が</small>
+                    <strong>きちんと届く</strong>
                   </span>
                   <strong>{item.title}</strong>
                   <small>{item.note}</small>
@@ -1846,9 +1853,70 @@ function ResultWorkspace({
         );
 
         if (caption) {
+          const captionPalette: Record<
+            Tone,
+            {
+              background: string;
+              border: string;
+              highlight: string;
+              text: string;
+              stroke: string;
+              fontWeight: number;
+            }
+          > = {
+            editorial: {
+              background: "rgba(255,252,248,.96)",
+              border: "#e45f4d",
+              highlight: "#d94f3b",
+              text: "#162033",
+              stroke: "",
+              fontWeight: 800,
+            },
+            cinema: {
+              background: "",
+              border: "",
+              highlight: "#f4d57a",
+              text: "#ffffff",
+              stroke: "#10151f",
+              fontWeight: 800,
+            },
+            studio: {
+              background: "rgba(19,27,40,.94)",
+              border: "#d5a850",
+              highlight: "#ffd26a",
+              text: "#ffffff",
+              stroke: "",
+              fontWeight: 800,
+            },
+            glass: {
+              background: "rgba(12,28,34,.78)",
+              border: "#8fe3cc",
+              highlight: "#9ff3dc",
+              text: "#f8fffd",
+              stroke: "",
+              fontWeight: 750,
+            },
+            mono: {
+              background: "rgba(248,246,240,.97)",
+              border: "#181818",
+              highlight: "#181818",
+              text: "#181818",
+              stroke: "",
+              fontWeight: 850,
+            },
+            signature: {
+              background: "rgba(255,243,229,.96)",
+              border: "#bf9660",
+              highlight: "#d95a48",
+              text: "#3e2d28",
+              stroke: "",
+              fontWeight: 750,
+            },
+          };
+          const palette = captionPalette[tone];
           const fontSize = Math.max(26, Math.min(64, canvas.width * 0.052));
-          const horizontalPadding = fontSize * 0.65;
-          const verticalPadding = fontSize * 0.42;
+          const horizontalPadding = fontSize * (tone === "cinema" ? 0.32 : 0.72);
+          const verticalPadding = fontSize * (tone === "cinema" ? 0.18 : 0.44);
           const maxTextWidth = canvas.width * 0.82;
           const charactersPerLine = Math.max(
             8,
@@ -1860,7 +1928,7 @@ function ResultWorkspace({
             lines.push(characters.slice(index, index + charactersPerLine).join(""));
           }
 
-          context.font = `900 ${fontSize}px sans-serif`;
+          context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
           context.textAlign = "center";
           context.textBaseline = "middle";
           const widestLine = Math.max(
@@ -1874,40 +1942,38 @@ function ResultWorkspace({
           const boxHeight = lines.length * lineHeight + verticalPadding * 2;
           const boxX = (canvas.width - boxWidth) / 2;
           const boxY = canvas.height - boxHeight - canvas.height * 0.08;
-          const captionPalette =
-            tone === "trust"
-              ? {
-                  background: "rgba(239,255,250,.95)",
-                  border: "#147d70",
-                  highlight: "#147d70",
-                  text: "#101828",
-                }
-              : tone === "punchy"
-                ? {
-                    background: "rgba(217,255,239,.96)",
-                    border: "#101828",
-                    highlight: "#ff5d45",
-                    text: "#101828",
-                  }
-                : tone === "outline"
-                  ? {
-                      background: "rgba(0,0,0,.18)",
-                      border: "",
-                      highlight: "#ffd84d",
-                      text: "#ffffff",
-                    }
-                  : {
-                      background: "rgba(255,255,255,.94)",
-                      border: "",
-                      highlight: "#ff5d45",
-                      text: "#101828",
-                    };
-          context.fillStyle = captionPalette.background;
-          context.fillRect(boxX, boxY, boxWidth, boxHeight);
-          if (captionPalette.border) {
-            context.lineWidth = Math.max(4, fontSize * 0.08);
-            context.strokeStyle = captionPalette.border;
-            context.strokeRect(boxX, boxY, boxWidth, boxHeight);
+          if (palette.background) {
+            context.save();
+            context.shadowColor = "rgba(8,15,25,.26)";
+            context.shadowBlur = fontSize * 0.4;
+            context.shadowOffsetY = fontSize * 0.16;
+            context.fillStyle = palette.background;
+            context.beginPath();
+            context.roundRect(
+              boxX,
+              boxY,
+              boxWidth,
+              boxHeight,
+              tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
+            );
+            context.fill();
+            context.restore();
+          }
+          if (palette.border) {
+            context.lineWidth =
+              tone === "editorial"
+                ? Math.max(3, fontSize * 0.055)
+                : Math.max(2, fontSize * 0.035);
+            context.strokeStyle = palette.border;
+            context.beginPath();
+            context.roundRect(
+              boxX,
+              boxY,
+              boxWidth,
+              boxHeight,
+              tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
+            );
+            context.stroke();
           }
           const highlight = caption.highlight?.trim() ?? "";
           context.textAlign = "left";
@@ -1922,23 +1988,23 @@ function ResultWorkspace({
                 ? [
                     {
                       text: line.slice(0, highlightIndex),
-                      color: captionPalette.text,
+                      color: palette.text,
                     },
-                    { text: highlight, color: captionPalette.highlight },
+                    { text: highlight, color: palette.highlight },
                     {
                       text: line.slice(highlightIndex + highlight.length),
-                      color: captionPalette.text,
+                      color: palette.text,
                     },
                   ]
-                : [{ text: line, color: captionPalette.text }];
+                : [{ text: line, color: palette.text }];
             let textX =
               canvas.width / 2 - context.measureText(line).width / 2;
 
             parts.forEach((part) => {
-              if (tone === "outline") {
+              if (palette.stroke) {
                 context.lineWidth = Math.max(5, fontSize * 0.12);
                 context.lineJoin = "round";
-                context.strokeStyle = "#101828";
+                context.strokeStyle = palette.stroke;
                 context.strokeText(part.text, textX, lineY);
               }
               context.fillStyle = part.color;

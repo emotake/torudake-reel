@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import {
   buildCaptionSegments,
-  buildCaptionSegmentsFromWords,
   type RawCaptionSegment,
 } from "../../../lib/captions";
 import {
@@ -16,20 +15,16 @@ import {
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 
-type WhisperResponse = {
+type TranscriptionResponse = {
   duration?: number;
   language?: string;
   segments?: Array<{
     start?: number;
     end?: number;
+    speaker?: string;
     text?: string;
   }>;
   text?: string;
-  words?: Array<{
-    start?: number;
-    end?: number;
-    word?: string;
-  }>;
 };
 
 type OpenAIErrorResponse = {
@@ -173,15 +168,11 @@ export async function POST(request: Request) {
 
     const formData = new FormData();
     formData.set("file", file, safeFileName(file.name));
-    formData.set("model", "whisper-1");
+    formData.set("model", "gpt-4o-transcribe-diarize");
     formData.set("language", "ja");
-    formData.set("response_format", "verbose_json");
-    formData.append("timestamp_granularities[]", "segment");
-    formData.append("timestamp_granularities[]", "word");
-    formData.set(
-      "prompt",
-      "撮るだけリール。話し言葉を省略せず正確に文字起こしし、自然な日本語の句読点を補って意味の区切りを明確にしてください。固有名詞と数字は特に正確にしてください。",
-    );
+    formData.set("response_format", "diarized_json");
+    formData.set("chunking_strategy", "auto");
+    formData.set("temperature", "0");
 
     const response = await fetch(
       "https://api.openai.com/v1/audio/transcriptions",
@@ -211,7 +202,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const transcription = (await response.json()) as WhisperResponse;
+    const transcription = (await response.json()) as TranscriptionResponse;
     const rawSegments: RawCaptionSegment[] = (transcription.segments ?? [])
       .map((segment) => ({
         start: Number(segment.start),
@@ -225,23 +216,7 @@ export async function POST(request: Request) {
           segment.end > segment.start &&
           Boolean(segment.text),
       );
-    const rawWords = (transcription.words ?? [])
-      .map((word) => ({
-        start: Number(word.start),
-        end: Number(word.end),
-        word: word.word?.trim() ?? "",
-      }))
-      .filter(
-        (word) =>
-          Number.isFinite(word.start) &&
-          Number.isFinite(word.end) &&
-          word.end > word.start &&
-          Boolean(word.word),
-      );
-    const segments =
-      rawWords.length > 0
-        ? buildCaptionSegmentsFromWords(rawWords)
-        : buildCaptionSegments(rawSegments);
+    const segments = buildCaptionSegments(rawSegments, 14);
 
     if (segments.length === 0) {
       return jsonError(
