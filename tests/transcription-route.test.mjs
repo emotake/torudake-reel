@@ -79,3 +79,71 @@ test("turns a video transcription into timestamped captions", async () => {
     delete globalThis.__cloudflareEnv;
   }
 });
+
+test("explains when the OpenAI API credit is exhausted", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      return Response.json(
+        {
+          error: {
+            code: "insufficient_quota",
+            type: "insufficient_quota",
+            message: "You exceeded your current quota.",
+          },
+        },
+        {
+          status: 429,
+          headers: { "x-request-id": "test-request-id" },
+        },
+      );
+    }
+
+    return nativeFetch(input);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("quota-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.mp4", {
+        type: "video/mp4",
+      }),
+    );
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 429);
+    const payload = await response.json();
+    assert.match(payload.error, /API利用枠が不足/);
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});

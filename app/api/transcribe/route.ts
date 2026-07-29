@@ -22,7 +22,18 @@ type WhisperResponse = {
   text?: string;
 };
 
-function transcriptionError(status: number) {
+type OpenAIErrorResponse = {
+  error?: {
+    code?: string;
+    message?: string;
+    type?: string;
+  };
+};
+
+function transcriptionError(
+  status: number,
+  openAIError?: OpenAIErrorResponse["error"],
+) {
   if (status === 401 || status === 403) {
     return "音声認識の認証設定を確認してください。";
   }
@@ -30,6 +41,21 @@ function transcriptionError(status: number) {
     return "動画が音声認識サービスの上限を超えています。";
   }
   if (status === 429) {
+    const errorDetail = [
+      openAIError?.code,
+      openAIError?.type,
+      openAIError?.message,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (
+      errorDetail.includes("insufficient_quota") ||
+      errorDetail.includes("current quota") ||
+      errorDetail.includes("billing")
+    ) {
+      return "音声認識のAPI利用枠が不足しています。OpenAI APIのクレジットを追加してから、もう一度お試しください。";
+    }
     return "音声認識が混み合っています。少し待ってからもう一度お試しください。";
   }
   return "音声認識に失敗しました。時間をおいてもう一度お試しください。";
@@ -158,12 +184,20 @@ export async function POST(request: Request) {
     );
 
     if (!response.ok) {
+      const errorResponse = (await response
+        .json()
+        .catch(() => null)) as OpenAIErrorResponse | null;
       console.error(
         "OpenAI transcription failed",
         response.status,
         response.headers.get("x-request-id"),
+        errorResponse?.error?.code,
+        errorResponse?.error?.type,
       );
-      return jsonError(transcriptionError(response.status), response.status);
+      return jsonError(
+        transcriptionError(response.status, errorResponse?.error),
+        response.status,
+      );
     }
 
     const transcription = (await response.json()) as WhisperResponse;
