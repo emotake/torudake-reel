@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  captionsToSrt,
+  captionsToVtt,
+  formatCaptionClock,
+  type CaptionSegment,
+} from "../lib/captions";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = "follow" | "sales" | "reach";
@@ -19,12 +25,7 @@ type TransferReceipt = {
   expiresAt: number;
 };
 
-type TranscriptLine = {
-  id: number;
-  text: string;
-  removed: boolean;
-  accent?: boolean;
-};
+type TranscriptLine = CaptionSegment;
 
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
   { id: "follow", icon: "＋", title: "フォローを増やす", note: "結論を先に見せる" },
@@ -39,12 +40,26 @@ const tones: { id: Tone; title: string; note: string }[] = [
 ];
 
 const initialTranscript: TranscriptLine[] = [
-  { id: 1, text: "えー、今日はですね、", removed: true },
-  { id: 2, text: "続けられる人が最初にやっている", removed: false },
-  { id: 3, text: "たったひとつの習慣を紹介します。", removed: false, accent: true },
-  { id: 4, text: "私も前までは、あの、", removed: true },
-  { id: 5, text: "何を始めても三日坊主でした。", removed: false },
-  { id: 6, text: "でも、小さく始めるだけで変わりました。", removed: false, accent: true },
+  { id: 1, start: 0, end: 2.2, text: "えー、今日はですね、", removed: true },
+  { id: 2, start: 2.2, end: 5.8, text: "続けられる人が最初にやっている", removed: false },
+  {
+    id: 3,
+    start: 5.8,
+    end: 9.5,
+    text: "たったひとつの習慣を紹介します。",
+    removed: false,
+    accent: true,
+  },
+  { id: 4, start: 9.5, end: 12, text: "私も前までは、あの、", removed: true },
+  { id: 5, start: 12, end: 15.6, text: "何を始めても三日坊主でした。", removed: false },
+  {
+    id: 6,
+    start: 15.6,
+    end: 19.8,
+    text: "でも、小さく始めるだけで変わりました。",
+    removed: false,
+    accent: true,
+  },
 ];
 
 export default function Home() {
@@ -56,11 +71,15 @@ export default function Home() {
   const [tone, setTone] = useState<Tone>("natural");
   const [length, setLength] = useState(60);
   const [file, setFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState("");
+  const videoUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : ""),
+    [file],
+  );
   const [progress, setProgress] = useState(0);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("after");
   const [transcript, setTranscript] =
     useState<TranscriptLine[]>(initialTranscript);
+  const [editError, setEditError] = useState("");
   const [toast, setToast] = useState("");
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferStatus, setTransferStatus] =
@@ -71,30 +90,10 @@ export default function Home() {
   const [transferError, setTransferError] = useState("");
 
   useEffect(() => {
-    if (!file) {
-      setVideoUrl("");
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setVideoUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  useEffect(() => {
-    if (stage !== "processing") return;
-    setProgress(4);
-    const timer = window.setInterval(() => {
-      setProgress((current) => {
-        const next = Math.min(current + (current < 55 ? 9 : 6), 100);
-        if (next >= 100) {
-          window.clearInterval(timer);
-          window.setTimeout(() => setStage("result"), 320);
-        }
-        return next;
-      });
-    }, 210);
-    return () => window.clearInterval(timer);
-  }, [stage]);
+    return () => {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+    };
+  }, [videoUrl]);
 
   const keptLines = useMemo(
     () => transcript.filter((line) => !line.removed),
@@ -108,25 +107,86 @@ export default function Home() {
 
   function chooseFile(selected?: File) {
     if (!selected) return;
-    if (!selected.type.startsWith("video/")) {
+    const looksLikeVideo =
+      selected.type.startsWith("video/") ||
+      /\.(mp4|mov|m4v|webm)$/i.test(selected.name);
+    if (!looksLikeVideo) {
       notify("動画ファイルを選んでください");
       return;
     }
     setFile(selected);
+    setEditError("");
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function useSample() {
     setFile(null);
+    setEditError("");
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function startEditing() {
-    setProgress(0);
-    setTranscript(initialTranscript);
+  async function startEditing() {
+    if (file && file.size > 25 * 1024 * 1024) {
+      setEditError(
+        "字幕の自動生成は25MBまでです。動画を短くするか圧縮してお試しください。",
+      );
+      return;
+    }
+
+    setEditError("");
+    setProgress(4);
     setStage("processing");
+
+    const progressTimer = window.setInterval(() => {
+      setProgress((current) =>
+        Math.min(current + (current < 42 ? 7 : current < 72 ? 4 : 2), 88),
+      );
+    }, 500);
+
+    try {
+      let nextTranscript = initialTranscript;
+
+      if (file) {
+        const formData = new FormData();
+        formData.set("file", file, file.name);
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          body: formData,
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          segments?: TranscriptLine[];
+        };
+
+        if (!response.ok || !payload.segments?.length) {
+          throw new Error(
+            payload.error ?? "字幕を生成できませんでした。もう一度お試しください。",
+          );
+        }
+        nextTranscript = payload.segments;
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      }
+
+      window.clearInterval(progressTimer);
+      setTranscript(nextTranscript);
+      setProgress(100);
+      window.setTimeout(() => {
+        setPreviewMode("after");
+        setStage("result");
+      }, 320);
+    } catch (error) {
+      window.clearInterval(progressTimer);
+      setProgress(0);
+      setEditError(
+        error instanceof Error
+          ? error.message
+          : "字幕を生成できませんでした。もう一度お試しください。",
+      );
+      setStage("setup");
+    }
   }
 
   function reset() {
@@ -137,6 +197,7 @@ export default function Home() {
     setProgress(0);
     setPreviewMode("after");
     setTranscript(initialTranscript);
+    setEditError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -436,6 +497,7 @@ export default function Home() {
           setLength={setLength}
           chooseAnother={() => inputRef.current?.click()}
           startEditing={startEditing}
+          error={editError}
         />
       )}
 
@@ -991,6 +1053,7 @@ function SetupWorkspace({
   setLength,
   chooseAnother,
   startEditing,
+  error,
 }: {
   file: File | null;
   videoUrl: string;
@@ -1001,7 +1064,8 @@ function SetupWorkspace({
   length: number;
   setLength: (length: number) => void;
   chooseAnother: () => void;
-  startEditing: () => void;
+  startEditing: () => Promise<void>;
+  error: string;
 }) {
   return (
     <section className="workspace">
@@ -1039,7 +1103,7 @@ function SetupWorkspace({
           </div>
           <div className="localNote">
             <span>●</span>
-            体験版では動画は端末内だけで表示され、外部へ送信されません。
+            字幕生成時だけ音声認識処理へ送信します。受け渡し領域には保存しません。
           </div>
         </aside>
 
@@ -1124,6 +1188,12 @@ function SetupWorkspace({
               <i>✦</i>
             </button>
           </div>
+          {error && (
+            <p className="editError" role="alert">
+              <span>!</span>
+              {error}
+            </p>
+          )}
         </div>
       </div>
     </section>
@@ -1138,11 +1208,11 @@ function Processing({
   progress: number;
 }) {
   const steps = [
-    { threshold: 18, label: "音声を読み取り中", note: "日本語の単語と時刻を確認" },
-    { threshold: 42, label: "不要な間を判定中", note: "自然な間は残します" },
-    { threshold: 68, label: "カットを組み立て中", note: "言い直しと重複を整理" },
-    { threshold: 88, label: "テロップを作成中", note: "読みやすい位置で改行" },
-    { threshold: 100, label: "仕上げ中", note: "表紙と投稿文を準備" },
+    { threshold: 18, label: "音声を読み取り中", note: "動画から日本語の音声を確認" },
+    { threshold: 42, label: "文字起こし中", note: "話した言葉を正確に字幕化" },
+    { threshold: 68, label: "時刻を合わせています", note: "発話の開始と終了を同期" },
+    { threshold: 88, label: "字幕を整形中", note: "読みやすい長さで分割" },
+    { threshold: 100, label: "仕上げ中", note: "字幕プレビューを準備" },
   ];
   const activeIndex = steps.findIndex((step) => progress <= step.threshold);
 
@@ -1167,7 +1237,7 @@ function Processing({
           <p className="eyebrow">AI EDITING</p>
           <h1>投稿できる状態に整えています。</h1>
           <p>
-            {file?.name ?? "サンプル動画"}を解析中です。この体験版では処理工程を再現しています。
+            {file?.name ?? "サンプル動画"}の音声から、時刻付き字幕を作成しています。
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -1228,6 +1298,21 @@ function ResultWorkspace({
   reset: () => void;
   openTransfer: () => void;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(
+    transcript.at(-1)?.end ?? length,
+  );
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const activeCaption =
+    keptLines.find(
+      (line) => currentTime >= line.start && currentTime < line.end,
+    ) ?? (!videoUrl ? keptLines[0] : undefined);
+  const exportName =
+    file?.name.replace(/\.[^.]+$/, "") ?? "sample_talking_video";
+  const removedCount = transcript.filter((line) => line.removed).length;
+
   function toggleLine(id: number) {
     setTranscript(
       transcript.map((line) =>
@@ -1242,21 +1327,236 @@ function ResultWorkspace({
     );
   }
 
+  function seekTo(seconds: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(seconds, video.duration || seconds));
+    setCurrentTime(video.currentTime);
+  }
+
+  async function togglePlayback() {
+    const video = videoRef.current;
+    if (!video) {
+      notify("実際の動画を選ぶと再生できます");
+      return;
+    }
+    if (video.paused) {
+      await video.play();
+    } else {
+      video.pause();
+    }
+  }
+
+  function downloadText(filename: string, content: string, mime: string) {
+    const blob = new Blob(["\uFEFF", content], {
+      type: `${mime};charset=utf-8`,
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function copyTranscript() {
+    const text = keptLines.map((line) => line.text.trim()).filter(Boolean).join("\n");
+    await navigator.clipboard.writeText(text);
+    notify("字幕テキストをコピーしました");
+  }
+
+  async function exportCaptionedVideo() {
+    const video = videoRef.current;
+    if (!video || !file || isExporting) return;
+
+    const capturableVideo = video as HTMLVideoElement & {
+      captureStream?: () => MediaStream;
+      mozCaptureStream?: () => MediaStream;
+    };
+    const captureVideoStream =
+      capturableVideo.captureStream ?? capturableVideo.mozCaptureStream;
+
+    if (
+      typeof MediaRecorder === "undefined" ||
+      typeof HTMLCanvasElement.prototype.captureStream !== "function" ||
+      !captureVideoStream
+    ) {
+      notify("このブラウザは動画書き出しに対応していません");
+      return;
+    }
+
+    setIsExporting(true);
+    const previous = {
+      currentTime: video.currentTime,
+      muted: video.muted,
+      volume: video.volume,
+      loop: video.loop,
+      wasPlaying: !video.paused,
+    };
+    let animationFrame = 0;
+
+    try {
+      video.pause();
+      video.loop = false;
+      video.muted = false;
+      video.currentTime = 0;
+      await new Promise<void>((resolve) => {
+        if (video.readyState >= 2 && video.currentTime === 0) {
+          resolve();
+          return;
+        }
+        video.addEventListener("seeked", () => resolve(), { once: true });
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 1080;
+      canvas.height = video.videoHeight || 1920;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("動画の描画を開始できませんでした。");
+
+      const drawFrame = () => {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const caption = transcript.find(
+          (line) =>
+            !line.removed &&
+            line.text.trim() &&
+            video.currentTime >= line.start &&
+            video.currentTime < line.end,
+        );
+
+        if (caption) {
+          const fontSize = Math.max(26, Math.min(64, canvas.width * 0.052));
+          const horizontalPadding = fontSize * 0.65;
+          const verticalPadding = fontSize * 0.42;
+          const maxTextWidth = canvas.width * 0.82;
+          const charactersPerLine = Math.max(
+            8,
+            Math.floor(maxTextWidth / fontSize),
+          );
+          const characters = Array.from(caption.text.trim());
+          const lines: string[] = [];
+          for (let index = 0; index < characters.length; index += charactersPerLine) {
+            lines.push(characters.slice(index, index + charactersPerLine).join(""));
+          }
+
+          context.font = `900 ${fontSize}px sans-serif`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          const widestLine = Math.max(
+            ...lines.map((line) => context.measureText(line).width),
+          );
+          const lineHeight = fontSize * 1.25;
+          const boxWidth = Math.min(
+            canvas.width - horizontalPadding * 2,
+            widestLine + horizontalPadding * 2,
+          );
+          const boxHeight = lines.length * lineHeight + verticalPadding * 2;
+          const boxX = (canvas.width - boxWidth) / 2;
+          const boxY = canvas.height - boxHeight - canvas.height * 0.08;
+          context.fillStyle = "rgba(255,255,255,.94)";
+          context.fillRect(boxX, boxY, boxWidth, boxHeight);
+          context.fillStyle = "#101828";
+          lines.forEach((line, index) => {
+            context.fillText(
+              line,
+              canvas.width / 2,
+              boxY + verticalPadding + lineHeight * (index + 0.5),
+              maxTextWidth,
+            );
+          });
+        }
+
+        if (!video.ended) {
+          animationFrame = window.requestAnimationFrame(drawFrame);
+        }
+      };
+
+      const outputStream = canvas.captureStream(30);
+      const sourceStream = captureVideoStream.call(capturableVideo);
+      sourceStream
+        .getAudioTracks()
+        .forEach((track) => outputStream.addTrack(track));
+
+      const preferredMimeTypes = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+      ];
+      const mimeType =
+        preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) ??
+        "";
+      const recorder = new MediaRecorder(
+        outputStream,
+        mimeType ? { mimeType, videoBitsPerSecond: 6_000_000 } : undefined,
+      );
+      const chunks: BlobPart[] = [];
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size) chunks.push(event.data);
+      });
+      const stopped = new Promise<void>((resolve, reject) => {
+        recorder.addEventListener("stop", () => resolve(), { once: true });
+        recorder.addEventListener(
+          "error",
+          () => reject(new Error("動画の書き出しに失敗しました。")),
+          { once: true },
+        );
+      });
+      const ended = new Promise<void>((resolve) => {
+        video.addEventListener("ended", () => resolve(), { once: true });
+      });
+
+      recorder.start(1000);
+      drawFrame();
+      await video.play();
+      await ended;
+      recorder.stop();
+      await stopped;
+
+      const output = new Blob(chunks, {
+        type: recorder.mimeType || "video/webm",
+      });
+      if (!output.size) throw new Error("書き出した動画が空でした。");
+
+      const url = URL.createObjectURL(output);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportName}_captioned.webm`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify("字幕付き動画を書き出しました");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "動画の書き出しに失敗しました",
+      );
+    } finally {
+      window.cancelAnimationFrame(animationFrame);
+      video.pause();
+      video.loop = previous.loop;
+      video.muted = previous.muted;
+      video.volume = previous.volume;
+      video.currentTime = previous.currentTime;
+      if (previous.wasPlaying) void video.play();
+      setIsExporting(false);
+    }
+  }
+
   return (
     <section className="resultPage">
       <div className="resultHeading">
         <div>
           <p className="completePill">
             <span>✓</span>
-            自動編集が完了しました
+            字幕生成が完了しました
           </p>
-          <h1>あとは、読んで確認するだけ。</h1>
-          <p>削除した部分はいつでも戻せます。動画編集の知識は不要です。</p>
+          <h1>再生しながら、字幕を確認できます。</h1>
+          <p>字幕の文章はその場で直せます。不要な字幕は左のボタンで外せます。</p>
         </div>
         <div className="timeSaved">
-          <span>今回の短縮時間</span>
-          <strong>約35分</strong>
-          <small>従来38分 → 確認3分</small>
+          <span>生成した字幕</span>
+          <strong>{keptLines.length}枚</strong>
+          <small>動画に合わせて時刻を自動設定</small>
         </div>
       </div>
 
@@ -1268,13 +1568,13 @@ function ResultWorkspace({
                 className={previewMode === "before" ? "active" : ""}
                 onClick={() => setPreviewMode("before")}
               >
-                編集前
+                字幕なし
               </button>
               <button
                 className={previewMode === "after" ? "active" : ""}
                 onClick={() => setPreviewMode("after")}
               >
-                編集後
+                字幕あり
               </button>
             </div>
             <span>仕上がりプレビュー</span>
@@ -1282,40 +1582,60 @@ function ResultWorkspace({
 
           <div className={`resultVideo ${previewMode}`}>
             {videoUrl ? (
-              <video src={videoUrl} controls muted playsInline loop />
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={(event) => {
+                  setDuration(event.currentTarget.duration || transcript.at(-1)?.end || length);
+                }}
+                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+              />
             ) : (
               <div className="resultSample">
                 <CreatorFigure variant={previewMode} />
               </div>
             )}
-            {previewMode === "after" && (
-              <>
-                <div className="resultHook">
-                  続けられる人が
-                  <strong>最初にやること</strong>
-                </div>
-                <div className={`resultCaption ${tone}`}>
-                  {keptLines.at(-1)?.text ?? "小さく始めるだけで変わりました。"}
-                </div>
-                <span className="zoomMark">1.06×</span>
-              </>
+            {previewMode === "after" && activeCaption && (
+              <div className={`resultCaption ${tone}`}>
+                {activeCaption.text}
+              </div>
             )}
             <span className="videoState">
-              {previewMode === "after" ? "AFTER" : "RAW"}
+              {previewMode === "after" ? "字幕ON" : "字幕OFF"}
             </span>
           </div>
 
           <div className="timelinePreview">
-            <span className="playButton">▶</span>
+            <button
+              className="playButton"
+              onClick={() => void togglePlayback()}
+              aria-label={isPlaying ? "一時停止" : "再生"}
+            >
+              {isPlaying ? "Ⅱ" : "▶"}
+            </button>
             <div>
-              <i className="kept" />
-              <i className="removed" />
-              <i className="kept long" />
-              <i className="removed short" />
-              <i className="kept" />
-              <b style={{ left: previewMode === "after" ? "42%" : "18%" }} />
+              {transcript.map((line) => (
+                <i
+                  key={line.id}
+                  className={line.removed ? "removed" : "kept"}
+                  style={{ flex: Math.max(line.end - line.start, 0.2) }}
+                />
+              ))}
+              <b
+                style={{
+                  left: `${Math.min(100, (currentTime / Math.max(duration, 0.1)) * 100)}%`,
+                }}
+              />
             </div>
-            <span>0:22 / 0:{length}</span>
+            <span>
+              {formatCaptionClock(currentTime)} / {formatCaptionClock(duration)}
+            </span>
           </div>
         </div>
 
@@ -1328,7 +1648,7 @@ function ResultWorkspace({
             <span>自動保存</span>
           </div>
           <p className="editHelp">
-            薄い文章は削除候補です。左のボタンで戻す・消すを切り替えられます。
+            時刻を押すと該当位置へ移動します。左のボタンで字幕の表示・非表示を切り替えられます。
           </p>
           <div className="transcriptList">
             {transcript.map((line) => (
@@ -1342,27 +1662,36 @@ function ResultWorkspace({
                 >
                   {line.removed ? "↶" : "✓"}
                 </button>
-                <input
-                  value={line.text}
-                  onChange={(event) => updateLine(line.id, event.target.value)}
-                  disabled={line.removed}
-                />
+                <div className="captionEditor">
+                  <button
+                    className="captionTime"
+                    onClick={() => seekTo(line.start)}
+                    type="button"
+                  >
+                    {formatCaptionClock(line.start)}–{formatCaptionClock(line.end)}
+                  </button>
+                  <input
+                    value={line.text}
+                    onChange={(event) => updateLine(line.id, event.target.value)}
+                    disabled={line.removed}
+                  />
+                </div>
                 {line.accent && !line.removed && <span>強調</span>}
               </div>
             ))}
           </div>
           <div className="cutSummary">
             <div>
-              <span>無音カット</span>
-              <strong>8箇所</strong>
+              <span>非表示</span>
+              <strong>{removedCount}枚</strong>
             </div>
             <div>
-              <span>言い淀み</span>
-              <strong>6箇所</strong>
+              <span>表示中</span>
+              <strong>{keptLines.length}枚</strong>
             </div>
             <div>
-              <span>テロップ</span>
-              <strong>14枚</strong>
+              <span>動画時間</span>
+              <strong>{formatCaptionClock(duration)}</strong>
             </div>
           </div>
         </aside>
@@ -1371,71 +1700,100 @@ function ResultWorkspace({
       <div className="deliverables">
         <div>
           <p className="eyebrow">READY TO POST</p>
-          <h2>投稿に必要なものを、まとめて用意しました。</h2>
+          <h2>字幕データを、すぐ使える形式で保存できます。</h2>
         </div>
         <div className="deliverableCards">
-          <button onClick={() => notify("表紙プレビューを選択しました")}>
-            <span className="deliverableIcon cover">表</span>
+          <button onClick={() => void copyTranscript()}>
+            <span className="deliverableIcon cover">文</span>
             <p>
-              <strong>表紙画像</strong>
-              <small>1080 × 1920</small>
-            </p>
-            <i>→</i>
-          </button>
-          <button onClick={() => notify("投稿文をコピーしました")}>
-            <span className="deliverableIcon copy">文</span>
-            <p>
-              <strong>投稿文</strong>
-              <small>Instagram・Threads</small>
-            </p>
-            <i>→</i>
-          </button>
-          <button onClick={() => notify("テロップ原稿をコピーしました")}>
-            <span className="deliverableIcon text">字</span>
-            <p>
-              <strong>テロップ原稿</strong>
+              <strong>字幕をコピー</strong>
               <small>修正済みテキスト</small>
+            </p>
+            <i>→</i>
+          </button>
+          <button
+            onClick={() =>
+              downloadText(
+                `${exportName}.srt`,
+                captionsToSrt(transcript),
+                "application/x-subrip",
+              )
+            }
+          >
+            <span className="deliverableIcon copy">S</span>
+            <p>
+              <strong>SRTを保存</strong>
+              <small>動画編集ソフト向け</small>
+            </p>
+            <i>→</i>
+          </button>
+          <button
+            onClick={() =>
+              downloadText(
+                `${exportName}.vtt`,
+                captionsToVtt(transcript),
+                "text/vtt",
+              )
+            }
+          >
+            <span className="deliverableIcon text">V</span>
+            <p>
+              <strong>VTTを保存</strong>
+              <small>Web動画向け</small>
             </p>
             <i>→</i>
           </button>
         </div>
       </div>
 
-      <div className="handoffPrompt">
-        <div className="handoffPromptIcon">↑</div>
-        <div>
-          <p className="eyebrow">SEND YOUR TEST VIDEO</p>
-          <h2>この動画は、まだ送信されていません。</h2>
-          <p>
-            現在の画面は操作デモです。実際の動画を開発用に送ると、完了後に
-            <strong>「tr_」から始まる受け渡しコード</strong>が発行されます。
-          </p>
+      {!file && (
+        <div className="handoffPrompt">
+          <div className="handoffPromptIcon">↑</div>
+          <div>
+            <p className="eyebrow">TRY YOUR VIDEO</p>
+            <h2>サンプルではなく、実際の動画でも試せます。</h2>
+            <p>
+              動画を選ぶと、音声を解析して時刻付きの日本語字幕を自動生成します。
+            </p>
+          </div>
+          <button onClick={openTransfer}>
+            <span>動画を選ぶ</span>
+            <i>→</i>
+          </button>
         </div>
-        <button onClick={openTransfer}>
-          <span>受け渡し画面へ進む</span>
-          <i>→</i>
-        </button>
-      </div>
+      )}
 
       <div className="exportBar">
         <div>
           <span className="exportIcon">▶</span>
           <p>
-            <strong>{file?.name?.replace(/\.[^.]+$/, "") ?? "sample_talking_video"}_edited.mp4</strong>
-            <small>操作デモ・動画はまだ送信されていません</small>
+            <strong>{exportName}_captioned.webm</strong>
+            <small>
+              {file
+                ? "編集した字幕を動画へ焼き付けて保存します"
+                : "実際の動画を選ぶと書き出せます"}
+            </small>
           </p>
         </div>
         <div className="exportActions">
           <button className="quietButton" onClick={reset}>
             別の動画を作る
           </button>
-          <button
-            className="mainCta reviewCta"
-            onClick={openTransfer}
-          >
-            <span>動画を送ってコードを発行</span>
-            <i>→</i>
-          </button>
+          {file ? (
+            <button
+              className="mainCta reviewCta"
+              onClick={() => void exportCaptionedVideo()}
+              disabled={isExporting}
+            >
+              <span>{isExporting ? "書き出し中…" : "字幕付き動画を書き出す"}</span>
+              <i>{isExporting ? "●" : "↓"}</i>
+            </button>
+          ) : (
+            <button className="mainCta reviewCta" onClick={openTransfer}>
+              <span>実際の動画で試す</span>
+              <i>→</i>
+            </button>
+          )}
         </div>
       </div>
     </section>

@@ -2236,6 +2236,32 @@ footer > small {
   font-size: 11px;
 }
 
+.editError {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 13px 0 0;
+  padding: 11px 13px;
+  border: 1px solid #f3a899;
+  border-radius: 9px;
+  background: #fff4f1;
+  color: #9f2f1d;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.editError span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--coral);
+  color: white;
+}
+
 /* Processing */
 
 .processingPage {
@@ -2576,10 +2602,6 @@ footer > small {
   object-fit: contain;
 }
 
-.resultVideo.after video {
-  transform: scale(1.035);
-}
-
 .resultSample,
 .resultSample .creatorFigure {
   position: absolute;
@@ -2681,10 +2703,12 @@ footer > small {
   width: 33px;
   height: 33px;
   place-items: center;
+  border: 0;
   border-radius: 50%;
   background: var(--ink);
   color: white;
   font-size: 8px;
+  cursor: pointer;
 }
 
 .timelinePreview > div {
@@ -2754,6 +2778,9 @@ footer > small {
 .transcriptList {
   display: grid;
   gap: 6px;
+  max-height: 445px;
+  overflow-y: auto;
+  padding-right: 3px;
 }
 
 .transcriptLine {
@@ -2806,6 +2833,28 @@ footer > small {
   color: var(--ink);
   font-size: 9px;
   font-weight: 700;
+}
+
+.captionEditor {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.captionTime {
+  width: max-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: "DM Sans", sans-serif;
+  font-size: 6px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.captionTime:hover {
+  color: var(--coral);
 }
 
 .transcriptLine.removed input {
@@ -3055,6 +3104,11 @@ footer > small {
 
 .exportActions .mainCta {
   min-height: 45px;
+}
+
+.exportActions .mainCta:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .toast {
