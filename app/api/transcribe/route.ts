@@ -1,5 +1,9 @@
 import { env } from "cloudflare:workers";
-import { buildCaptionSegments, type RawCaptionSegment } from "../../../lib/captions";
+import {
+  buildCaptionSegments,
+  buildCaptionSegmentsFromWords,
+  type RawCaptionSegment,
+} from "../../../lib/captions";
 import {
   findTransfer,
   getMediaBucket,
@@ -21,6 +25,11 @@ type WhisperResponse = {
     text?: string;
   }>;
   text?: string;
+  words?: Array<{
+    start?: number;
+    end?: number;
+    word?: string;
+  }>;
 };
 
 type OpenAIErrorResponse = {
@@ -168,6 +177,7 @@ export async function POST(request: Request) {
     formData.set("language", "ja");
     formData.set("response_format", "verbose_json");
     formData.append("timestamp_granularities[]", "segment");
+    formData.append("timestamp_granularities[]", "word");
     formData.set(
       "prompt",
       "撮るだけリール。話し言葉を省略せず正確に文字起こしし、自然な日本語の句読点を補って意味の区切りを明確にしてください。固有名詞と数字は特に正確にしてください。",
@@ -215,7 +225,23 @@ export async function POST(request: Request) {
           segment.end > segment.start &&
           Boolean(segment.text),
       );
-    const segments = buildCaptionSegments(rawSegments);
+    const rawWords = (transcription.words ?? [])
+      .map((word) => ({
+        start: Number(word.start),
+        end: Number(word.end),
+        word: word.word?.trim() ?? "",
+      }))
+      .filter(
+        (word) =>
+          Number.isFinite(word.start) &&
+          Number.isFinite(word.end) &&
+          word.end > word.start &&
+          Boolean(word.word),
+      );
+    const segments =
+      rawWords.length > 0
+        ? buildCaptionSegmentsFromWords(rawWords)
+        : buildCaptionSegments(rawSegments);
 
     if (segments.length === 0) {
       return jsonError(

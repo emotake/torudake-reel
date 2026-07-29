@@ -19,7 +19,10 @@ test("turns an audio transcription into timestamped captions", async () => {
       assert.ok(init?.body instanceof FormData);
       assert.equal(init.body.get("model"), "whisper-1");
       assert.equal(init.body.get("response_format"), "verbose_json");
-      assert.equal(init.body.get("timestamp_granularities[]"), "segment");
+      assert.deepEqual(
+        init.body.getAll("timestamp_granularities[]"),
+        ["segment", "word"],
+      );
 
       return Response.json({
         duration: 4.5,
@@ -28,6 +31,12 @@ test("turns an audio transcription into timestamped captions", async () => {
         segments: [
           { start: 0, end: 2, text: "これは字幕です。" },
           { start: 2, end: 4.5, text: "次の字幕です。" },
+        ],
+        words: [
+          { start: 0, end: 0.6, word: "これは" },
+          { start: 0.6, end: 2, word: "字幕です。" },
+          { start: 2, end: 3, word: "次の" },
+          { start: 3, end: 4.5, word: "字幕です。" },
         ],
       });
     }

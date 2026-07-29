@@ -5,6 +5,7 @@ import {
   captionsToSrt,
   captionsToVtt,
   formatCaptionClock,
+  selectCaptionHighlight,
   type CaptionSegment,
 } from "../lib/captions";
 import {
@@ -47,6 +48,22 @@ class ApiRequestError extends Error {
 
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
+
+function RichCaptionText({ caption }: { caption: TranscriptLine }) {
+  const text = caption.text.trim();
+  const highlight = caption.highlight?.trim() ?? "";
+  const highlightIndex = highlight ? text.indexOf(highlight) : -1;
+
+  if (highlightIndex < 0) return <>{text}</>;
+
+  return (
+    <>
+      {text.slice(0, highlightIndex)}
+      <strong>{highlight}</strong>
+      {text.slice(highlightIndex + highlight.length)}
+    </>
+  );
+}
 
 function needsBrowserAudioExtraction(selectedFile: File) {
   return (
@@ -1588,8 +1605,13 @@ function ResultWorkspace({
   }
 
   function updateLine(id: number, text: string) {
+    const highlight = selectCaptionHighlight(text);
     setTranscript(
-      transcript.map((line) => (line.id === id ? { ...line, text } : line)),
+      transcript.map((line) =>
+        line.id === id
+          ? { ...line, text, highlight, accent: Boolean(highlight) }
+          : line,
+      ),
     );
   }
 
@@ -1721,14 +1743,33 @@ function ResultWorkspace({
           const boxY = canvas.height - boxHeight - canvas.height * 0.08;
           context.fillStyle = "rgba(255,255,255,.94)";
           context.fillRect(boxX, boxY, boxWidth, boxHeight);
-          context.fillStyle = "#101828";
+          const highlight = caption.highlight?.trim() ?? "";
+          context.textAlign = "left";
           lines.forEach((line, index) => {
-            context.fillText(
-              line,
-              canvas.width / 2,
-              boxY + verticalPadding + lineHeight * (index + 0.5),
-              maxTextWidth,
-            );
+            const lineY =
+              boxY + verticalPadding + lineHeight * (index + 0.5);
+            const highlightIndex = highlight
+              ? line.indexOf(highlight)
+              : -1;
+            const parts =
+              highlightIndex >= 0
+                ? [
+                    { text: line.slice(0, highlightIndex), color: "#101828" },
+                    { text: highlight, color: "#ff5d45" },
+                    {
+                      text: line.slice(highlightIndex + highlight.length),
+                      color: "#101828",
+                    },
+                  ]
+                : [{ text: line, color: "#101828" }];
+            let textX =
+              canvas.width / 2 - context.measureText(line).width / 2;
+
+            parts.forEach((part) => {
+              context.fillStyle = part.color;
+              context.fillText(part.text, textX, lineY);
+              textX += context.measureText(part.text).width;
+            });
           });
         }
 
@@ -1868,8 +1909,11 @@ function ResultWorkspace({
               </div>
             )}
             {previewMode === "after" && activeCaption && (
-              <div className={`resultCaption ${tone}`}>
-                {activeCaption.text}
+              <div
+                className={`resultCaption ${tone}`}
+                key={activeCaption.id}
+              >
+                <RichCaptionText caption={activeCaption} />
               </div>
             )}
             <span className="videoState">

@@ -2640,11 +2640,28 @@ footer > small {
   z-index: 9;
   padding: 11px 16px;
   border-radius: 10px;
-  background: rgba(255,255,255,.95);
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 12px 28px #10182838;
+  backdrop-filter: blur(10px);
   color: var(--ink);
   font-size: 14px;
   font-weight: 900;
+  line-height: 1.55;
+  letter-spacing: .025em;
   text-align: center;
+  animation: captionPop .2s cubic-bezier(.2,.8,.2,1);
+}
+
+.resultCaption strong {
+  display: inline-block;
+  margin: 0 .08em;
+  padding: .02em .3em .08em;
+  border-radius: .34em;
+  background: var(--coral);
+  box-shadow: 0 3px 0 #cf4937;
+  color: white;
+  line-height: 1.25;
+  transform: translateY(-.03em);
 }
 
 .resultCaption.trust {
@@ -2652,11 +2669,38 @@ footer > small {
   border-radius: 3px;
 }
 
+.resultCaption.trust strong {
+  background: var(--mint-dark);
+  box-shadow: 0 3px 0 #116d61;
+}
+
 .resultCaption.punchy {
   border: 4px solid var(--ink);
   background: var(--mint);
   color: var(--ink);
   transform: rotate(-1deg);
+}
+
+.resultCaption.punchy strong {
+  background: var(--ink);
+  box-shadow: 0 3px 0 #000;
+}
+
+@keyframes captionPop {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resultCaption {
+    animation: none;
+  }
 }
 
 .zoomMark {

@@ -4,10 +4,17 @@ export type RawCaptionSegment = {
   text: string;
 };
 
+export type RawCaptionWord = {
+  start: number;
+  end: number;
+  word: string;
+};
+
 export type CaptionSegment = RawCaptionSegment & {
   id: number;
   removed: boolean;
   accent?: boolean;
+  highlight?: string;
 };
 
 const DEFAULT_MAX_CAPTION_CHARS = 16;
@@ -18,6 +25,50 @@ const MAX_CAPTION_MERGE_GAP_SECONDS = 0.45;
 
 function roundSeconds(value: number) {
   return Math.round(value * 1000) / 1000;
+}
+
+export function selectCaptionHighlight(text: string) {
+  const normalized = text.trim();
+  const quoted = normalized.match(/[「『“"]([^」』”"]{2,10})[」』”"]/);
+  if (quoted?.[1]) return quoted[1];
+
+  const number = normalized.match(
+    /[0-9０-９]+(?:[.,．，][0-9０-９]+)?(?:%|％|円|万円|秒|分|本|回|倍|つ|人)?/,
+  );
+  if (number?.[0]) return number[0];
+
+  const keyword = [
+    "ポイント",
+    "結論",
+    "一番",
+    "重要",
+    "コツ",
+    "おすすめ",
+    "簡単",
+    "無料",
+    "注意",
+    "必ず",
+    "今すぐ",
+    "大切",
+    "効果",
+    "成功",
+    "失敗",
+    "メリット",
+    "デメリット",
+  ].find((candidate) => normalized.includes(candidate));
+  if (keyword) return keyword;
+
+  const katakana = normalized.match(/[ァ-ヶー]{4,10}/);
+  return katakana?.[0];
+}
+
+function addCaptionStyle(caption: CaptionSegment) {
+  const highlight = selectCaptionHighlight(caption.text);
+  return {
+    ...caption,
+    accent: Boolean(highlight),
+    highlight,
+  };
 }
 
 function splitCaptionText(
@@ -161,7 +212,7 @@ function mergeShortCaptionSegments(
   }
 
   return merged.map((caption, index) => ({
-    ...caption,
+    ...addCaptionStyle(caption),
     id: index + 1,
   }));
 }
@@ -210,6 +261,28 @@ export function buildCaptionSegments(
   }
 
   return mergeShortCaptionSegments(captions, normalizedMaxChars);
+}
+
+export function buildCaptionSegmentsFromWords(
+  words: RawCaptionWord[],
+  maxChars = DEFAULT_MAX_CAPTION_CHARS,
+) {
+  return buildCaptionSegments(
+    words
+      .map((word) => ({
+        start: Number(word.start),
+        end: Number(word.end),
+        text: word.word,
+      }))
+      .filter(
+        (word) =>
+          Number.isFinite(word.start) &&
+          Number.isFinite(word.end) &&
+          word.end > word.start &&
+          Boolean(word.text.trim()),
+      ),
+    maxChars,
+  );
 }
 
 function formatTimestamp(seconds: number, decimalSeparator: "," | ".") {
