@@ -97,6 +97,18 @@ export function isSupportedVideo(fileName: string, contentType: string) {
   );
 }
 
+export function isSupportedTranscriptionMedia(
+  fileName: string,
+  contentType: string,
+) {
+  const extension = fileName.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
+  return (
+    isSupportedVideo(fileName, contentType) ||
+    contentType.toLowerCase().startsWith("audio/") ||
+    [".mp3", ".mpga", ".mpeg", ".m4a", ".wav"].includes(extension)
+  );
+}
+
 export async function findTransfer(id: string, code: string) {
   const codeHash = await hashTransferCode(code);
   const [transfer] = await getDb()

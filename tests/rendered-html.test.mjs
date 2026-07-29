@@ -36,6 +36,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /まず1本、完成を見てから。/);
+  assert.match(html, /最大500MB/);
 });
 
 test("ships production metadata without starter markers", async () => {

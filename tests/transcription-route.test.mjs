@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("turns a video transcription into timestamped captions", async () => {
+test("turns an audio transcription into timestamped captions", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
   };
@@ -42,8 +42,8 @@ test("turns a video transcription into timestamped captions", async () => {
     const formData = new FormData();
     formData.set(
       "file",
-      new File([new Uint8Array([0, 0, 0, 24])], "voice.mp4", {
-        type: "video/mp4",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.wav", {
+        type: "audio/wav",
       }),
     );
 

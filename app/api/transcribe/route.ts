@@ -3,6 +3,7 @@ import { buildCaptionSegments, type RawCaptionSegment } from "../../../lib/capti
 import {
   findTransfer,
   getMediaBucket,
+  isSupportedTranscriptionMedia,
   isSupportedVideo,
   jsonError,
   removeTransfer,
@@ -157,8 +158,8 @@ export async function POST(request: Request) {
         413,
       );
     }
-    if (!isSupportedVideo(file.name, file.type || "video/mp4")) {
-      return jsonError("MP4・MOV・M4V・WebMの動画を選んでください。");
+    if (!isSupportedTranscriptionMedia(file.name, file.type || "video/mp4")) {
+      return jsonError("対応している動画または音声ファイルを選んでください。");
     }
 
     const formData = new FormData();

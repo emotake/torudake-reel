@@ -7,6 +7,10 @@ import {
   formatCaptionClock,
   type CaptionSegment,
 } from "../lib/captions";
+import {
+  encodeMonoWavChunk,
+  TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
+} from "../lib/audio";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = "follow" | "sales" | "reach";
@@ -30,6 +34,9 @@ type TranscriptLine = CaptionSegment;
 type ApiPayload = {
   error?: string;
 };
+
+const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 
 async function readApiResponse<T extends ApiPayload>(
   response: Response,
@@ -183,6 +190,105 @@ async function uploadVideoInChunks(
   }
 }
 
+async function transcribeMediaFile(mediaFile: File) {
+  const formData = new FormData();
+  formData.set("file", mediaFile, mediaFile.name);
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    body: formData,
+  });
+  const payload = await readApiResponse<
+    ApiPayload & { segments?: TranscriptLine[] }
+  >(response, "字幕を生成できませんでした。もう一度お試しください。");
+
+  if (!payload.segments?.length) {
+    throw new Error("字幕を生成できませんでした。もう一度お試しください。");
+  }
+  return payload.segments;
+}
+
+async function transcribeLargeVideo(
+  selectedFile: File,
+  onProgress: (progress: number) => void,
+) {
+  const AudioContextConstructor =
+    window.AudioContext ??
+    (
+      window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }
+    ).webkitAudioContext;
+
+  if (!AudioContextConstructor) {
+    throw new Error(
+      "このブラウザでは大きな動画の音声を処理できません。最新版のChromeまたはEdgeでお試しください。",
+    );
+  }
+
+  let decodedAudio: AudioBuffer;
+  const audioContext = new AudioContextConstructor();
+  try {
+    onProgress(8);
+    const sourceBytes = await selectedFile.arrayBuffer();
+    onProgress(14);
+    decodedAudio = await audioContext.decodeAudioData(sourceBytes);
+  } catch {
+    throw new Error(
+      "動画から音声を取り出せませんでした。MP4またはWebM形式に変換してお試しください。",
+    );
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+
+  if (!Number.isFinite(decodedAudio.duration) || decodedAudio.duration <= 0) {
+    throw new Error("動画に音声が見つかりませんでした。");
+  }
+
+  const chunkCount = Math.ceil(
+    decodedAudio.duration / TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
+  );
+  const mergedSegments: TranscriptLine[] = [];
+  const baseName =
+    selectedFile.name.replace(/\.[^.]+$/, "").replace(/[^\p{L}\p{N}_-]+/gu, "_") ||
+    "video";
+
+  for (let index = 0; index < chunkCount; index += 1) {
+    const chunkStart = index * TRANSCRIPTION_AUDIO_CHUNK_SECONDS;
+    const chunkDuration = Math.min(
+      TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
+      decodedAudio.duration - chunkStart,
+    );
+    onProgress(18 + Math.round((index / chunkCount) * 68));
+
+    const wavBytes = encodeMonoWavChunk(
+      decodedAudio,
+      chunkStart,
+      chunkDuration,
+    );
+    const audioFile = new File(
+      [wavBytes],
+      `${baseName}-audio-${String(index + 1).padStart(2, "0")}.wav`,
+      { type: "audio/wav" },
+    );
+    const chunkSegments = await transcribeMediaFile(audioFile);
+
+    for (const segment of chunkSegments) {
+      mergedSegments.push({
+        ...segment,
+        id: mergedSegments.length + 1,
+        start: Math.round((segment.start + chunkStart) * 1000) / 1000,
+        end: Math.round((segment.end + chunkStart) * 1000) / 1000,
+      });
+    }
+    onProgress(18 + Math.round(((index + 1) / chunkCount) * 70));
+  }
+
+  if (mergedSegments.length === 0) {
+    throw new Error("字幕を生成できませんでした。もう一度お試しください。");
+  }
+  return mergedSegments;
+}
+
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
   { id: "follow", icon: "＋", title: "フォローを増やす", note: "結論を先に見せる" },
   { id: "sales", icon: "↗", title: "商品を紹介する", note: "信頼とCTAを重視" },
@@ -270,6 +376,10 @@ export default function Home() {
       notify("動画ファイルを選んでください");
       return;
     }
+    if (selected.size > MAX_EDIT_VIDEO_BYTES) {
+      notify("字幕の自動生成は500MBまでです");
+      return;
+    }
     setFile(selected);
     setEditError("");
     setStage("setup");
@@ -284,9 +394,9 @@ export default function Home() {
   }
 
   async function startEditing() {
-    if (file && file.size > 25 * 1024 * 1024) {
+    if (file && file.size > MAX_EDIT_VIDEO_BYTES) {
       setEditError(
-        "字幕の自動生成は25MBまでです。動画を短くするか圧縮してお試しください。",
+        "字幕の自動生成は500MBまでです。動画を短くするか圧縮してお試しください。",
       );
       return;
     }
@@ -301,32 +411,36 @@ export default function Home() {
       let nextTranscript = initialTranscript;
 
       if (file) {
-        const controller = new AbortController();
-        const receipt = await uploadVideoInChunks(
-          file,
-          controller,
-          (uploadProgress) => {
-            setProgress(Math.max(4, Math.round(uploadProgress * 0.44)));
-          },
-        );
-        setProgress(48);
-        progressTimer = window.setInterval(() => {
-          setProgress((current) => Math.min(current + 2, 88));
-        }, 600);
+        if (file.size > DIRECT_TRANSCRIPTION_BYTES) {
+          nextTranscript = await transcribeLargeVideo(file, setProgress);
+        } else {
+          const controller = new AbortController();
+          const receipt = await uploadVideoInChunks(
+            file,
+            controller,
+            (uploadProgress) => {
+              setProgress(Math.max(4, Math.round(uploadProgress * 0.44)));
+            },
+          );
+          setProgress(48);
+          progressTimer = window.setInterval(() => {
+            setProgress((current) => Math.min(current + 2, 88));
+          }, 600);
 
-        const response = await fetch("/api/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: receipt.id, code: receipt.code }),
-        });
-        const payload = await readApiResponse<
-          ApiPayload & { segments?: TranscriptLine[] }
-        >(response, "字幕を生成できませんでした。もう一度お試しください。");
+          const response = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: receipt.id, code: receipt.code }),
+          });
+          const payload = await readApiResponse<
+            ApiPayload & { segments?: TranscriptLine[] }
+          >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
-        if (!payload.segments?.length) {
-          throw new Error("字幕を生成できませんでした。もう一度お試しください。");
+          if (!payload.segments?.length) {
+            throw new Error("字幕を生成できませんでした。もう一度お試しください。");
+          }
+          nextTranscript = payload.segments;
         }
-        nextTranscript = payload.segments;
       } else {
         progressTimer = window.setInterval(() => {
           setProgress((current) => Math.min(current + 7, 88));
@@ -954,7 +1068,7 @@ function Landing({
             <div className="stepIcon uploadIcon">↑</div>
             <h3>撮った動画を送る</h3>
             <p>1〜5分の縦動画をそのままアップロード。</p>
-            <small>MP4・MOV・スマホ対応</small>
+            <small>MP4・MOV・スマホ対応 / 最大500MB</small>
           </article>
           <article>
             <span className="stepNo">02</span>
@@ -1162,7 +1276,7 @@ function SetupWorkspace({
           </div>
           <div className="localNote">
             <span>●</span>
-            字幕生成のため動画を一時保管し、処理完了後に削除します。
+            25MBを超える動画は端末内で音声だけを軽量化して字幕を生成します（最大500MB）。
           </div>
         </aside>
 
