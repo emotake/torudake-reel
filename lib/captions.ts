@@ -285,6 +285,24 @@ export function buildCaptionSegmentsFromWords(
   );
 }
 
+export function clampCaptionsToDuration(
+  captions: CaptionSegment[],
+  maxDurationSeconds: number,
+) {
+  if (!Number.isFinite(maxDurationSeconds) || maxDurationSeconds <= 0) {
+    return [];
+  }
+
+  return captions
+    .filter((caption) => caption.start < maxDurationSeconds)
+    .map((caption, index) => ({
+      ...caption,
+      id: index + 1,
+      end: Math.min(caption.end, maxDurationSeconds),
+    }))
+    .filter((caption) => caption.end > caption.start);
+}
+
 function formatTimestamp(seconds: number, decimalSeparator: "," | ".") {
   const safeSeconds = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
   const totalMilliseconds = Math.round(safeSeconds * 1000);

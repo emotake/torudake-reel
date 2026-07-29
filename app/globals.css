@@ -2124,6 +2124,10 @@ footer > small {
   align-content: start;
 }
 
+.optionCards.toneCards {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .toneLines {
   display: flex;
   height: 38px;
@@ -2172,6 +2176,26 @@ footer > small {
 
 .toneLines.punchy i:last-child {
   height: 31px;
+}
+
+.toneLines.outline {
+  gap: 5px;
+  padding: 0 7px;
+  border-radius: 7px;
+  background: var(--ink);
+}
+
+.toneLines.outline i {
+  height: 18px;
+  border: 1px solid white;
+  background: transparent;
+}
+
+.optionCostNote {
+  margin: 10px 2px 0;
+  color: var(--mint-dark);
+  font-size: 8px;
+  font-weight: 800;
 }
 
 .lengthOptions {
@@ -2588,6 +2612,83 @@ footer > small {
   box-shadow: 0 3px 9px #10182812;
 }
 
+.captionPatternPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  margin: 0 0 13px;
+}
+
+.captionPatternPicker > span {
+  margin-right: 2px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.captionPatternPicker button {
+  display: inline-flex;
+  min-height: 31px;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 9px 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.captionPatternPicker button.active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.captionPatternPicker small {
+  flex-basis: 100%;
+  color: var(--mint-dark);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.patternSwatch {
+  display: grid;
+  width: 28px;
+  height: 23px;
+  place-items: center;
+  border-radius: 6px;
+  background: #fff4ef;
+  color: var(--coral);
+  font-family: "DM Sans", sans-serif;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.patternSwatch.trust {
+  background: #eafff7;
+  color: var(--mint-dark);
+}
+
+.patternSwatch.punchy {
+  border: 2px solid var(--ink);
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.patternSwatch.outline {
+  background: var(--ink);
+  color: white;
+  text-shadow:
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000;
+}
+
 .resultVideo {
   position: relative;
   height: 600px;
@@ -2686,6 +2787,26 @@ footer > small {
   box-shadow: 0 3px 0 #000;
 }
 
+.resultCaption.outline {
+  background: rgba(0,0,0,.16);
+  box-shadow: none;
+  color: white;
+  text-shadow:
+    -2px -2px 0 #101828,
+    2px -2px 0 #101828,
+    -2px 2px 0 #101828,
+    2px 2px 0 #101828,
+    0 3px 7px #000a;
+  backdrop-filter: none;
+}
+
+.resultCaption.outline strong {
+  padding: 0 .1em;
+  background: transparent;
+  box-shadow: none;
+  color: #ffd84d;
+}
+
 @keyframes captionPop {
   from {
     opacity: 0;
@@ -2732,6 +2853,21 @@ footer > small {
 
 .resultVideo.before .videoState {
   background: #566174;
+}
+
+.outputRange {
+  position: absolute;
+  top: 14px;
+  left: 73px;
+  z-index: 9;
+  padding: 5px 7px;
+  border: 1px solid rgba(255,255,255,.38);
+  border-radius: 6px;
+  background: rgba(16,24,40,.76);
+  color: white;
+  font-family: "DM Sans", sans-serif;
+  font-size: 7px;
+  font-weight: 900;
 }
 
 .timelinePreview {
@@ -3593,6 +3729,10 @@ footer > small {
   .optionCards.three,
   .lengthOptions {
     grid-template-columns: 1fr;
+  }
+
+  .optionCards.toneCards {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .optionCards button {

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captionsToSrt,
   captionsToVtt,
+  clampCaptionsToDuration,
   formatCaptionClock,
   selectCaptionHighlight,
   type CaptionSegment,
@@ -15,7 +16,7 @@ import {
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = "follow" | "sales" | "reach";
-type Tone = "natural" | "trust" | "punchy";
+type Tone = "natural" | "trust" | "punchy" | "outline";
 type PreviewMode = "before" | "after";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
 
@@ -71,6 +72,51 @@ function needsBrowserAudioExtraction(selectedFile: File) {
     selectedFile.type.toLowerCase() === "video/quicktime" ||
     /\.(mov|m4v)$/i.test(selectedFile.name)
   );
+}
+
+async function readVideoDuration(selectedFile: File) {
+  const sourceUrl = URL.createObjectURL(selectedFile);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error("動画の長さを確認できませんでした。"));
+      }, 8000);
+      const finish = (callback: () => void) => {
+        window.clearTimeout(timeout);
+        video.removeAttribute("src");
+        video.load();
+        callback();
+      };
+
+      video.addEventListener(
+        "loadedmetadata",
+        () => {
+          const duration = video.duration;
+          finish(() => {
+            if (Number.isFinite(duration) && duration > 0) {
+              resolve(duration);
+            } else {
+              reject(new Error("動画の長さを確認できませんでした。"));
+            }
+          });
+        },
+        { once: true },
+      );
+      video.addEventListener(
+        "error",
+        () => finish(() => reject(new Error("動画の長さを確認できませんでした。"))),
+        { once: true },
+      );
+      video.src = sourceUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
 }
 
 async function readApiResponse<T extends ApiPayload>(
@@ -249,6 +295,7 @@ async function transcribeMediaFile(mediaFile: File) {
 async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
+  maxDurationSeconds: number,
 ) {
   let extractionDetail = "";
   try {
@@ -267,7 +314,7 @@ async function transcribeLargeVideo(
 
         for await (const chunk of extractTranscriptionAudioChunks(
           selectedFile,
-          { maxChunkBytes },
+          { maxChunkBytes, maxDurationSeconds },
         )) {
           onProgress(Math.min(84, 14 + completedChunks * 6));
           const chunkSegments = await transcribeMediaFile(chunk.file);
@@ -354,8 +401,12 @@ async function transcribeLargeVideo(
     throw new Error("動画に音声が見つかりませんでした。");
   }
 
+  const transcriptionDuration = Math.min(
+    decodedAudio.duration,
+    maxDurationSeconds,
+  );
   const chunkCount = Math.ceil(
-    decodedAudio.duration / TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
+    transcriptionDuration / TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
   );
   const mergedSegments: TranscriptLine[] = [];
   const baseName =
@@ -366,7 +417,7 @@ async function transcribeLargeVideo(
     const chunkStart = index * TRANSCRIPTION_AUDIO_CHUNK_SECONDS;
     const chunkDuration = Math.min(
       TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
-      decodedAudio.duration - chunkStart,
+      transcriptionDuration - chunkStart,
     );
     onProgress(18 + Math.round((index / chunkCount) * 68));
 
@@ -406,9 +457,10 @@ const goals: { id: Goal; icon: string; title: string; note: string }[] = [
 ];
 
 const tones: { id: Tone; title: string; note: string }[] = [
-  { id: "natural", title: "自然", note: "話し方を残す" },
-  { id: "trust", title: "信頼感", note: "落ち着いた間" },
-  { id: "punchy", title: "テンポ重視", note: "短く小気味よく" },
+  { id: "natural", title: "クリーン", note: "白ベースで読みやすく" },
+  { id: "trust", title: "信頼感", note: "ミントの落ち着いた印象" },
+  { id: "punchy", title: "ポップ", note: "太枠でテンポよく" },
+  { id: "outline", title: "黒縁", note: "動画になじむ定番字幕" },
 ];
 
 const initialTranscript: TranscriptLine[] = [
@@ -521,8 +573,16 @@ export default function Home() {
       let nextTranscript = initialTranscript;
 
       if (file) {
-        if (needsBrowserAudioExtraction(file)) {
-          nextTranscript = await transcribeLargeVideo(file, setProgress);
+        const sourceDuration = await readVideoDuration(file).catch(() => null);
+        const needsDurationTrim =
+          sourceDuration !== null && sourceDuration > length + 0.05;
+
+        if (needsBrowserAudioExtraction(file) || needsDurationTrim) {
+          nextTranscript = await transcribeLargeVideo(
+            file,
+            setProgress,
+            length,
+          );
         } else {
           const controller = new AbortController();
           const receipt = await uploadVideoInChunks(
@@ -551,6 +611,7 @@ export default function Home() {
           }
           nextTranscript = payload.segments;
         }
+        nextTranscript = clampCaptionsToDuration(nextTranscript, length);
       } else {
         progressTimer = window.setInterval(() => {
           setProgress((current) => Math.min(current + 7, 88));
@@ -798,6 +859,7 @@ export default function Home() {
           setTranscript={setTranscript}
           keptLines={keptLines}
           tone={tone}
+          setTone={setTone}
           length={length}
           notify={notify}
           reset={reset}
@@ -1415,7 +1477,7 @@ function SetupWorkspace({
           <fieldset>
             <legend>
               <span>02</span>
-              仕上がりの雰囲気
+              テロップのパターン
             </legend>
             <div className="optionCards three toneCards">
               {tones.map((item) => (
@@ -1435,6 +1497,9 @@ function SetupWorkspace({
                 </button>
               ))}
             </div>
+            <p className="optionCostNote">
+              デザイン変更は端末内で行うため、API利用量は増えません。
+            </p>
           </fieldset>
 
           <fieldset>
@@ -1563,6 +1628,7 @@ function ResultWorkspace({
   setTranscript,
   keptLines,
   tone,
+  setTone,
   length,
   notify,
   reset,
@@ -1576,6 +1642,7 @@ function ResultWorkspace({
   setTranscript: (lines: TranscriptLine[]) => void;
   keptLines: TranscriptLine[];
   tone: Tone;
+  setTone: (tone: Tone) => void;
   length: number;
   notify: (message: string) => void;
   reset: () => void;
@@ -1583,9 +1650,7 @@ function ResultWorkspace({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(
-    transcript.at(-1)?.end ?? length,
-  );
+  const [duration, setDuration] = useState(length);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const activeCaption =
@@ -1618,7 +1683,7 @@ function ResultWorkspace({
   function seekTo(seconds: number) {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(seconds, video.duration || seconds));
+    video.currentTime = Math.max(0, Math.min(seconds, duration));
     setCurrentTime(video.currentTime);
   }
 
@@ -1629,6 +1694,10 @@ function ResultWorkspace({
       return;
     }
     if (video.paused) {
+      if (video.currentTime >= duration - 0.05) {
+        video.currentTime = 0;
+        setCurrentTime(0);
+      }
       await video.play();
     } else {
       video.pause();
@@ -1741,8 +1810,41 @@ function ResultWorkspace({
           const boxHeight = lines.length * lineHeight + verticalPadding * 2;
           const boxX = (canvas.width - boxWidth) / 2;
           const boxY = canvas.height - boxHeight - canvas.height * 0.08;
-          context.fillStyle = "rgba(255,255,255,.94)";
+          const captionPalette =
+            tone === "trust"
+              ? {
+                  background: "rgba(239,255,250,.95)",
+                  border: "#147d70",
+                  highlight: "#147d70",
+                  text: "#101828",
+                }
+              : tone === "punchy"
+                ? {
+                    background: "rgba(217,255,239,.96)",
+                    border: "#101828",
+                    highlight: "#ff5d45",
+                    text: "#101828",
+                  }
+                : tone === "outline"
+                  ? {
+                      background: "rgba(0,0,0,.18)",
+                      border: "",
+                      highlight: "#ffd84d",
+                      text: "#ffffff",
+                    }
+                  : {
+                      background: "rgba(255,255,255,.94)",
+                      border: "",
+                      highlight: "#ff5d45",
+                      text: "#101828",
+                    };
+          context.fillStyle = captionPalette.background;
           context.fillRect(boxX, boxY, boxWidth, boxHeight);
+          if (captionPalette.border) {
+            context.lineWidth = Math.max(4, fontSize * 0.08);
+            context.strokeStyle = captionPalette.border;
+            context.strokeRect(boxX, boxY, boxWidth, boxHeight);
+          }
           const highlight = caption.highlight?.trim() ?? "";
           context.textAlign = "left";
           lines.forEach((line, index) => {
@@ -1754,18 +1856,27 @@ function ResultWorkspace({
             const parts =
               highlightIndex >= 0
                 ? [
-                    { text: line.slice(0, highlightIndex), color: "#101828" },
-                    { text: highlight, color: "#ff5d45" },
+                    {
+                      text: line.slice(0, highlightIndex),
+                      color: captionPalette.text,
+                    },
+                    { text: highlight, color: captionPalette.highlight },
                     {
                       text: line.slice(highlightIndex + highlight.length),
-                      color: "#101828",
+                      color: captionPalette.text,
                     },
                   ]
-                : [{ text: line, color: "#101828" }];
+                : [{ text: line, color: captionPalette.text }];
             let textX =
               canvas.width / 2 - context.measureText(line).width / 2;
 
             parts.forEach((part) => {
+              if (tone === "outline") {
+                context.lineWidth = Math.max(5, fontSize * 0.12);
+                context.lineJoin = "round";
+                context.strokeStyle = "#101828";
+                context.strokeText(part.text, textX, lineY);
+              }
               context.fillStyle = part.color;
               context.fillText(part.text, textX, lineY);
               textX += context.measureText(part.text).width;
@@ -1773,7 +1884,7 @@ function ResultWorkspace({
           });
         }
 
-        if (!video.ended) {
+        if (!video.ended && video.currentTime < length) {
           animationFrame = window.requestAnimationFrame(drawFrame);
         }
       };
@@ -1808,14 +1919,33 @@ function ResultWorkspace({
           { once: true },
         );
       });
+      const exportDuration = Math.min(
+        Number.isFinite(video.duration) ? video.duration : length,
+        length,
+      );
       const ended = new Promise<void>((resolve) => {
-        video.addEventListener("ended", () => resolve(), { once: true });
+        const finishAtSelectedLength = () => {
+          if (
+            video.ended ||
+            video.currentTime >= exportDuration - 0.03
+          ) {
+            video.removeEventListener(
+              "timeupdate",
+              finishAtSelectedLength,
+            );
+            video.removeEventListener("ended", finishAtSelectedLength);
+            resolve();
+          }
+        };
+        video.addEventListener("timeupdate", finishAtSelectedLength);
+        video.addEventListener("ended", finishAtSelectedLength);
       });
 
       recorder.start(1000);
       drawFrame();
       await video.play();
       await ended;
+      video.pause();
       recorder.stop();
       await stopped;
 
@@ -1887,6 +2017,25 @@ function ResultWorkspace({
             <span>仕上がりプレビュー</span>
           </div>
 
+          <div
+            className="captionPatternPicker"
+            aria-label="テロップのパターン"
+          >
+            <span>テロップ</span>
+            {tones.map((item) => (
+              <button
+                className={tone === item.id ? "active" : ""}
+                key={item.id}
+                onClick={() => setTone(item.id)}
+                type="button"
+              >
+                <i className={`patternSwatch ${item.id}`}>Aa</i>
+                {item.title}
+              </button>
+            ))}
+            <small>切り替えてもAPI利用量は増えません</small>
+          </div>
+
           <div className={`resultVideo ${previewMode}`}>
             {videoUrl ? (
               <video
@@ -1896,9 +2045,24 @@ function ResultWorkspace({
                 playsInline
                 preload="metadata"
                 onLoadedMetadata={(event) => {
-                  setDuration(event.currentTarget.duration || transcript.at(-1)?.end || length);
+                  const sourceDuration = event.currentTarget.duration;
+                  setDuration(
+                    Number.isFinite(sourceDuration) && sourceDuration > 0
+                      ? Math.min(sourceDuration, length)
+                      : length,
+                  );
                 }}
-                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                onTimeUpdate={(event) => {
+                  const video = event.currentTarget;
+                  if (video.currentTime >= duration - 0.03) {
+                    video.pause();
+                    video.currentTime = duration;
+                    setCurrentTime(duration);
+                    setIsPlaying(false);
+                    return;
+                  }
+                  setCurrentTime(video.currentTime);
+                }}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
@@ -1919,6 +2083,7 @@ function ResultWorkspace({
             <span className="videoState">
               {previewMode === "after" ? "字幕ON" : "字幕OFF"}
             </span>
+            <span className="outputRange">{length}秒版</span>
           </div>
 
           <div className="timelinePreview">
