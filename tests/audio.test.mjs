@@ -44,5 +44,5 @@ test("keeps each browser-generated audio request well below the site limit", () 
       TRANSCRIPTION_AUDIO_SAMPLE_RATE *
       2;
 
-  assert.ok(wavBytes < 8 * 1024 * 1024);
+  assert.ok(wavBytes < 1024 * 1024);
 });

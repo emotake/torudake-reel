@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ABSOLUTE_MAX_AUDIO_CHUNK_BYTES,
+  DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+  MIN_AUDIO_CHUNK_BYTES,
   getAudioCodecPriority,
   getDirectCopyAudioOutput,
   getSafeAudioChunkSeconds,
@@ -37,13 +38,30 @@ test("keeps Dolby audio tracks available as a secondary fallback", () => {
 });
 
 test("keeps direct-copy audio chunks below the upload limit", () => {
-  assert.equal(getSafeAudioChunkSeconds(128_000), 150);
+  assert.equal(DEFAULT_MAX_AUDIO_CHUNK_BYTES, 768 * 1024);
+  assert.equal(MIN_AUDIO_CHUNK_BYTES, 192 * 1024);
+
+  const normalChunkSeconds = getSafeAudioChunkSeconds(128_000);
+  assert.ok(normalChunkSeconds < 60);
+  assert.ok(
+    (normalChunkSeconds * 128_000) / 8 <
+      DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+  );
+
   const highBitrateChunkSeconds = getSafeAudioChunkSeconds(320_000);
-  assert.ok(highBitrateChunkSeconds < 150);
+  assert.ok(highBitrateChunkSeconds < normalChunkSeconds);
   assert.ok(
     (highBitrateChunkSeconds * 320_000) / 8 <
-      ABSOLUTE_MAX_AUDIO_CHUNK_BYTES,
+      DEFAULT_MAX_AUDIO_CHUNK_BYTES,
   );
-  assert.equal(ABSOLUTE_MAX_AUDIO_CHUNK_BYTES, 4 * 1024 * 1024);
+
+  const retryChunkSeconds = getSafeAudioChunkSeconds(
+    128_000,
+    MIN_AUDIO_CHUNK_BYTES,
+  );
+  assert.ok(retryChunkSeconds < normalChunkSeconds);
+  assert.ok(
+    (retryChunkSeconds * 128_000) / 8 < MIN_AUDIO_CHUNK_BYTES,
+  );
   assert.equal(getSafeAudioChunkSeconds(null), 150);
 });

@@ -1,7 +1,8 @@
 const MAX_AUDIO_CHUNK_SECONDS = 150;
-const TARGET_AUDIO_CHUNK_BYTES = 3 * 1024 * 1024;
-export const ABSOLUTE_MAX_AUDIO_CHUNK_BYTES = 4 * 1024 * 1024;
-const MIN_AUDIO_CHUNK_SECONDS = 10;
+export const DEFAULT_MAX_AUDIO_CHUNK_BYTES = 768 * 1024;
+export const MIN_AUDIO_CHUNK_BYTES = 192 * 1024;
+const TARGET_AUDIO_CHUNK_RATIO = 0.75;
+const MIN_AUDIO_CHUNK_SECONDS = 1;
 
 type DirectCopyAudioCodec =
   | "aac"
@@ -58,16 +59,23 @@ export function getAudioCodecPriority(codec: string | null) {
   }
 }
 
-export function getSafeAudioChunkSeconds(bitrate: number | null) {
+export function getSafeAudioChunkSeconds(
+  bitrate: number | null,
+  maxChunkBytes = DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+) {
   if (!bitrate || !Number.isFinite(bitrate) || bitrate <= 0) {
     return MAX_AUDIO_CHUNK_SECONDS;
   }
+
+  const targetChunkBytes =
+    Math.max(MIN_AUDIO_CHUNK_BYTES, maxChunkBytes) *
+    TARGET_AUDIO_CHUNK_RATIO;
 
   return Math.max(
     MIN_AUDIO_CHUNK_SECONDS,
     Math.min(
       MAX_AUDIO_CHUNK_SECONDS,
-      Math.floor((TARGET_AUDIO_CHUNK_BYTES * 8) / bitrate),
+      Math.floor((targetChunkBytes * 8) / bitrate),
     ),
   );
 }
@@ -83,6 +91,7 @@ function safeBaseName(fileName: string) {
 
 export async function* extractTranscriptionAudioChunks(
   sourceFile: File,
+  options: { maxChunkBytes?: number } = {},
 ): AsyncGenerator<TranscriptionAudioChunk> {
   const {
     BlobSource,
@@ -156,7 +165,11 @@ export async function* extractTranscriptionAudioChunks(
     }
 
     const packetSink = new EncodedPacketSink(audioTrack);
-    let chunkSeconds = getSafeAudioChunkSeconds(bitrate);
+    const maxChunkBytes = Math.max(
+      MIN_AUDIO_CHUNK_BYTES,
+      Math.floor(options.maxChunkBytes ?? DEFAULT_MAX_AUDIO_CHUNK_BYTES),
+    );
+    let chunkSeconds = getSafeAudioChunkSeconds(bitrate, maxChunkBytes);
     let chunkStart = 0;
     let chunkNumber = 1;
     const baseName = safeBaseName(sourceFile.name);
@@ -212,7 +225,7 @@ export async function* extractTranscriptionAudioChunks(
       }
 
       if (
-        target.buffer.byteLength > ABSOLUTE_MAX_AUDIO_CHUNK_BYTES &&
+        target.buffer.byteLength > maxChunkBytes &&
         chunkSeconds > MIN_AUDIO_CHUNK_SECONDS
       ) {
         chunkSeconds = Math.max(
@@ -221,7 +234,7 @@ export async function* extractTranscriptionAudioChunks(
         );
         continue;
       }
-      if (target.buffer.byteLength > ABSOLUTE_MAX_AUDIO_CHUNK_BYTES) {
+      if (target.buffer.byteLength > maxChunkBytes) {
         throw new Error("動画の音声データが大きすぎます。");
       }
 

@@ -35,6 +35,16 @@ type ApiPayload = {
   error?: string;
 };
 
+class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 
@@ -53,10 +63,11 @@ async function readApiResponse<T extends ApiPayload>(
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     const responseText = (await response.text()).trim();
-    throw new Error(
+    throw new ApiRequestError(
       response.status === 413
         ? "動画の送信サイズが上限を超えました。動画を短くするか圧縮してお試しください。"
         : responseText || fallbackMessage,
+      response.status,
     );
   }
 
@@ -68,7 +79,10 @@ async function readApiResponse<T extends ApiPayload>(
   }
 
   if (!response.ok) {
-    throw new Error(payload.error || fallbackMessage);
+    throw new ApiRequestError(
+      payload.error || fallbackMessage,
+      response.status,
+    );
   }
   return payload;
 }
@@ -222,31 +236,60 @@ async function transcribeLargeVideo(
   let extractionDetail = "";
   try {
     onProgress(8);
-    const { extractTranscriptionAudioChunks } = await import(
-      "../lib/transcription-media"
-    );
-    const mergedSegments: TranscriptLine[] = [];
-    let completedChunks = 0;
+    const {
+      DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+      MIN_AUDIO_CHUNK_BYTES,
+      extractTranscriptionAudioChunks,
+    } = await import("../lib/transcription-media");
+    let maxChunkBytes = DEFAULT_MAX_AUDIO_CHUNK_BYTES;
 
-    for await (const chunk of extractTranscriptionAudioChunks(selectedFile)) {
-      onProgress(Math.min(84, 14 + completedChunks * 10));
-      const chunkSegments = await transcribeMediaFile(chunk.file);
+    while (maxChunkBytes >= MIN_AUDIO_CHUNK_BYTES) {
+      try {
+        const mergedSegments: TranscriptLine[] = [];
+        let completedChunks = 0;
 
-      for (const segment of chunkSegments) {
-        mergedSegments.push({
-          ...segment,
-          id: mergedSegments.length + 1,
-          start:
-            Math.round((segment.start + chunk.startSeconds) * 1000) / 1000,
-          end: Math.round((segment.end + chunk.startSeconds) * 1000) / 1000,
-        });
+        for await (const chunk of extractTranscriptionAudioChunks(
+          selectedFile,
+          { maxChunkBytes },
+        )) {
+          onProgress(Math.min(84, 14 + completedChunks * 6));
+          const chunkSegments = await transcribeMediaFile(chunk.file);
+
+          for (const segment of chunkSegments) {
+            mergedSegments.push({
+              ...segment,
+              id: mergedSegments.length + 1,
+              start:
+                Math.round((segment.start + chunk.startSeconds) * 1000) /
+                1000,
+              end:
+                Math.round((segment.end + chunk.startSeconds) * 1000) /
+                1000,
+            });
+          }
+          completedChunks += 1;
+          onProgress(Math.min(88, 20 + completedChunks * 6));
+        }
+
+        if (mergedSegments.length > 0) {
+          return mergedSegments;
+        }
+        break;
+      } catch (error) {
+        if (
+          error instanceof ApiRequestError &&
+          error.status === 413 &&
+          maxChunkBytes > MIN_AUDIO_CHUNK_BYTES
+        ) {
+          maxChunkBytes = Math.max(
+            MIN_AUDIO_CHUNK_BYTES,
+            Math.floor(maxChunkBytes / 2),
+          );
+          onProgress(12);
+          continue;
+        }
+        throw error;
       }
-      completedChunks += 1;
-      onProgress(Math.min(88, 20 + completedChunks * 10));
-    }
-
-    if (mergedSegments.length > 0) {
-      return mergedSegments;
     }
   } catch (transmuxError) {
     extractionDetail =

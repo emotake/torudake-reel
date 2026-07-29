@@ -1,5 +1,5 @@
 export const TRANSCRIPTION_AUDIO_SAMPLE_RATE = 16_000;
-export const TRANSCRIPTION_AUDIO_CHUNK_SECONDS = 150;
+export const TRANSCRIPTION_AUDIO_CHUNK_SECONDS = 15;
 
 export type DecodedAudioSource = {
   duration: number;
