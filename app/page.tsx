@@ -1622,6 +1622,7 @@ function ResultWorkspace({
   const [sourceDuration, setSourceDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const editRanges = useMemo(
     () => buildEditRanges(transcript),
     [transcript],
@@ -1779,6 +1780,283 @@ function ResultWorkspace({
       .join("\n");
     await navigator.clipboard.writeText(text);
     notify("字幕テキストをコピーしました");
+  }
+
+  async function generateThumbnail() {
+    const video = videoRef.current;
+    if (!video || !file || isGeneratingThumbnail) {
+      if (!file) notify("実際の動画を選ぶと表紙を生成できます");
+      return;
+    }
+
+    const coverCaption =
+      keptLines.find((line) => line.accent && line.text.trim()) ??
+      keptLines.find((line) => line.text.trim());
+    if (!coverCaption) {
+      notify("表紙に使う字幕を1つ以上残してください");
+      return;
+    }
+
+    const previous = {
+      currentTime: video.currentTime,
+      wasPlaying: !video.paused,
+    };
+    setIsGeneratingThumbnail(true);
+
+    try {
+      video.pause();
+      const frameTime = Math.max(
+        0,
+        Math.min(
+          coverCaption.start +
+            Math.min(0.8, Math.max(0.08, (coverCaption.end - coverCaption.start) / 2)),
+          sourceDuration || video.duration || coverCaption.end,
+        ),
+      );
+
+      if (Math.abs(video.currentTime - frameTime) > 0.03) {
+        const sought = new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(
+            () => reject(new Error("表紙に使う場面を読み込めませんでした。")),
+            8000,
+          );
+          video.addEventListener(
+            "seeked",
+            () => {
+              window.clearTimeout(timeout);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        video.currentTime = frameTime;
+        await sought;
+      }
+
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+        throw new Error("表紙に使う場面を読み込めませんでした。");
+      }
+      await new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1080;
+      canvas.height = 1920;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("表紙画像を作成できませんでした。");
+
+      const sourceWidth = video.videoWidth;
+      const sourceHeight = video.videoHeight;
+      const scale = Math.max(
+        canvas.width / sourceWidth,
+        canvas.height / sourceHeight,
+      );
+      const cropWidth = canvas.width / scale;
+      const cropHeight = canvas.height / scale;
+      context.drawImage(
+        video,
+        (sourceWidth - cropWidth) / 2,
+        (sourceHeight - cropHeight) / 2,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+
+      const shade = context.createLinearGradient(0, 0, 0, canvas.height);
+      shade.addColorStop(0, "rgba(7,12,20,.12)");
+      shade.addColorStop(0.48, "rgba(7,12,20,.04)");
+      shade.addColorStop(0.72, "rgba(7,12,20,.48)");
+      shade.addColorStop(1, "rgba(7,12,20,.86)");
+      context.fillStyle = shade;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      const palettes: Record<
+        Tone,
+        {
+          panel: string;
+          border: string;
+          text: string;
+          accent: string;
+          label: string;
+        }
+      > = {
+        editorial: {
+          panel: "rgba(255,252,248,.96)",
+          border: "#e45f4d",
+          text: "#162033",
+          accent: "#d94f3b",
+          label: "#fff7f0",
+        },
+        cinema: {
+          panel: "rgba(11,16,24,.7)",
+          border: "rgba(255,255,255,.7)",
+          text: "#ffffff",
+          accent: "#f4d57a",
+          label: "#ffffff",
+        },
+        studio: {
+          panel: "rgba(19,27,40,.94)",
+          border: "#d5a850",
+          text: "#ffffff",
+          accent: "#ffd26a",
+          label: "#f8e8b8",
+        },
+        glass: {
+          panel: "rgba(12,28,34,.82)",
+          border: "#8fe3cc",
+          text: "#f8fffd",
+          accent: "#9ff3dc",
+          label: "#d9fff4",
+        },
+        mono: {
+          panel: "rgba(248,246,240,.97)",
+          border: "#181818",
+          text: "#181818",
+          accent: "#181818",
+          label: "#ffffff",
+        },
+        signature: {
+          panel: "rgba(255,243,229,.96)",
+          border: "#bf9660",
+          text: "#3e2d28",
+          accent: "#d95a48",
+          label: "#fff7ed",
+        },
+      };
+      const palette = palettes[tone];
+      const roundRect = (
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        radius: number,
+      ) => {
+        const safeRadius = Math.min(radius, width / 2, height / 2);
+        context.beginPath();
+        context.moveTo(x + safeRadius, y);
+        context.arcTo(x + width, y, x + width, y + height, safeRadius);
+        context.arcTo(
+          x + width,
+          y + height,
+          x,
+          y + height,
+          safeRadius,
+        );
+        context.arcTo(x, y + height, x, y, safeRadius);
+        context.arcTo(x, y, x + width, y, safeRadius);
+        context.closePath();
+      };
+
+      context.save();
+      context.shadowColor = "rgba(4,10,18,.28)";
+      context.shadowBlur = 32;
+      context.shadowOffsetY = 12;
+      context.fillStyle = "rgba(12,20,32,.76)";
+      roundRect(70, 72, 360, 78, 39);
+      context.fill();
+      context.restore();
+      context.fillStyle = palette.label;
+      context.font = '800 30px "Noto Sans JP", "Yu Gothic", sans-serif';
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText("撮るだけリール", 112, 111);
+
+      const sourceText = coverCaption.text.trim();
+      const characters = Array.from(sourceText);
+      const lines: string[] = [];
+      const charactersPerLine = 12;
+      for (
+        let index = 0;
+        index < Math.min(characters.length, charactersPerLine * 3);
+        index += charactersPerLine
+      ) {
+        const line = characters
+          .slice(index, index + charactersPerLine)
+          .join("");
+        lines.push(
+          index + charactersPerLine >= charactersPerLine * 3 &&
+            characters.length > charactersPerLine * 3
+            ? `${line.slice(0, -1)}…`
+            : line,
+        );
+      }
+
+      const fontSize = lines.length >= 3 ? 74 : 82;
+      const lineHeight = fontSize * 1.25;
+      const panelX = 70;
+      const panelWidth = canvas.width - 140;
+      const panelHeight = lines.length * lineHeight + 220;
+      const panelY = canvas.height - panelHeight - 150;
+      context.save();
+      context.shadowColor = "rgba(4,10,18,.38)";
+      context.shadowBlur = 42;
+      context.shadowOffsetY = 18;
+      context.fillStyle = palette.panel;
+      roundRect(panelX, panelY, panelWidth, panelHeight, 38);
+      context.fill();
+      context.restore();
+      context.lineWidth = tone === "editorial" ? 10 : 5;
+      context.strokeStyle = palette.border;
+      roundRect(panelX, panelY, panelWidth, panelHeight, 38);
+      context.stroke();
+
+      context.fillStyle = palette.accent;
+      roundRect(panelX + 52, panelY + 48, 150, 12, 6);
+      context.fill();
+      context.fillStyle = palette.text;
+      context.font = `850 ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      lines.forEach((line, index) => {
+        context.fillText(
+          line,
+          panelX + 52,
+          panelY + 116 + lineHeight * (index + 0.5),
+          panelWidth - 104,
+        );
+      });
+
+      context.fillStyle = palette.accent;
+      context.font = '750 28px "Noto Sans JP", "Yu Gothic", sans-serif';
+      context.fillText(
+        "話して送るだけ・自動動画編集",
+        panelX + 52,
+        panelY + panelHeight - 54,
+      );
+
+      const output = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) =>
+            blob
+              ? resolve(blob)
+              : reject(new Error("表紙画像を保存できませんでした。")),
+          "image/jpeg",
+          0.92,
+        );
+      });
+      const url = URL.createObjectURL(output);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportName}_cover.jpg`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify("表紙画像を保存しました");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "表紙画像の生成に失敗しました",
+      );
+    } finally {
+      video.pause();
+      video.currentTime = previous.currentTime;
+      if (previous.wasPlaying) void video.play();
+      setIsGeneratingThumbnail(false);
+    }
   }
 
   async function exportCaptionedVideo() {
@@ -2361,9 +2639,22 @@ function ResultWorkspace({
       <div className="deliverables">
         <div>
           <p className="eyebrow">READY TO POST</p>
-          <h2>字幕データを、すぐ使える形式で保存できます。</h2>
+          <h2>表紙と字幕データを、すぐ使える形式で保存できます。</h2>
         </div>
         <div className="deliverableCards">
+          <button
+            onClick={() => void generateThumbnail()}
+            disabled={isGeneratingThumbnail}
+          >
+            <span className="deliverableIcon thumbnail">表</span>
+            <p>
+              <strong>
+                {isGeneratingThumbnail ? "表紙を生成中…" : "表紙を保存"}
+              </strong>
+              <small>動画の見せ場から9:16画像</small>
+            </p>
+            <i>{isGeneratingThumbnail ? "●" : "↓"}</i>
+          </button>
           <button onClick={() => void copyTranscript()}>
             <span className="deliverableIcon cover">文</span>
             <p>

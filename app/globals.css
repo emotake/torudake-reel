@@ -3220,7 +3220,7 @@ footer > small {
 
 .deliverableCards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
@@ -3238,6 +3238,11 @@ footer > small {
   text-align: left;
 }
 
+.deliverableCards button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .deliverableIcon {
   display: grid;
   width: 32px;
@@ -3248,6 +3253,10 @@ footer > small {
   color: white;
   font-size: 10px;
   font-weight: 900;
+}
+
+.deliverableIcon.thumbnail {
+  background: linear-gradient(145deg, var(--coral), #f0a35f);
 }
 
 .deliverableIcon.copy {
