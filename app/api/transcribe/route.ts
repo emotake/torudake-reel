@@ -6,6 +6,7 @@ import {
 import {
   alignRefinedTextToSegments,
   getTranscriptionQualityReasons,
+  isRefinedTranscriptComplete,
 } from "../../../lib/transcription-quality";
 import {
   findTransfer,
@@ -380,10 +381,18 @@ export async function POST(request: Request) {
       const refineResult = await requestTranscription(apiKey, file, "refine");
       if (refineResult.ok) {
         const refinedText = refineResult.transcription.text?.trim() ?? "";
-        if (refinedText) {
+        const refinedTextIsComplete =
+          qualityReasons.length > 0 ||
+          isRefinedTranscriptComplete(refinedText, rawSegments);
+        if (refinedText && refinedTextIsComplete) {
           rawSegments = alignRefinedTextToSegments(refinedText, rawSegments);
           transcriptionText = refinedText;
           refined = true;
+        } else if (refinedText) {
+          console.warn(
+            "OpenAI high-accuracy transcription ignored incomplete result",
+            refineResult.requestId,
+          );
         }
       } else {
         console.error(
@@ -428,9 +437,11 @@ export async function POST(request: Request) {
           transcriptionDuration || segments.at(-1)?.end || 0,
         segments,
         refined,
-        refinementReason: requestHighAccuracy
-          ? "requested"
-          : qualityReasons[0],
+        refinementReason: refined
+          ? requestHighAccuracy
+            ? "requested"
+            : qualityReasons[0]
+          : undefined,
       },
       {
         headers: {

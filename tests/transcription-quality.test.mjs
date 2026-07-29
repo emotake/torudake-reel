@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   alignRefinedTextToSegments,
   getTranscriptionQualityReasons,
+  isRefinedTranscriptComplete,
 } from "../lib/transcription-quality.ts";
 
 test("flags only clearly suspicious Japanese transcription output", () => {
@@ -38,5 +39,27 @@ test("aligns refined text to the original speech timing", () => {
   assert.equal(
     aligned.map((segment) => segment.text).join(""),
     "今日は新しい機能を紹介します。字幕がもっと自然になりました。",
+  );
+});
+
+test("rejects a refined transcript that omits a large part of the source", () => {
+  const sourceSegments = [
+    { start: 0, end: 2, text: "あ、これ押さないとダメなんだ" },
+    { start: 10, end: 12, text: "ちょっと待って、試してみよう" },
+  ];
+
+  assert.equal(
+    isRefinedTranscriptComplete(
+      "ちょっと待って、試してみよう。",
+      sourceSegments,
+    ),
+    false,
+  );
+  assert.equal(
+    isRefinedTranscriptComplete(
+      "あ、これを押さないとダメなんだ。ちょっと待って、試してみよう。",
+      sourceSegments,
+    ),
+    true,
   );
 });

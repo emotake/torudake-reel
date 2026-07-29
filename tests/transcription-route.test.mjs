@@ -426,6 +426,99 @@ test("uses a second high-accuracy pass only when requested", async () => {
   }
 });
 
+test("keeps the timed transcript when a high-accuracy pass omits speech", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      const model = init.body.get("model");
+      if (model === "gpt-4o-transcribe-diarize") {
+        return Response.json({
+          duration: 12,
+          language: "ja",
+          text: "あ、これ押さないとダメなんだ。ちょっと待って、試してみよう。",
+          segments: [
+            {
+              start: 0,
+              end: 2,
+              speaker: "A",
+              text: "あ、これ押さないとダメなんだ。",
+            },
+            {
+              start: 10,
+              end: 12,
+              speaker: "A",
+              text: "ちょっと待って、試してみよう。",
+            },
+          ],
+        });
+      }
+
+      assert.equal(model, "gpt-4o-transcribe");
+      return Response.json({
+        duration: 12,
+        language: "ja",
+        text: "ちょっと待って、試してみよう。",
+      });
+    }
+
+    return nativeFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set(
+      "incomplete-high-accuracy-test",
+      `${process.pid}-${Date.now()}`,
+    );
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.wav", {
+        type: "audio/wav",
+      }),
+    );
+    formData.set("quality", "high");
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.refined, false);
+    assert.equal(payload.refinementReason, undefined);
+    assert.equal(
+      payload.segments.map((segment) => segment.text).join(""),
+      "あ、これ押さないとダメなんだ。ちょっと待って、試してみよう。",
+    );
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
 test("marks a silent audio chunk as skippable", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",

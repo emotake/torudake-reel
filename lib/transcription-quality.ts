@@ -77,6 +77,23 @@ export function getTranscriptionQualityReasons(text: string) {
   return reasons;
 }
 
+export function isRefinedTranscriptComplete(
+  refinedText: string,
+  sourceSegments: RawCaptionSegment[],
+) {
+  const refinedLength = Array.from(compactText(refinedText)).length;
+  const sourceLength = sourceSegments.reduce(
+    (total, segment) =>
+      total + Array.from(compactText(segment.text ?? "")).length,
+    0,
+  );
+
+  if (refinedLength === 0 || sourceLength === 0) return false;
+
+  const lengthRatio = refinedLength / sourceLength;
+  return lengthRatio >= 0.65 && lengthRatio <= 1.6;
+}
+
 function findNaturalBoundary(
   characters: string[],
   start: number,
