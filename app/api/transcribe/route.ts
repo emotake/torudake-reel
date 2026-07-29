@@ -4,6 +4,10 @@ import {
   type RawCaptionSegment,
 } from "../../../lib/captions";
 import {
+  alignRefinedTextToSegments,
+  getTranscriptionQualityReasons,
+} from "../../../lib/transcription-quality";
+import {
   findTransfer,
   getMediaBucket,
   isSupportedTranscriptionMedia,
@@ -34,6 +38,107 @@ type OpenAIErrorResponse = {
     type?: string;
   };
 };
+
+type TranscriptionCallResult =
+  | {
+      ok: true;
+      transcription: TranscriptionResponse;
+    }
+  | {
+      ok: false;
+      error?: OpenAIErrorResponse["error"];
+      requestId: string | null;
+      status: number;
+    };
+
+const HIGH_ACCURACY_PROMPT =
+  "日本語のInstagramリール用動画です。聞こえた日本語を省略せず、言い換えず、固有名詞・数字・商品名をできるだけ正確に文字起こししてください。";
+
+function getRawSegments(transcription: TranscriptionResponse) {
+  const transcriptionText = transcription.text?.trim() ?? "";
+  const transcriptionDuration = Number(transcription.duration);
+  const segments: RawCaptionSegment[] = (transcription.segments ?? [])
+    .map((segment) => ({
+      start: Number(segment.start),
+      end: Number(segment.end),
+      text: segment.text?.trim() ?? "",
+    }))
+    .filter(
+      (segment) =>
+        Number.isFinite(segment.start) &&
+        Number.isFinite(segment.end) &&
+        segment.end > segment.start &&
+        Boolean(segment.text),
+    );
+
+  if (
+    segments.length === 0 &&
+    transcriptionText &&
+    Number.isFinite(transcriptionDuration) &&
+    transcriptionDuration > 0
+  ) {
+    segments.push({
+      start: 0,
+      end: transcriptionDuration,
+      text: transcriptionText,
+    });
+  }
+
+  return segments;
+}
+
+async function requestTranscription(
+  apiKey: string,
+  file: File,
+  mode: "timed" | "refine",
+): Promise<TranscriptionCallResult> {
+  const formData = new FormData();
+  formData.set("file", file, safeFileName(file.name));
+  formData.set(
+    "model",
+    mode === "timed"
+      ? "gpt-4o-transcribe-diarize"
+      : "gpt-4o-transcribe",
+  );
+  formData.set("language", "ja");
+  formData.set(
+    "response_format",
+    mode === "timed" ? "diarized_json" : "json",
+  );
+  formData.set("chunking_strategy", "auto");
+  formData.set("temperature", "0");
+  if (mode === "refine") {
+    formData.set("prompt", HIGH_ACCURACY_PROMPT);
+  }
+
+  const response = await fetch(
+    "https://api.openai.com/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    const errorResponse = (await response
+      .json()
+      .catch(() => null)) as OpenAIErrorResponse | null;
+    return {
+      ok: false,
+      status: response.status,
+      requestId: response.headers.get("x-request-id"),
+      error: errorResponse?.error,
+    };
+  }
+
+  return {
+    ok: true,
+    transcription: (await response.json()) as TranscriptionResponse,
+  };
+}
 
 function transcriptionError(
   status: number,
@@ -86,6 +191,7 @@ export async function POST(request: Request) {
     }
 
     let file: File | null = null;
+    let requestHighAccuracy = false;
     const requestContentType =
       request.headers.get("content-type")?.toLowerCase() ?? "";
 
@@ -93,7 +199,9 @@ export async function POST(request: Request) {
       const payload = (await request.json()) as {
         id?: string;
         code?: string;
+        quality?: string;
       };
+      requestHighAccuracy = payload.quality === "high";
       const id = payload.id?.trim() ?? "";
       const code = payload.code?.trim() ?? "";
       if (!id || !code) {
@@ -148,6 +256,7 @@ export async function POST(request: Request) {
     } else {
       const requestData = await request.formData();
       const uploadedFile = requestData.get("file");
+      requestHighAccuracy = requestData.get("quality") === "high";
       if (uploadedFile instanceof File) {
         file = uploadedFile;
       }
@@ -166,72 +275,51 @@ export async function POST(request: Request) {
       return jsonError("対応している動画または音声ファイルを選んでください。");
     }
 
-    const formData = new FormData();
-    formData.set("file", file, safeFileName(file.name));
-    formData.set("model", "gpt-4o-transcribe-diarize");
-    formData.set("language", "ja");
-    formData.set("response_format", "diarized_json");
-    formData.set("chunking_strategy", "auto");
-    formData.set("temperature", "0");
-
-    const response = await fetch(
-      "https://api.openai.com/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: formData,
-      },
-    );
-
-    if (!response.ok) {
-      const errorResponse = (await response
-        .json()
-        .catch(() => null)) as OpenAIErrorResponse | null;
+    const timedResult = await requestTranscription(apiKey, file, "timed");
+    if (!timedResult.ok) {
       console.error(
         "OpenAI transcription failed",
-        response.status,
-        response.headers.get("x-request-id"),
-        errorResponse?.error?.code,
-        errorResponse?.error?.type,
+        timedResult.status,
+        timedResult.requestId,
+        timedResult.error?.code,
+        timedResult.error?.type,
       );
       return jsonError(
-        transcriptionError(response.status, errorResponse?.error),
-        response.status,
+        transcriptionError(timedResult.status, timedResult.error),
+        timedResult.status,
       );
     }
 
-    const transcription = (await response.json()) as TranscriptionResponse;
-    const transcriptionText = transcription.text?.trim() ?? "";
+    const transcription = timedResult.transcription;
+    let transcriptionText = transcription.text?.trim() ?? "";
     const transcriptionDuration = Number(transcription.duration);
-    let rawSegments: RawCaptionSegment[] = (transcription.segments ?? [])
-      .map((segment) => ({
-        start: Number(segment.start),
-        end: Number(segment.end),
-        text: segment.text?.trim() ?? "",
-      }))
-      .filter(
-        (segment) =>
-          Number.isFinite(segment.start) &&
-          Number.isFinite(segment.end) &&
-          segment.end > segment.start &&
-          Boolean(segment.text),
-      );
-    if (
-      rawSegments.length === 0 &&
-      transcriptionText &&
-      Number.isFinite(transcriptionDuration) &&
-      transcriptionDuration > 0
-    ) {
-      rawSegments = [
-        {
-          start: 0,
-          end: transcriptionDuration,
-          text: transcriptionText,
-        },
-      ];
+    let rawSegments = getRawSegments(transcription);
+    const qualityReasons = getTranscriptionQualityReasons(transcriptionText);
+    const shouldRefine =
+      requestHighAccuracy ||
+      (transcriptionText.length > 0 && qualityReasons.length > 0);
+    let refined = false;
+
+    if (shouldRefine) {
+      const refineResult = await requestTranscription(apiKey, file, "refine");
+      if (refineResult.ok) {
+        const refinedText = refineResult.transcription.text?.trim() ?? "";
+        if (refinedText) {
+          rawSegments = alignRefinedTextToSegments(refinedText, rawSegments);
+          transcriptionText = refinedText;
+          refined = true;
+        }
+      } else {
+        console.error(
+          "OpenAI high-accuracy transcription failed",
+          refineResult.status,
+          refineResult.requestId,
+          refineResult.error?.code,
+          refineResult.error?.type,
+        );
+      }
     }
+
     const segments = buildCaptionSegments(rawSegments, 14);
 
     if (segments.length === 0) {
@@ -246,6 +334,7 @@ export async function POST(request: Request) {
               : 0,
           segments: [],
           silent: true,
+          refined,
         },
         {
           headers: {
@@ -262,6 +351,10 @@ export async function POST(request: Request) {
         duration:
           transcriptionDuration || segments.at(-1)?.end || 0,
         segments,
+        refined,
+        refinementReason: requestHighAccuracy
+          ? "requested"
+          : qualityReasons[0],
       },
       {
         headers: {

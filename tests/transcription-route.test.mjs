@@ -149,6 +149,98 @@ test("uses the full transcript when timed segments are omitted", async () => {
   }
 });
 
+test("uses a second high-accuracy pass only when requested", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+  };
+
+  const nativeFetch = globalThis.fetch;
+  const requestedModels = [];
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/audio/transcriptions") {
+      const model = init.body.get("model");
+      requestedModels.push(model);
+
+      if (model === "gpt-4o-transcribe-diarize") {
+        return Response.json({
+          duration: 6,
+          language: "ja",
+          text: "今日は新しい機能を紹介します字幕が自然になりました",
+          segments: [
+            { start: 0, end: 2.8, speaker: "A", text: "今日は新しい機能を紹介します" },
+            { start: 3.1, end: 6, speaker: "A", text: "字幕が自然になりました" },
+          ],
+        });
+      }
+
+      assert.equal(model, "gpt-4o-transcribe");
+      assert.equal(init.body.get("language"), "ja");
+      assert.equal(init.body.get("response_format"), "json");
+      assert.match(init.body.get("prompt"), /日本語のInstagramリール/);
+      return Response.json({
+        duration: 6,
+        language: "ja",
+        text: "今日は新しい機能をご紹介します。字幕がもっと自然になりました。",
+      });
+    }
+
+    return nativeFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("high-accuracy-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const formData = new FormData();
+    formData.set(
+      "file",
+      new File([new Uint8Array([0, 0, 0, 24])], "voice.wav", {
+        type: "audio/wav",
+      }),
+    );
+    formData.set("quality", "high");
+
+    const response = await worker.fetch(
+      new Request("http://localhost/api/transcribe", {
+        method: "POST",
+        body: formData,
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.deepEqual(requestedModels, [
+      "gpt-4o-transcribe-diarize",
+      "gpt-4o-transcribe",
+    ]);
+    assert.equal(payload.refined, true);
+    assert.equal(payload.refinementReason, "requested");
+    assert.equal(
+      payload.segments.map((segment) => segment.text).join(""),
+      "今日は新しい機能をご紹介します。字幕がもっと自然になりました。",
+    );
+    assert.equal(payload.segments[0].start, 0);
+    assert.equal(payload.segments.at(-1).end, 6);
+  } finally {
+    globalThis.fetch = nativeFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
 test("marks a silent audio chunk as skippable", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
@@ -207,6 +299,7 @@ test("marks a silent audio chunk as skippable", async () => {
       duration: 4,
       segments: [],
       silent: true,
+      refined: false,
     });
   } finally {
     globalThis.fetch = nativeFetch;

@@ -46,3 +46,27 @@ test("keeps each browser-generated audio request well below the site limit", () 
 
   assert.ok(wavBytes < 1024 * 1024);
 });
+
+test("normalizes a quiet voice without clipping its waveform", () => {
+  const samples = new Float32Array([-0.02, -0.01, 0.01, 0.02]);
+  const wav = encodeMonoWavChunk(
+    {
+      duration: 2,
+      getChannelData: () => samples,
+      length: samples.length,
+      numberOfChannels: 1,
+      sampleRate: 2,
+    },
+    0,
+    2,
+    2,
+  );
+  const view = new DataView(wav);
+  const encodedSamples = Array.from(
+    { length: samples.length },
+    (_, index) => view.getInt16(44 + index * 2, true),
+  );
+
+  assert.ok(Math.max(...encodedSamples.map(Math.abs)) > 2_000);
+  assert.ok(Math.max(...encodedSamples.map(Math.abs)) < 32_767);
+});

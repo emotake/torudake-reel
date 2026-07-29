@@ -1,5 +1,9 @@
 export const TRANSCRIPTION_AUDIO_SAMPLE_RATE = 16_000;
-export const TRANSCRIPTION_AUDIO_CHUNK_SECONDS = 15;
+export const TRANSCRIPTION_AUDIO_CHUNK_SECONDS = 25;
+const NORMALIZATION_TARGET_RMS = 0.16;
+const NORMALIZATION_PEAK_LIMIT = 0.92;
+const NORMALIZATION_MAX_GAIN = 6;
+const SILENCE_RMS_THRESHOLD = 0.0005;
 
 export type DecodedAudioSource = {
   duration: number;
@@ -77,6 +81,9 @@ export function encodeMonoWavChunk(
     (_, channel) => source.getChannelData(channel),
   );
   const sourceStep = sourceLength / outputSamples;
+  const monoSamples = new Float32Array(outputSamples);
+  let peak = 0;
+  let squaredTotal = 0;
 
   for (let index = 0; index < outputSamples; index += 1) {
     const sourcePosition = sourceStart + index * sourceStep;
@@ -90,7 +97,26 @@ export function encodeMonoWavChunk(
         channel[leftIndex] + (channel[rightIndex] - channel[leftIndex]) * mix;
     }
     sample /= channels.length;
-    view.setInt16(44 + index * bytesPerSample, pcm16(sample), true);
+    monoSamples[index] = sample;
+    peak = Math.max(peak, Math.abs(sample));
+    squaredTotal += sample * sample;
+  }
+
+  const rms = Math.sqrt(squaredTotal / outputSamples);
+  const rmsGain =
+    rms > SILENCE_RMS_THRESHOLD ? NORMALIZATION_TARGET_RMS / rms : 1;
+  const peakGain = peak > 0 ? NORMALIZATION_PEAK_LIMIT / peak : 1;
+  const gain = Math.max(
+    0.25,
+    Math.min(NORMALIZATION_MAX_GAIN, rmsGain, peakGain),
+  );
+
+  for (let index = 0; index < outputSamples; index += 1) {
+    view.setInt16(
+      44 + index * bytesPerSample,
+      pcm16(monoSamples[index] * gain),
+      true,
+    );
   }
 
   return buffer;

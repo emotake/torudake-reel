@@ -50,6 +50,11 @@ type ApiPayload = {
   error?: string;
 };
 
+type TranscriptionResult = {
+  refined: boolean;
+  segments: TranscriptLine[];
+};
+
 class ApiRequestError extends Error {
   constructor(
     message: string,
@@ -243,28 +248,44 @@ async function uploadVideoInChunks(
   }
 }
 
-async function transcribeMediaFile(mediaFile: File) {
+async function transcribeMediaFile(
+  mediaFile: File,
+  highAccuracy = false,
+): Promise<TranscriptionResult> {
   const formData = new FormData();
   formData.set("file", mediaFile, mediaFile.name);
+  if (highAccuracy) {
+    formData.set("quality", "high");
+  }
   const response = await fetch("/api/transcribe", {
     method: "POST",
     body: formData,
   });
   const payload = await readApiResponse<
-    ApiPayload & { segments?: TranscriptLine[]; silent?: boolean }
+    ApiPayload & {
+      refined?: boolean;
+      segments?: TranscriptLine[];
+      silent?: boolean;
+    }
   >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
-  if (payload.silent) return [];
+  if (payload.silent) {
+    return { segments: [], refined: Boolean(payload.refined) };
+  }
   if (!payload.segments?.length) {
     throw new Error("字幕を生成できませんでした。もう一度お試しください。");
   }
-  return payload.segments;
+  return {
+    segments: payload.segments,
+    refined: Boolean(payload.refined),
+  };
 }
 
 async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
-) {
+  highAccuracy = false,
+): Promise<TranscriptionResult> {
   let extractionDetail = "";
   try {
     onProgress(8);
@@ -279,15 +300,20 @@ async function transcribeLargeVideo(
       try {
         const mergedSegments: TranscriptLine[] = [];
         let completedChunks = 0;
+        let refined = false;
 
         for await (const chunk of extractTranscriptionAudioChunks(
           selectedFile,
           { maxChunkBytes },
         )) {
           onProgress(Math.min(84, 14 + completedChunks * 6));
-          const chunkSegments = await transcribeMediaFile(chunk.file);
+          const chunkResult = await transcribeMediaFile(
+            chunk.file,
+            highAccuracy,
+          );
+          refined ||= chunkResult.refined;
 
-          for (const segment of chunkSegments) {
+          for (const segment of chunkResult.segments) {
             mergedSegments.push({
               ...segment,
               id: mergedSegments.length + 1,
@@ -304,7 +330,7 @@ async function transcribeLargeVideo(
         }
 
         if (mergedSegments.length > 0) {
-          return mergedSegments;
+          return { segments: mergedSegments, refined };
         }
         break;
       } catch (error) {
@@ -377,6 +403,7 @@ async function transcribeLargeVideo(
     transcriptionDuration / TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
   );
   const mergedSegments: TranscriptLine[] = [];
+  let refined = false;
   const baseName =
     selectedFile.name.replace(/\.[^.]+$/, "").replace(/[^\p{L}\p{N}_-]+/gu, "_") ||
     "video";
@@ -399,9 +426,10 @@ async function transcribeLargeVideo(
       `${baseName}-audio-${String(index + 1).padStart(2, "0")}.wav`,
       { type: "audio/wav" },
     );
-    const chunkSegments = await transcribeMediaFile(audioFile);
+    const chunkResult = await transcribeMediaFile(audioFile, highAccuracy);
+    refined ||= chunkResult.refined;
 
-    for (const segment of chunkSegments) {
+    for (const segment of chunkResult.segments) {
       mergedSegments.push({
         ...segment,
         id: mergedSegments.length + 1,
@@ -417,7 +445,7 @@ async function transcribeLargeVideo(
       "音声を字幕にできませんでした。声が聞こえる区間がある動画でお試しください。",
     );
   }
-  return mergedSegments;
+  return { segments: mergedSegments, refined };
 }
 
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
@@ -476,6 +504,8 @@ export default function Home() {
   const [transcript, setTranscript] =
     useState<TranscriptLine[]>(initialTranscript);
   const [editError, setEditError] = useState("");
+  const [isHighAccuracyRun, setIsHighAccuracyRun] = useState(false);
+  const [usedHighAccuracy, setUsedHighAccuracy] = useState(false);
   const [toast, setToast] = useState("");
   const [transferFile, setTransferFile] = useState<File | null>(null);
   const [transferStatus, setTransferStatus] =
@@ -516,6 +546,8 @@ export default function Home() {
     }
     setFile(selected);
     setEditError("");
+    setUsedHighAccuracy(false);
+    setIsHighAccuracyRun(false);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -523,11 +555,13 @@ export default function Home() {
   function useSample() {
     setFile(null);
     setEditError("");
+    setUsedHighAccuracy(false);
+    setIsHighAccuracyRun(false);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function startEditing() {
+  async function startEditing(highAccuracy = false) {
     if (file && file.size > MAX_EDIT_VIDEO_BYTES) {
       setEditError(
         "字幕の自動生成は500MBまでです。動画を短くするか圧縮してお試しください。",
@@ -536,6 +570,7 @@ export default function Home() {
     }
 
     setEditError("");
+    setIsHighAccuracyRun(highAccuracy);
     setProgress(4);
     setStage("processing");
 
@@ -543,13 +578,17 @@ export default function Home() {
 
     try {
       let nextTranscript = initialTranscript;
+      let refined = false;
 
       if (file) {
         if (needsBrowserAudioExtraction(file)) {
-          nextTranscript = await transcribeLargeVideo(
+          const transcriptionResult = await transcribeLargeVideo(
             file,
             setProgress,
+            highAccuracy,
           );
+          nextTranscript = transcriptionResult.segments;
+          refined = transcriptionResult.refined;
         } else {
           const controller = new AbortController();
           const receipt = await uploadVideoInChunks(
@@ -567,16 +606,24 @@ export default function Home() {
           const response = await fetch("/api/transcribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: receipt.id, code: receipt.code }),
+            body: JSON.stringify({
+              id: receipt.id,
+              code: receipt.code,
+              quality: highAccuracy ? "high" : "standard",
+            }),
           });
           const payload = await readApiResponse<
-            ApiPayload & { segments?: TranscriptLine[] }
+            ApiPayload & {
+              refined?: boolean;
+              segments?: TranscriptLine[];
+            }
           >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
           if (!payload.segments?.length) {
             throw new Error("字幕を生成できませんでした。もう一度お試しください。");
           }
           nextTranscript = payload.segments;
+          refined = Boolean(payload.refined);
         }
       } else {
         progressTimer = window.setInterval(() => {
@@ -590,6 +637,7 @@ export default function Home() {
         window.clearInterval(progressTimer);
       }
       setTranscript(nextTranscript);
+      setUsedHighAccuracy(refined);
       setProgress(100);
       window.setTimeout(() => {
         setPreviewMode("after");
@@ -618,6 +666,8 @@ export default function Home() {
     setPreviewMode("after");
     setTranscript(initialTranscript);
     setEditError("");
+    setUsedHighAccuracy(false);
+    setIsHighAccuracyRun(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -807,13 +857,17 @@ export default function Home() {
           length={length}
           setLength={setLength}
           chooseAnother={() => inputRef.current?.click()}
-          startEditing={startEditing}
+          startEditing={() => startEditing(false)}
           error={editError}
         />
       )}
 
       {stage === "processing" && (
-        <Processing file={file} progress={progress} />
+        <Processing
+          file={file}
+          progress={progress}
+          highAccuracy={isHighAccuracyRun}
+        />
       )}
 
       {stage === "result" && (
@@ -831,6 +885,8 @@ export default function Home() {
           notify={notify}
           reset={reset}
           openTransfer={openTransferWithCurrentVideo}
+          regenerateHighAccuracy={() => startEditing(true)}
+          usedHighAccuracy={usedHighAccuracy}
         />
       )}
 
@@ -1520,13 +1576,21 @@ function SetupWorkspace({
 function Processing({
   file,
   progress,
+  highAccuracy,
 }: {
   file: File | null;
   progress: number;
+  highAccuracy: boolean;
 }) {
   const steps = [
-    { threshold: 18, label: "全体を読み取り中", note: "元動画の内容を最後まで確認" },
-    { threshold: 42, label: "文字起こし中", note: "話した言葉と時刻を正確に取得" },
+    { threshold: 18, label: "音声を整えています", note: "音量をそろえて声を聞き取りやすく調整" },
+    {
+      threshold: 42,
+      label: highAccuracy ? "高精度で文字起こし中" : "文字起こし中",
+      note: highAccuracy
+        ? "2つの認識結果を照合して言葉を補正"
+        : "日本語の発話と時刻を一度で取得",
+    },
     { threshold: 68, label: "時刻を合わせています", note: "発話の開始と終了を同期" },
     { threshold: 88, label: "自然に再構成中", note: "文の切れ目で指定時間へ編集" },
     { threshold: 100, label: "仕上げ中", note: "カットと字幕プレビューを準備" },
@@ -1554,7 +1618,9 @@ function Processing({
           <p className="eyebrow">AI EDITING</p>
           <h1>投稿できる状態に整えています。</h1>
           <p>
-            {file?.name ?? "サンプル動画"}を全体から読み取り、話の流れを保った短い動画へ再構成しています。
+            {file?.name ?? "サンプル動画"}の
+            {highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}
+            話の流れを保った短い動画へ再構成しています。
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -1602,6 +1668,8 @@ function ResultWorkspace({
   notify,
   reset,
   openTransfer,
+  regenerateHighAccuracy,
+  usedHighAccuracy,
 }: {
   file: File | null;
   videoUrl: string;
@@ -1616,6 +1684,8 @@ function ResultWorkspace({
   notify: (message: string) => void;
   reset: () => void;
   openTransfer: () => void;
+  regenerateHighAccuracy: () => Promise<void>;
+  usedHighAccuracy: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -2408,7 +2478,9 @@ function ResultWorkspace({
         <div>
           <p className="completePill">
             <span>✓</span>
-            全体の自動編集が完了しました
+            {usedHighAccuracy
+              ? "高精度の文字起こしで仕上げました"
+              : "全体の自動編集が完了しました"}
           </p>
           <h1>話の流れを残して、自然な長さにつなぎ直しました。</h1>
           <p>
@@ -2731,6 +2803,14 @@ function ResultWorkspace({
           <button className="quietButton" onClick={reset}>
             別の動画を作る
           </button>
+          {file && !usedHighAccuracy && (
+            <button
+              className="quietButton highAccuracyButton"
+              onClick={() => void regenerateHighAccuracy()}
+            >
+              高精度で再生成
+            </button>
+          )}
           {file ? (
             <button
               className="mainCta reviewCta"

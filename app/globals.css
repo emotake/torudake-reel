@@ -3428,6 +3428,17 @@ footer > small {
   opacity: 0.62;
 }
 
+.highAccuracyButton {
+  border-color: #b9dfc8;
+  background: #effcf4;
+  color: var(--mint-dark);
+}
+
+.highAccuracyButton:hover {
+  border-color: var(--mint);
+  background: #e1f8ea;
+}
+
 .toast {
   position: fixed;
   right: 22px;
