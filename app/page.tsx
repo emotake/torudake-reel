@@ -251,9 +251,13 @@ async function uploadVideoInChunks(
 async function transcribeMediaFile(
   mediaFile: File,
   highAccuracy = false,
+  usageReservationId: string | null = null,
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
   formData.set("file", mediaFile, mediaFile.name);
+  if (usageReservationId) {
+    formData.set("usageReservationId", usageReservationId);
+  }
   if (highAccuracy) {
     formData.set("quality", "high");
   }
@@ -285,6 +289,7 @@ async function transcribeLargeVideo(
   selectedFile: File,
   onProgress: (progress: number) => void,
   highAccuracy = false,
+  usageReservationId: string | null = null,
 ): Promise<TranscriptionResult> {
   let extractionDetail = "";
   try {
@@ -310,6 +315,7 @@ async function transcribeLargeVideo(
           const chunkResult = await transcribeMediaFile(
             chunk.file,
             highAccuracy,
+            usageReservationId,
           );
           refined ||= chunkResult.refined;
 
@@ -426,7 +432,11 @@ async function transcribeLargeVideo(
       `${baseName}-audio-${String(index + 1).padStart(2, "0")}.wav`,
       { type: "audio/wav" },
     );
-    const chunkResult = await transcribeMediaFile(audioFile, highAccuracy);
+    const chunkResult = await transcribeMediaFile(
+      audioFile,
+      highAccuracy,
+      usageReservationId,
+    );
     refined ||= chunkResult.refined;
 
     for (const segment of chunkResult.segments) {
@@ -446,6 +456,76 @@ async function transcribeLargeVideo(
     );
   }
   return { segments: mergedSegments, refined };
+}
+
+async function getVideoDurationSeconds(selectedFile: File) {
+  const objectUrl = URL.createObjectURL(selectedFile);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(
+        () => reject(new Error("動画の長さを確認できませんでした。")),
+        10000,
+      );
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        const duration = video.duration;
+        if (Number.isFinite(duration) && duration > 0) {
+          resolve(duration);
+        } else {
+          reject(new Error("動画の長さを確認できませんでした。"));
+        }
+      };
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(new Error("動画の長さを確認できませんでした。"));
+      };
+      video.src = objectUrl;
+    });
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function reserveVideoUsage(selectedFile: File) {
+  const response = await fetch("/api/usage/reserve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
+      idempotencyKey: crypto.randomUUID(),
+    }),
+  });
+  if (response.status === 401) {
+    window.location.href =
+      "/signin-with-chatgpt?return_to=%2Faccount%3Fcontinue%3Dediting";
+    throw new ApiRequestError(
+      "続けるにはアカウントへのログインが必要です。",
+      401,
+    );
+  }
+  const payload = await readApiResponse<
+    ApiPayload & {
+      required?: boolean;
+      reservationId?: string;
+    }
+  >(response, "利用枠を確認できませんでした。");
+  return payload.required ? (payload.reservationId ?? null) : null;
+}
+
+async function updateVideoUsage(
+  action: "complete" | "release",
+  reservationId: string,
+) {
+  await fetch(`/api/usage/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reservationId }),
+  }).catch(() => undefined);
 }
 
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
@@ -490,6 +570,7 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const transferInputRef = useRef<HTMLInputElement>(null);
   const transferAbortRef = useRef<AbortController | null>(null);
+  const usageReservationRef = useRef<string | null>(null);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
   const [tone, setTone] = useState<Tone>("editorial");
@@ -514,6 +595,10 @@ export default function Home() {
   const [transferReceipt, setTransferReceipt] =
     useState<TransferReceipt | null>(null);
   const [transferError, setTransferError] = useState("");
+  const [billingBusyPlan, setBillingBusyPlan] = useState<
+    "light" | "one_time" | null
+  >(null);
+  const [billingError, setBillingError] = useState("");
 
   useEffect(() => {
     return () => {
@@ -548,6 +633,7 @@ export default function Home() {
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
+    usageReservationRef.current = null;
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -575,10 +661,16 @@ export default function Home() {
     setStage("processing");
 
     let progressTimer: number | undefined;
+    let newlyReservedUsage: string | null = null;
 
     try {
       let nextTranscript = initialTranscript;
       let refined = false;
+      if (file && !highAccuracy) {
+        newlyReservedUsage = await reserveVideoUsage(file);
+        usageReservationRef.current = newlyReservedUsage;
+      }
+      const usageReservationId = usageReservationRef.current;
 
       if (file) {
         if (needsBrowserAudioExtraction(file)) {
@@ -586,6 +678,7 @@ export default function Home() {
             file,
             setProgress,
             highAccuracy,
+            usageReservationId,
           );
           nextTranscript = transcriptionResult.segments;
           refined = transcriptionResult.refined;
@@ -610,6 +703,7 @@ export default function Home() {
               id: receipt.id,
               code: receipt.code,
               quality: highAccuracy ? "high" : "standard",
+              usageReservationId,
             }),
           });
           const payload = await readApiResponse<
@@ -638,6 +732,9 @@ export default function Home() {
       }
       setTranscript(nextTranscript);
       setUsedHighAccuracy(refined);
+      if (newlyReservedUsage) {
+        await updateVideoUsage("complete", newlyReservedUsage);
+      }
       setProgress(100);
       window.setTimeout(() => {
         setPreviewMode("after");
@@ -646,6 +743,10 @@ export default function Home() {
     } catch (error) {
       if (progressTimer !== undefined) {
         window.clearInterval(progressTimer);
+      }
+      if (newlyReservedUsage) {
+        await updateVideoUsage("release", newlyReservedUsage);
+        usageReservationRef.current = null;
       }
       setProgress(0);
       setEditError(
@@ -668,7 +769,43 @@ export default function Home() {
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
+    usageReservationRef.current = null;
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function startCheckout(plan: "light" | "one_time") {
+    if (billingBusyPlan) return;
+    setBillingError("");
+    setBillingBusyPlan(plan);
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          requestId: crypto.randomUUID(),
+        }),
+      });
+      if (response.status === 401) {
+        const continuePath = `/account?checkout=${plan}`;
+        window.location.href = `/signin-with-chatgpt?return_to=${encodeURIComponent(continuePath)}`;
+        return;
+      }
+      const payload = await readApiResponse<
+        ApiPayload & {
+          url?: string;
+        }
+      >(response, "決済画面を開けませんでした。");
+      if (!payload.url) throw new Error("決済画面を開けませんでした。");
+      window.location.href = payload.url;
+    } catch (error) {
+      setBillingError(
+        error instanceof Error
+          ? error.message
+          : "決済画面を開けませんでした。",
+      );
+      setBillingBusyPlan(null);
+    }
   }
 
   function openTransfer() {
@@ -782,6 +919,9 @@ export default function Home() {
         )}
 
         <div className="topActions">
+          <a className="accountButton" href="/account">
+            アカウント
+          </a>
           {stage !== "start" && stage !== "transfer" && (
             <button className="quietButton" onClick={reset}>
               新しく作る
@@ -827,6 +967,9 @@ export default function Home() {
           openPicker={() => inputRef.current?.click()}
           useSample={useSample}
           openTransfer={openTransfer}
+          startCheckout={startCheckout}
+          billingBusyPlan={billingBusyPlan}
+          billingError={billingError}
         />
       )}
 
@@ -1130,10 +1273,16 @@ function Landing({
   openPicker,
   useSample,
   openTransfer,
+  startCheckout,
+  billingBusyPlan,
+  billingError,
 }: {
   openPicker: () => void;
   useSample: () => void;
   openTransfer: () => void;
+  startCheckout: (plan: "light" | "one_time") => void;
+  billingBusyPlan: "light" | "one_time" | null;
+  billingError: string;
 }) {
   return (
     <>
@@ -1163,7 +1312,7 @@ function Landing({
             </button>
           </div>
           <div className="trustRow">
-            <span>✓ 登録不要</span>
+            <span>✓ サンプル体験は登録不要</span>
             <span>✓ 体験版では動画を送信しません</span>
             <span>✓ スマホ動画対応</span>
           </div>
@@ -1354,13 +1503,13 @@ function Landing({
             <p>FREE PREVIEW</p>
             <h3>無料体験</h3>
             <strong>¥0</strong>
-            <span>30秒・透かしあり</span>
+            <span>合計3分または2動画まで</span>
             <ul>
-              <li>✓ 自動カット</li>
-              <li>✓ 自動テロップ</li>
-              <li>✓ 低画質プレビュー</li>
+              <li>✓ 自動カット・自動テロップ</li>
+              <li>✓ 1動画90秒まで</li>
+              <li>✓ 低画質・透かしあり</li>
             </ul>
-            <button onClick={useSample}>サンプルで試す</button>
+            <button onClick={openPicker}>無料で動画を試す</button>
           </article>
           <article className="featuredPrice">
             <span className="popular">おすすめ</span>
@@ -1375,7 +1524,14 @@ function Landing({
               <li>✓ 1080p・透かしなし</li>
               <li>✓ 編集スタイルを記憶</li>
             </ul>
-            <button onClick={openPicker}>無料で1本試す</button>
+            <button
+              onClick={() => startCheckout("light")}
+              disabled={billingBusyPlan !== null}
+            >
+              {billingBusyPlan === "light"
+                ? "決済画面を準備中…"
+                : "月5本プランを始める"}
+            </button>
           </article>
           <article>
             <p>ONE TIME</p>
@@ -1387,9 +1543,24 @@ function Landing({
               <li>✓ 1080p・透かしなし</li>
               <li>✓ 表紙と投稿文つき</li>
             </ul>
-            <button onClick={openPicker}>動画を選ぶ</button>
+            <button
+              onClick={() => startCheckout("one_time")}
+              disabled={billingBusyPlan !== null}
+            >
+              {billingBusyPlan === "one_time"
+                ? "決済画面を準備中…"
+                : "1本購入する"}
+            </button>
           </article>
         </div>
+        {billingError && (
+          <p className="billingInlineError" role="alert">
+            {billingError}
+          </p>
+        )}
+        <p className="billingFootnote">
+          決済はStripeの安全な画面で行います。カード情報は撮るだけリールに保存されません。
+        </p>
       </section>
 
       <section className="bottomCta">

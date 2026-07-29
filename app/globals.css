@@ -2940,6 +2940,292 @@ footer > small {
   }
 }
 
+.priceGrid article > button:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.accountButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(20, 34, 54, 0.16);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.billingInlineError {
+  max-width: 760px;
+  margin: 22px auto 0;
+  padding: 14px 18px;
+  border: 1px solid rgba(205, 73, 49, 0.28);
+  border-radius: 14px;
+  color: #9f2f22;
+  background: #fff2ee;
+  text-align: center;
+  font-weight: 700;
+}
+
+.billingFootnote {
+  margin: 20px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.accountPage {
+  min-height: 100vh;
+  padding: 28px clamp(20px, 5vw, 72px) 72px;
+  color: #17243a;
+  background:
+    radial-gradient(circle at 86% 8%, rgba(229, 82, 60, 0.13), transparent 28rem),
+    linear-gradient(180deg, #fbfaf7 0%, #f3f0e8 100%);
+}
+
+.accountHeader,
+.accountIntro {
+  display: flex;
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.accountHeader {
+  min-height: 64px;
+}
+
+.accountBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #17243a;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.accountBrand span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  color: white;
+  background: #df583f;
+  font-size: 12px;
+}
+
+.accountSignOut,
+.accountSecondaryAction {
+  color: #17243a;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.accountIntro {
+  padding: 76px 0 42px;
+}
+
+.accountIntro h1,
+.accountSignInCard h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(34px, 5vw, 62px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.accountIntro > div > p:last-child,
+.accountSignInCard > p {
+  color: #6f7784;
+}
+
+.accountSecondaryAction,
+.accountPrimaryAction {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  border-radius: 999px;
+  color: white;
+  background: #17243a;
+  text-decoration: none;
+  font-weight: 900;
+}
+
+.accountNotice,
+.accountLoading,
+.accountError,
+.accountSecurity {
+  width: min(1080px, 100%);
+  margin: 0 auto 24px;
+}
+
+.accountNotice {
+  padding: 16px 18px;
+  border: 1px solid rgba(209, 132, 34, 0.26);
+  border-radius: 16px;
+  background: #fff7e8;
+  color: #7c5318;
+  font-weight: 700;
+}
+
+.accountUsageGrid,
+.accountPlans {
+  display: grid;
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.accountUsageGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.accountUsageGrid article,
+.accountPlans article,
+.accountSignInCard {
+  border: 1px solid rgba(22, 36, 58, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 20px 60px rgba(43, 48, 62, 0.08);
+}
+
+.accountUsageGrid article {
+  padding: 24px;
+}
+
+.accountUsageGrid p,
+.accountPlans article > p {
+  margin: 0 0 12px;
+  color: #8b635a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.accountUsageGrid strong {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 25px;
+}
+
+.accountUsageGrid span {
+  color: #737b87;
+  font-size: 13px;
+}
+
+.accountPlans {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.accountPlans article {
+  padding: 28px;
+}
+
+.accountPlans article.featured {
+  border-color: rgba(223, 88, 63, 0.45);
+}
+
+.accountPlans h2 {
+  margin: 0 0 8px;
+}
+
+.accountPlans strong {
+  display: block;
+  margin-bottom: 22px;
+  font-size: 28px;
+}
+
+.accountPlans button,
+.accountPortalButton {
+  min-height: 48px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  background: #df583f;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.accountPlans button:disabled,
+.accountPortalButton:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.accountPortalButton {
+  display: block;
+  width: min(1080px, 100%);
+  margin: 18px auto 0;
+  color: #17243a;
+  background: white;
+  border: 1px solid rgba(22, 36, 58, 0.14);
+}
+
+.accountError {
+  margin-top: 18px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  color: #9f2f22;
+  background: #fff2ee;
+  font-weight: 800;
+}
+
+.accountSecurity {
+  margin-top: 24px;
+  color: #7b828d;
+  font-size: 12px;
+  text-align: center;
+}
+
+.accountSignInCard {
+  width: min(640px, 100%);
+  margin: 9vh auto 0;
+  padding: clamp(28px, 6vw, 56px);
+}
+
+.accountSignInCard .accountBrand {
+  margin-bottom: 54px;
+}
+
+.accountSignInCard .accountPrimaryAction {
+  margin-top: 24px;
+}
+
+.accountSignInCard small {
+  display: block;
+  margin-top: 18px;
+  color: #7b828d;
+  line-height: 1.7;
+}
+
+@media (max-width: 760px) {
+  .accountButton {
+    display: none;
+  }
+
+  .accountIntro {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-top: 44px;
+  }
+
+  .accountUsageGrid,
+  .accountPlans {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .resultCaption {
     animation: none;

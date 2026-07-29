@@ -8,6 +8,13 @@
       "when": 1785109800000,
       "tag": "0000_video_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785369000000,
+      "tag": "0001_billing_accounts",
+      "breakpoints": true
     }
   ]
 }

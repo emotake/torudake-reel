@@ -11,6 +11,10 @@ declare module "cloudflare:workers" {
     DB: D1Database;
     MEDIA: R2Bucket;
     OPENAI_API_KEY?: string;
+    STRIPE_SECRET_KEY?: string;
+    STRIPE_WEBHOOK_SECRET?: string;
+    STRIPE_PRICE_LIGHT_MONTHLY?: string;
+    STRIPE_PRICE_ONE_TIME?: string;
     [binding: string]: unknown;
   };
 }

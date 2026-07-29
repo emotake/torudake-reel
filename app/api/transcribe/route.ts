@@ -17,6 +17,9 @@ import {
   removeTransfer,
   safeFileName,
 } from "../../../lib/transfers";
+import { findOwnedUsageReservation } from "../../../lib/billing-store";
+import { getCurrentUser } from "../../../lib/current-user";
+import { isBillingConfigured } from "../../../lib/stripe";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 45_000;
@@ -45,6 +48,7 @@ type OpenAIErrorResponse = {
 type TranscriptionCallResult =
   | {
       ok: true;
+      requestId: string | null;
       transcription: TranscriptionResponse;
     }
   | {
@@ -178,11 +182,14 @@ async function requestTranscription(
 
   return {
     ok: true,
+    requestId: response.headers.get("x-request-id"),
     transcription: (await response.json()) as TranscriptionResponse,
   };
 }
 
-function canUseTimedFallback(result: TranscriptionCallResult) {
+function canUseTimedFallback(
+  result: TranscriptionCallResult,
+): result is Extract<TranscriptionCallResult, { ok: false }> {
   return !result.ok && result.status >= 500 && result.status <= 599;
 }
 
@@ -269,6 +276,7 @@ export async function POST(request: Request) {
 
     let file: File | null = null;
     let requestHighAccuracy = false;
+    let usageReservationId = "";
     const requestContentType =
       request.headers.get("content-type")?.toLowerCase() ?? "";
 
@@ -277,8 +285,10 @@ export async function POST(request: Request) {
         id?: string;
         code?: string;
         quality?: string;
+        usageReservationId?: string;
       };
       requestHighAccuracy = payload.quality === "high";
+      usageReservationId = payload.usageReservationId?.trim() ?? "";
       const id = payload.id?.trim() ?? "";
       const code = payload.code?.trim() ?? "";
       if (!id || !code) {
@@ -334,8 +344,27 @@ export async function POST(request: Request) {
       const requestData = await request.formData();
       const uploadedFile = requestData.get("file");
       requestHighAccuracy = requestData.get("quality") === "high";
+      usageReservationId = String(
+        requestData.get("usageReservationId") ?? "",
+      ).trim();
       if (uploadedFile instanceof File) {
         file = uploadedFile;
+      }
+    }
+
+    if (isBillingConfigured()) {
+      const currentUser = getCurrentUser(request);
+      if (!currentUser) {
+        return jsonError("続けるにはアカウントへのログインが必要です。", 401);
+      }
+      if (
+        !usageReservationId ||
+        !(await findOwnedUsageReservation(currentUser, usageReservationId))
+      ) {
+        return jsonError(
+          "利用枠を確認できませんでした。動画を選び直してください。",
+          402,
+        );
       }
     }
 
