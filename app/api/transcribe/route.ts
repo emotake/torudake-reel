@@ -170,7 +170,7 @@ export async function POST(request: Request) {
     formData.append("timestamp_granularities[]", "segment");
     formData.set(
       "prompt",
-      "撮るだけリール。自然な日本語の句読点を使い、固有名詞と話し言葉を正確に文字起こししてください。",
+      "撮るだけリール。話し言葉を省略せず正確に文字起こしし、自然な日本語の句読点を補って意味の区切りを明確にしてください。固有名詞と数字は特に正確にしてください。",
     );
 
     const response = await fetch(
