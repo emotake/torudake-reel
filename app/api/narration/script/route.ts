@@ -127,7 +127,7 @@ export async function POST(request: Request) {
   }
 
   if (isBillingConfigured()) {
-    const currentUser = getCurrentUser(request);
+    const currentUser = getCurrentUser(request, { allowTrial: true });
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId

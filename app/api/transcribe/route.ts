@@ -353,7 +353,7 @@ export async function POST(request: Request) {
     }
 
     if (isBillingConfigured()) {
-      const currentUser = getCurrentUser(request);
+      const currentUser = getCurrentUser(request, { allowTrial: true });
       if (!currentUser) {
         return jsonError("続けるにはアカウントへのログインが必要です。", 401);
       }

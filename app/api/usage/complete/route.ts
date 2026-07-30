@@ -7,7 +7,7 @@ import { isBillingConfigured } from "../../../../lib/stripe";
 
 export async function POST(request: Request) {
   if (!isBillingConfigured()) return Response.json({ completed: true });
-  const currentUser = getCurrentUser(request);
+  const currentUser = getCurrentUser(request, { allowTrial: true });
   if (!currentUser) return authenticationRequired();
   const payload = (await request.json().catch(() => null)) as {
     reservationId?: string;

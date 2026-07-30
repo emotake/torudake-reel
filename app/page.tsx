@@ -609,19 +609,31 @@ async function extractNarrationFrames(selectedFile: File, count = 6) {
 }
 
 async function reserveVideoUsage(selectedFile: File) {
-  const response = await fetch("/api/usage/reserve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
-      idempotencyKey: crypto.randomUUID(),
-    }),
+  const requestBody = JSON.stringify({
+    sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
+    idempotencyKey: crypto.randomUUID(),
   });
+  const requestReservation = () =>
+    fetch("/api/usage/reserve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: requestBody,
+    });
+  let response = await requestReservation();
+
   if (response.status === 401) {
-    window.location.href =
-      "/signin-with-chatgpt?return_to=%2Faccount%3Fcontinue%3Dediting";
+    const sessionResponse = await fetch("/api/session/trial", {
+      method: "POST",
+    });
+    await readApiResponse<ApiPayload & { ready?: boolean }>(
+      sessionResponse,
+      "無料体験を開始できませんでした。ページを再読み込みしてお試しください。",
+    );
+    response = await requestReservation();
+  }
+  if (response.status === 401) {
     throw new ApiRequestError(
-      "続けるにはアカウントへのログインが必要です。",
+      "無料体験を開始できませんでした。ページを再読み込みしてお試しください。",
       401,
     );
   }
@@ -1191,7 +1203,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260730-purposeful-editing">
+    <main className="siteShell" data-build="20260730-trial-session">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">

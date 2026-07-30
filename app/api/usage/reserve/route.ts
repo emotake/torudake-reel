@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (!isBillingConfigured()) {
     return Response.json({ required: false });
   }
-  const currentUser = getCurrentUser(request);
+  const currentUser = getCurrentUser(request, { allowTrial: true });
   if (!currentUser) return authenticationRequired();
 
   let payload: {
