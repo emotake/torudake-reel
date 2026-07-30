@@ -949,7 +949,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell">
+    <main className="siteShell" data-build="20260730-stripe-fixed">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
