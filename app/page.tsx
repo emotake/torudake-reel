@@ -1191,7 +1191,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260730-narration-mode">
+    <main className="siteShell" data-build="20260730-purposeful-editing">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -1735,8 +1735,8 @@ function Landing({
           <article>
             <span className="stepNo">02</span>
             <div className="stepIcon magicIcon">✦</div>
-            <h3>AIが全部整える</h3>
-            <p>映像、音声、字幕、AIナレーションをまとめて処理。</p>
+            <h3>目的に合わせて自動編集</h3>
+            <p>映像、音声、字幕、AIナレーションをまとめて設計。</p>
             <small>元の音声があっても、なくても対応</small>
           </article>
           <article>

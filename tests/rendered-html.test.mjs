@@ -35,6 +35,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を預ける/);
   assert.match(html, /安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
+  assert.match(html, /目的に合わせて自動編集/);
+  assert.doesNotMatch(html, /AIが全部整える/);
   assert.match(html, /まず1本、完成を見てから。/);
   assert.match(html, /最大500MB/);
   assert.match(html, /合計3分または2動画まで/);
