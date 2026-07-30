@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
+  getNarrationOriginalAudioGain,
   NARRATION_DISCLOSURE_TEXT,
   normalizeNarrationPlan,
   splitNarrationScript,
@@ -64,4 +65,9 @@ test("always appends one visible AI narration disclosure", () => {
     1,
   );
   assert.ok(caption.endsWith(NARRATION_DISCLOSURE_TEXT));
+});
+
+test("uses a quiet original track only when narration mix keeps it", () => {
+  assert.equal(getNarrationOriginalAudioGain("duck"), 0.12);
+  assert.equal(getNarrationOriginalAudioGain("mute"), 0);
 });

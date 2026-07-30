@@ -6,6 +6,7 @@ export const NARRATION_TERMS_VERSION = "2026-07-30";
 
 export type VideoAudioMode = "spoken" | "narration";
 export type NarrationStyle = "bright" | "calm" | "tempo" | "refined";
+export type NarrationOriginalAudioMode = "duck" | "mute";
 
 export type NarrationSegment = {
   text: string;
@@ -156,6 +157,12 @@ export function buildDisclosedPostCaption(socialCaption: string) {
     .replaceAll(NARRATION_DISCLOSURE_TEXT, "")
     .trim();
   return [body, NARRATION_DISCLOSURE_TEXT].filter(Boolean).join("\n\n");
+}
+
+export function getNarrationOriginalAudioGain(
+  mode: NarrationOriginalAudioMode,
+) {
+  return mode === "duck" ? 0.12 : 0;
 }
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {

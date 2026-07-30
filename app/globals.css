@@ -3604,6 +3604,57 @@ footer > small {
   line-height: 1.5;
 }
 
+.narrationOptionLabel,
+.resultAudioMix > span {
+  display: block;
+  margin: 15px 0 8px;
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.narrationOptionLabel:first-of-type {
+  margin-top: 0;
+}
+
+.narrationMixCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.narrationMixCards button {
+  display: grid;
+  min-height: 62px;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.narrationMixCards button.selected {
+  border: 2px solid var(--coral);
+  background: #fff8f4;
+}
+
+.narrationMixCards strong {
+  font-size: 8px;
+}
+
+.narrationMixCards small {
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.resultAudioMix > span {
+  margin-top: 0;
+}
+
 .narrationBrief {
   display: grid;
   gap: 8px;
@@ -3937,6 +3988,10 @@ footer > small {
   .narrationStyleCards,
   .voiceStylePicker {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .narrationMixCards {
+    grid-template-columns: 1fr;
   }
 
   .narrationStudio {

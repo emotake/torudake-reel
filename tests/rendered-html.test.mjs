@@ -28,8 +28,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>撮るだけリール｜話して送るだけの自動動画編集<\/title>/);
-  assert.match(html, /話して送るだけ。/);
+  assert.match(html, /<title>撮るだけリール｜動画を選ぶだけの自動動画編集<\/title>/);
+  assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
   assert.match(html, /動画を預ける/);
@@ -48,7 +48,7 @@ test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="撮るだけリール｜話して送るだけの自動動画編集"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜動画を選ぶだけの自動動画編集"/);
   assert.match(html, /property="og:image"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project|30秒ジャッジ/);

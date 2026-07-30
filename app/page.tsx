@@ -46,11 +46,13 @@ import {
 import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
+  getNarrationOriginalAudioGain,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
   type NarrationPlan,
+  type NarrationOriginalAudioMode,
   type NarrationStyle,
   type VideoAudioMode,
 } from "../lib/narration";
@@ -718,6 +720,8 @@ export default function Home() {
   const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
   const [narrationStyle, setNarrationStyle] =
     useState<NarrationStyle>("bright");
+  const [narrationOriginalAudio, setNarrationOriginalAudio] =
+    useState<NarrationOriginalAudioMode>("duck");
   const [narrationBrief, setNarrationBrief] = useState("");
   const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
     null,
@@ -1061,6 +1065,7 @@ export default function Home() {
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
+    setNarrationOriginalAudio("duck");
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     usageReservationRef.current = null;
@@ -1186,7 +1191,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260730-ai-narration">
+    <main className="siteShell" data-build="20260730-narration-mode">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -1195,7 +1200,7 @@ export default function Home() {
           </span>
           <span className="brandText">
             撮るだけリール
-            <small>話す動画も、無言動画も</small>
+            <small>素材動画から、投稿できる1本へ</small>
           </span>
         </button>
 
@@ -1295,6 +1300,8 @@ export default function Home() {
           setAudioMode={setAudioMode}
           narrationStyle={narrationStyle}
           setNarrationStyle={setNarrationStyle}
+          narrationOriginalAudio={narrationOriginalAudio}
+          setNarrationOriginalAudio={setNarrationOriginalAudio}
           narrationBrief={narrationBrief}
           setNarrationBrief={setNarrationBrief}
           chooseAnother={() => inputRef.current?.click()}
@@ -1338,6 +1345,8 @@ export default function Home() {
           setNarrationPlan={setNarrationPlan}
           narrationAudioUrl={narrationAudioUrl}
           narrationStyle={narrationStyle}
+          narrationOriginalAudio={narrationOriginalAudio}
+          setNarrationOriginalAudio={setNarrationOriginalAudio}
           regenerateNarration={regenerateNarration}
         />
       )}
@@ -1345,7 +1354,7 @@ export default function Home() {
       <footer>
         <div>
           <strong>撮るだけリール</strong>
-          <span>動画を送るだけ。カット・AI音声・テロップ・表紙まで自動。</span>
+          <span>動画を選ぶだけ。カット・AI音声・テロップ・表紙まで自動。</span>
         </div>
         <div className="footerLinks">
           <a href="#how">使い方</a>
@@ -1599,10 +1608,10 @@ function Landing({
         <div className="heroCopy">
           <p className="eyebrow">
             <span>NEW</span>
-            話す動画も、無言動画も
+            素材動画から、投稿できる1本へ
           </p>
           <h1>
-            話して送るだけ。
+            動画を選ぶだけ。
             <br />
             <em>編集は、もうしない。</em>
           </h1>
@@ -1711,7 +1720,7 @@ function Landing({
           <h2>
             あなたがするのは、
             <br />
-            <em>話す・選ぶ・確認する。</em>
+            <em>選ぶ・決める・確認する。</em>
           </h2>
           <p>難しい編集画面はありません。</p>
         </div>
@@ -1727,8 +1736,8 @@ function Landing({
             <span className="stepNo">02</span>
             <div className="stepIcon magicIcon">✦</div>
             <h3>AIが全部整える</h3>
-            <p>無音、言い淀み、字幕、ズームをまとめて処理。</p>
-            <small>日本語の自然な「間」を残す</small>
+            <p>映像、音声、字幕、AIナレーションをまとめて処理。</p>
+            <small>元の音声があっても、なくても対応</small>
           </article>
           <article>
             <span className="stepNo">03</span>
@@ -1755,7 +1764,7 @@ function Landing({
           <ul>
             <li>
               <span>✓</span>
-              日本語の言い淀みと自然な間を分ける
+              元の音声とAIナレーションを自然に組み合わせる
             </li>
             <li>
               <span>✓</span>
@@ -1908,6 +1917,8 @@ function SetupWorkspace({
   setAudioMode,
   narrationStyle,
   setNarrationStyle,
+  narrationOriginalAudio,
+  setNarrationOriginalAudio,
   narrationBrief,
   setNarrationBrief,
   chooseAnother,
@@ -1924,6 +1935,8 @@ function SetupWorkspace({
   setAudioMode: (mode: VideoAudioMode) => void;
   narrationStyle: NarrationStyle;
   setNarrationStyle: (style: NarrationStyle) => void;
+  narrationOriginalAudio: NarrationOriginalAudioMode;
+  setNarrationOriginalAudio: (mode: NarrationOriginalAudioMode) => void;
   narrationBrief: string;
   setNarrationBrief: (brief: string) => void;
   chooseAnother: () => void;
@@ -1937,7 +1950,7 @@ function SetupWorkspace({
           <p className="eyebrow">NEW PROJECT</p>
           <h1>どんなリールにしますか？</h1>
           <p>
-            話している動画は聞き取り、無言動画は映像からナレーションまで自動設計します。
+            元の音声を活かす編集と、AIナレーションを重ねる編集から選べます。
           </p>
         </div>
         <span>STEP 1 / 2</span>
@@ -1959,7 +1972,7 @@ function SetupWorkspace({
           <div className="fileRow">
             <span className="fileIcon">▶</span>
             <p>
-              <strong>{file?.name ?? "sample_talking_video.mp4"}</strong>
+              <strong>{file?.name ?? "sample_reel_video.mp4"}</strong>
               <small>
                 {file ? `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB` : "18.4 MB"}・縦動画
               </small>
@@ -1969,7 +1982,7 @@ function SetupWorkspace({
           <div className="localNote">
             <span>●</span>
             {audioMode === "narration"
-              ? "代表的な場面だけを安全に読み取り、映像に合う台本と音声を生成します。"
+              ? "会話や環境音が入った動画にも使えます。代表場面から台本を作り、AIナレーションを重ねます。"
               : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
           </div>
         </aside>
@@ -1978,7 +1991,7 @@ function SetupWorkspace({
           <fieldset>
             <legend>
               <span>01</span>
-              動画の音声
+              音声の仕上げ方
             </legend>
             <div className="audioModeCards">
               <button
@@ -1986,9 +1999,9 @@ function SetupWorkspace({
                 className={audioMode === "spoken" ? "selected" : ""}
                 onClick={() => setAudioMode("spoken")}
               >
-                <i aria-hidden="true">声</i>
-                <strong>話している動画</strong>
-                <small>声を高精度で字幕にして自然にカット</small>
+                <i aria-hidden="true">元</i>
+                <strong>元の音声を活かす</strong>
+                <small>会話・解説・環境音から字幕と自然なカット</small>
                 <b>{audioMode === "spoken" ? "✓" : ""}</b>
               </button>
               <button
@@ -1997,8 +2010,8 @@ function SetupWorkspace({
                 onClick={() => setAudioMode("narration")}
               >
                 <i aria-hidden="true">AI</i>
-                <strong>無言動画＋AIナレーション</strong>
-                <small>映像から台本・音声・テロップを生成</small>
+                <strong>AIナレーションモード</strong>
+                <small>元の音声の有無を問わず、台本とAI音声を追加</small>
                 <b>{audioMode === "narration" ? "✓" : ""}</b>
               </button>
             </div>
@@ -2055,8 +2068,9 @@ function SetupWorkspace({
             <fieldset className="narrationSetup">
               <legend>
                 <span>04</span>
-                ナレーションの雰囲気
+                AIナレーションの仕上げ
               </legend>
+              <p className="narrationOptionLabel">声の雰囲気</p>
               <div className="narrationStyleCards">
                 {NARRATION_STYLES.map((style) => (
                   <button
@@ -2069,6 +2083,29 @@ function SetupWorkspace({
                     <small>{style.note}</small>
                   </button>
                 ))}
+              </div>
+              <p className="narrationOptionLabel">元動画の音</p>
+              <div className="narrationMixCards">
+                <button
+                  type="button"
+                  className={
+                    narrationOriginalAudio === "duck" ? "selected" : ""
+                  }
+                  onClick={() => setNarrationOriginalAudio("duck")}
+                >
+                  <strong>小さく残す</strong>
+                  <small>会話・環境音を12%で残し、AI音声を重ねる</small>
+                </button>
+                <button
+                  type="button"
+                  className={
+                    narrationOriginalAudio === "mute" ? "selected" : ""
+                  }
+                  onClick={() => setNarrationOriginalAudio("mute")}
+                >
+                  <strong>元の音を消す</strong>
+                  <small>元動画を消音し、AIナレーションだけにする</small>
+                </button>
               </div>
               <label className="narrationBrief">
                 <span>伝えたい内容・商品名など <small>任意</small></span>
@@ -2106,7 +2143,7 @@ function SetupWorkspace({
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
                 ・
                 {audioMode === "narration"
-                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声`
+                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・元音${narrationOriginalAudio === "duck" ? "12%" : "OFF"}`
                   : "おまかせテロップ"}
                 ・{length}秒
               </p>
@@ -2245,6 +2282,8 @@ function ResultWorkspace({
   setNarrationPlan,
   narrationAudioUrl,
   narrationStyle,
+  narrationOriginalAudio,
+  setNarrationOriginalAudio,
   regenerateNarration,
 }: {
   file: File | null;
@@ -2267,6 +2306,8 @@ function ResultWorkspace({
   setNarrationPlan: (plan: NarrationPlan | null) => void;
   narrationAudioUrl: string;
   narrationStyle: NarrationStyle;
+  narrationOriginalAudio: NarrationOriginalAudioMode;
+  setNarrationOriginalAudio: (mode: NarrationOriginalAudioMode) => void;
   regenerateNarration: (
     script: string,
     style: NarrationStyle,
@@ -2326,7 +2367,7 @@ function ResultWorkspace({
     "--caption-panel": captionDesign.palette.background,
   } as CSSProperties;
   const exportName =
-    file?.name.replace(/\.[^.]+$/, "") ?? "sample_talking_video";
+    file?.name.replace(/\.[^.]+$/, "") ?? "sample_reel_video";
   const removedCount = transcript.filter((line) => line.removed).length;
 
   function toggleLine(id: number) {
@@ -2449,6 +2490,9 @@ function ResultWorkspace({
       return;
     }
     if (video.paused) {
+      video.volume = narrationPlan
+        ? getNarrationOriginalAudioGain(narrationOriginalAudio)
+        : 1;
       const isInsideKeptRange = editRanges.some(
         (range) =>
           video.currentTime >= range.start &&
@@ -2549,6 +2593,15 @@ function ResultWorkspace({
       response,
       "確認を記録できませんでした。もう一度お試しください。",
     );
+  }
+
+  function updateNarrationOriginalAudio(
+    mode: NarrationOriginalAudioMode,
+  ) {
+    setNarrationOriginalAudio(mode);
+    if (videoRef.current) {
+      videoRef.current.volume = getNarrationOriginalAudioGain(mode);
+    }
   }
 
   async function generateThumbnail() {
@@ -2735,7 +2788,7 @@ function ResultWorkspace({
       context.fillText(
         captionProfile.brandName
           ? `${captionProfile.brandName}・Reel story`
-          : "話して送るだけ・自動動画編集",
+          : "動画を選ぶだけ・自動動画編集",
         panelX + 52,
         panelY + panelHeight - 54,
       );
@@ -3024,7 +3077,8 @@ function ResultWorkspace({
               new MediaStream(sourceAudioTracks),
             );
           const originalGain = exportAudioContext.createGain();
-          originalGain.gain.value = 0.12;
+          originalGain.gain.value =
+            getNarrationOriginalAudioGain(narrationOriginalAudio);
           originalSource.connect(originalGain).connect(destination);
         }
 
@@ -3258,6 +3312,31 @@ function ResultWorkspace({
                     <small>{style.note}</small>
                   </button>
                 ))}
+              </div>
+              <div className="resultAudioMix">
+                <span>元動画の音</span>
+                <div className="narrationMixCards">
+                  <button
+                    type="button"
+                    className={
+                      narrationOriginalAudio === "duck" ? "selected" : ""
+                    }
+                    onClick={() => updateNarrationOriginalAudio("duck")}
+                  >
+                    <strong>小さく残す</strong>
+                    <small>会話・環境音を12%</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      narrationOriginalAudio === "mute" ? "selected" : ""
+                    }
+                    onClick={() => updateNarrationOriginalAudio("mute")}
+                  >
+                    <strong>元の音を消す</strong>
+                    <small>AI音声だけ</small>
+                  </button>
+                </div>
               </div>
               <button
                 type="button"
