@@ -2055,6 +2055,53 @@ footer > small {
   font-size: 8px;
 }
 
+.autoTelopNote {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  margin-top: 24px;
+  padding: 17px;
+  border: 1px solid #cfe4dc;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f4fffaf0, #fffaf5);
+}
+
+.autoTelopNote > span {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #ffd26a;
+  font-family: "DM Sans", sans-serif;
+  font-size: 17px;
+  font-weight: 900;
+  box-shadow: 0 7px 18px #10182824;
+}
+
+.autoTelopNote strong {
+  font-size: 10px;
+}
+
+.autoTelopNote p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.65;
+}
+
+.autoTelopNote > small {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #dff8ec;
+  color: var(--mint-dark);
+  font-size: 7px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .optionCards {
   display: grid;
   gap: 10px;
@@ -2699,6 +2746,198 @@ footer > small {
   font-weight: 800;
 }
 
+.captionIdentityPanel {
+  margin: 0 0 13px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffdf9;
+}
+
+.captionIdentitySummary {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.identityMonogram {
+  display: grid;
+  width: 42px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--caption-border, #e45f4d);
+  border-left-width: 3px;
+  border-radius: 7px;
+  background: var(--caption-panel, #fff);
+  color: var(--caption-accent, #e45f4d);
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.identityMonogram.mono {
+  border-width: 2px;
+  border-radius: 2px;
+  box-shadow: 3px 3px 0 #181818;
+}
+
+.identityMonogram.signature {
+  border-radius: 9px 2px 9px 2px;
+  font-family: Georgia, serif;
+}
+
+.captionIdentitySummary > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.captionIdentitySummary small {
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.captionIdentitySummary strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.captionIdentitySummary > i {
+  color: var(--coral);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.captionIdentityControls {
+  display: grid;
+  gap: 13px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: white;
+}
+
+.identityControl {
+  display: grid;
+  gap: 7px;
+}
+
+.identityControl > span {
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.identityControl > span small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.moodChoices {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.moodChoices button {
+  min-height: 34px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.moodChoices button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
+.brandNameControl input {
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdfa;
+  color: var(--ink);
+  font: inherit;
+  font-size: 9px;
+  outline: none;
+}
+
+.brandNameControl input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px #e45f4d14;
+}
+
+.accentChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.accentChoices > button {
+  width: 26px;
+  height: 26px;
+  border: 3px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.accentChoices > button.active {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.customAccent {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 29px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.customAccent input {
+  width: 23px;
+  height: 21px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.captionIdentityControls > p {
+  margin: 0;
+  color: var(--mint-dark);
+  font-size: 7px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
 .patternSwatch {
   display: grid;
   width: 28px;
@@ -2800,18 +3039,46 @@ footer > small {
   z-index: 9;
   padding: 13px 18px 14px;
   border: 1px solid #eaded3;
-  border-left: 4px solid #e45f4d;
+  border-left: 4px solid var(--caption-border, #e45f4d);
   border-radius: 8px;
-  background: rgba(255,252,248,.96);
+  background: var(--caption-panel, rgba(255,252,248,.96));
   box-shadow: 0 14px 34px #10182832;
   backdrop-filter: blur(10px);
-  color: #172033;
+  color: var(--caption-text, #172033);
   font-size: 14px;
   font-weight: 800;
   line-height: 1.58;
   letter-spacing: .035em;
   text-align: center;
   animation: captionPop .2s cubic-bezier(.2,.8,.2,1);
+}
+
+.captionLine {
+  display: block;
+}
+
+.captionBrand {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--caption-accent, #e45f4d);
+  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-size: .58em;
+  font-weight: 850;
+  letter-spacing: .12em;
+  line-height: 1.2;
+}
+
+.resultCaption.hook {
+  padding-top: 16px;
+  font-size: 16px;
+}
+
+.resultCaption.metric {
+  font-size: 15px;
+}
+
+.resultCaption.emphasis {
+  box-shadow: 0 17px 38px #1018283d;
 }
 
 .resultCaption strong {
@@ -2821,7 +3088,7 @@ footer > small {
   border-radius: 0;
   background: linear-gradient(transparent 67%, #ef9c8f80 0);
   box-shadow: none;
-  color: #c94736;
+  color: var(--caption-accent, #c94736);
   line-height: 1.25;
   transform: none;
 }
@@ -2844,12 +3111,12 @@ footer > small {
 
 .resultCaption.cinema strong {
   background: transparent;
-  color: #f4d57a;
+  color: var(--caption-accent, #f4d57a);
 }
 
 .resultCaption.studio {
   border: 1px solid #ffffff26;
-  border-bottom: 4px solid #d5a850;
+  border-bottom: 4px solid var(--caption-border, #d5a850);
   border-radius: 5px;
   background: rgba(19,27,40,.94);
   color: white;
@@ -2859,11 +3126,11 @@ footer > small {
 
 .resultCaption.studio strong {
   background: transparent;
-  color: #ffd26a;
+  color: var(--caption-accent, #ffd26a);
 }
 
 .resultCaption.glass {
-  border: 1px solid #8fe3cc9c;
+  border: 1px solid var(--caption-border, #8fe3cc);
   border-radius: 14px;
   background: linear-gradient(135deg, #15353bd9, #14232edb);
   box-shadow: 0 16px 38px #06111670;
@@ -2874,11 +3141,11 @@ footer > small {
 
 .resultCaption.glass strong {
   background: transparent;
-  color: #9ff3dc;
+  color: var(--caption-accent, #9ff3dc);
 }
 
 .resultCaption.mono {
-  border: 2px solid #181818;
+  border: 2px solid var(--caption-border, #181818);
   border-radius: 2px;
   background: rgba(248,246,240,.97);
   box-shadow: 6px 6px 0 #181818;
@@ -2890,12 +3157,12 @@ footer > small {
 
 .resultCaption.mono strong {
   padding: 0 .2em .04em;
-  background: #181818;
+  background: var(--caption-accent, #181818);
   color: white;
 }
 
 .resultCaption.signature {
-  border: 1px solid #bf9660;
+  border: 1px solid var(--caption-border, #bf9660);
   border-radius: 12px 2px 12px 2px;
   background: rgba(255,243,229,.96);
   box-shadow: 0 15px 38px #4b2c1d42;
@@ -2910,7 +3177,7 @@ footer > small {
   position: absolute;
   width: 22px;
   height: 1px;
-  background: #bf9660;
+  background: var(--caption-border, #bf9660);
   content: "";
 }
 
@@ -2926,7 +3193,7 @@ footer > small {
 
 .resultCaption.signature strong {
   background: linear-gradient(transparent 68%, #dc776c55 0);
-  color: #d95a48;
+  color: var(--caption-accent, #d95a48);
 }
 
 @keyframes captionPop {
@@ -4160,6 +4427,21 @@ footer > small {
     padding: 20px 14px;
   }
 
+  .autoTelopNote {
+    grid-template-columns: 44px minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .autoTelopNote > span {
+    width: 44px;
+    height: 44px;
+  }
+
+  .autoTelopNote > small {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .optionCards.three,
   .lengthOptions {
     grid-template-columns: 1fr;
@@ -4215,6 +4497,19 @@ footer > small {
   .previewPanel,
   .editPanel {
     padding: 14px;
+  }
+
+  .captionIdentitySummary {
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    padding-inline: 9px;
+  }
+
+  .identityMonogram {
+    width: 38px;
+  }
+
+  .moodChoices {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .resultVideo {

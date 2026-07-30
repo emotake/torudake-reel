@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   captionsToSrt,
   captionsToVtt,
@@ -20,16 +26,21 @@ import {
   encodeMonoWavChunk,
   TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
 } from "../lib/audio";
+import {
+  CAPTION_ACCENT_PRESETS,
+  CAPTION_MOODS,
+  DEFAULT_CAPTION_PROFILE,
+  getCaptionEntranceProgress,
+  getCaptionPresentation,
+  normalizeCaptionProfile,
+  resolveCaptionDesign,
+  wrapCaptionLines,
+  type CaptionGoal,
+  type CaptionProfile,
+} from "../lib/caption-design";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
-type Goal = "follow" | "sales" | "reach";
-type Tone =
-  | "editorial"
-  | "cinema"
-  | "studio"
-  | "glass"
-  | "mono"
-  | "signature";
+type Goal = CaptionGoal;
 type PreviewMode = "before" | "after";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
 
@@ -68,20 +79,32 @@ class ApiRequestError extends Error {
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 
-function RichCaptionText({ caption }: { caption: TranscriptLine }) {
-  const text = caption.text.trim();
+function RichCaptionText({
+  caption,
+  maxCharacters = 14,
+}: {
+  caption: TranscriptLine;
+  maxCharacters?: number;
+}) {
   const highlight = caption.highlight?.trim() ?? "";
-  const highlightIndex = highlight ? text.indexOf(highlight) : -1;
+  const lines = wrapCaptionLines(caption.text, maxCharacters, 2);
 
-  if (highlightIndex < 0) return <>{text}</>;
-
-  return (
-    <>
-      {text.slice(0, highlightIndex)}
-      <strong>{highlight}</strong>
-      {text.slice(highlightIndex + highlight.length)}
-    </>
-  );
+  return lines.map((line, lineIndex) => {
+    const highlightIndex = highlight ? line.indexOf(highlight) : -1;
+    return (
+      <span className="captionLine" key={`${caption.id}-${lineIndex}`}>
+        {highlightIndex < 0 ? (
+          line
+        ) : (
+          <>
+            {line.slice(0, highlightIndex)}
+            <strong>{highlight}</strong>
+            {line.slice(highlightIndex + highlight.length)}
+          </>
+        )}
+      </span>
+    );
+  });
 }
 
 function needsBrowserAudioExtraction(selectedFile: File) {
@@ -534,15 +557,6 @@ const goals: { id: Goal; icon: string; title: string; note: string }[] = [
   { id: "reach", icon: "◎", title: "まず見てもらう", note: "テンポと冒頭を重視" },
 ];
 
-const tones: { id: Tone; title: string; note: string }[] = [
-  { id: "editorial", title: "エディトリアル", note: "余白を生かした上品な誌面調" },
-  { id: "cinema", title: "シネマ", note: "映像を隠さない映画字幕" },
-  { id: "studio", title: "スタジオ", note: "端正で信頼感のある番組調" },
-  { id: "glass", title: "グラス", note: "透明感のあるモダンな帯" },
-  { id: "mono", title: "モノクロ", note: "余計な色を省いたミニマル" },
-  { id: "signature", title: "シグネチャー", note: "温度感のあるブランド調" },
-];
-
 const initialTranscript: TranscriptLine[] = [
   { id: 1, start: 0, end: 2.2, text: "えー、今日はですね、", removed: true },
   { id: 2, start: 2.2, end: 5.8, text: "続けられる人が最初にやっている", removed: false },
@@ -573,7 +587,16 @@ export default function Home() {
   const usageReservationRef = useRef<string | null>(null);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
-  const [tone, setTone] = useState<Tone>("editorial");
+  const [captionProfile, setCaptionProfile] = useState<CaptionProfile>(() => {
+    if (typeof window === "undefined") return DEFAULT_CAPTION_PROFILE;
+    const saved = window.localStorage.getItem("torudake-caption-profile");
+    if (!saved) return DEFAULT_CAPTION_PROFILE;
+    try {
+      return normalizeCaptionProfile(JSON.parse(saved));
+    } catch {
+      return DEFAULT_CAPTION_PROFILE;
+    }
+  });
   const [length, setLength] = useState(60);
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
@@ -605,6 +628,35 @@ export default function Home() {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, [videoUrl]);
+
+  useEffect(() => {
+    void fetch("/api/caption-profile")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          profile?: unknown;
+        };
+        if (payload.profile) {
+          setCaptionProfile(normalizeCaptionProfile(payload.profile));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "torudake-caption-profile",
+      JSON.stringify(captionProfile),
+    );
+    const timeout = window.setTimeout(() => {
+      void fetch("/api/caption-profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: captionProfile }),
+      }).catch(() => undefined);
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [captionProfile]);
 
   const keptLines = useMemo(
     () => transcript.filter((line) => !line.removed),
@@ -995,8 +1047,6 @@ export default function Home() {
           videoUrl={videoUrl}
           goal={goal}
           setGoal={setGoal}
-          tone={tone}
-          setTone={setTone}
           length={length}
           setLength={setLength}
           chooseAnother={() => inputRef.current?.click()}
@@ -1022,8 +1072,9 @@ export default function Home() {
           transcript={transcript}
           setTranscript={setTranscript}
           keptLines={keptLines}
-          tone={tone}
-          setTone={setTone}
+          goal={goal}
+          captionProfile={captionProfile}
+          setCaptionProfile={setCaptionProfile}
           length={length}
           notify={notify}
           reset={reset}
@@ -1586,8 +1637,6 @@ function SetupWorkspace({
   videoUrl,
   goal,
   setGoal,
-  tone,
-  setTone,
   length,
   setLength,
   chooseAnother,
@@ -1598,8 +1647,6 @@ function SetupWorkspace({
   videoUrl: string;
   goal: Goal;
   setGoal: (goal: Goal) => void;
-  tone: Tone;
-  setTone: (tone: Tone) => void;
   length: number;
   setLength: (length: number) => void;
   chooseAnother: () => void;
@@ -1612,9 +1659,9 @@ function SetupWorkspace({
         <div>
           <p className="eyebrow">NEW PROJECT</p>
           <h1>どんなリールにしますか？</h1>
-          <p>3つ選ぶだけで、カットとテロップの方針が決まります。</p>
+          <p>目的と長さを選ぶだけで、カットとテロップを自動設計します。</p>
         </div>
-        <span>STEP 1 / 3</span>
+        <span>STEP 1 / 2</span>
       </div>
 
       <div className="setupGrid">
@@ -1671,33 +1718,6 @@ function SetupWorkspace({
           <fieldset>
             <legend>
               <span>02</span>
-              テロップのパターン
-            </legend>
-            <div className="optionCards three toneCards">
-              {tones.map((item) => (
-                <button
-                  key={item.id}
-                  className={tone === item.id ? "selected" : ""}
-                  onClick={() => setTone(item.id)}
-                >
-                  <span className={`tonePreview ${item.id}`}>
-                    <small>言葉が</small>
-                    <strong>きちんと届く</strong>
-                  </span>
-                  <strong>{item.title}</strong>
-                  <small>{item.note}</small>
-                  <b>{tone === item.id ? "✓" : ""}</b>
-                </button>
-              ))}
-            </div>
-            <p className="optionCostNote">
-              デザイン変更は端末内で行うため、API利用量は増えません。
-            </p>
-          </fieldset>
-
-          <fieldset>
-            <legend>
-              <span>03</span>
               完成する長さ
             </legend>
             <div className="lengthOptions">
@@ -1719,12 +1739,23 @@ function SetupWorkspace({
             </p>
           </fieldset>
 
+          <div className="autoTelopNote">
+            <span aria-hidden="true">Aa</span>
+            <div>
+              <strong>テロップは内容に合わせて、おまかせ設計</strong>
+              <p>
+                冒頭・数字・強調したい言葉を見分けて、見せ方を自動で変えます。完成後にブランドの雰囲気や色も調整できます。
+              </p>
+            </div>
+            <small>追加API料金なし</small>
+          </div>
+
           <div className="editSummary">
             <div>
               <span>今回の編集方針</span>
               <p>
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
-                ・{tones.find((item) => item.id === tone)?.title}・{length}秒
+                ・おまかせテロップ・{length}秒
               </p>
             </div>
             <button className="mainCta" onClick={startEditing}>
@@ -1833,8 +1864,9 @@ function ResultWorkspace({
   transcript,
   setTranscript,
   keptLines,
-  tone,
-  setTone,
+  goal,
+  captionProfile,
+  setCaptionProfile,
   length,
   notify,
   reset,
@@ -1849,8 +1881,9 @@ function ResultWorkspace({
   transcript: TranscriptLine[];
   setTranscript: (lines: TranscriptLine[]) => void;
   keptLines: TranscriptLine[];
-  tone: Tone;
-  setTone: (tone: Tone) => void;
+  goal: Goal;
+  captionProfile: CaptionProfile;
+  setCaptionProfile: (profile: CaptionProfile) => void;
   length: number;
   notify: (message: string) => void;
   reset: () => void;
@@ -1864,6 +1897,12 @@ function ResultWorkspace({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
+  const [isCaptionDesignerOpen, setIsCaptionDesignerOpen] = useState(false);
+  const captionDesign = useMemo(
+    () => resolveCaptionDesign(captionProfile, goal),
+    [captionProfile, goal],
+  );
+  const tone = captionDesign.tone;
   const editRanges = useMemo(
     () => buildEditRanges(transcript),
     [transcript],
@@ -1881,6 +1920,18 @@ function ResultWorkspace({
     keptLines.find(
       (line) => currentTime >= line.start && currentTime < line.end,
     ) ?? (!videoUrl ? keptLines[0] : undefined);
+  const activeCaptionIndex = activeCaption
+    ? keptLines.findIndex((line) => line.id === activeCaption.id)
+    : -1;
+  const activePresentation = activeCaption
+    ? getCaptionPresentation(activeCaption, Math.max(0, activeCaptionIndex))
+    : "standard";
+  const captionStyle = {
+    "--caption-accent": captionDesign.palette.highlight,
+    "--caption-border": captionDesign.palette.border,
+    "--caption-text": captionDesign.palette.text,
+    "--caption-panel": captionDesign.palette.background,
+  } as CSSProperties;
   const exportName =
     file?.name.replace(/\.[^.]+$/, "") ?? "sample_talking_video";
   const removedCount = transcript.filter((line) => line.removed).length;
@@ -2115,60 +2166,13 @@ function ResultWorkspace({
       context.fillStyle = shade;
       context.fillRect(0, 0, canvas.width, canvas.height);
 
-      const palettes: Record<
-        Tone,
-        {
-          panel: string;
-          border: string;
-          text: string;
-          accent: string;
-          label: string;
-        }
-      > = {
-        editorial: {
-          panel: "rgba(255,252,248,.96)",
-          border: "#e45f4d",
-          text: "#162033",
-          accent: "#d94f3b",
-          label: "#fff7f0",
-        },
-        cinema: {
-          panel: "rgba(11,16,24,.7)",
-          border: "rgba(255,255,255,.7)",
-          text: "#ffffff",
-          accent: "#f4d57a",
-          label: "#ffffff",
-        },
-        studio: {
-          panel: "rgba(19,27,40,.94)",
-          border: "#d5a850",
-          text: "#ffffff",
-          accent: "#ffd26a",
-          label: "#f8e8b8",
-        },
-        glass: {
-          panel: "rgba(12,28,34,.82)",
-          border: "#8fe3cc",
-          text: "#f8fffd",
-          accent: "#9ff3dc",
-          label: "#d9fff4",
-        },
-        mono: {
-          panel: "rgba(248,246,240,.97)",
-          border: "#181818",
-          text: "#181818",
-          accent: "#181818",
-          label: "#ffffff",
-        },
-        signature: {
-          panel: "rgba(255,243,229,.96)",
-          border: "#bf9660",
-          text: "#3e2d28",
-          accent: "#d95a48",
-          label: "#fff7ed",
-        },
+      const palette = {
+        panel: captionDesign.palette.background || "rgba(11,16,24,.7)",
+        border: captionDesign.palette.border,
+        text: captionDesign.palette.text,
+        accent: captionDesign.palette.highlight,
+        label: captionDesign.palette.label,
       };
-      const palette = palettes[tone];
       const roundRect = (
         x: number,
         y: number,
@@ -2204,27 +2208,15 @@ function ResultWorkspace({
       context.font = '800 30px "Noto Sans JP", "Yu Gothic", sans-serif';
       context.textAlign = "left";
       context.textBaseline = "middle";
-      context.fillText("撮るだけリール", 112, 111);
+      context.fillText(
+        captionProfile.brandName || "撮るだけリール",
+        112,
+        111,
+        278,
+      );
 
       const sourceText = coverCaption.text.trim();
-      const characters = Array.from(sourceText);
-      const lines: string[] = [];
-      const charactersPerLine = 12;
-      for (
-        let index = 0;
-        index < Math.min(characters.length, charactersPerLine * 3);
-        index += charactersPerLine
-      ) {
-        const line = characters
-          .slice(index, index + charactersPerLine)
-          .join("");
-        lines.push(
-          index + charactersPerLine >= charactersPerLine * 3 &&
-            characters.length > charactersPerLine * 3
-            ? `${line.slice(0, -1)}…`
-            : line,
-        );
-      }
+      const lines = wrapCaptionLines(sourceText, 12, 3);
 
       const fontSize = lines.length >= 3 ? 74 : 82;
       const lineHeight = fontSize * 1.25;
@@ -2264,7 +2256,9 @@ function ResultWorkspace({
       context.fillStyle = palette.accent;
       context.font = '750 28px "Noto Sans JP", "Yu Gothic", sans-serif';
       context.fillText(
-        "話して送るだけ・自動動画編集",
+        captionProfile.brandName
+          ? `${captionProfile.brandName}・Reel story`
+          : "話して送るだけ・自動動画編集",
         panelX + 52,
         panelY + panelHeight - 54,
       );
@@ -2378,68 +2372,23 @@ function ResultWorkspace({
         );
 
         if (caption) {
-          const captionPalette: Record<
-            Tone,
-            {
-              background: string;
-              border: string;
-              highlight: string;
-              text: string;
-              stroke: string;
-              fontWeight: number;
-            }
-          > = {
-            editorial: {
-              background: "rgba(255,252,248,.96)",
-              border: "#e45f4d",
-              highlight: "#d94f3b",
-              text: "#162033",
-              stroke: "",
-              fontWeight: 800,
-            },
-            cinema: {
-              background: "",
-              border: "",
-              highlight: "#f4d57a",
-              text: "#ffffff",
-              stroke: "#10151f",
-              fontWeight: 800,
-            },
-            studio: {
-              background: "rgba(19,27,40,.94)",
-              border: "#d5a850",
-              highlight: "#ffd26a",
-              text: "#ffffff",
-              stroke: "",
-              fontWeight: 800,
-            },
-            glass: {
-              background: "rgba(12,28,34,.78)",
-              border: "#8fe3cc",
-              highlight: "#9ff3dc",
-              text: "#f8fffd",
-              stroke: "",
-              fontWeight: 750,
-            },
-            mono: {
-              background: "rgba(248,246,240,.97)",
-              border: "#181818",
-              highlight: "#181818",
-              text: "#181818",
-              stroke: "",
-              fontWeight: 850,
-            },
-            signature: {
-              background: "rgba(255,243,229,.96)",
-              border: "#bf9660",
-              highlight: "#d95a48",
-              text: "#3e2d28",
-              stroke: "",
-              fontWeight: 750,
-            },
-          };
-          const palette = captionPalette[tone];
-          const fontSize = Math.max(26, Math.min(64, canvas.width * 0.052));
+          const keptIndex = keptLines.findIndex(
+            (line) => line.id === caption.id,
+          );
+          const presentation = getCaptionPresentation(
+            caption,
+            Math.max(0, keptIndex),
+          );
+          const palette = captionDesign.palette;
+          const presentationScale =
+            presentation === "hook"
+              ? 1.12
+              : presentation === "metric"
+                ? 1.08
+                : 1;
+          const fontSize =
+            Math.max(26, Math.min(64, canvas.width * 0.052)) *
+            presentationScale;
           const horizontalPadding = fontSize * (tone === "cinema" ? 0.32 : 0.72);
           const verticalPadding = fontSize * (tone === "cinema" ? 0.18 : 0.44);
           const maxTextWidth = canvas.width * 0.82;
@@ -2447,11 +2396,14 @@ function ResultWorkspace({
             8,
             Math.floor(maxTextWidth / fontSize),
           );
-          const characters = Array.from(caption.text.trim());
-          const lines: string[] = [];
-          for (let index = 0; index < characters.length; index += charactersPerLine) {
-            lines.push(characters.slice(index, index + charactersPerLine).join(""));
-          }
+          const lines = wrapCaptionLines(
+            caption.text,
+            charactersPerLine,
+            2,
+          );
+          const showBrand =
+            presentation === "hook" && Boolean(captionProfile.brandName);
+          const brandHeight = showBrand ? fontSize * 0.52 : 0;
 
           context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
           context.textAlign = "center";
@@ -2464,9 +2416,19 @@ function ResultWorkspace({
             canvas.width - horizontalPadding * 2,
             widestLine + horizontalPadding * 2,
           );
-          const boxHeight = lines.length * lineHeight + verticalPadding * 2;
+          const boxHeight =
+            lines.length * lineHeight +
+            verticalPadding * 2 +
+            brandHeight;
           const boxX = (canvas.width - boxWidth) / 2;
           const boxY = canvas.height - boxHeight - canvas.height * 0.08;
+          const entrance = getCaptionEntranceProgress(
+            video.currentTime,
+            caption.start,
+          );
+          context.save();
+          context.globalAlpha = 0.35 + entrance * 0.65;
+          context.translate(0, (1 - entrance) * fontSize * 0.18);
           if (palette.background) {
             context.save();
             context.shadowColor = "rgba(8,15,25,.26)";
@@ -2500,11 +2462,26 @@ function ResultWorkspace({
             );
             context.stroke();
           }
+          if (showBrand) {
+            context.fillStyle = palette.highlight;
+            context.font = `750 ${fontSize * 0.34}px "Noto Sans JP", "Yu Gothic", sans-serif`;
+            context.textAlign = "left";
+            context.fillText(
+              captionProfile.brandName,
+              boxX + horizontalPadding,
+              boxY + verticalPadding * 0.72,
+              boxWidth - horizontalPadding * 2,
+            );
+          }
           const highlight = caption.highlight?.trim() ?? "";
+          context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
           context.textAlign = "left";
           lines.forEach((line, index) => {
             const lineY =
-              boxY + verticalPadding + lineHeight * (index + 0.5);
+              boxY +
+              verticalPadding +
+              brandHeight +
+              lineHeight * (index + 0.5);
             const highlightIndex = highlight
               ? line.indexOf(highlight)
               : -1;
@@ -2537,6 +2514,7 @@ function ResultWorkspace({
               textX += context.measureText(part.text).width;
             });
           });
+          context.restore();
         }
 
         if (keepDrawing) {
@@ -2685,23 +2663,119 @@ function ResultWorkspace({
             <span>仕上がりプレビュー</span>
           </div>
 
-          <div
-            className="captionPatternPicker"
-            aria-label="テロップのパターン"
-          >
-            <span>テロップ</span>
-            {tones.map((item) => (
-              <button
-                className={tone === item.id ? "active" : ""}
-                key={item.id}
-                onClick={() => setTone(item.id)}
-                type="button"
+          <div className="captionIdentityPanel">
+            <button
+              className="captionIdentitySummary"
+              type="button"
+              aria-expanded={isCaptionDesignerOpen}
+              onClick={() =>
+                setIsCaptionDesignerOpen((current) => !current)
+              }
+            >
+              <span
+                className={`identityMonogram ${tone}`}
+                style={captionStyle}
+                aria-hidden="true"
               >
-                <i className={`patternSwatch ${item.id}`}>Aa</i>
-                {item.title}
-              </button>
-            ))}
-            <small>切り替えてもAPI利用量は増えません</small>
+                Aa
+              </span>
+              <span>
+                <small>あなたらしいテロップ</small>
+                <strong>
+                  {CAPTION_MOODS.find(
+                    (item) => item.id === captionProfile.mood,
+                  )?.label ?? "おまかせ"}
+                  ・{captionProfile.brandName || "ブランド名なし"}
+                </strong>
+              </span>
+              <i>{isCaptionDesignerOpen ? "閉じる" : "調整する"}</i>
+            </button>
+
+            {isCaptionDesignerOpen && (
+              <div className="captionIdentityControls">
+                <div className="identityControl">
+                  <span>どんな印象にする？</span>
+                  <div className="moodChoices">
+                    {CAPTION_MOODS.map((item) => (
+                      <button
+                        className={
+                          captionProfile.mood === item.id ? "active" : ""
+                        }
+                        key={item.id}
+                        type="button"
+                        title={item.note}
+                        onClick={() =>
+                          setCaptionProfile({
+                            ...captionProfile,
+                            mood: item.id,
+                          })
+                        }
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="identityControl brandNameControl">
+                  <span>屋号・ブランド名 <small>任意</small></span>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    value={captionProfile.brandName}
+                    placeholder="例：emota studio"
+                    onChange={(event) =>
+                      setCaptionProfile({
+                        ...captionProfile,
+                        brandName: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <div className="identityControl">
+                  <span>ブランドカラー</span>
+                  <div className="accentChoices">
+                    {CAPTION_ACCENT_PRESETS.map((color) => (
+                      <button
+                        aria-label={`ブランドカラー ${color}`}
+                        className={
+                          captionProfile.accentColor === color
+                            ? "active"
+                            : ""
+                        }
+                        key={color}
+                        type="button"
+                        style={{ backgroundColor: color }}
+                        onClick={() =>
+                          setCaptionProfile({
+                            ...captionProfile,
+                            accentColor: color,
+                          })
+                        }
+                      />
+                    ))}
+                    <label className="customAccent">
+                      <input
+                        aria-label="好きなブランドカラー"
+                        type="color"
+                        value={captionProfile.accentColor}
+                        onChange={(event) =>
+                          setCaptionProfile({
+                            ...captionProfile,
+                            accentColor: event.target.value,
+                          })
+                        }
+                      />
+                      好きな色
+                    </label>
+                  </div>
+                </div>
+                <p>
+                  設定はこの端末に保存され、ログイン中はアカウントにも引き継がれます。追加のAI利用料はかかりません。
+                </p>
+              </div>
+            )}
           </div>
 
           <div className={`resultVideo ${previewMode}`}>
@@ -2751,9 +2825,16 @@ function ResultWorkspace({
             )}
             {previewMode === "after" && activeCaption && (
               <div
-                className={`resultCaption ${tone}`}
+                className={`resultCaption ${tone} ${activePresentation}`}
                 key={activeCaption.id}
+                style={captionStyle}
               >
+                {activePresentation === "hook" &&
+                  captionProfile.brandName && (
+                    <small className="captionBrand">
+                      {captionProfile.brandName}
+                    </small>
+                  )}
                 <RichCaptionText caption={activeCaption} />
               </div>
             )}

@@ -44,6 +44,18 @@ export const users = sqliteTable(
   ],
 );
 
+export const captionProfiles = sqliteTable("caption_profiles", {
+  userId: text("user_id").primaryKey(),
+  mood: text("mood", {
+    enum: ["auto", "soft", "refined", "bold"],
+  })
+    .notNull()
+    .default("auto"),
+  accentColor: text("accent_color").notNull().default("#e45f4d"),
+  brandName: text("brand_name").notNull().default(""),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const billingSubscriptions = sqliteTable(
   "billing_subscriptions",
   {
