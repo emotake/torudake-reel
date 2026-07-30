@@ -22,6 +22,13 @@
       "when": 1785455400000,
       "tag": "0002_caption_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785459000000,
+      "tag": "0003_ai_disclosure_confirmations",
+      "breakpoints": true
     }
   ]
 }

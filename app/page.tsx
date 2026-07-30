@@ -43,6 +43,17 @@ import {
   LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
 } from "../lib/billing-policy";
+import {
+  buildDisclosedPostCaption,
+  buildNarrationTimeline,
+  NARRATION_DISCLOSURE_TEXT,
+  NARRATION_STYLES,
+  NARRATION_TERMS_VERSION,
+  splitNarrationScript,
+  type NarrationPlan,
+  type NarrationStyle,
+  type VideoAudioMode,
+} from "../lib/narration";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = CaptionGoal;
@@ -519,6 +530,82 @@ async function getVideoDurationSeconds(selectedFile: File) {
   }
 }
 
+async function extractNarrationFrames(selectedFile: File, count = 6) {
+  const objectUrl = URL.createObjectURL(selectedFile);
+  const video = document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    const duration = await new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(
+        () => reject(new Error("動画の場面を読み取れませんでした。")),
+        15_000,
+      );
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        if (
+          Number.isFinite(video.duration) &&
+          video.duration > 0 &&
+          video.videoWidth > 0 &&
+          video.videoHeight > 0
+        ) {
+          resolve(video.duration);
+        } else {
+          reject(new Error("動画の場面を読み取れませんでした。"));
+        }
+      };
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(
+          new Error(
+            "動画の場面を読み取れませんでした。MP4またはWebM形式でお試しください。",
+          ),
+        );
+      };
+      video.src = objectUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 540 / video.videoWidth);
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("動画の場面を読み取れませんでした。");
+    const frames: string[] = [];
+    const frameCount = Math.max(3, Math.min(8, count));
+
+    for (let index = 0; index < frameCount; index += 1) {
+      const ratio = frameCount === 1 ? 0.5 : 0.06 + (index / (frameCount - 1)) * 0.88;
+      const time = Math.min(Math.max(0, duration - 0.05), duration * ratio);
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(
+          () => reject(new Error("動画の場面の読み取りに時間がかかっています。")),
+          8_000,
+        );
+        video.onseeked = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        video.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error("動画の場面を読み取れませんでした。"));
+        };
+        video.currentTime = time;
+      });
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.7));
+    }
+    return { duration, frames };
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 async function reserveVideoUsage(selectedFile: File) {
   const response = await fetch("/api/usage/reserve", {
     method: "POST",
@@ -554,6 +641,31 @@ async function updateVideoUsage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reservationId }),
   }).catch(() => undefined);
+}
+
+async function requestNarrationSpeech(
+  script: string,
+  style: NarrationStyle,
+  usageReservationId: string | null,
+) {
+  const response = await fetch("/api/narration/speech", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script, style, usageReservationId }),
+  });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json")
+      ? ((await response.json().catch(() => ({}))) as ApiPayload)
+      : {};
+    throw new ApiRequestError(
+      payload.error || "AI音声を生成できませんでした。もう一度お試しください。",
+      response.status,
+    );
+  }
+  const audio = await response.blob();
+  if (!audio.size) throw new Error("AI音声を生成できませんでした。");
+  return audio;
 }
 
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
@@ -603,6 +715,14 @@ export default function Home() {
     }
   });
   const [length, setLength] = useState(60);
+  const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
+  const [narrationStyle, setNarrationStyle] =
+    useState<NarrationStyle>("bright");
+  const [narrationBrief, setNarrationBrief] = useState("");
+  const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
+    null,
+  );
+  const [narrationAudioUrl, setNarrationAudioUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : ""),
@@ -633,6 +753,12 @@ export default function Home() {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, [videoUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (narrationAudioUrl) URL.revokeObjectURL(narrationAudioUrl);
+    };
+  }, [narrationAudioUrl]);
 
   useEffect(() => {
     void fetch("/api/caption-profile")
@@ -690,6 +816,8 @@ export default function Home() {
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
+    setNarrationPlan(null);
+    setNarrationAudioUrl("");
     usageReservationRef.current = null;
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -700,6 +828,8 @@ export default function Home() {
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
+    setNarrationPlan(null);
+    setNarrationAudioUrl("");
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -815,6 +945,110 @@ export default function Home() {
     }
   }
 
+  async function startNarrationEditing() {
+    if (!file) {
+      setEditError(
+        "AIナレーションは実際の動画から場面を読み取って作ります。動画を選んでください。",
+      );
+      return;
+    }
+
+    setEditError("");
+    setIsHighAccuracyRun(false);
+    setProgress(4);
+    setStage("processing");
+    let newlyReservedUsage: string | null = null;
+
+    try {
+      newlyReservedUsage = await reserveVideoUsage(file);
+      usageReservationRef.current = newlyReservedUsage;
+      setProgress(14);
+      const extracted = await extractNarrationFrames(file);
+      setProgress(36);
+
+      const scriptResponse = await fetch("/api/narration/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: extracted.frames,
+          brief: narrationBrief,
+          goal,
+          length,
+          style: narrationStyle,
+          sourceDuration: extracted.duration,
+          usageReservationId: newlyReservedUsage,
+        }),
+      });
+      const nextPlan = await readApiResponse<ApiPayload & NarrationPlan>(
+        scriptResponse,
+        "AIナレーションの台本を作成できませんでした。",
+      );
+      setProgress(68);
+      const audio = await requestNarrationSpeech(
+        nextPlan.script,
+        narrationStyle,
+        newlyReservedUsage,
+      );
+      setProgress(90);
+      const timeline = buildNarrationTimeline(
+        nextPlan.segments,
+        extracted.duration,
+        length,
+      );
+      if (!timeline.length) {
+        throw new Error("AIナレーションのテロップを作成できませんでした。");
+      }
+
+      setTranscript(timeline);
+      setNarrationPlan(nextPlan);
+      setNarrationAudioUrl(URL.createObjectURL(audio));
+      setUsedHighAccuracy(true);
+      if (newlyReservedUsage) {
+        await updateVideoUsage("complete", newlyReservedUsage);
+      }
+      setProgress(100);
+      window.setTimeout(() => {
+        setPreviewMode("after");
+        setStage("result");
+      }, 320);
+    } catch (error) {
+      if (newlyReservedUsage) {
+        await updateVideoUsage("release", newlyReservedUsage);
+        usageReservationRef.current = null;
+      }
+      setProgress(0);
+      setEditError(
+        error instanceof Error
+          ? error.message
+          : "AIナレーションを生成できませんでした。もう一度お試しください。",
+      );
+      setStage("setup");
+    }
+  }
+
+  async function regenerateNarration(
+    script: string,
+    style: NarrationStyle,
+  ) {
+    if (!file || !narrationPlan) return;
+    const cleanScript = script.replace(/\s+/g, " ").trim();
+    if (!cleanScript) throw new Error("ナレーション台本を入力してください。");
+    const audio = await requestNarrationSpeech(
+      cleanScript,
+      style,
+      usageReservationRef.current,
+    );
+    const duration = await getVideoDurationSeconds(file);
+    const segments = splitNarrationScript(cleanScript).map((text, index) => ({
+      text,
+      emphasis: index === 0,
+    }));
+    setNarrationStyle(style);
+    setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
+    setTranscript(buildNarrationTimeline(segments, duration, length));
+    setNarrationAudioUrl(URL.createObjectURL(audio));
+  }
+
   function reset() {
     transferAbortRef.current?.abort();
     transferAbortRef.current = null;
@@ -826,6 +1060,9 @@ export default function Home() {
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
+    setAudioMode("spoken");
+    setNarrationPlan(null);
+    setNarrationAudioUrl("");
     usageReservationRef.current = null;
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -949,7 +1186,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260730-stripe-fixed">
+    <main className="siteShell" data-build="20260730-ai-narration">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -958,7 +1195,7 @@ export default function Home() {
           </span>
           <span className="brandText">
             撮るだけリール
-            <small>ひとり喋り動画専用</small>
+            <small>話す動画も、無言動画も</small>
           </span>
         </button>
 
@@ -1054,8 +1291,18 @@ export default function Home() {
           setGoal={setGoal}
           length={length}
           setLength={setLength}
+          audioMode={audioMode}
+          setAudioMode={setAudioMode}
+          narrationStyle={narrationStyle}
+          setNarrationStyle={setNarrationStyle}
+          narrationBrief={narrationBrief}
+          setNarrationBrief={setNarrationBrief}
           chooseAnother={() => inputRef.current?.click()}
-          startEditing={() => startEditing(false)}
+          startEditing={() =>
+            audioMode === "narration"
+              ? startNarrationEditing()
+              : startEditing(false)
+          }
           error={editError}
         />
       )}
@@ -1065,6 +1312,7 @@ export default function Home() {
           file={file}
           progress={progress}
           highAccuracy={isHighAccuracyRun}
+          narration={audioMode === "narration"}
         />
       )}
 
@@ -1086,19 +1334,24 @@ export default function Home() {
           openTransfer={openTransferWithCurrentVideo}
           regenerateHighAccuracy={() => startEditing(true)}
           usedHighAccuracy={usedHighAccuracy}
+          narrationPlan={narrationPlan}
+          setNarrationPlan={setNarrationPlan}
+          narrationAudioUrl={narrationAudioUrl}
+          narrationStyle={narrationStyle}
+          regenerateNarration={regenerateNarration}
         />
       )}
 
       <footer>
         <div>
           <strong>撮るだけリール</strong>
-          <span>話して送るだけ。カット・テロップ・表紙まで自動。</span>
+          <span>動画を送るだけ。カット・AI音声・テロップ・表紙まで自動。</span>
         </div>
         <div className="footerLinks">
           <a href="#how">使い方</a>
           <a href="#price">料金</a>
           <span>プライバシー</span>
-          <span>利用規約</span>
+          <a href="/terms">利用規約</a>
         </div>
         <small>© 2026 撮るだけリール・限定プレビュー</small>
       </footer>
@@ -1346,7 +1599,7 @@ function Landing({
         <div className="heroCopy">
           <p className="eyebrow">
             <span>NEW</span>
-            日本語のひとり喋り動画専用
+            話す動画も、無言動画も
           </p>
           <h1>
             話して送るだけ。
@@ -1354,7 +1607,7 @@ function Landing({
             <em>編集は、もうしない。</em>
           </h1>
           <p className="heroLead">
-            無音カット、言い淀み除去、テロップ、ズーム、表紙まで。
+            無音カット、高精度字幕、AIナレーション、テロップ、表紙まで。
             <br />
             撮りっぱなしの動画を、投稿できるリールに仕上げます。
           </p>
@@ -1651,6 +1904,12 @@ function SetupWorkspace({
   setGoal,
   length,
   setLength,
+  audioMode,
+  setAudioMode,
+  narrationStyle,
+  setNarrationStyle,
+  narrationBrief,
+  setNarrationBrief,
   chooseAnother,
   startEditing,
   error,
@@ -1661,6 +1920,12 @@ function SetupWorkspace({
   setGoal: (goal: Goal) => void;
   length: number;
   setLength: (length: number) => void;
+  audioMode: VideoAudioMode;
+  setAudioMode: (mode: VideoAudioMode) => void;
+  narrationStyle: NarrationStyle;
+  setNarrationStyle: (style: NarrationStyle) => void;
+  narrationBrief: string;
+  setNarrationBrief: (brief: string) => void;
   chooseAnother: () => void;
   startEditing: () => Promise<void>;
   error: string;
@@ -1671,7 +1936,9 @@ function SetupWorkspace({
         <div>
           <p className="eyebrow">NEW PROJECT</p>
           <h1>どんなリールにしますか？</h1>
-          <p>目的と長さを選ぶだけで、カットとテロップを自動設計します。</p>
+          <p>
+            話している動画は聞き取り、無言動画は映像からナレーションまで自動設計します。
+          </p>
         </div>
         <span>STEP 1 / 2</span>
       </div>
@@ -1701,7 +1968,9 @@ function SetupWorkspace({
           </div>
           <div className="localNote">
             <span>●</span>
-            iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。
+            {audioMode === "narration"
+              ? "代表的な場面だけを安全に読み取り、映像に合う台本と音声を生成します。"
+              : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
           </div>
         </aside>
 
@@ -1709,6 +1978,35 @@ function SetupWorkspace({
           <fieldset>
             <legend>
               <span>01</span>
+              動画の音声
+            </legend>
+            <div className="audioModeCards">
+              <button
+                type="button"
+                className={audioMode === "spoken" ? "selected" : ""}
+                onClick={() => setAudioMode("spoken")}
+              >
+                <i aria-hidden="true">声</i>
+                <strong>話している動画</strong>
+                <small>声を高精度で字幕にして自然にカット</small>
+                <b>{audioMode === "spoken" ? "✓" : ""}</b>
+              </button>
+              <button
+                type="button"
+                className={audioMode === "narration" ? "selected" : ""}
+                onClick={() => setAudioMode("narration")}
+              >
+                <i aria-hidden="true">AI</i>
+                <strong>無言動画＋AIナレーション</strong>
+                <small>映像から台本・音声・テロップを生成</small>
+                <b>{audioMode === "narration" ? "✓" : ""}</b>
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>
+              <span>02</span>
               この動画の目的
             </legend>
             <div className="optionCards three">
@@ -1729,7 +2027,7 @@ function SetupWorkspace({
 
           <fieldset>
             <legend>
-              <span>02</span>
+              <span>03</span>
               完成する長さ
             </legend>
             <div className="lengthOptions">
@@ -1747,19 +2045,58 @@ function SetupWorkspace({
               ))}
             </div>
             <p className="optionCostNote">
-              自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。
+              {audioMode === "narration"
+                ? "動画全体を送らず、数枚の代表場面だけで台本を作るため、API利用量を抑えます。"
+                : "自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。"}
             </p>
           </fieldset>
+
+          {audioMode === "narration" && (
+            <fieldset className="narrationSetup">
+              <legend>
+                <span>04</span>
+                ナレーションの雰囲気
+              </legend>
+              <div className="narrationStyleCards">
+                {NARRATION_STYLES.map((style) => (
+                  <button
+                    type="button"
+                    key={style.id}
+                    className={narrationStyle === style.id ? "selected" : ""}
+                    onClick={() => setNarrationStyle(style.id)}
+                  >
+                    <strong>{style.label}</strong>
+                    <small>{style.note}</small>
+                  </button>
+                ))}
+              </div>
+              <label className="narrationBrief">
+                <span>伝えたい内容・商品名など <small>任意</small></span>
+                <textarea
+                  value={narrationBrief}
+                  maxLength={800}
+                  rows={3}
+                  placeholder="例：新作のバッグ。軽さと内ポケットの使いやすさを伝えたい"
+                  onChange={(event) => setNarrationBrief(event.target.value)}
+                />
+                <small>
+                  映像から分からない固有名詞や価格だけ補足すると、創作を防いで自然に仕上がります。
+                </small>
+              </label>
+            </fieldset>
+          )}
 
           <div className="autoTelopNote">
             <span aria-hidden="true">Aa</span>
             <div>
               <strong>テロップは内容に合わせて、おまかせ設計</strong>
               <p>
-                冒頭・数字・強調したい言葉を見分けて、見せ方を自動で変えます。完成後にブランドの雰囲気や色も調整できます。
+                {audioMode === "narration"
+                  ? "ナレーションの文の切れ目に合わせ、音声と同じ内容をリッチなテロップで表示します。"
+                  : "冒頭・数字・強調したい言葉を見分けて、見せ方を自動で変えます。完成後にブランドの雰囲気や色も調整できます。"}
               </p>
             </div>
-            <small>追加API料金なし</small>
+            <small>{audioMode === "narration" ? "API利用あり" : "追加API料金なし"}</small>
           </div>
 
           <div className="editSummary">
@@ -1767,11 +2104,19 @@ function SetupWorkspace({
               <span>今回の編集方針</span>
               <p>
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
-                ・おまかせテロップ・{length}秒
+                ・
+                {audioMode === "narration"
+                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声`
+                  : "おまかせテロップ"}
+                ・{length}秒
               </p>
             </div>
             <button className="mainCta" onClick={startEditing}>
-              <span>この設定で自動編集する</span>
+              <span>
+                {audioMode === "narration"
+                  ? "AIナレーション付きで作る"
+                  : "この設定で自動編集する"}
+              </span>
               <i>✦</i>
             </button>
           </div>
@@ -1791,12 +2136,22 @@ function Processing({
   file,
   progress,
   highAccuracy,
+  narration,
 }: {
   file: File | null;
   progress: number;
   highAccuracy: boolean;
+  narration: boolean;
 }) {
-  const steps = [
+  const steps = narration
+    ? [
+        { threshold: 18, label: "場面を選んでいます", note: "動画全体から代表的な場面を抽出" },
+        { threshold: 42, label: "構成を考えています", note: "映像の順序と目的から自然な台本を作成" },
+        { threshold: 70, label: "AI音声を作っています", note: "選んだ雰囲気で日本語ナレーションを生成" },
+        { threshold: 90, label: "字幕を合わせています", note: "文の切れ目で映像とテロップを同期" },
+        { threshold: 100, label: "仕上げ中", note: "投稿文とプレビューを準備" },
+      ]
+    : [
     { threshold: 18, label: "音声を整えています", note: "音量をそろえて声を聞き取りやすく調整" },
     {
       threshold: 42,
@@ -1833,8 +2188,9 @@ function Processing({
           <h1>投稿できる状態に整えています。</h1>
           <p>
             {file?.name ?? "サンプル動画"}の
-            {highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}
-            話の流れを保った短い動画へ再構成しています。
+            {narration
+              ? "場面を読み取り、映像に合う台本・音声・テロップを作っています。"
+              : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}話の流れを保った短い動画へ再構成しています。`}
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -1885,6 +2241,11 @@ function ResultWorkspace({
   openTransfer,
   regenerateHighAccuracy,
   usedHighAccuracy,
+  narrationPlan,
+  setNarrationPlan,
+  narrationAudioUrl,
+  narrationStyle,
+  regenerateNarration,
 }: {
   file: File | null;
   videoUrl: string;
@@ -1902,14 +2263,34 @@ function ResultWorkspace({
   openTransfer: () => void;
   regenerateHighAccuracy: () => Promise<void>;
   usedHighAccuracy: boolean;
+  narrationPlan: NarrationPlan | null;
+  setNarrationPlan: (plan: NarrationPlan | null) => void;
+  narrationAudioUrl: string;
+  narrationStyle: NarrationStyle;
+  regenerateNarration: (
+    script: string,
+    style: NarrationStyle,
+  ) => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const narrationAudioRef = useRef<HTMLAudioElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [sourceDuration, setSourceDuration] = useState(0);
+  const [narrationDuration, setNarrationDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [isCaptionDesignerOpen, setIsCaptionDesignerOpen] = useState(false);
+  const [narrationDraft, setNarrationDraft] = useState(
+    narrationPlan?.script ?? "",
+  );
+  const [draftNarrationStyle, setDraftNarrationStyle] =
+    useState<NarrationStyle>(narrationStyle);
+  const [isRegeneratingNarration, setIsRegeneratingNarration] =
+    useState(false);
+  const [showDisclosureConfirm, setShowDisclosureConfirm] = useState(false);
+  const [disclosureConfirmed, setDisclosureConfirmed] = useState(false);
+  const [isRecordingDisclosure, setIsRecordingDisclosure] = useState(false);
   const captionDesign = useMemo(
     () => resolveCaptionDesign(captionProfile, goal),
     [captionProfile, goal],
@@ -1978,12 +2359,31 @@ function ResultWorkspace({
   }
 
   function seekToEditedTime(seconds: number) {
+    const safeSeconds = Math.max(0, Math.min(seconds, editDuration));
     seekTo(
       editedTimeToSourceTime(
         editRanges,
-        Math.max(0, Math.min(seconds, editDuration)),
+        safeSeconds,
       ),
     );
+    syncNarrationAudio(safeSeconds);
+  }
+
+  function syncNarrationAudio(editedSeconds: number) {
+    const audio = narrationAudioRef.current;
+    if (!audio || !narrationPlan || !narrationDuration || !editDuration) return;
+    const rate = Math.max(
+      0.55,
+      Math.min(1.75, narrationDuration / editDuration),
+    );
+    audio.playbackRate = rate;
+    const target = Math.min(
+      Math.max(0, narrationDuration - 0.02),
+      Math.max(0, editedSeconds) * rate,
+    );
+    if (Math.abs(audio.currentTime - target) > 0.18) {
+      audio.currentTime = target;
+    }
   }
 
   function moveToNextKeptRange(video: HTMLVideoElement) {
@@ -2029,6 +2429,9 @@ function ResultWorkspace({
     );
     if (currentRangeIndex >= 0) {
       setCurrentTime(video.currentTime);
+      syncNarrationAudio(
+        sourceTimeToEditedTime(editRanges, video.currentTime),
+      );
       return;
     }
 
@@ -2059,9 +2462,19 @@ function ResultWorkspace({
         video.currentTime = nextRange.start;
         setCurrentTime(nextRange.start);
       }
+      syncNarrationAudio(
+        sourceTimeToEditedTime(editRanges, video.currentTime),
+      );
       await video.play();
+      if (narrationPlan && narrationAudioRef.current) {
+        await narrationAudioRef.current.play().catch(() => {
+          video.pause();
+          throw new Error("AI音声を再生できませんでした。");
+        });
+      }
     } else {
       video.pause();
+      narrationAudioRef.current?.pause();
     }
   }
 
@@ -2084,6 +2497,58 @@ function ResultWorkspace({
       .join("\n");
     await navigator.clipboard.writeText(text);
     notify("字幕テキストをコピーしました");
+  }
+
+  async function copyPostCaption() {
+    if (!narrationPlan) return;
+    await navigator.clipboard.writeText(
+      buildDisclosedPostCaption(narrationPlan.socialCaption),
+    );
+    notify("開示文を含む投稿文をコピーしました");
+  }
+
+  async function handleNarrationRegeneration() {
+    if (isRegeneratingNarration) return;
+    setIsRegeneratingNarration(true);
+    try {
+      await regenerateNarration(narrationDraft, draftNarrationStyle);
+      notify("AI音声とテロップを更新しました");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "AI音声を更新できませんでした",
+      );
+    } finally {
+      setIsRegeneratingNarration(false);
+    }
+  }
+
+  async function recordDisclosureConfirmation() {
+    let clientSessionId = window.localStorage.getItem(
+      "torudake-client-session-id",
+    );
+    if (!clientSessionId) {
+      clientSessionId = crypto.randomUUID();
+      window.localStorage.setItem(
+        "torudake-client-session-id",
+        clientSessionId,
+      );
+    }
+    const response = await fetch("/api/narration/disclosure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmationId: crypto.randomUUID(),
+        clientSessionId,
+        termsVersion: NARRATION_TERMS_VERSION,
+        confirmed: true,
+      }),
+    });
+    await readApiResponse<ApiPayload & { recorded?: boolean }>(
+      response,
+      "確認を記録できませんでした。もう一度お試しください。",
+    );
   }
 
   async function generateThumbnail() {
@@ -2350,6 +2815,8 @@ function ResultWorkspace({
     let animationFrame = 0;
     let keepDrawing = true;
     let sourceStream: MediaStream | null = null;
+    let exportAudioContext: AudioContext | null = null;
+    let exportNarration: HTMLAudioElement | null = null;
 
     try {
       video.pause();
@@ -2536,9 +3003,65 @@ function ResultWorkspace({
 
       const outputStream = canvas.captureStream(30);
       sourceStream = captureVideoStream.call(capturableVideo);
-      sourceStream
-        .getAudioTracks()
-        .forEach((track) => outputStream.addTrack(track));
+      if (narrationPlan && narrationAudioUrl) {
+        const AudioContextConstructor =
+          window.AudioContext ??
+          (
+            window as typeof window & {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+        if (!AudioContextConstructor) {
+          throw new Error("このブラウザはAI音声の書き出しに対応していません。");
+        }
+        exportAudioContext = new AudioContextConstructor();
+        const destination =
+          exportAudioContext.createMediaStreamDestination();
+        const sourceAudioTracks = sourceStream.getAudioTracks();
+        if (sourceAudioTracks.length) {
+          const originalSource =
+            exportAudioContext.createMediaStreamSource(
+              new MediaStream(sourceAudioTracks),
+            );
+          const originalGain = exportAudioContext.createGain();
+          originalGain.gain.value = 0.12;
+          originalSource.connect(originalGain).connect(destination);
+        }
+
+        exportNarration = new Audio(narrationAudioUrl);
+        exportNarration.preload = "auto";
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(
+            () => reject(new Error("AI音声を読み込めませんでした。")),
+            10_000,
+          );
+          exportNarration!.onloadedmetadata = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
+          exportNarration!.onerror = () => {
+            window.clearTimeout(timeout);
+            reject(new Error("AI音声を読み込めませんでした。"));
+          };
+          exportNarration!.load();
+        });
+        exportNarration.playbackRate = Math.max(
+          0.55,
+          Math.min(1.75, exportNarration.duration / Math.max(editDuration, 0.1)),
+        );
+        const narrationSource =
+          exportAudioContext.createMediaElementSource(exportNarration);
+        const narrationGain = exportAudioContext.createGain();
+        narrationGain.gain.value = 1;
+        narrationSource.connect(narrationGain).connect(destination);
+        destination.stream
+          .getAudioTracks()
+          .forEach((track) => outputStream.addTrack(track));
+      } else {
+        sourceStream
+          .getAudioTracks()
+          .forEach((track) => outputStream.addTrack(track));
+      }
 
       const preferredMimeTypes = [
         "video/webm;codecs=vp9,opus",
@@ -2594,9 +3117,16 @@ function ResultWorkspace({
 
       recorder.start(1000);
       drawFrame();
-      await video.play();
+      if (exportNarration) {
+        exportNarration.currentTime = 0;
+        await exportAudioContext?.resume();
+        await Promise.all([video.play(), exportNarration.play()]);
+      } else {
+        await video.play();
+      }
       await ended;
       video.pause();
+      exportNarration?.pause();
       keepDrawing = false;
       recorder.stop();
       await stopped;
@@ -2623,6 +3153,10 @@ function ResultWorkspace({
       keepDrawing = false;
       window.cancelAnimationFrame(animationFrame);
       sourceStream?.getTracks().forEach((track) => track.stop());
+      exportNarration?.pause();
+      exportNarration?.removeAttribute("src");
+      exportNarration?.load();
+      await exportAudioContext?.close().catch(() => undefined);
       video.pause();
       video.loop = previous.loop;
       video.muted = previous.muted;
@@ -2633,19 +3167,54 @@ function ResultWorkspace({
     }
   }
 
+  function requestVideoExport() {
+    if (narrationPlan) {
+      setDisclosureConfirmed(false);
+      setShowDisclosureConfirm(true);
+      return;
+    }
+    void exportCaptionedVideo();
+  }
+
+  async function confirmNarrationExport() {
+    if (!disclosureConfirmed || isRecordingDisclosure) return;
+    setIsRecordingDisclosure(true);
+    try {
+      await recordDisclosureConfirmation();
+      setShowDisclosureConfirm(false);
+      await exportCaptionedVideo();
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "確認を記録できませんでした。",
+      );
+    } finally {
+      setIsRecordingDisclosure(false);
+    }
+  }
+
   return (
     <section className="resultPage">
       <div className="resultHeading">
         <div>
           <p className="completePill">
             <span>✓</span>
-            {usedHighAccuracy
+            {narrationPlan
+              ? "AIナレーション付きで仕上げました"
+              : usedHighAccuracy
               ? "高精度の文字起こしで仕上げました"
               : "全体の自動編集が完了しました"}
           </p>
-          <h1>話の流れを残して、自然な長さにつなぎ直しました。</h1>
+          <h1>
+            {narrationPlan
+              ? "映像の流れに合わせて、声とテロップを組み立てました。"
+              : "話の流れを残して、自然な長さにつなぎ直しました。"}
+          </h1>
           <p>
-            元動画全体から、言い淀み・重複・長い間を外し、文の切れ目で再構成しています。
+            {narrationPlan
+              ? "台本と声の雰囲気はここで調整できます。公開動画にサービス名や透かしは入りません。"
+              : "元動画全体から、言い淀み・重複・長い間を外し、文の切れ目で再構成しています。"}
           </p>
         </div>
         <div className="timeSaved">
@@ -2654,6 +3223,97 @@ function ResultWorkspace({
           <small>全体から約{length}秒へ自動構成</small>
         </div>
       </div>
+
+      {narrationPlan && (
+        <section className="narrationStudio">
+          <div className="narrationStudioHeading">
+            <div>
+              <p className="eyebrow">VOICE STUDIO</p>
+              <h2>声と投稿文を、あなたらしく整える</h2>
+            </div>
+            <span>公開動画への透かしなし</span>
+          </div>
+          <div className="narrationStudioGrid">
+            <div className="narrationScriptEditor">
+              <label>
+                <span>ナレーション台本</span>
+                <textarea
+                  value={narrationDraft}
+                  rows={6}
+                  maxLength={2_000}
+                  onChange={(event) => setNarrationDraft(event.target.value)}
+                />
+              </label>
+              <div className="voiceStylePicker">
+                {NARRATION_STYLES.map((style) => (
+                  <button
+                    type="button"
+                    key={style.id}
+                    className={
+                      draftNarrationStyle === style.id ? "active" : ""
+                    }
+                    onClick={() => setDraftNarrationStyle(style.id)}
+                  >
+                    <strong>{style.label}</strong>
+                    <small>{style.note}</small>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="quietButton regenerateVoice"
+                disabled={isRegeneratingNarration}
+                onClick={() => void handleNarrationRegeneration()}
+              >
+                {isRegeneratingNarration
+                  ? "AI音声を再生成中…"
+                  : "この台本と声で再生成"}
+              </button>
+              <audio
+                ref={narrationAudioRef}
+                className="narrationAudio"
+                src={narrationAudioUrl}
+                controls
+                preload="metadata"
+                onLoadedMetadata={(event) =>
+                  setNarrationDuration(event.currentTarget.duration || 0)
+                }
+              />
+            </div>
+            <div className="postCaptionEditor">
+              <label>
+                <span>Instagram投稿文</span>
+                <textarea
+                  rows={6}
+                  maxLength={1_200}
+                  value={narrationPlan.socialCaption}
+                  onChange={(event) =>
+                    setNarrationPlan({
+                      ...narrationPlan,
+                      socialCaption: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="fixedDisclosure">
+                <span>投稿時に自動追加</span>
+                <strong>{NARRATION_DISCLOSURE_TEXT}</strong>
+                <small>
+                  動画へは焼き込まず、投稿文にだけ自然に添えます。
+                </small>
+              </div>
+              <button
+                type="button"
+                className="mainCta copyPostCaption"
+                onClick={() => void copyPostCaption()}
+              >
+                <span>開示文つき投稿文をコピー</span>
+                <i>→</i>
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="resultGrid">
         <div className="previewPanel">
@@ -2827,8 +3487,14 @@ function ResultWorkspace({
                   handleVideoTimeUpdate(event.currentTarget)
                 }
                 onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onEnded={() => setIsPlaying(false)}
+                onPause={() => {
+                  setIsPlaying(false);
+                  narrationAudioRef.current?.pause();
+                }}
+                onEnded={() => {
+                  setIsPlaying(false);
+                  narrationAudioRef.current?.pause();
+                }}
               />
             ) : (
               <div className="resultSample">
@@ -3067,7 +3733,7 @@ function ResultWorkspace({
           <button className="quietButton" onClick={reset}>
             別の動画を作る
           </button>
-          {file && !usedHighAccuracy && (
+          {file && !usedHighAccuracy && !narrationPlan && (
             <button
               className="quietButton highAccuracyButton"
               onClick={() => void regenerateHighAccuracy()}
@@ -3078,10 +3744,16 @@ function ResultWorkspace({
           {file ? (
             <button
               className="mainCta reviewCta"
-              onClick={() => void exportCaptionedVideo()}
+              onClick={requestVideoExport}
               disabled={isExporting}
             >
-              <span>{isExporting ? "書き出し中…" : "字幕付き動画を書き出す"}</span>
+              <span>
+                {isExporting
+                  ? "書き出し中…"
+                  : narrationPlan
+                    ? "AI音声付き動画を書き出す"
+                    : "字幕付き動画を書き出す"}
+              </span>
               <i>{isExporting ? "●" : "↓"}</i>
             </button>
           ) : (
@@ -3092,6 +3764,80 @@ function ResultWorkspace({
           )}
         </div>
       </div>
+
+      {showDisclosureConfirm && (
+        <div
+          className="disclosureModalBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowDisclosureConfirm(false);
+            }
+          }}
+        >
+          <div
+            className="disclosureModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="disclosure-title"
+          >
+            <button
+              type="button"
+              className="modalClose"
+              aria-label="閉じる"
+              onClick={() => setShowDisclosureConfirm(false)}
+            >
+              ×
+            </button>
+            <p className="eyebrow">BEFORE EXPORT</p>
+            <h2 id="disclosure-title">投稿時の表示を確認してください</h2>
+            <p>
+              動画には透かしを入れません。代わりに、コピー済みの投稿文へ次の一文を残して投稿してください。
+            </p>
+            <strong className="modalDisclosureText">
+              {NARRATION_DISCLOSURE_TEXT}
+            </strong>
+            <label className="disclosureCheck">
+              <input
+                type="checkbox"
+                checked={disclosureConfirmed}
+                onChange={(event) =>
+                  setDisclosureConfirmed(event.target.checked)
+                }
+              />
+              <span>
+                投稿時にこの開示文を含めます。
+                <a href="/terms" target="_blank" rel="noreferrer">
+                  利用規約
+                </a>
+                を確認しました。
+              </span>
+            </label>
+            <div className="modalActions">
+              <button
+                type="button"
+                className="quietButton"
+                onClick={() => setShowDisclosureConfirm(false)}
+              >
+                戻る
+              </button>
+              <button
+                type="button"
+                className="mainCta"
+                disabled={!disclosureConfirmed || isRecordingDisclosure}
+                onClick={() => void confirmNarrationExport()}
+              >
+                <span>
+                  {isRecordingDisclosure
+                    ? "確認中…"
+                    : "確認して動画を書き出す"}
+                </span>
+                <i>↓</i>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -5,5 +5,15 @@ export async function resolve(specifier, context, nextResolve) {
       shortCircuit: true,
     };
   }
+  if (
+    (specifier.startsWith("./") || specifier.startsWith("../")) &&
+    !/\.[a-z0-9]+$/i.test(specifier)
+  ) {
+    try {
+      return await nextResolve(`${specifier}.ts`, context);
+    } catch {
+      // Fall through to Node's default resolution for directory imports.
+    }
+  }
   return nextResolve(specifier, context);
 }

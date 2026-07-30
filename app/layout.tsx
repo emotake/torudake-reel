@@ -13,7 +13,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const imageUrl = new URL("/og.png", baseUrl).toString();
   const title = "撮るだけリール｜話して送るだけの自動動画編集";
   const description =
-    "日本語のひとり喋り動画専用。無音カット、言い淀み除去、テロップ、ズーム、表紙まで自動で仕上げます。";
+    "話している動画は高精度字幕と自然なカット、無言動画はAIナレーション・テロップ・投稿文まで自動で仕上げます。";
 
   return {
     metadataBase: baseUrl,

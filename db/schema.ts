@@ -137,3 +137,26 @@ export const stripeEvents = sqliteTable(
   },
   (table) => [index("stripe_events_processed_at_idx").on(table.processedAt)],
 );
+
+export const aiDisclosureConfirmations = sqliteTable(
+  "ai_disclosure_confirmations",
+  {
+    id: text("id").primaryKey(),
+    confirmationId: text("confirmation_id").notNull(),
+    userId: text("user_id"),
+    sessionHash: text("session_hash").notNull(),
+    action: text("action", { enum: ["export"] }).notNull(),
+    disclosureMethod: text("disclosure_method", {
+      enum: ["post_caption"],
+    }).notNull(),
+    termsVersion: text("terms_version").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_disclosure_confirmation_id_unique").on(
+      table.confirmationId,
+    ),
+    index("ai_disclosure_user_id_idx").on(table.userId),
+    index("ai_disclosure_created_at_idx").on(table.createdAt),
+  ],
+);

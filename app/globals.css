@@ -1282,6 +1282,7 @@ footer strong {
 }
 
 footer span,
+footer a,
 footer small {
   color: var(--muted);
   font-size: 8px;
@@ -3496,6 +3497,463 @@ footer > small {
 @media (prefers-reduced-motion: reduce) {
   .resultCaption {
     animation: none;
+  }
+}
+
+/* AI narration */
+
+.audioModeCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.audioModeCards button {
+  position: relative;
+  display: grid;
+  min-height: 104px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 2px 12px;
+  align-content: center;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.audioModeCards button.selected {
+  border: 2px solid var(--coral);
+  background: linear-gradient(135deg, #fff8f4, #fffdf9);
+}
+
+.audioModeCards i {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  grid-row: 1 / 3;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--ink);
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.audioModeCards button:last-child i {
+  background: linear-gradient(135deg, var(--coral), #ff9a62);
+}
+
+.audioModeCards strong {
+  font-size: 10px;
+}
+
+.audioModeCards small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.audioModeCards b {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--coral);
+  color: white;
+  font-size: 8px;
+}
+
+.narrationStyleCards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.narrationStyleCards button {
+  display: grid;
+  min-height: 76px;
+  align-content: center;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.narrationStyleCards button.selected {
+  border: 2px solid var(--ink);
+  background: var(--cream);
+}
+
+.narrationStyleCards strong {
+  font-size: 8px;
+}
+
+.narrationStyleCards small {
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.narrationBrief {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.narrationBrief > span,
+.narrationScriptEditor label > span,
+.postCaptionEditor label > span {
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.narrationBrief > span small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.narrationBrief textarea,
+.narrationScriptEditor textarea,
+.postCaptionEditor textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.8;
+}
+
+.narrationBrief textarea:focus,
+.narrationScriptEditor textarea:focus,
+.postCaptionEditor textarea:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 90, 60, 0.08);
+}
+
+.narrationBrief > small {
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.6;
+}
+
+.narrationStudio {
+  margin: 0 auto 18px;
+  padding: 22px;
+  border: 1px solid #d9d4ca;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 95% 5%, rgba(185, 245, 208, 0.32), transparent 27%),
+    white;
+  box-shadow: 0 12px 36px rgba(16, 24, 40, 0.055);
+}
+
+.narrationStudioHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.narrationStudioHeading h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+
+.narrationStudioHeading > span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e9f9ef;
+  color: var(--mint-dark);
+  font-size: 7px;
+  font-weight: 900;
+}
+
+.narrationStudioGrid {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 16px;
+}
+
+.narrationScriptEditor,
+.postCaptionEditor {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.narrationScriptEditor label,
+.postCaptionEditor label {
+  display: grid;
+  gap: 8px;
+}
+
+.voiceStylePicker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.voiceStylePicker button {
+  display: grid;
+  min-height: 59px;
+  align-content: center;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.voiceStylePicker button.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
+.voiceStylePicker strong {
+  font-size: 7px;
+}
+
+.voiceStylePicker small {
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.voiceStylePicker button.active small {
+  color: #cbd3df;
+}
+
+.regenerateVoice {
+  justify-self: start;
+}
+
+.narrationAudio {
+  width: 100%;
+  height: 38px;
+}
+
+.fixedDisclosure {
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+  border: 1px solid #cfe4dc;
+  border-radius: 11px;
+  background: #f3fff8;
+}
+
+.fixedDisclosure span {
+  color: var(--mint-dark);
+  font-size: 7px;
+  font-weight: 900;
+}
+
+.fixedDisclosure strong {
+  font-size: 8px;
+}
+
+.fixedDisclosure small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.copyPostCaption {
+  width: 100%;
+}
+
+.disclosureModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 14, 24, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.disclosureModal {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 30px;
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.3);
+}
+
+.disclosureModal h2 {
+  margin: 5px 0 10px;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.disclosureModal > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+
+.modalClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cream-2);
+  cursor: pointer;
+}
+
+.modalDisclosureText {
+  display: block;
+  margin: 17px 0;
+  padding: 14px;
+  border: 1px solid #cfe4dc;
+  border-radius: 11px;
+  background: #f3fff8;
+  font-size: 10px;
+}
+
+.disclosureCheck {
+  display: grid;
+  grid-template-columns: 19px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 14px;
+  border-radius: 11px;
+  background: var(--cream);
+  cursor: pointer;
+}
+
+.disclosureCheck input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--coral);
+}
+
+.disclosureCheck span {
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.disclosureCheck a {
+  margin: 0 3px;
+  color: var(--coral-dark);
+  font-weight: 900;
+  text-decoration: underline;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.modalActions .mainCta:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.legalPage {
+  width: min(860px, calc(100% - 36px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 54px 0 90px;
+}
+
+.legalBack {
+  display: inline-flex;
+  margin-bottom: 32px;
+  color: var(--coral-dark);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.legalPage header {
+  padding-bottom: 25px;
+  border-bottom: 1px solid var(--line);
+}
+
+.legalPage h1 {
+  margin: 8px 0;
+  font-size: clamp(34px, 6vw, 56px);
+  letter-spacing: -0.06em;
+}
+
+.legalPage header p,
+.legalPage article p,
+.legalPage article li {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 2;
+}
+
+.legalPage article {
+  padding: 25px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.legalPage article h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+
+.legalPage article ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+@media (max-width: 760px) {
+  .audioModeCards,
+  .narrationStudioGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .narrationStyleCards,
+  .voiceStylePicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .narrationStudio {
+    padding: 15px;
+  }
+
+  .narrationStudioHeading {
+    flex-direction: column;
+  }
+
+  .modalActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .modalActions .quietButton {
+    order: 2;
   }
 }
 
