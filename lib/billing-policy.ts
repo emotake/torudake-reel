@@ -1,6 +1,8 @@
 export const FREE_VIDEO_LIMIT = 2;
 export const FREE_SECONDS_LIMIT = 180;
-export const LIGHT_MONTHLY_VIDEO_LIMIT = 5;
+export const LIGHT_MONTHLY_VIDEO_LIMIT = 8;
+export const LIGHT_MONTHLY_PRICE_JPY = 1480;
+export const ONE_TIME_PRICE_JPY = 300;
 
 export type BillingUsageSnapshot = {
   freeVideosUsed: number;

@@ -14,6 +14,7 @@ import {
   stripeRequest,
   type StripePlan,
 } from "../../../../lib/stripe";
+import { LIGHT_MONTHLY_VIDEO_LIMIT } from "../../../../lib/billing-policy";
 
 type StripeCustomer = {
   id: string;
@@ -60,8 +61,7 @@ export async function POST(request: Request) {
       if (billingStatus.monthlyPlanActive) {
         return Response.json(
           {
-            error:
-              "月5本プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
+            error: `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランはすでに利用中です。変更や解約はアカウント画面から行えます。`,
             code: "subscription_already_active",
           },
           { status: 409 },

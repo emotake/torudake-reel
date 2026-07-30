@@ -21,7 +21,9 @@ const RESERVATION_LIFETIME_SECONDS = 60 * 60;
 
 export class UsageLimitError extends Error {
   constructor() {
-    super("無料枠を使い切りました。月5本プランまたは1本購入を選んでください。");
+    super(
+      `無料枠を使い切りました。月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランまたは1本購入を選んでください。`,
+    );
     this.name = "UsageLimitError";
   }
 }

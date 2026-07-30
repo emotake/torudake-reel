@@ -38,6 +38,11 @@ import {
   type CaptionGoal,
   type CaptionProfile,
 } from "../lib/caption-design";
+import {
+  LIGHT_MONTHLY_PRICE_JPY,
+  LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
+} from "../lib/billing-policy";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = CaptionGoal;
@@ -1565,11 +1570,16 @@ function Landing({
           <article className="featuredPrice">
             <span className="popular">おすすめ</span>
             <p>LIGHT</p>
-            <h3>月5本プラン</h3>
+            <h3>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h3>
             <strong>
-              ¥1,480<small>/月</small>
+              ¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              <small>/月</small>
             </strong>
-            <span>1本あたり296円</span>
+            <span>
+              {`1本あたり${Math.floor(
+                LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT,
+              )}円`}
+            </span>
             <ul>
               <li>✓ 90秒まで</li>
               <li>✓ 1080p・透かしなし</li>
@@ -1581,13 +1591,15 @@ function Landing({
             >
               {billingBusyPlan === "light"
                 ? "決済画面を準備中…"
-                : "月5本プランを始める"}
+                : `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランを始める`}
             </button>
           </article>
           <article>
             <p>ONE TIME</p>
             <h3>1本だけ</h3>
-            <strong>¥480</strong>
+            <strong>
+              ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+            </strong>
             <span>サブスクなし</span>
             <ul>
               <li>✓ 90秒まで</li>

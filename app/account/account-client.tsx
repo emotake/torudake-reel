@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import {
+  LIGHT_MONTHLY_PRICE_JPY,
+  LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
+} from "../../lib/billing-policy";
 
 type BillingStatus = {
   configured: boolean;
@@ -175,7 +180,11 @@ export default function AccountClient({
           <section className="accountUsageGrid">
             <article>
               <p>現在のプラン</p>
-              <strong>{status.monthly?.active ? "月5本プラン" : "無料体験"}</strong>
+              <strong>
+                {status.monthly?.active
+                  ? `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プラン`
+                  : "無料体験"}
+              </strong>
               <span>
                 {status.monthly?.active
                   ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用`
@@ -207,8 +216,10 @@ export default function AccountClient({
           <section className="accountPlans">
             <article className="featured">
               <p>LIGHT</p>
-              <h2>月5本プラン</h2>
-              <strong>¥1,480 / 月</strong>
+              <h2>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h2>
+              <strong>
+                ¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 月
+              </strong>
               <button
                 disabled={busy !== null || status.monthly?.active}
                 onClick={() => startCheckout("light")}
@@ -217,13 +228,13 @@ export default function AccountClient({
                   ? "利用中"
                   : busy === "light"
                     ? "準備中…"
-                    : "月5本プランを始める"}
+                    : `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランを始める`}
               </button>
             </article>
             <article>
               <p>ONE TIME</p>
               <h2>1本だけ</h2>
-              <strong>¥480</strong>
+              <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
               <button
                 disabled={busy !== null}
                 onClick={() => startCheckout("one_time")}

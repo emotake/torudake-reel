@@ -5,7 +5,9 @@ import {
   chooseBillingBucket,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
+  LIGHT_MONTHLY_PRICE_JPY,
   LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
 } from "../lib/billing-policy.ts";
 
 const emptyUsage = {
@@ -15,6 +17,16 @@ const emptyUsage = {
   monthlyPlanActive: false,
   oneTimeCreditsRemaining: 0,
 };
+
+test("keeps the simple launch pricing in one policy", () => {
+  assert.equal(LIGHT_MONTHLY_VIDEO_LIMIT, 8);
+  assert.equal(LIGHT_MONTHLY_PRICE_JPY, 1480);
+  assert.equal(ONE_TIME_PRICE_JPY, 300);
+  assert.equal(
+    Math.floor(LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT),
+    185,
+  );
+});
 
 test("stops the free trial at either two videos or three minutes", () => {
   assert.equal(

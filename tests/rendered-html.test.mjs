@@ -38,7 +38,9 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /まず1本、完成を見てから。/);
   assert.match(html, /最大500MB/);
   assert.match(html, /合計3分または2動画まで/);
-  assert.match(html, /月5本プランを始める/);
+  assert.match(html, /月8本プランを始める/);
+  assert.match(html, /1本あたり185円/);
+  assert.match(html, /¥(?:<!-- -->)?300/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
 });
 
