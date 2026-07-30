@@ -47,6 +47,7 @@ import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
   getNarrationOriginalAudioGain,
+  getNarrationPlaybackRate,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
@@ -96,6 +97,7 @@ class ApiRequestError extends Error {
 
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
+const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
 
 function RichCaptionText({
   caption,
@@ -608,6 +610,48 @@ async function extractNarrationFrames(selectedFile: File, count = 6) {
   }
 }
 
+async function requestNarrationPlan({
+  frames,
+  brief,
+  goal,
+  length,
+  style,
+  sourceDuration,
+  usageReservationId,
+  timingScale,
+  previousScript,
+}: {
+  frames: string[];
+  brief: string;
+  goal: Goal;
+  length: number;
+  style: NarrationStyle;
+  sourceDuration: number;
+  usageReservationId: string | null;
+  timingScale?: number;
+  previousScript?: string;
+}) {
+  const response = await fetch("/api/narration/script", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      frames,
+      brief,
+      goal,
+      length,
+      style,
+      sourceDuration,
+      usageReservationId,
+      timingScale,
+      previousScript,
+    }),
+  });
+  return readApiResponse<ApiPayload & NarrationPlan>(
+    response,
+    "AIナレーションの台本を作成できませんでした。",
+  );
+}
+
 async function reserveVideoUsage(selectedFile: File) {
   const requestBody = JSON.stringify({
     sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
@@ -680,6 +724,53 @@ async function requestNarrationSpeech(
   const audio = await response.blob();
   if (!audio.size) throw new Error("AI音声を生成できませんでした。");
   return audio;
+}
+
+async function getNarrationAudioDuration(audio: Blob) {
+  const url = URL.createObjectURL(audio);
+  const player = document.createElement("audio");
+  player.preload = "metadata";
+
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        player.onloadedmetadata = null;
+        player.ondurationchange = null;
+        player.oncanplay = null;
+        player.onerror = null;
+      };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error("AI音声の長さを確認できませんでした。"));
+      };
+      const finish = () => {
+        if (
+          settled ||
+          !Number.isFinite(player.duration) ||
+          player.duration <= 0
+        ) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(player.duration);
+      };
+      const timeout = window.setTimeout(fail, 10_000);
+      player.onloadedmetadata = finish;
+      player.ondurationchange = finish;
+      player.oncanplay = finish;
+      player.onerror = fail;
+      player.src = url;
+      player.load();
+    });
+  } finally {
+    player.removeAttribute("src");
+    URL.revokeObjectURL(url);
+  }
 }
 
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
@@ -982,10 +1073,37 @@ export default function Home() {
       const extracted = await extractNarrationFrames(file);
       setProgress(36);
 
-      const scriptResponse = await fetch("/api/narration/script", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let nextPlan = await requestNarrationPlan({
+        frames: extracted.frames,
+        brief: narrationBrief,
+        goal,
+        length,
+        style: narrationStyle,
+        sourceDuration: extracted.duration,
+        usageReservationId: newlyReservedUsage,
+      });
+      setProgress(68);
+      let audio = await requestNarrationSpeech(
+        nextPlan.script,
+        narrationStyle,
+        newlyReservedUsage,
+      );
+      let audioDuration = await getNarrationAudioDuration(audio);
+      const maximumDuration = Math.max(
+        1,
+        Math.min(length, extracted.duration),
+      );
+
+      if (
+        audioDuration >
+        maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
+      ) {
+        setProgress(76);
+        const timingScale = Math.max(
+          0.55,
+          Math.min(0.94, (maximumDuration / audioDuration) * 0.9),
+        );
+        nextPlan = await requestNarrationPlan({
           frames: extracted.frames,
           brief: narrationBrief,
           goal,
@@ -993,23 +1111,30 @@ export default function Home() {
           style: narrationStyle,
           sourceDuration: extracted.duration,
           usageReservationId: newlyReservedUsage,
-        }),
-      });
-      const nextPlan = await readApiResponse<ApiPayload & NarrationPlan>(
-        scriptResponse,
-        "AIナレーションの台本を作成できませんでした。",
-      );
-      setProgress(68);
-      const audio = await requestNarrationSpeech(
-        nextPlan.script,
-        narrationStyle,
-        newlyReservedUsage,
-      );
+          timingScale,
+          previousScript: nextPlan.script,
+        });
+        audio = await requestNarrationSpeech(
+          nextPlan.script,
+          narrationStyle,
+          newlyReservedUsage,
+        );
+        audioDuration = await getNarrationAudioDuration(audio);
+      }
+      if (
+        audioDuration >
+        maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
+      ) {
+        throw new Error(
+          `AI音声が${Math.ceil(audioDuration)}秒になり、${Math.floor(maximumDuration)}秒以内へ自然に収まりませんでした。台本を短くしてもう一度お試しください。`,
+        );
+      }
       setProgress(90);
       const timeline = buildNarrationTimeline(
         nextPlan.segments,
         extracted.duration,
         length,
+        audioDuration,
       );
       if (!timeline.length) {
         throw new Error("AIナレーションのテロップを作成できませんでした。");
@@ -1054,14 +1179,26 @@ export default function Home() {
       style,
       usageReservationRef.current,
     );
+    const audioDuration = await getNarrationAudioDuration(audio);
     const duration = await getVideoDurationSeconds(file);
+    const maximumDuration = Math.max(1, Math.min(length, duration));
+    if (
+      audioDuration >
+      maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
+    ) {
+      throw new Error(
+        `この台本は約${Math.ceil(audioDuration)}秒です。自然な速さを保つため、${Math.floor(maximumDuration)}秒以内になるよう少し短くしてください。`,
+      );
+    }
     const segments = splitNarrationScript(cleanScript).map((text, index) => ({
       text,
       emphasis: index === 0,
     }));
     setNarrationStyle(style);
     setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
-    setTranscript(buildNarrationTimeline(segments, duration, length));
+    setTranscript(
+      buildNarrationTimeline(segments, duration, length, audioDuration),
+    );
     setNarrationAudioUrl(URL.createObjectURL(audio));
   }
 
@@ -2063,6 +2200,7 @@ function SetupWorkspace({
                   onClick={() => setLength(item)}
                 >
                   <strong>{item}</strong>秒
+                  {audioMode === "narration" ? "以内" : ""}
                   <small>
                     {item === 30 ? "短く強く" : item === 60 ? "おすすめ" : "しっかり解説"}
                   </small>
@@ -2071,7 +2209,7 @@ function SetupWorkspace({
             </div>
             <p className="optionCostNote">
               {audioMode === "narration"
-                ? "動画全体を送らず、数枚の代表場面だけで台本を作るため、API利用量を抑えます。"
+                ? "AI音声は自然な1倍速のまま、選んだ長さ以内に映像とテロップを合わせます。動画は代表場面だけで読み取り、API利用量も抑えます。"
                 : "自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。"}
             </p>
           </fieldset>
@@ -2332,6 +2470,7 @@ function ResultWorkspace({
   const [narrationDuration, setNarrationDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const isExportingRef = useRef(false);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [isCaptionDesignerOpen, setIsCaptionDesignerOpen] = useState(false);
   const [narrationDraft, setNarrationDraft] = useState(
@@ -2350,8 +2489,12 @@ function ResultWorkspace({
   );
   const tone = captionDesign.tone;
   const editRanges = useMemo(
-    () => buildEditRanges(transcript),
-    [transcript],
+    () =>
+      buildEditRanges(
+        transcript,
+        narrationPlan ? { maxJoinGapSeconds: 0.001 } : undefined,
+      ),
+    [narrationPlan, transcript],
   );
   const editedTranscript = useMemo(
     () => remapCaptionsToEditedTimeline(transcript, editRanges),
@@ -2402,6 +2545,7 @@ function ResultWorkspace({
   }
 
   function seekTo(seconds: number) {
+    if (isExportingRef.current) return;
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = Math.max(
@@ -2419,22 +2563,20 @@ function ResultWorkspace({
         safeSeconds,
       ),
     );
-    syncNarrationAudio(safeSeconds);
+    syncNarrationAudio(safeSeconds, true);
   }
 
-  function syncNarrationAudio(editedSeconds: number) {
+  function syncNarrationAudio(editedSeconds: number, force = false) {
     const audio = narrationAudioRef.current;
     if (!audio || !narrationPlan || !narrationDuration || !editDuration) return;
-    const rate = Math.max(
-      0.55,
-      Math.min(1.75, narrationDuration / editDuration),
-    );
+    const rate = getNarrationPlaybackRate();
     audio.playbackRate = rate;
+    audio.preservesPitch = true;
     const target = Math.min(
       Math.max(0, narrationDuration - 0.02),
       Math.max(0, editedSeconds) * rate,
     );
-    if (Math.abs(audio.currentTime - target) > 0.18) {
+    if (force || Math.abs(audio.currentTime - target) > 0.18) {
       audio.currentTime = target;
     }
   }
@@ -2469,6 +2611,7 @@ function ResultWorkspace({
   }
 
   function handleVideoTimeUpdate(video: HTMLVideoElement) {
+    if (isExportingRef.current) return;
     if (editRanges.length === 0) {
       video.pause();
       setIsPlaying(false);
@@ -2492,6 +2635,7 @@ function ResultWorkspace({
   }
 
   async function togglePlayback() {
+    if (isExportingRef.current) return;
     const video = videoRef.current;
     if (!video) {
       notify("実際の動画を選ぶと再生できます");
@@ -2520,6 +2664,7 @@ function ResultWorkspace({
       }
       syncNarrationAudio(
         sourceTimeToEditedTime(editRanges, video.currentTime),
+        true,
       );
       await video.play();
       if (narrationPlan && narrationAudioRef.current) {
@@ -2838,7 +2983,7 @@ function ResultWorkspace({
 
   async function exportCaptionedVideo() {
     const video = videoRef.current;
-    if (!video || !file || isExporting) return;
+    if (!video || !file || isExportingRef.current) return;
     const playableRanges = editRanges
       .map((range) => ({
         start: Math.max(0, range.start),
@@ -2869,6 +3014,7 @@ function ResultWorkspace({
       return;
     }
 
+    isExportingRef.current = true;
     setIsExporting(true);
     const previous = {
       currentTime: video.currentTime,
@@ -2877,27 +3023,69 @@ function ResultWorkspace({
       loop: video.loop,
       wasPlaying: !video.paused,
     };
+    narrationAudioRef.current?.pause();
     let animationFrame = 0;
     let keepDrawing = true;
     let sourceStream: MediaStream | null = null;
     let exportAudioContext: AudioContext | null = null;
     let exportNarration: HTMLAudioElement | null = null;
+    let recorder: MediaRecorder | null = null;
+    const seekExportMedia = async (
+      media: HTMLMediaElement,
+      seconds: number,
+    ): Promise<void> => {
+      const maximum = Number.isFinite(media.duration)
+        ? Math.max(0, media.duration - 0.02)
+        : Math.max(0, seconds);
+      const target = Math.max(0, Math.min(seconds, maximum));
+      const needsSeek = Math.abs(media.currentTime - target) > 0.02;
+      if (!needsSeek && media.readyState >= 2) return;
+
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const eventName = needsSeek ? "seeked" : "canplay";
+        const cleanup = () => {
+          window.clearTimeout(timeout);
+          media.removeEventListener(eventName, finish);
+          media.removeEventListener("error", fail);
+        };
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+        const fail = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(
+            new Error("動画とAI音声の位置を合わせられませんでした。"),
+          );
+        };
+        const timeout = window.setTimeout(fail, 8_000);
+        media.addEventListener(eventName, finish, { once: true });
+        media.addEventListener("error", fail, { once: true });
+        if (needsSeek) {
+          media.currentTime = target;
+        } else {
+          media.preload = "auto";
+          media.load();
+        }
+      });
+      if (
+        !needsSeek &&
+        Math.abs(media.currentTime - target) > 0.02
+      ) {
+        await seekExportMedia(media, target);
+      }
+    };
 
     try {
       video.pause();
       video.loop = false;
       video.muted = false;
-      video.currentTime = playableRanges[0].start;
-      await new Promise<void>((resolve) => {
-        if (
-          video.readyState >= 2 &&
-          Math.abs(video.currentTime - playableRanges[0].start) < 0.03
-        ) {
-          resolve();
-          return;
-        }
-        video.addEventListener("seeked", () => resolve(), { once: true });
-      });
+      await seekExportMedia(video, playableRanges[0].start);
 
       const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth || 1080;
@@ -3111,10 +3299,8 @@ function ResultWorkspace({
           };
           exportNarration!.load();
         });
-        exportNarration.playbackRate = Math.max(
-          0.55,
-          Math.min(1.75, exportNarration.duration / Math.max(editDuration, 0.1)),
-        );
+        exportNarration.playbackRate = getNarrationPlaybackRate();
+        exportNarration.preservesPitch = true;
         const narrationSource =
           exportAudioContext.createMediaElementSource(exportNarration);
         const narrationGain = exportAudioContext.createGain();
@@ -3137,68 +3323,145 @@ function ResultWorkspace({
       const mimeType =
         preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) ??
         "";
-      const recorder = new MediaRecorder(
+      recorder = new MediaRecorder(
         outputStream,
         mimeType ? { mimeType, videoBitsPerSecond: 6_000_000 } : undefined,
       );
+      const activeRecorder = recorder;
       const chunks: BlobPart[] = [];
-      recorder.addEventListener("dataavailable", (event) => {
+      activeRecorder.addEventListener("dataavailable", (event) => {
         if (event.data.size) chunks.push(event.data);
       });
       const stopped = new Promise<void>((resolve, reject) => {
-        recorder.addEventListener("stop", () => resolve(), { once: true });
-        recorder.addEventListener(
+        activeRecorder.addEventListener("stop", () => resolve(), { once: true });
+        activeRecorder.addEventListener(
           "error",
           () => reject(new Error("動画の書き出しに失敗しました。")),
           { once: true },
         );
       });
-      const ended = new Promise<void>((resolve) => {
-        let rangeIndex = 0;
-        const finishNaturalEdit = () => {
-          const currentRange = playableRanges[rangeIndex];
-          if (
-            !video.ended &&
-            video.currentTime < currentRange.end - 0.03
-          ) {
-            return;
-          }
-
-          if (rangeIndex < playableRanges.length - 1) {
-            rangeIndex += 1;
-            video.currentTime = playableRanges[rangeIndex].start;
-            return;
-          }
-
-          video.removeEventListener(
-            "timeupdate",
-            finishNaturalEdit,
+      const waitForEvent = (
+        target: EventTarget,
+        eventName: string,
+        errorMessage: string,
+        timeoutMs = 8_000,
+      ) =>
+        new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            window.clearTimeout(timeout);
+            target.removeEventListener(eventName, finish);
+          };
+          const finish = () => {
+            cleanup();
+            resolve();
+          };
+          const timeout = window.setTimeout(() => {
+            cleanup();
+            reject(new Error(errorMessage));
+          }, timeoutMs);
+          target.addEventListener(eventName, finish, { once: true });
+        });
+      const pauseRecorderForSeek = async () => {
+        if (activeRecorder.state !== "recording") return;
+        const paused = waitForEvent(
+          activeRecorder,
+          "pause",
+          "動画のカット処理を一時停止できませんでした。",
+        );
+        activeRecorder.pause();
+        await paused;
+      };
+      const resumeRecorderAfterSeek = async () => {
+        if (activeRecorder.state !== "paused") return;
+        const resumed = waitForEvent(
+          activeRecorder,
+          "resume",
+          "動画のカット処理を再開できませんでした。",
+        );
+        activeRecorder.resume();
+        await resumed;
+      };
+      const waitForRangeEnd = (range: { start: number; end: number }) =>
+        new Promise<void>((resolve, reject) => {
+          const timeoutMs = Math.max(
+            10_000,
+            Math.ceil((range.end - range.start + 8) * 1_000),
           );
-          video.removeEventListener("ended", finishNaturalEdit);
-          resolve();
-        };
-        video.addEventListener("timeupdate", finishNaturalEdit);
-        video.addEventListener("ended", finishNaturalEdit);
-      });
+          let settled = false;
+          let rangeAnimationFrame = 0;
+          const cleanup = () => {
+            window.clearTimeout(timeout);
+            window.cancelAnimationFrame(rangeAnimationFrame);
+            video.removeEventListener("ended", check);
+            video.removeEventListener("error", fail);
+          };
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            video.pause();
+            exportNarration?.pause();
+            cleanup();
+            resolve();
+          };
+          const check = () => {
+            if (
+              video.ended ||
+              video.currentTime >= range.end - 0.015
+            ) {
+              finish();
+              return;
+            }
+            rangeAnimationFrame = window.requestAnimationFrame(check);
+          };
+          const fail = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("動画のカット位置を再生できませんでした。"));
+          };
+          const timeout = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("動画の書き出しに時間がかかりすぎています。"));
+          }, timeoutMs);
+          video.addEventListener("ended", check);
+          video.addEventListener("error", fail, { once: true });
+          rangeAnimationFrame = window.requestAnimationFrame(check);
+        });
 
-      recorder.start(1000);
+      activeRecorder.start(1000);
       drawFrame();
-      if (exportNarration) {
-        exportNarration.currentTime = 0;
-        await exportAudioContext?.resume();
-        await Promise.all([video.play(), exportNarration.play()]);
-      } else {
-        await video.play();
+      await exportAudioContext?.resume();
+      let narrationElapsed = 0;
+
+      for (
+        let rangeIndex = 0;
+        rangeIndex < playableRanges.length;
+        rangeIndex += 1
+      ) {
+        const range = playableRanges[rangeIndex];
+        if (rangeIndex > 0) await pauseRecorderForSeek();
+        await seekExportMedia(video, range.start);
+        if (exportNarration) {
+          await seekExportMedia(exportNarration, narrationElapsed);
+        }
+        if (rangeIndex > 0) await resumeRecorderAfterSeek();
+
+        const rangeEnded = waitForRangeEnd(range);
+        const playback = [video.play()];
+        if (exportNarration) playback.push(exportNarration.play());
+        await Promise.all([...playback, rangeEnded]);
+        narrationElapsed += range.end - range.start;
       }
-      await ended;
       video.pause();
       exportNarration?.pause();
       keepDrawing = false;
-      recorder.stop();
+      activeRecorder.stop();
       await stopped;
 
       const output = new Blob(chunks, {
-        type: recorder.mimeType || "video/webm",
+        type: activeRecorder.mimeType || "video/webm",
       });
       if (!output.size) throw new Error("書き出した動画が空でした。");
 
@@ -3218,6 +3481,13 @@ function ResultWorkspace({
     } finally {
       keepDrawing = false;
       window.cancelAnimationFrame(animationFrame);
+      if (recorder && recorder.state !== "inactive") {
+        try {
+          recorder.stop();
+        } catch {
+          // The recorder may already be stopping after an asynchronous error.
+        }
+      }
       sourceStream?.getTracks().forEach((track) => track.stop());
       exportNarration?.pause();
       exportNarration?.removeAttribute("src");
@@ -3227,9 +3497,19 @@ function ResultWorkspace({
       video.loop = previous.loop;
       video.muted = previous.muted;
       video.volume = previous.volume;
+      isExportingRef.current = false;
       video.currentTime = previous.currentTime;
-      if (previous.wasPlaying) void video.play();
       setIsExporting(false);
+      if (previous.wasPlaying) {
+        syncNarrationAudio(
+          sourceTimeToEditedTime(editRanges, previous.currentTime),
+          true,
+        );
+        await video.play().catch(() => undefined);
+        if (narrationPlan && narrationAudioRef.current) {
+          await narrationAudioRef.current.play().catch(() => undefined);
+        }
+      }
     }
   }
 
@@ -3286,7 +3566,11 @@ function ResultWorkspace({
         <div className="timeSaved">
           <span>仕上がり時間</span>
           <strong>{formatCaptionClock(editDuration)}</strong>
-          <small>全体から約{length}秒へ自動構成</small>
+          <small>
+            全体から
+            {narrationPlan ? `${length}秒以内` : `約${length}秒`}
+            へ自動構成
+          </small>
         </div>
       </div>
 
@@ -3370,6 +3654,9 @@ function ResultWorkspace({
                   setNarrationDuration(event.currentTarget.duration || 0)
                 }
               />
+              <p className="naturalNarrationNote">
+                声を動画尺に合わせて引き伸ばさず、自然な1倍速で再生・書き出しします。
+              </p>
             </div>
             <div className="postCaptionEditor">
               <label>
@@ -3577,14 +3864,39 @@ function ResultWorkspace({
                 onTimeUpdate={(event) =>
                   handleVideoTimeUpdate(event.currentTarget)
                 }
-                onPlay={() => setIsPlaying(true)}
+                onSeeking={() => {
+                  if (!isExportingRef.current) {
+                    narrationAudioRef.current?.pause();
+                  }
+                }}
+                onSeeked={(event) => {
+                  if (isExportingRef.current || !narrationPlan) return;
+                  const video = event.currentTarget;
+                  syncNarrationAudio(
+                    sourceTimeToEditedTime(editRanges, video.currentTime),
+                    true,
+                  );
+                  if (!video.paused && narrationAudioRef.current) {
+                    void narrationAudioRef.current.play().catch(() => {
+                      video.pause();
+                      notify("AI音声を再生できませんでした。");
+                    });
+                  }
+                }}
+                onPlay={() => {
+                  if (!isExportingRef.current) setIsPlaying(true);
+                }}
                 onPause={() => {
-                  setIsPlaying(false);
-                  narrationAudioRef.current?.pause();
+                  if (!isExportingRef.current) {
+                    setIsPlaying(false);
+                    narrationAudioRef.current?.pause();
+                  }
                 }}
                 onEnded={() => {
-                  setIsPlaying(false);
-                  narrationAudioRef.current?.pause();
+                  if (!isExportingRef.current) {
+                    setIsPlaying(false);
+                    narrationAudioRef.current?.pause();
+                  }
                 }}
               />
             ) : (
@@ -3611,7 +3923,8 @@ function ResultWorkspace({
               {previewMode === "after" ? "字幕ON" : "字幕OFF"}
             </span>
             <span className="outputRange">
-              約{length}秒版・実尺{formatCaptionClock(editDuration)}
+              {narrationPlan ? `${length}秒以内版` : `約${length}秒版`}
+              ・実尺{formatCaptionClock(editDuration)}
             </span>
           </div>
 
@@ -3673,12 +3986,18 @@ function ResultWorkspace({
           <div className="editPanelHeading">
             <div>
               <p className="eyebrow">TEXT EDIT</p>
-              <h2>文字でカットを確認</h2>
+              <h2>
+                {narrationPlan
+                  ? "音声とテロップを確認"
+                  : "文字でカットを確認"}
+              </h2>
             </div>
             <span>自動保存</span>
           </div>
           <p className="editHelp">
-            グレーの文は自動カット候補です。左のボタンで動画へ戻す・外すを切り替えられます。
+            {narrationPlan
+              ? "テロップはAI音声と同期しています。内容を変えるときは、上の台本を編集して「この台本と声で再生成」を押してください。"
+              : "グレーの文は自動カット候補です。左のボタンで動画へ戻す・外すを切り替えられます。"}
           </p>
           <div className="transcriptList">
             {transcript.map((line) => (
@@ -3688,6 +4007,7 @@ function ResultWorkspace({
               >
                 <button
                   onClick={() => toggleLine(line.id)}
+                  disabled={Boolean(narrationPlan)}
                   aria-label={line.removed ? "この文を戻す" : "この文を削除する"}
                 >
                   {line.removed ? "↶" : "✓"}
@@ -3706,6 +4026,7 @@ function ResultWorkspace({
                     value={line.text}
                     onChange={(event) => updateLine(line.id, event.target.value)}
                     disabled={line.removed}
+                    readOnly={Boolean(narrationPlan)}
                   />
                 </div>
                 {line.accent && !line.removed && <span>強調</span>}

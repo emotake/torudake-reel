@@ -14,10 +14,17 @@ const GOALS = new Set(["follow", "sales", "reach"]);
 const LENGTHS = new Set([30, 60, 90]);
 
 const STYLE_INSTRUCTIONS: Record<NarrationStyle, string> = {
-  bright: "明るく親しみやすく、短い言葉で話しかける",
-  calm: "やさしく落ち着き、余韻のある言葉で案内する",
-  tempo: "冒頭の引きを強くし、テンポの良い短文で進める",
-  refined: "過度に煽らず、上品で洗練された語彙を使う",
+  bright: "明るく弾む親近感。短い言葉で友人へ話しかける",
+  calm: "近く柔らかな距離感。情景と余韻を大切に物語る",
+  tempo: "芯のある明瞭さ。冒頭の引きを強くして短文で刻む",
+  refined: "深い低音に合う静かな説得力。簡潔で重みのある語彙を使う",
+};
+
+const NATURAL_CHARACTERS_PER_SECOND: Record<NarrationStyle, number> = {
+  bright: 4.7,
+  calm: 4.2,
+  tempo: 5,
+  refined: 4.1,
 };
 
 type OpenAIResponse = {
@@ -88,6 +95,8 @@ export async function POST(request: Request) {
     style?: unknown;
     sourceDuration?: unknown;
     usageReservationId?: unknown;
+    timingScale?: unknown;
+    previousScript?: unknown;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -109,6 +118,12 @@ export async function POST(request: Request) {
   const length = Number(payload.length);
   const sourceDuration = Number(payload.sourceDuration);
   const style = payload.style;
+  const timingScale =
+    payload.timingScale === undefined ? 1 : Number(payload.timingScale);
+  const previousScript =
+    typeof payload.previousScript === "string"
+      ? payload.previousScript.replace(/\s+/g, " ").trim().slice(0, 2_000)
+      : "";
 
   if (
     frames.length === 0 ||
@@ -118,7 +133,10 @@ export async function POST(request: Request) {
     !isNarrationStyle(style) ||
     !Number.isFinite(sourceDuration) ||
     sourceDuration <= 0 ||
-    sourceDuration > 60 * 60
+    sourceDuration > 60 * 60 ||
+    !Number.isFinite(timingScale) ||
+    timingScale < 0.55 ||
+    timingScale > 1
   ) {
     return Response.json(
       { error: "動画の場面を確認できませんでした。動画を選び直してください。" },
@@ -145,7 +163,16 @@ export async function POST(request: Request) {
   }
 
   const targetDuration = Math.min(length, Math.floor(sourceDuration));
-  const characterGuide = Math.max(45, Math.round(targetDuration * 4.1));
+  const narrationWindow = Math.max(3, targetDuration * 0.88 * timingScale);
+  const characterGuide = Math.max(
+    18,
+    Math.round(narrationWindow * NATURAL_CHARACTERS_PER_SECOND[style]),
+  );
+  const characterMinimum = Math.max(12, Math.round(characterGuide * 0.9));
+  const characterMaximum = Math.max(
+    characterMinimum,
+    Math.round(characterGuide * 1.08),
+  );
   const goalInstruction =
     goal === "sales"
       ? "商品の価値を具体的に伝え、最後に自然な行動提案を置く"
@@ -153,6 +180,9 @@ export async function POST(request: Request) {
         ? "冒頭1文で続きを見たくさせ、視覚的な変化に合わせて展開する"
         : "視聴者に親しく話しかけ、最後にフォローしたくなる余韻を作る";
   const userBrief = brief || "補足情報なし。映像で確実に確認できる内容だけを使う。";
+  const timingCorrection = previousScript
+    ? `\n再調整する元台本: ${previousScript}\n元台本の意味・事実・冒頭の引き・結びを保ち、重複や補足を削って指定文字数へ短くしてください。`
+    : "";
   const content: Array<
     | { type: "input_text"; text: string }
     | { type: "input_image"; image_url: string; detail: "low" }
@@ -163,14 +193,17 @@ export async function POST(request: Request) {
 
 目的: ${goalInstruction}
 声の雰囲気: ${STYLE_INSTRUCTIONS[style]}
-完成尺: 約${targetDuration}秒
-台本の文字数目安: ${characterGuide}字（映像より長くしない）
-利用者からの補足: ${userBrief}
+完成尺の上限: ${targetDuration}秒
+自然な読み上げ時間: 約${Math.round(narrationWindow)}秒
+台本の文字数: ${characterMinimum}〜${characterMaximum}字
+利用者からの補足: ${userBrief}${timingCorrection}
 
 ルール:
 - 添付画像は動画から時系列に抽出した場面です。見える順序を尊重してください。
 - 映像や補足から確認できない商品名、効果、価格、所在地、実績を創作しないでください。
 - 大げさな断定や不自然な広告調を避け、投稿者の映像に自然になじむ語り口にしてください。
+- 尺を埋めるための言い換えや繰り返しを避け、自然な1倍速で読める台本にしてください。
+- 最初の1文で引きつけ、最後の1文は映像だけの余韻へ自然につながる短い結びにしてください。
 - 元動画の音声内容は提供されないため、会話を引用・推測したり、映像内の人物が実際に話した内容として断定したりしないでください。
 - segmentsはテロップ1枚あたり8〜24文字を目安に、文の切れ目で分割してください。
 - socialCaptionは投稿本文です。AI音声の開示文はサービス側で固定追加するため、ここには含めないでください。`,

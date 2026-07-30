@@ -14,30 +14,30 @@ const VOICE_SETTINGS: Record<
   bright: {
     voice: "coral",
     fallbackVoice: "nova",
-    speed: 1.02,
+    speed: 1,
     instructions:
-      "自然な日本語で、明るく親しみやすく。広告の読み上げにせず、友人へ話すように。文の切れ目に短い間を入れる。",
+      "自然な日本語で、明るい中高域の声。笑顔が伝わるように弾ませ、親しい人へ話す距離感で読む。広告調や甲高い作り声にせず、語尾は軽やかに、文の切れ目には自然な短い間を置く。",
   },
   calm: {
     voice: "marin",
     fallbackVoice: "shimmer",
-    speed: 0.94,
+    speed: 0.98,
     instructions:
-      "自然な日本語で、やさしく落ち着いた声。急がず、情景が伝わる余韻を作る。抑揚は控えめだが単調にしない。",
+      "自然な日本語で、息づかいを感じる柔らかな声。聞き手のすぐ近くで物語るように、急がず静かな抑揚をつける。大切な言葉の前後に間を置き、語尾はやさしく余韻を残す。",
   },
   tempo: {
     voice: "cedar",
     fallbackVoice: "alloy",
-    speed: 1.08,
+    speed: 1.04,
     instructions:
-      "自然な日本語で、軽快で歯切れよく。冒頭に勢いを出し、短文ごとにリズムを変える。過剰に煽らない。",
+      "自然な日本語で、芯のあるクリアな中低音。子音を明瞭にして短文を歯切れよく刻み、冒頭は一段強く引きつける。早口や煽り口調にはせず、要点ごとにリズムを切り替える。",
   },
   refined: {
-    voice: "sage",
-    fallbackVoice: "onyx",
-    speed: 0.98,
+    voice: "onyx",
+    fallbackVoice: "sage",
+    speed: 0.97,
     instructions:
-      "自然な日本語で、上品で洗練された声。低めのテンションで信頼感を出し、語尾まで明瞭に読む。",
+      "自然な日本語で、深く重厚な低音。静かな説得力のあるドキュメンタリー調で、声量を上げずに言葉を立たせる。映画予告のように誇張せず、低い重心と長めの余韻を保つ。",
   },
 };
 
@@ -146,7 +146,9 @@ export async function POST(request: Request) {
     const firstError = (await response.clone().json().catch(() => ({}))) as OpenAIError;
     const detail = `${firstError.error?.code ?? ""} ${firstError.error?.type ?? ""} ${firstError.error?.message ?? ""}`;
     if (
-      (response.status === 400 || response.status === 404) &&
+      (response.status === 400 ||
+        response.status === 404 ||
+        response.status === 410) &&
       /model|voice|deprecated|not.found/i.test(detail)
     ) {
       response = await requestSpeech(apiKey, script, payload.style, true);

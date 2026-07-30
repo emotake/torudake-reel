@@ -5,10 +5,16 @@ import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
   getNarrationOriginalAudioGain,
+  getNarrationPlaybackRate,
   NARRATION_DISCLOSURE_TEXT,
+  NARRATION_STYLES,
   normalizeNarrationPlan,
   splitNarrationScript,
 } from "../lib/narration.ts";
+import {
+  buildEditRanges,
+  getEditedDuration,
+} from "../lib/edit-plan.ts";
 
 test("normalizes a structured narration plan", () => {
   const plan = normalizeNarrationPlan({
@@ -36,7 +42,7 @@ test("falls back to sentence boundaries when segments are missing", () => {
   );
 });
 
-test("samples the whole source while keeping the requested edit duration", () => {
+test("samples the whole source while matching the natural audio duration", () => {
   const timeline = buildNarrationTimeline(
     [
       { text: "最初の場面です", emphasis: true },
@@ -45,15 +51,46 @@ test("samples the whole source while keeping the requested edit duration", () =>
     ],
     72,
     30,
+    21.6,
   );
   assert.equal(timeline.length, 3);
   const editedDuration = timeline.reduce(
     (total, segment) => total + segment.end - segment.start,
     0,
   );
-  assert.ok(Math.abs(editedDuration - 30) < 0.01);
+  assert.ok(Math.abs(editedDuration - 21.6) < 0.01);
   assert.ok(timeline[1].start > timeline[0].end);
-  assert.ok(timeline.at(-1).end <= 72);
+  assert.equal(timeline.at(-1).end, 72);
+});
+
+test("uses four clearly named voice characters with stable ids", () => {
+  assert.deepEqual(
+    NARRATION_STYLES.map((style) => style.id),
+    ["bright", "calm", "tempo", "refined"],
+  );
+  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 4);
+  assert.ok(NARRATION_STYLES.every((style) => style.note.includes("声")));
+});
+
+test("never stretches narration to fill the video duration", () => {
+  assert.equal(getNarrationPlaybackRate(), 1);
+});
+
+test("preserves short narration cut gaps instead of rejoining the source", () => {
+  const timeline = buildNarrationTimeline(
+    Array.from({ length: 20 }, (_, index) => ({
+      text: `場面${index + 1}の説明です`,
+      emphasis: index === 0,
+    })),
+    60,
+    60,
+    52.8,
+  );
+  const ranges = buildEditRanges(timeline, {
+    maxJoinGapSeconds: 0.001,
+  });
+  assert.ok(ranges.length > 1);
+  assert.ok(Math.abs(getEditedDuration(ranges) - 52.8) < 0.02);
 });
 
 test("always appends one visible AI narration disclosure", () => {

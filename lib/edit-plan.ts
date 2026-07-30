@@ -7,6 +7,10 @@ export type EditRange = {
   end: number;
 };
 
+type BuildEditRangesOptions = {
+  maxJoinGapSeconds?: number;
+};
+
 const MAX_JOIN_GAP_SECONDS = 0.42;
 const MAX_SENTENCE_GAP_SECONDS = 0.78;
 const MAX_SENTENCE_BLOCK_SECONDS = 12;
@@ -67,7 +71,12 @@ function isNearDuplicate(
 
 export function buildEditRanges(
   captions: CaptionSegment[],
+  options: BuildEditRangesOptions = {},
 ): EditRange[] {
+  const maxJoinGapSeconds = Math.max(
+    0,
+    options.maxJoinGapSeconds ?? MAX_JOIN_GAP_SECONDS,
+  );
   const kept = captions
     .filter(
       (caption) =>
@@ -84,7 +93,7 @@ export function buildEditRanges(
     const previous = ranges.at(-1);
     if (
       previous &&
-      caption.start - previous.end <= MAX_JOIN_GAP_SECONDS
+      caption.start - previous.end <= maxJoinGapSeconds
     ) {
       previous.end = Math.max(previous.end, caption.end);
       return;

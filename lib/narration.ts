@@ -25,10 +25,10 @@ export const NARRATION_STYLES: Array<{
   label: string;
   note: string;
 }> = [
-  { id: "bright", label: "明るく親しみやすい", note: "日常・お店紹介向け" },
-  { id: "calm", label: "やさしく落ち着く", note: "美容・暮らし向け" },
-  { id: "tempo", label: "テンポよく軽快", note: "商品・How-to向け" },
-  { id: "refined", label: "上品で洗練", note: "ブランド・作品向け" },
+  { id: "bright", label: "親しみポップ", note: "明るく弾む声｜日常・お店" },
+  { id: "calm", label: "余韻ストーリー", note: "近く柔らかな声｜美容・暮らし" },
+  { id: "tempo", label: "キレのあるナビ", note: "芯のある声｜商品・How-to" },
+  { id: "refined", label: "低音シネマ", note: "深く重厚な声｜ブランド・作品" },
 ];
 
 function cleanText(value: unknown, maxLength: number) {
@@ -104,6 +104,7 @@ export function buildNarrationTimeline(
   segments: NarrationSegment[],
   sourceDuration: number,
   requestedDuration: number,
+  narrationDuration?: number,
 ): CaptionSegment[] {
   const validSegments = segments
     .map((segment) => ({
@@ -115,14 +116,23 @@ export function buildNarrationTimeline(
   if (!validSegments.length) return [];
 
   const safeSourceDuration = Math.max(1, sourceDuration || requestedDuration);
-  const targetDuration = Math.max(
+  const maximumDuration = Math.max(
     1,
     Math.min(requestedDuration || safeSourceDuration, safeSourceDuration),
   );
+  const targetDuration =
+    Number.isFinite(narrationDuration) && Number(narrationDuration) > 0
+      ? Math.max(1, Math.min(Number(narrationDuration), maximumDuration))
+      : maximumDuration;
   const weights = validSegments.map((segment) =>
     Math.max(5, Array.from(segment.text).length),
   );
   const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  const sourceGapBudget = Math.max(0, safeSourceDuration - targetDuration);
+  const sourceGap =
+    validSegments.length > 1
+      ? sourceGapBudget / (validSegments.length - 1)
+      : 0;
   let outputCursor = 0;
 
   return validSegments.map((segment, index) => {
@@ -132,9 +142,9 @@ export function buildNarrationTimeline(
         : (weights[index] / totalWeight) * targetDuration;
     const duration = Math.max(0.4, remaining);
     const sourceStart =
-      targetDuration >= safeSourceDuration
-        ? outputCursor
-        : outputCursor * (safeSourceDuration / targetDuration);
+      validSegments.length === 1
+        ? sourceGapBudget / 2
+        : outputCursor + sourceGap * index;
     const start = Math.min(sourceStart, Math.max(0, safeSourceDuration - 0.2));
     const end = Math.min(safeSourceDuration, start + duration);
     outputCursor += remaining;
@@ -150,6 +160,10 @@ export function buildNarrationTimeline(
       highlight,
     };
   });
+}
+
+export function getNarrationPlaybackRate() {
+  return 1;
 }
 
 export function buildDisclosedPostCaption(socialCaption: string) {
