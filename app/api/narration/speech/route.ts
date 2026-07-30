@@ -7,6 +7,9 @@ import {
 } from "../../../../lib/narration";
 import { isBillingConfigured } from "../../../../lib/stripe";
 
+const DELIVERY_GUARD =
+  "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
+
 const VOICE_SETTINGS: Record<
   NarrationStyle,
   { voice: string; fallbackVoice: string; speed: number; instructions: string }
@@ -16,28 +19,35 @@ const VOICE_SETTINGS: Record<
     fallbackVoice: "nova",
     speed: 1,
     instructions:
-      "自然な日本語で、明るい中高域の声。笑顔が伝わるように弾ませ、親しい人へ話す距離感で読む。広告調や甲高い作り声にせず、語尾は軽やかに、文の切れ目には自然な短い間を置く。",
+      "自然な日本語を、飾りすぎない聞き取りやすい女性の声で読む。落ち着いた明るさと日常会話の距離感を保ち、広告調、作り声、過度な演技を避ける。固有名詞は明瞭に、文の切れ目には自然な短い間を置く。",
   },
   calm: {
-    voice: "marin",
-    fallbackVoice: "shimmer",
-    speed: 0.98,
+    voice: "cedar",
+    fallbackVoice: "echo",
+    speed: 0.99,
     instructions:
-      "自然な日本語で、息づかいを感じる柔らかな声。聞き手のすぐ近くで物語るように、急がず静かな抑揚をつける。大切な言葉の前後に間を置き、語尾はやさしく余韻を残す。",
+      "自然な日本語を、飾りすぎない聞き取りやすい男性の声で読む。穏やかな中低音と日常会話の距離感を保ち、ナレーター然とした誇張や過度な低音演技を避ける。固有名詞は明瞭に、文の切れ目には自然な短い間を置く。",
   },
   tempo: {
-    voice: "cedar",
-    fallbackVoice: "alloy",
-    speed: 1.04,
+    voice: "nova",
+    fallbackVoice: "shimmer",
+    speed: 1.06,
     instructions:
-      "自然な日本語で、芯のあるクリアな中低音。子音を明瞭にして短文を歯切れよく刻み、冒頭は一段強く引きつける。早口や煽り口調にはせず、要点ごとにリズムを切り替える。",
+      "自然な日本語で、明るく高めの萌えアニメキャラクター風。小さな驚きや喜びを大きく表現し、語尾を軽く跳ねさせ、短い文ごとに表情を切り替える。可愛らしいキャラ声にするが甲高く潰さず、幼児の声にはせず、固有名詞を明瞭に読む。実在する声優やキャラクターは模倣しない。",
   },
   refined: {
     voice: "onyx",
-    fallbackVoice: "sage",
+    fallbackVoice: "onyx",
     speed: 0.97,
     instructions:
       "自然な日本語で、深く重厚な低音。静かな説得力のあるドキュメンタリー調で、声量を上げずに言葉を立たせる。映画予告のように誇張せず、低い重心と長めの余韻を保つ。",
+  },
+  comedy: {
+    voice: "fable",
+    fallbackVoice: "fable",
+    speed: 1.02,
+    instructions:
+      "熱量の高い関西芸人のツッコミ役のように読む。状況説明は標準語または薄い関西弁で妙に真剣に入り、短いツッコミだけ一段強い自然な関西弁で鋭く跳ね、オチの後は急に脱力する。声量・高低・間を大胆に変えるが、叫び続けたり単語を潰したりせず、固有名詞は明瞭に読む。台本の標準語を勝手に関西弁へ変えず、実在する芸人は模倣しない。",
   },
 };
 
@@ -73,7 +83,7 @@ async function requestSpeech(
             voice: settings.voice,
             response_format: "mp3",
             speed: settings.speed,
-            instructions: settings.instructions,
+            instructions: `${settings.instructions}${DELIVERY_GUARD}`,
           },
     ),
   });

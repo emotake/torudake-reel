@@ -63,13 +63,23 @@ test("samples the whole source while matching the natural audio duration", () =>
   assert.equal(timeline.at(-1).end, 72);
 });
 
-test("uses four clearly named voice characters with stable ids", () => {
+test("keeps the four voice ids stable and adds a distinct comedy voice", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
-    ["bright", "calm", "tempo", "refined"],
+    ["bright", "calm", "tempo", "refined", "comedy"],
   );
-  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 4);
+  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 5);
   assert.ok(NARRATION_STYLES.every((style) => style.note.includes("声")));
+  assert.deepEqual(
+    NARRATION_STYLES.map((style) => style.label),
+    [
+      "自然な女性",
+      "自然な男性",
+      "萌えアニメ",
+      "低音シネマ",
+      "関西ツッコミ",
+    ],
+  );
 });
 
 test("never stretches narration to fill the video duration", () => {
@@ -105,6 +115,6 @@ test("always appends one visible AI narration disclosure", () => {
 });
 
 test("uses a quiet original track only when narration mix keeps it", () => {
-  assert.equal(getNarrationOriginalAudioGain("duck"), 0.12);
+  assert.equal(getNarrationOriginalAudioGain("duck"), 0.08);
   assert.equal(getNarrationOriginalAudioGain("mute"), 0);
 });

@@ -19,7 +19,7 @@ async function loadWorker(testName) {
   return worker;
 }
 
-test("sends four distinct voice characters at natural fixed speeds", async () => {
+test("sends five distinct voice characters at natural fixed speeds", async () => {
   globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
   const originalFetch = globalThis.fetch;
   const requests = [];
@@ -33,7 +33,7 @@ test("sends four distinct voice characters at natural fixed speeds", async () =>
 
   try {
     const worker = await loadWorker("narration-voices");
-    const styles = ["bright", "calm", "tempo", "refined"];
+    const styles = ["bright", "calm", "tempo", "refined", "comedy"];
 
     for (const style of styles) {
       const response = await worker.fetch(
@@ -53,15 +53,22 @@ test("sends four distinct voice characters at natural fixed speeds", async () =>
 
     assert.deepEqual(
       requests.map((request) => request.body.voice),
-      ["coral", "marin", "cedar", "onyx"],
+      ["coral", "cedar", "nova", "onyx", "fable"],
     );
     assert.deepEqual(
       requests.map((request) => request.body.speed),
-      [1, 0.98, 1.04, 0.97],
+      [1, 0.99, 1.06, 0.97, 1.02],
     );
     assert.equal(
       new Set(requests.map((request) => request.body.instructions)).size,
-      4,
+      5,
+    );
+    assert.ok(
+      requests.every((request) =>
+        request.body.instructions.includes(
+          "台本にない語句、相づち、笑い声、効果音を追加せず",
+        ),
+      ),
     );
     assert.ok(
       requests.every(
@@ -117,7 +124,7 @@ test("uses the matching HD fallback voice when the primary model is unavailable"
     assert.equal(response.status, 200);
     assert.equal(requests.length, 2);
     assert.equal(requests[1].model, "tts-1-hd");
-    assert.equal(requests[1].voice, "sage");
+    assert.equal(requests[1].voice, "onyx");
     assert.equal(requests[1].speed, 0.97);
   } finally {
     globalThis.fetch = originalFetch;

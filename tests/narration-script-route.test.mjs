@@ -67,9 +67,81 @@ test("shortens only an overlong narration while preserving its intent", async ()
     assert.ok(openAiRequest);
     const prompt = openAiRequest.input[0].content[0].text;
     assert.match(prompt, /自然な読み上げ時間: 約18秒/);
-    assert.match(prompt, /台本の文字数: 70〜84字/);
+    assert.match(prompt, /台本の文字数: 75〜90字/);
     assert.match(prompt, /再調整する元台本/);
     assert.match(prompt, /元台本の意味・事実・冒頭の引き・結びを保ち/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("builds the Kansai comedy style around a safe setup and punchline", async () => {
+  globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
+  const originalFetch = globalThis.fetch;
+  let openAiRequest;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/responses") {
+      openAiRequest = JSON.parse(init.body);
+      return Response.json({
+        output_text: JSON.stringify({
+          title: "真顔で挑む朝",
+          script: "準備は完璧。と思った三秒後、全部やり直しです。",
+          socialCaption: "予想外まで含めて今日の記録。",
+          segments: [
+            { text: "準備は完璧。", emphasis: true },
+            { text: "と思った三秒後、全部やり直しです。", emphasis: true },
+          ],
+        }),
+      });
+    }
+
+    return originalFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set(
+      "narration-comedy-style",
+      `${process.pid}-${Date.now()}`,
+    );
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: ["data:image/jpeg;base64,AA=="],
+          brief: "朝の支度で起きた小さな失敗",
+          goal: "reach",
+          length: 30,
+          style: "comedy",
+          sourceDuration: 45,
+        }),
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const prompt = openAiRequest.input[0].content[0].text;
+    assert.match(prompt, /激しい関西芸人風/);
+    assert.match(prompt, /妙に真剣な実況→一拍→短く激しい関西弁のツッコミ／オチ/);
+    assert.match(prompt, /実在する芸人の口癖は使わない/);
+    assert.match(prompt, /人物の容姿・属性・失敗を嘲笑しない/);
+    assert.match(prompt, /台本の文字数: 103〜123字/);
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__cloudflareEnv;

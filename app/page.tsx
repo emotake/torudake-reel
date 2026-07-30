@@ -23,6 +23,11 @@ import {
   sourceTimeToEditedTime,
 } from "../lib/edit-plan";
 import {
+  buildPreviewRanges,
+  decideNarrationPreviewAction,
+  resolveEditedPreviewPosition,
+} from "../lib/preview-sync";
+import {
   encodeMonoWavChunk,
   TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
 } from "../lib/audio";
@@ -824,7 +829,7 @@ export default function Home() {
   const [narrationStyle, setNarrationStyle] =
     useState<NarrationStyle>("bright");
   const [narrationOriginalAudio, setNarrationOriginalAudio] =
-    useState<NarrationOriginalAudioMode>("duck");
+    useState<NarrationOriginalAudioMode>("mute");
   const [narrationBrief, setNarrationBrief] = useState("");
   const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
     null,
@@ -1214,7 +1219,7 @@ export default function Home() {
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
-    setNarrationOriginalAudio("duck");
+    setNarrationOriginalAudio("mute");
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     usageReservationRef.current = null;
@@ -2226,6 +2231,7 @@ function SetupWorkspace({
                   <button
                     type="button"
                     key={style.id}
+                    data-style={style.id}
                     className={narrationStyle === style.id ? "selected" : ""}
                     onClick={() => setNarrationStyle(style.id)}
                   >
@@ -2239,22 +2245,22 @@ function SetupWorkspace({
                 <button
                   type="button"
                   className={
-                    narrationOriginalAudio === "duck" ? "selected" : ""
-                  }
-                  onClick={() => setNarrationOriginalAudio("duck")}
-                >
-                  <strong>小さく残す</strong>
-                  <small>会話・環境音を12%で残し、AI音声を重ねる</small>
-                </button>
-                <button
-                  type="button"
-                  className={
                     narrationOriginalAudio === "mute" ? "selected" : ""
                   }
                   onClick={() => setNarrationOriginalAudio("mute")}
                 >
-                  <strong>元の音を消す</strong>
-                  <small>元動画を消音し、AIナレーションだけにする</small>
+                  <strong>AI音声だけ（おすすめ）</strong>
+                  <small>元動画の声を消し、試聴どおり明瞭に仕上げる</small>
+                </button>
+                <button
+                  type="button"
+                  className={
+                    narrationOriginalAudio === "duck" ? "selected" : ""
+                  }
+                  onClick={() => setNarrationOriginalAudio("duck")}
+                >
+                  <strong>環境音を薄く残す</strong>
+                  <small>8%で重ねる。会話入り動画では声が重なります</small>
                 </button>
               </div>
               <label className="narrationBrief">
@@ -2293,7 +2299,7 @@ function SetupWorkspace({
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
                 ・
                 {audioMode === "narration"
-                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・元音${narrationOriginalAudio === "duck" ? "12%" : "OFF"}`
+                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・${narrationOriginalAudio === "duck" ? "環境音8%" : "元音なし"}`
                   : "おまかせテロップ"}
                 ・{length}秒
               </p>
@@ -2464,7 +2470,15 @@ function ResultWorkspace({
   ) => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const narrationAudioRef = useRef<HTMLAudioElement>(null);
+  const narrationSampleAudioRef = useRef<HTMLAudioElement>(null);
+  const previewNarrationAudioRef = useRef<HTMLAudioElement>(null);
+  const previewInternalSeekRef = useRef<{
+    target: number;
+    startedAt: number;
+    resumeAudio: boolean;
+  } | null>(null);
+  const previewPlaybackReadyRef = useRef(false);
+  const previewHoldingFinalFrameRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [sourceDuration, setSourceDuration] = useState(0);
   const [narrationDuration, setNarrationDuration] = useState(0);
@@ -2496,6 +2510,10 @@ function ResultWorkspace({
       ),
     [narrationPlan, transcript],
   );
+  const previewRanges = useMemo(
+    () => buildPreviewRanges(editRanges),
+    [editRanges],
+  );
   const editedTranscript = useMemo(
     () => remapCaptionsToEditedTimeline(transcript, editRanges),
     [editRanges, transcript],
@@ -2525,6 +2543,152 @@ function ResultWorkspace({
     file?.name.replace(/\.[^.]+$/, "") ?? "sample_reel_video";
   const removedCount = transcript.filter((line) => line.removed).length;
 
+  useEffect(() => {
+    previewPlaybackReadyRef.current = false;
+    previewHoldingFinalFrameRef.current = false;
+    previewInternalSeekRef.current = null;
+    previewNarrationAudioRef.current?.pause();
+    videoRef.current?.pause();
+  }, [narrationAudioUrl]);
+
+  useEffect(() => {
+    if (!isPlaying || isExporting || !narrationPlan) return;
+
+    let animationFrame = 0;
+    const scheduleNextFrame = () => {
+      animationFrame = window.requestAnimationFrame(updatePreview);
+    };
+    const updatePreview = () => {
+      const video = videoRef.current;
+      const audio = previewNarrationAudioRef.current;
+      if (!video || !audio) return;
+
+      const lastRange = previewRanges.at(-1);
+      if (!lastRange) {
+        previewInternalSeekRef.current = null;
+        previewPlaybackReadyRef.current = false;
+        previewHoldingFinalFrameRef.current = false;
+        audio.pause();
+        video.pause();
+        setIsPlaying(false);
+        return;
+      }
+
+      if (audio.ended) {
+        previewPlaybackReadyRef.current = false;
+        previewHoldingFinalFrameRef.current = false;
+        previewInternalSeekRef.current = null;
+        audio.pause();
+        video.pause();
+        if (Math.abs(video.currentTime - lastRange.sourceEnd) > 0.015) {
+          previewInternalSeekRef.current = {
+            target: lastRange.sourceEnd,
+            startedAt: performance.now(),
+            resumeAudio: false,
+          };
+          video.currentTime = lastRange.sourceEnd;
+        }
+        setCurrentTime(lastRange.sourceEnd);
+        setIsPlaying(false);
+        return;
+      }
+
+      const internalSeek = previewInternalSeekRef.current;
+      if (internalSeek) {
+        const seekAge = performance.now() - internalSeek.startedAt;
+        if (
+          !video.seeking &&
+          seekAge > 20 &&
+          Math.abs(video.currentTime - internalSeek.target) <= 0.12
+        ) {
+          previewInternalSeekRef.current = null;
+          if (
+            internalSeek.resumeAudio &&
+            previewPlaybackReadyRef.current &&
+            (!video.paused || previewHoldingFinalFrameRef.current)
+          ) {
+            void audio.play().catch(() => {
+              previewPlaybackReadyRef.current = false;
+              video.pause();
+            });
+          }
+        } else if (seekAge > 2_500) {
+          previewInternalSeekRef.current = null;
+          previewPlaybackReadyRef.current = false;
+          audio.pause();
+          video.pause();
+          setIsPlaying(false);
+          return;
+        }
+        scheduleNextFrame();
+        return;
+      }
+
+      if (
+        !previewPlaybackReadyRef.current ||
+        audio.paused ||
+        audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
+        scheduleNextFrame();
+        return;
+      }
+      if (previewHoldingFinalFrameRef.current) {
+        scheduleNextFrame();
+        return;
+      }
+      if (
+        video.paused ||
+        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
+        scheduleNextFrame();
+        return;
+      }
+
+      const action = decideNarrationPreviewAction(
+        previewRanges,
+        audio.currentTime,
+        video.currentTime,
+        false,
+      );
+      if (action.type === "end") {
+        previewHoldingFinalFrameRef.current = true;
+        video.pause();
+        if (
+          Math.abs(video.currentTime - action.position.sourceTime) > 0.015
+        ) {
+          previewInternalSeekRef.current = {
+            target: action.position.sourceTime,
+            startedAt: performance.now(),
+            resumeAudio: false,
+          };
+          video.currentTime = action.position.sourceTime;
+        }
+        setCurrentTime(action.position.sourceTime);
+        scheduleNextFrame();
+        return;
+      }
+      if (action.type === "seek-video") {
+        if (
+          Math.abs(video.currentTime - action.position.sourceTime) > 0.015
+        ) {
+          audio.pause();
+          previewInternalSeekRef.current = {
+            target: action.position.sourceTime,
+            startedAt: performance.now(),
+            resumeAudio: true,
+          };
+          video.currentTime = action.position.sourceTime;
+          setCurrentTime(action.position.sourceTime);
+        }
+      }
+
+      scheduleNextFrame();
+    };
+
+    scheduleNextFrame();
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isExporting, isPlaying, narrationPlan, previewRanges]);
+
   function toggleLine(id: number) {
     setTranscript(
       transcript.map((line) =>
@@ -2548,6 +2712,9 @@ function ResultWorkspace({
     if (isExportingRef.current) return;
     const video = videoRef.current;
     if (!video) return;
+    previewInternalSeekRef.current = null;
+    previewHoldingFinalFrameRef.current = false;
+    previewNarrationAudioRef.current?.pause();
     video.currentTime = Math.max(
       0,
       Math.min(seconds, sourceDuration || seconds),
@@ -2557,28 +2724,62 @@ function ResultWorkspace({
 
   function seekToEditedTime(seconds: number) {
     const safeSeconds = Math.max(0, Math.min(seconds, editDuration));
-    seekTo(
-      editedTimeToSourceTime(
-        editRanges,
-        safeSeconds,
-      ),
-    );
+    const sourceSeconds = narrationPlan
+      ? resolveEditedPreviewPosition(previewRanges, safeSeconds).sourceTime
+      : editedTimeToSourceTime(editRanges, safeSeconds);
+    seekTo(sourceSeconds);
     syncNarrationAudio(safeSeconds, true);
   }
 
   function syncNarrationAudio(editedSeconds: number, force = false) {
-    const audio = narrationAudioRef.current;
-    if (!audio || !narrationPlan || !narrationDuration || !editDuration) return;
+    const audio = previewNarrationAudioRef.current;
+    if (!audio || !narrationPlan || !editDuration) return;
     const rate = getNarrationPlaybackRate();
     audio.playbackRate = rate;
     audio.preservesPitch = true;
+    const playableDuration =
+      Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : narrationDuration;
+    if (!playableDuration) return;
     const target = Math.min(
-      Math.max(0, narrationDuration - 0.02),
+      Math.max(0, playableDuration - 0.02),
       Math.max(0, editedSeconds) * rate,
     );
-    if (force || Math.abs(audio.currentTime - target) > 0.18) {
+    if (force && Math.abs(audio.currentTime - target) > 0.015) {
       audio.currentTime = target;
     }
+  }
+
+  async function seekVideoBeforePlayback(
+    video: HTMLVideoElement,
+    target: number,
+  ) {
+    if (Math.abs(video.currentTime - target) <= 0.015) return;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let timeout = 0;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        video.removeEventListener("seeked", finish);
+        video.removeEventListener("error", finish);
+        previewInternalSeekRef.current = null;
+        resolve();
+      };
+
+      previewInternalSeekRef.current = {
+        target,
+        startedAt: performance.now(),
+        resumeAudio: false,
+      };
+      video.addEventListener("seeked", finish);
+      video.addEventListener("error", finish);
+      timeout = window.setTimeout(finish, 2_000);
+      video.currentTime = target;
+    });
   }
 
   function moveToNextKeptRange(video: HTMLVideoElement) {
@@ -2618,6 +2819,11 @@ function ResultWorkspace({
       return;
     }
 
+    if (narrationPlan) {
+      setCurrentTime(video.currentTime);
+      return;
+    }
+
     const currentRangeIndex = editRanges.findIndex(
       (range) =>
         video.currentTime >= range.start - 0.03 &&
@@ -2625,9 +2831,6 @@ function ResultWorkspace({
     );
     if (currentRangeIndex >= 0) {
       setCurrentTime(video.currentTime);
-      syncNarrationAudio(
-        sourceTimeToEditedTime(editRanges, video.currentTime),
-      );
       return;
     }
 
@@ -2645,7 +2848,8 @@ function ResultWorkspace({
       notify("残す文を1つ以上選んでください");
       return;
     }
-    if (video.paused) {
+    if (video.paused && !previewHoldingFinalFrameRef.current) {
+      narrationSampleAudioRef.current?.pause();
       video.volume = narrationPlan
         ? getNarrationOriginalAudioGain(narrationOriginalAudio)
         : 1;
@@ -2659,23 +2863,38 @@ function ResultWorkspace({
           editRanges.find(
             (range) => range.start > video.currentTime + 0.01,
           ) ?? editRanges[0];
-        video.currentTime = nextRange.start;
+        await seekVideoBeforePlayback(video, nextRange.start);
         setCurrentTime(nextRange.start);
       }
       syncNarrationAudio(
         sourceTimeToEditedTime(editRanges, video.currentTime),
         true,
       );
-      await video.play();
-      if (narrationPlan && narrationAudioRef.current) {
-        await narrationAudioRef.current.play().catch(() => {
-          video.pause();
-          throw new Error("AI音声を再生できませんでした。");
-        });
+      previewHoldingFinalFrameRef.current = false;
+      previewPlaybackReadyRef.current = false;
+      try {
+        if (narrationPlan && previewNarrationAudioRef.current) {
+          await Promise.all([
+            video.play(),
+            previewNarrationAudioRef.current.play(),
+          ]);
+          previewPlaybackReadyRef.current = true;
+        } else {
+          await video.play();
+        }
+      } catch {
+        previewPlaybackReadyRef.current = false;
+        previewInternalSeekRef.current = null;
+        video.pause();
+        previewNarrationAudioRef.current?.pause();
+        notify("AI音声を再生できませんでした。もう一度お試しください。");
       }
     } else {
+      previewPlaybackReadyRef.current = false;
+      previewHoldingFinalFrameRef.current = false;
+      previewInternalSeekRef.current = null;
       video.pause();
-      narrationAudioRef.current?.pause();
+      previewNarrationAudioRef.current?.pause();
     }
   }
 
@@ -2710,6 +2929,13 @@ function ResultWorkspace({
 
   async function handleNarrationRegeneration() {
     if (isRegeneratingNarration) return;
+    previewPlaybackReadyRef.current = false;
+    previewHoldingFinalFrameRef.current = false;
+    previewInternalSeekRef.current = null;
+    videoRef.current?.pause();
+    previewNarrationAudioRef.current?.pause();
+    narrationSampleAudioRef.current?.pause();
+    setIsPlaying(false);
     setIsRegeneratingNarration(true);
     try {
       await regenerateNarration(narrationDraft, draftNarrationStyle);
@@ -2781,6 +3007,10 @@ function ResultWorkspace({
       wasPlaying: !video.paused,
     };
     setIsGeneratingThumbnail(true);
+    previewPlaybackReadyRef.current = false;
+    previewHoldingFinalFrameRef.current = false;
+    previewInternalSeekRef.current = null;
+    previewNarrationAudioRef.current?.pause();
 
     try {
       video.pause();
@@ -2975,8 +3205,25 @@ function ResultWorkspace({
       );
     } finally {
       video.pause();
-      video.currentTime = previous.currentTime;
-      if (previous.wasPlaying) void video.play();
+      await seekVideoBeforePlayback(video, previous.currentTime);
+      if (previous.wasPlaying) {
+        syncNarrationAudio(
+          sourceTimeToEditedTime(editRanges, previous.currentTime),
+          true,
+        );
+        if (narrationPlan && previewNarrationAudioRef.current) {
+          await Promise.all([
+            video.play(),
+            previewNarrationAudioRef.current.play(),
+          ])
+            .then(() => {
+              previewPlaybackReadyRef.current = true;
+            })
+            .catch(() => undefined);
+        } else {
+          await video.play().catch(() => undefined);
+        }
+      }
       setIsGeneratingThumbnail(false);
     }
   }
@@ -3016,6 +3263,9 @@ function ResultWorkspace({
 
     isExportingRef.current = true;
     setIsExporting(true);
+    previewPlaybackReadyRef.current = false;
+    previewHoldingFinalFrameRef.current = false;
+    previewInternalSeekRef.current = null;
     const previous = {
       currentTime: video.currentTime,
       muted: video.muted,
@@ -3023,7 +3273,8 @@ function ResultWorkspace({
       loop: video.loop,
       wasPlaying: !video.paused,
     };
-    narrationAudioRef.current?.pause();
+    previewNarrationAudioRef.current?.pause();
+    narrationSampleAudioRef.current?.pause();
     let animationFrame = 0;
     let keepDrawing = true;
     let sourceStream: MediaStream | null = null;
@@ -3505,9 +3756,17 @@ function ResultWorkspace({
           sourceTimeToEditedTime(editRanges, previous.currentTime),
           true,
         );
-        await video.play().catch(() => undefined);
-        if (narrationPlan && narrationAudioRef.current) {
-          await narrationAudioRef.current.play().catch(() => undefined);
+        if (narrationPlan && previewNarrationAudioRef.current) {
+          await Promise.all([
+            video.play(),
+            previewNarrationAudioRef.current.play(),
+          ])
+            .then(() => {
+              previewPlaybackReadyRef.current = true;
+            })
+            .catch(() => undefined);
+        } else {
+          await video.play().catch(() => undefined);
         }
       }
     }
@@ -3599,6 +3858,7 @@ function ResultWorkspace({
                   <button
                     type="button"
                     key={style.id}
+                    data-style={style.id}
                     className={
                       draftNarrationStyle === style.id ? "active" : ""
                     }
@@ -3615,22 +3875,22 @@ function ResultWorkspace({
                   <button
                     type="button"
                     className={
-                      narrationOriginalAudio === "duck" ? "selected" : ""
-                    }
-                    onClick={() => updateNarrationOriginalAudio("duck")}
-                  >
-                    <strong>小さく残す</strong>
-                    <small>会話・環境音を12%</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={
                       narrationOriginalAudio === "mute" ? "selected" : ""
                     }
                     onClick={() => updateNarrationOriginalAudio("mute")}
                   >
-                    <strong>元の音を消す</strong>
-                    <small>AI音声だけ</small>
+                    <strong>AI音声だけ（おすすめ）</strong>
+                    <small>試聴どおり明瞭に再生</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      narrationOriginalAudio === "duck" ? "selected" : ""
+                    }
+                    onClick={() => updateNarrationOriginalAudio("duck")}
+                  >
+                    <strong>環境音を薄く残す</strong>
+                    <small>8%。会話入りでは声が重なります</small>
                   </button>
                 </div>
               </div>
@@ -3645,7 +3905,7 @@ function ResultWorkspace({
                   : "この台本と声で再生成"}
               </button>
               <audio
-                ref={narrationAudioRef}
+                ref={narrationSampleAudioRef}
                 className="narrationAudio"
                 src={narrationAudioUrl}
                 controls
@@ -3653,6 +3913,34 @@ function ResultWorkspace({
                 onLoadedMetadata={(event) =>
                   setNarrationDuration(event.currentTarget.duration || 0)
                 }
+                onPlay={() => {
+                  previewPlaybackReadyRef.current = false;
+                  previewHoldingFinalFrameRef.current = false;
+                  previewInternalSeekRef.current = null;
+                  videoRef.current?.pause();
+                  previewNarrationAudioRef.current?.pause();
+                }}
+              />
+              <audio
+                ref={previewNarrationAudioRef}
+                src={narrationAudioUrl}
+                preload="auto"
+                onLoadedMetadata={(event) =>
+                  setNarrationDuration(event.currentTarget.duration || 0)
+                }
+                onWaiting={() => {
+                  const video = videoRef.current;
+                  if (
+                    !video ||
+                    isExportingRef.current ||
+                    !previewPlaybackReadyRef.current ||
+                    previewInternalSeekRef.current
+                  ) {
+                    return;
+                  }
+                  previewPlaybackReadyRef.current = false;
+                  video.pause();
+                }}
               />
               <p className="naturalNarrationNote">
                 声を動画尺に合わせて引き伸ばさず、自然な1倍速で再生・書き出しします。
@@ -3864,20 +4152,51 @@ function ResultWorkspace({
                 onTimeUpdate={(event) =>
                   handleVideoTimeUpdate(event.currentTarget)
                 }
-                onSeeking={() => {
-                  if (!isExportingRef.current) {
-                    narrationAudioRef.current?.pause();
-                  }
+                onSeeking={(event) => {
+                  if (isExportingRef.current) return;
+                  const internalSeek = previewInternalSeekRef.current;
+                  const isExpectedInternalSeek =
+                    internalSeek &&
+                    Math.abs(
+                      event.currentTarget.currentTime - internalSeek.target,
+                    ) <= 0.12;
+                  if (isExpectedInternalSeek) return;
+                  previewInternalSeekRef.current = null;
+                  previewHoldingFinalFrameRef.current = false;
+                  previewNarrationAudioRef.current?.pause();
                 }}
                 onSeeked={(event) => {
-                  if (isExportingRef.current || !narrationPlan) return;
                   const video = event.currentTarget;
+                  const internalSeek = previewInternalSeekRef.current;
+                  const isExpectedInternalSeek =
+                    internalSeek &&
+                    Math.abs(video.currentTime - internalSeek.target) <= 0.12;
+                  if (isExpectedInternalSeek) {
+                    previewInternalSeekRef.current = null;
+                    setCurrentTime(video.currentTime);
+                    if (
+                      internalSeek.resumeAudio &&
+                      previewPlaybackReadyRef.current &&
+                      (!video.paused ||
+                        previewHoldingFinalFrameRef.current) &&
+                      previewNarrationAudioRef.current
+                    ) {
+                      void previewNarrationAudioRef.current.play().catch(() => {
+                        previewPlaybackReadyRef.current = false;
+                        video.pause();
+                        notify("AI音声を再生できませんでした。");
+                      });
+                    }
+                    return;
+                  }
+                  previewInternalSeekRef.current = null;
+                  if (isExportingRef.current || !narrationPlan) return;
                   syncNarrationAudio(
                     sourceTimeToEditedTime(editRanges, video.currentTime),
                     true,
                   );
-                  if (!video.paused && narrationAudioRef.current) {
-                    void narrationAudioRef.current.play().catch(() => {
+                  if (!video.paused && previewNarrationAudioRef.current) {
+                    void previewNarrationAudioRef.current.play().catch(() => {
                       video.pause();
                       notify("AI音声を再生できませんでした。");
                     });
@@ -3887,15 +4206,19 @@ function ResultWorkspace({
                   if (!isExportingRef.current) setIsPlaying(true);
                 }}
                 onPause={() => {
+                  if (previewHoldingFinalFrameRef.current) return;
                   if (!isExportingRef.current) {
+                    previewPlaybackReadyRef.current = false;
                     setIsPlaying(false);
-                    narrationAudioRef.current?.pause();
+                    previewNarrationAudioRef.current?.pause();
                   }
                 }}
                 onEnded={() => {
+                  if (previewHoldingFinalFrameRef.current) return;
                   if (!isExportingRef.current) {
+                    previewPlaybackReadyRef.current = false;
                     setIsPlaying(false);
-                    narrationAudioRef.current?.pause();
+                    previewNarrationAudioRef.current?.pause();
                   }
                 }}
               />
@@ -4015,7 +4338,13 @@ function ResultWorkspace({
                 <div className="captionEditor">
                   <button
                     className="captionTime"
-                    onClick={() => seekTo(line.start)}
+                    onClick={() =>
+                      narrationPlan
+                        ? seekToEditedTime(
+                            sourceTimeToEditedTime(editRanges, line.start),
+                          )
+                        : seekTo(line.start)
+                    }
                     type="button"
                   >
                     {line.removed ? "元動画 " : ""}

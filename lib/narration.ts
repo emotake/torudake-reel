@@ -5,7 +5,12 @@ export const NARRATION_DISCLOSURE_TEXT =
 export const NARRATION_TERMS_VERSION = "2026-07-30";
 
 export type VideoAudioMode = "spoken" | "narration";
-export type NarrationStyle = "bright" | "calm" | "tempo" | "refined";
+export type NarrationStyle =
+  | "bright"
+  | "calm"
+  | "tempo"
+  | "refined"
+  | "comedy";
 export type NarrationOriginalAudioMode = "duck" | "mute";
 
 export type NarrationSegment = {
@@ -25,10 +30,15 @@ export const NARRATION_STYLES: Array<{
   label: string;
   note: string;
 }> = [
-  { id: "bright", label: "親しみポップ", note: "明るく弾む声｜日常・お店" },
-  { id: "calm", label: "余韻ストーリー", note: "近く柔らかな声｜美容・暮らし" },
-  { id: "tempo", label: "キレのあるナビ", note: "芯のある声｜商品・How-to" },
+  { id: "bright", label: "自然な女性", note: "素直な女性声｜日常・説明" },
+  { id: "calm", label: "自然な男性", note: "素直な男性声｜商品・解説" },
+  { id: "tempo", label: "萌えアニメ", note: "高めのキャラ声｜推し・日常" },
   { id: "refined", label: "低音シネマ", note: "深く重厚な声｜ブランド・作品" },
+  {
+    id: "comedy",
+    label: "関西ツッコミ",
+    note: "クセ強ツッコミ声｜検証・オチ",
+  },
 ];
 
 function cleanText(value: unknown, maxLength: number) {
@@ -176,7 +186,7 @@ export function buildDisclosedPostCaption(socialCaption: string) {
 export function getNarrationOriginalAudioGain(
   mode: NarrationOriginalAudioMode,
 ) {
-  return mode === "duck" ? 0.12 : 0;
+  return mode === "duck" ? 0.08 : 0;
 }
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {

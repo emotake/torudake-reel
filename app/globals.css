@@ -3572,7 +3572,7 @@ footer > small {
 
 .narrationStyleCards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
 }
 
@@ -3592,6 +3592,26 @@ footer > small {
 .narrationStyleCards button.selected {
   border: 2px solid var(--ink);
   background: var(--cream);
+}
+
+.narrationStyleCards button[data-style="comedy"] {
+  border-color: #ff8a5b;
+  background: linear-gradient(145deg, #fff8d9, #ffe5dd);
+}
+
+.narrationStyleCards button[data-style="tempo"] {
+  border-color: #e8a6d8;
+  background: linear-gradient(145deg, #fff2fb, #f1ecff);
+}
+
+.narrationStyleCards button[data-style="comedy"].selected {
+  border-color: #e6482e;
+  box-shadow: 0 0 0 2px rgba(230, 72, 46, 0.12);
+}
+
+.narrationStyleCards button[data-style="tempo"].selected {
+  border-color: #b84b9d;
+  box-shadow: 0 0 0 2px rgba(184, 75, 157, 0.12);
 }
 
 .narrationStyleCards strong {
@@ -3761,7 +3781,7 @@ footer > small {
 
 .voiceStylePicker {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 6px;
 }
 
@@ -3782,6 +3802,26 @@ footer > small {
   border-color: var(--ink);
   background: var(--ink);
   color: white;
+}
+
+.voiceStylePicker button[data-style="comedy"] {
+  border-color: #ff8a5b;
+  background: #fff3df;
+}
+
+.voiceStylePicker button[data-style="tempo"] {
+  border-color: #e8a6d8;
+  background: #fff0fa;
+}
+
+.voiceStylePicker button[data-style="comedy"].active {
+  border-color: #e6482e;
+  background: #d83a24;
+}
+
+.voiceStylePicker button[data-style="tempo"].active {
+  border-color: #a93d91;
+  background: #a93d91;
 }
 
 .voiceStylePicker strong {
