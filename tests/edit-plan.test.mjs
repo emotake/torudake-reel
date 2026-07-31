@@ -7,6 +7,7 @@ import {
   editedTimeToSourceTime,
   getEditedDuration,
   remapCaptionsToEditedTimeline,
+  setCaptionCut,
   sourceTimeToEditedTime,
 } from "../lib/edit-plan.ts";
 
@@ -68,4 +69,78 @@ test("maps source timestamps onto the cut timeline", () => {
       { start: 5, end: 10, text: "最後の文です。" },
     ],
   );
+});
+
+test("does not merge ranges across an explicitly cut short caption", () => {
+  const edited = [
+    caption(1, 0, 2, "残す前半です。"),
+    { ...caption(2, 2, 2.2, "短くても切る部分です。"), removed: true },
+    caption(3, 2.2, 4, "残す後半です。"),
+  ];
+
+  const ranges = buildEditRanges(edited);
+
+  assert.deepEqual(ranges, [
+    { start: 0, end: 2 },
+    { start: 2.2, end: 4 },
+  ]);
+  assert.equal(getEditedDuration(ranges), 3.8);
+  assert.equal(sourceTimeToEditedTime(ranges, 2.2), 2);
+  assert.equal(editedTimeToSourceTime(ranges, 2.1), 2.3);
+});
+
+test("still joins a short natural gap when no caption was explicitly cut", () => {
+  const edited = [
+    caption(1, 0, 2, "前半です。"),
+    caption(2, 2.2, 4, "後半です。"),
+  ];
+
+  assert.deepEqual(buildEditRanges(edited), [{ start: 0, end: 4 }]);
+});
+
+test("sets and restores a caption cut without mutating other captions", () => {
+  const source = [
+    caption(1, 0, 2, "残す文です。"),
+    caption(2, 2, 4, "切り替える文です。"),
+  ];
+
+  const cut = setCaptionCut(source, 2, true);
+  assert.equal(cut.changed, true);
+  assert.equal(cut.blockedReason, undefined);
+  assert.equal(cut.captions[0], source[0]);
+  assert.equal(cut.captions[1].removed, true);
+  assert.equal(source[1].removed, false);
+
+  const restored = setCaptionCut(cut.captions, 2, false);
+  assert.equal(restored.changed, true);
+  assert.equal(restored.captions[1].removed, false);
+});
+
+test("prevents cutting the final playable caption", () => {
+  const source = [
+    caption(1, 0, 2, "最後に残った文です。"),
+    { ...caption(2, 2, 4, "すでにカット中です。"), removed: true },
+    caption(3, 4, 6, ""),
+  ];
+
+  const result = setCaptionCut(source, 1, true);
+
+  assert.equal(result.changed, false);
+  assert.equal(result.blockedReason, "would-remove-all");
+  assert.equal(result.captions, source);
+});
+
+test("allows restoring from an all-cut state and ignores an unknown id", () => {
+  const source = [
+    { ...caption(1, 0, 2, "戻す文です。"), removed: true },
+  ];
+
+  const restored = setCaptionCut(source, 1, false);
+  assert.equal(restored.changed, true);
+  assert.equal(restored.captions[0].removed, false);
+
+  const unknown = setCaptionCut(source, 999, true);
+  assert.equal(unknown.changed, false);
+  assert.equal(unknown.blockedReason, "not-found");
+  assert.equal(unknown.captions, source);
 });

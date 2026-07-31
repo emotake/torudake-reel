@@ -11,7 +11,10 @@ export type NarrationStyle =
   | "tempo"
   | "refined"
   | "comedy";
-export type NarrationOriginalAudioMode = "duck" | "mute";
+export type NarrationOriginalAudioLevel = number;
+
+export const DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT = 8;
+export const MAX_NARRATION_ORIGINAL_AUDIO_PERCENT = 20;
 
 export type NarrationSegment = {
   text: string;
@@ -184,9 +187,14 @@ export function buildDisclosedPostCaption(socialCaption: string) {
 }
 
 export function getNarrationOriginalAudioGain(
-  mode: NarrationOriginalAudioMode,
+  percent: NarrationOriginalAudioLevel,
 ) {
-  return mode === "duck" ? 0.08 : 0;
+  if (!Number.isFinite(percent)) return 0;
+  const safePercent = Math.min(
+    MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
+    Math.max(0, percent),
+  );
+  return Math.round(safePercent) / 100;
 }
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {

@@ -3624,8 +3624,7 @@ footer > small {
   line-height: 1.5;
 }
 
-.narrationOptionLabel,
-.resultAudioMix > span {
+.narrationOptionLabel {
   display: block;
   margin: 15px 0 8px;
   color: var(--ink);
@@ -3637,15 +3636,60 @@ footer > small {
   margin-top: 0;
 }
 
-.narrationMixCards {
+.originalAudioMix {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+  margin-top: 15px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffcf8;
+}
+
+.originalAudioMixHeading {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.originalAudioMixHeading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.originalAudioMixHeading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.originalAudioMixHeading small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.originalAudioMixHeading output {
+  min-width: 60px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: white;
+  font-family: "DM Sans", sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.originalAudioPresets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.narrationMixCards button {
+.originalAudioPresets button {
   display: grid;
-  min-height: 62px;
+  min-height: 76px;
   align-content: center;
   gap: 4px;
   padding: 10px 12px;
@@ -3656,22 +3700,94 @@ footer > small {
   text-align: left;
 }
 
-.narrationMixCards button.selected {
+.originalAudioPresets button.selected {
   border: 2px solid var(--coral);
   background: #fff8f4;
 }
 
-.narrationMixCards strong {
-  font-size: 8px;
+.originalAudioPresets button:disabled,
+.originalAudioSlider input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-.narrationMixCards small {
+.originalAudioPresets button > span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.originalAudioPresets strong {
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+}
+
+.originalAudioPresets i {
+  padding: 3px 5px;
+  border-radius: 999px;
+  background: #f0ece5;
+  color: #5f5a52;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.originalAudioPresets button.selected i {
+  background: var(--coral);
+  color: white;
+}
+
+.originalAudioPresets small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
-.resultAudioMix > span {
+.originalAudioPresets button:focus-visible,
+.originalAudioSlider input:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
+}
+
+.originalAudioSlider {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.originalAudioSlider > span {
+  display: grid;
+  gap: 2px;
+}
+
+.originalAudioSlider strong {
+  font-size: 11px;
+}
+
+.originalAudioSlider small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.originalAudioSlider input {
+  width: 100%;
+  accent-color: var(--coral);
+  cursor: pointer;
+}
+
+.originalAudioAdvice {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--cream);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.resultAudioMix .originalAudioMix {
   margin-top: 0;
 }
 
@@ -4037,7 +4153,11 @@ footer > small {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .narrationMixCards {
+  .originalAudioPresets {
+    grid-template-columns: 1fr;
+  }
+
+  .originalAudioSlider {
     grid-template-columns: 1fr;
   }
 
@@ -4188,12 +4308,53 @@ footer > small {
 
 .editHelp {
   margin: 0 0 13px;
-  padding: 10px;
+  padding: 11px 12px;
   border-radius: 8px;
   background: var(--cream);
   color: var(--muted);
-  font-size: 7px;
+  font-size: 12px;
   line-height: 1.6;
+}
+
+.captionCutToolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: -3px 0 13px;
+}
+
+.captionCutToolbar > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.captionCutToolbar > span strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.captionCutToolbar > span i {
+  margin: 0 7px;
+  color: #b5aea3;
+  font-style: normal;
+}
+
+.captionCutToolbar > button {
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.captionCutToolbar > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .transcriptList {
@@ -4207,11 +4368,11 @@ footer > small {
 .transcriptLine {
   position: relative;
   display: grid;
-  grid-template-columns: 27px 1fr auto;
-  gap: 7px;
-  min-height: 54px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 76px;
   align-items: center;
-  padding: 8px;
+  padding: 10px 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
 }
@@ -4226,38 +4387,13 @@ footer > small {
   background: #f7f5f1;
 }
 
-.transcriptLine > button {
-  display: grid;
-  width: 25px;
-  height: 25px;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: var(--mint);
-  color: var(--mint-dark);
-  font-size: 9px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.transcriptLine.removed > button {
-  background: white;
-  color: var(--muted);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-
-.transcriptLine > button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
 .transcriptLine input {
   width: 100%;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -4278,7 +4414,7 @@ footer > small {
   background: transparent;
   color: var(--muted);
   font-family: "DM Sans", sans-serif;
-  font-size: 6px;
+  font-size: 11px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -4292,13 +4428,64 @@ footer > small {
   text-decoration: line-through;
 }
 
-.transcriptLine > span {
+.captionLineControls {
+  display: grid;
+  min-width: 122px;
+  gap: 6px;
+  justify-items: stretch;
+}
+
+.captionCutStatus,
+.captionAccentStatus {
+  justify-self: end;
   padding: 4px 6px;
   border-radius: 5px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.captionAccentStatus {
   background: var(--coral);
   color: white;
-  font-size: 6px;
+}
+
+.captionCutStatus {
+  background: #e9e5de;
+  color: #655f57;
+}
+
+.captionCutToggle {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #efb4a8;
+  border-radius: 9px;
+  background: #fff8f5;
+  color: #943f30;
+  font-size: 12px;
   font-weight: 900;
+  cursor: pointer;
+}
+
+.transcriptLine.removed .captionCutToggle {
+  border-color: #b8d8cf;
+  background: white;
+  color: var(--mint-dark);
+}
+
+.captionCutToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.captionCutToggle:focus-visible,
+.captionCutToolbar > button:focus-visible,
+.captionTime:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
 }
 
 .cutSummary {
@@ -4318,11 +4505,11 @@ footer > small {
 
 .cutSummary span {
   color: var(--muted);
-  font-size: 6px;
+  font-size: 11px;
 }
 
 .cutSummary strong {
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .deliverables {
@@ -4725,6 +4912,38 @@ footer > small {
 }
 
 @media (max-width: 700px) {
+  .captionCutToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .captionCutToolbar > button {
+    min-height: 44px;
+  }
+
+  .transcriptList {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .transcriptLine {
+    grid-template-columns: 1fr;
+  }
+
+  .captionLineControls {
+    width: 100%;
+  }
+
+  .captionCutStatus,
+  .captionAccentStatus {
+    justify-self: start;
+  }
+
+  .captionCutToggle {
+    width: 100%;
+  }
+
   .topbar {
     min-height: 66px;
     padding: 0 15px;

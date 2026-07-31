@@ -11,6 +11,12 @@ type BuildEditRangesOptions = {
   maxJoinGapSeconds?: number;
 };
 
+export type CaptionCutUpdate<T extends CaptionSegment> = {
+  captions: T[];
+  changed: boolean;
+  blockedReason?: "would-remove-all" | "not-found";
+};
+
 const MAX_JOIN_GAP_SECONDS = 0.42;
 const MAX_SENTENCE_GAP_SECONDS = 0.78;
 const MAX_SENTENCE_BLOCK_SECONDS = 12;
@@ -69,6 +75,64 @@ function isNearDuplicate(
   });
 }
 
+export function isIncludedCaption(caption: CaptionSegment) {
+  return (
+    !caption.removed &&
+    Boolean(caption.text.trim()) &&
+    Number.isFinite(caption.start) &&
+    Number.isFinite(caption.end) &&
+    caption.end > caption.start
+  );
+}
+
+function isTimedCaption(caption: CaptionSegment) {
+  return (
+    Number.isFinite(caption.start) &&
+    Number.isFinite(caption.end) &&
+    caption.end > caption.start
+  );
+}
+
+export function setCaptionCut<T extends CaptionSegment>(
+  captions: T[],
+  id: number,
+  cut: boolean,
+): CaptionCutUpdate<T> {
+  const target = captions.find((caption) => caption.id === id);
+  if (!target) {
+    return {
+      captions,
+      changed: false,
+      blockedReason: "not-found",
+    };
+  }
+  if (target.removed === cut) {
+    return { captions, changed: false };
+  }
+
+  if (
+    cut &&
+    isIncludedCaption(target) &&
+    !captions.some(
+      (caption) =>
+        caption.id !== id && isIncludedCaption(caption),
+    )
+  ) {
+    return {
+      captions,
+      changed: false,
+      blockedReason: "would-remove-all",
+    };
+  }
+
+  return {
+    captions: captions.map((caption) =>
+      caption.id === id ? { ...caption, removed: cut } : caption,
+    ),
+    changed: true,
+  };
+}
+
 export function buildEditRanges(
   captions: CaptionSegment[],
   options: BuildEditRangesOptions = {},
@@ -78,22 +142,28 @@ export function buildEditRanges(
     options.maxJoinGapSeconds ?? MAX_JOIN_GAP_SECONDS,
   );
   const kept = captions
-    .filter(
-      (caption) =>
-        !caption.removed &&
-        caption.text.trim() &&
-        Number.isFinite(caption.start) &&
-        Number.isFinite(caption.end) &&
-        caption.end > caption.start,
-    )
+    .filter(isIncludedCaption)
     .sort((left, right) => left.start - right.start);
+  const removedBarriers = captions.filter(
+    (caption) => caption.removed && isTimedCaption(caption),
+  );
   const ranges: EditRange[] = [];
 
   kept.forEach((caption) => {
     const previous = ranges.at(-1);
+    const crossesRemovedCaption =
+      previous &&
+      caption.start > previous.end &&
+      removedBarriers.some(
+        (removed) =>
+          removed.end > previous.end &&
+          removed.start < caption.start,
+      );
     if (
       previous &&
-      caption.start - previous.end <= maxJoinGapSeconds
+      (caption.start <= previous.end ||
+        (!crossesRemovedCaption &&
+          caption.start - previous.end <= maxJoinGapSeconds))
     ) {
       previous.end = Math.max(previous.end, caption.end);
       return;

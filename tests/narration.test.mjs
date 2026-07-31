@@ -114,7 +114,11 @@ test("always appends one visible AI narration disclosure", () => {
   assert.ok(caption.endsWith(NARRATION_DISCLOSURE_TEXT));
 });
 
-test("uses a quiet original track only when narration mix keeps it", () => {
-  assert.equal(getNarrationOriginalAudioGain("duck"), 0.08);
-  assert.equal(getNarrationOriginalAudioGain("mute"), 0);
+test("converts the selected original-audio percentage into a safe gain", () => {
+  assert.equal(getNarrationOriginalAudioGain(0), 0);
+  assert.equal(getNarrationOriginalAudioGain(8), 0.08);
+  assert.equal(getNarrationOriginalAudioGain(12), 0.12);
+  assert.equal(getNarrationOriginalAudioGain(-5), 0);
+  assert.equal(getNarrationOriginalAudioGain(80), 0.2);
+  assert.equal(getNarrationOriginalAudioGain(Number.NaN), 0);
 });

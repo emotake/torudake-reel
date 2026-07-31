@@ -19,7 +19,9 @@ import {
   createNaturalEdit,
   editedTimeToSourceTime,
   getEditedDuration,
+  isIncludedCaption,
   remapCaptionsToEditedTimeline,
+  setCaptionCut,
   sourceTimeToEditedTime,
 } from "../lib/edit-plan";
 import {
@@ -51,14 +53,16 @@ import {
 import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
+  DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT,
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
+  MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
   type NarrationPlan,
-  type NarrationOriginalAudioMode,
+  type NarrationOriginalAudioLevel,
   type NarrationStyle,
   type VideoAudioMode,
 } from "../lib/narration";
@@ -67,6 +71,16 @@ type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = CaptionGoal;
 type PreviewMode = "before" | "after";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
+
+type OriginalAudioPreviewGraph = {
+  context: AudioContext;
+  originalSource: MediaElementAudioSourceNode;
+  narrationSource: MediaElementAudioSourceNode;
+  gain: GainNode;
+  limiter: DynamicsCompressorNode;
+  video: HTMLVideoElement;
+  narrationAudio: HTMLAudioElement;
+};
 
 type UploadedPart = {
   partNumber: number;
@@ -829,7 +843,9 @@ export default function Home() {
   const [narrationStyle, setNarrationStyle] =
     useState<NarrationStyle>("bright");
   const [narrationOriginalAudio, setNarrationOriginalAudio] =
-    useState<NarrationOriginalAudioMode>("mute");
+    useState<NarrationOriginalAudioLevel>(
+      DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT,
+    );
   const [narrationBrief, setNarrationBrief] = useState("");
   const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
     null,
@@ -902,7 +918,7 @@ export default function Home() {
   }, [captionProfile]);
 
   const keptLines = useMemo(
-    () => transcript.filter((line) => !line.removed),
+    () => transcript.filter(isIncludedCaption),
     [transcript],
   );
 
@@ -1219,7 +1235,7 @@ export default function Home() {
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
-    setNarrationOriginalAudio("mute");
+    setNarrationOriginalAudio(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     usageReservationRef.current = null;
@@ -2060,6 +2076,100 @@ function Landing({
   );
 }
 
+const ORIGINAL_AUDIO_PRESETS = [
+  {
+    percent: 0,
+    label: "0%",
+    badge: "音を消す",
+    note: "AIナレーションだけを明瞭に",
+  },
+  {
+    percent: 8,
+    label: "8%",
+    badge: "会話ありにおすすめ",
+    note: "元の声を控えめに残す",
+  },
+  {
+    percent: 12,
+    label: "12%",
+    badge: "その場の音におすすめ",
+    note: "料理・街・作業音を活かす",
+  },
+] as const;
+
+function OriginalAudioMixControl({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: NarrationOriginalAudioLevel;
+  onChange: (percent: NarrationOriginalAudioLevel) => void;
+  disabled?: boolean;
+}) {
+  const roundedValue = Math.round(value);
+  const advice =
+    roundedValue === 0
+      ? "元動画の音は入りません。AIナレーションだけを最も明瞭に聞かせたいときに向いています。"
+      : roundedValue <= 8
+        ? "元動画に会話がある場合は8%がおすすめです。AIナレーションを主役にしながら、元の雰囲気を薄く残せます。"
+        : roundedValue <= 12
+          ? "声のない料理・街歩き・作業動画は12%がおすすめです。その場の音が自然に伝わります。"
+          : "元動画の音がはっきり残ります。会話がある動画ではAIナレーションと重なりやすいため、仕上がりプレビューで確認してください。";
+
+  return (
+    <section
+      className="originalAudioMix"
+      aria-label="元動画の音量"
+    >
+      <div className="originalAudioMixHeading">
+        <div>
+          <strong>元動画の音量</strong>
+          <small>
+            AIナレーションを100%としたときの、元の声・周りの音・BGM
+          </small>
+        </div>
+        <output aria-live="polite">{roundedValue}%</output>
+      </div>
+      <div className="originalAudioPresets">
+        {ORIGINAL_AUDIO_PRESETS.map((preset) => (
+          <button
+            key={preset.percent}
+            type="button"
+            className={roundedValue === preset.percent ? "selected" : ""}
+            onClick={() => onChange(preset.percent)}
+            aria-pressed={roundedValue === preset.percent}
+            disabled={disabled}
+          >
+            <span>
+              <strong>{preset.label}</strong>
+              <i>{preset.badge}</i>
+            </span>
+            <small>{preset.note}</small>
+          </button>
+        ))}
+      </div>
+      <label className="originalAudioSlider">
+        <span>
+          <strong>細かく調整</strong>
+          <small>0〜{MAX_NARRATION_ORIGINAL_AUDIO_PERCENT}%</small>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={MAX_NARRATION_ORIGINAL_AUDIO_PERCENT}
+          step={1}
+          value={roundedValue}
+          onChange={(event) => onChange(Number(event.target.value))}
+          aria-label="AIナレーションに重ねる元動画の音量"
+          aria-valuetext={`${roundedValue}%`}
+          disabled={disabled}
+        />
+      </label>
+      <p className="originalAudioAdvice">{advice}</p>
+    </section>
+  );
+}
+
 function SetupWorkspace({
   file,
   videoUrl,
@@ -2089,8 +2199,10 @@ function SetupWorkspace({
   setAudioMode: (mode: VideoAudioMode) => void;
   narrationStyle: NarrationStyle;
   setNarrationStyle: (style: NarrationStyle) => void;
-  narrationOriginalAudio: NarrationOriginalAudioMode;
-  setNarrationOriginalAudio: (mode: NarrationOriginalAudioMode) => void;
+  narrationOriginalAudio: NarrationOriginalAudioLevel;
+  setNarrationOriginalAudio: (
+    percent: NarrationOriginalAudioLevel,
+  ) => void;
   narrationBrief: string;
   setNarrationBrief: (brief: string) => void;
   chooseAnother: () => void;
@@ -2136,7 +2248,7 @@ function SetupWorkspace({
           <div className="localNote">
             <span>●</span>
             {audioMode === "narration"
-              ? "会話や環境音が入った動画にも使えます。代表場面から台本を作り、AIナレーションを重ねます。"
+              ? "会話や周りの音が入った動画にも使えます。代表場面から台本を作り、AIナレーションを重ねます。"
               : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
           </div>
         </aside>
@@ -2155,7 +2267,7 @@ function SetupWorkspace({
               >
                 <i aria-hidden="true">元</i>
                 <strong>元の音声を活かす</strong>
-                <small>会話・解説・環境音から字幕と自然なカット</small>
+                <small>元動画の会話・解説・その場の音から字幕と自然なカット</small>
                 <b>{audioMode === "spoken" ? "✓" : ""}</b>
               </button>
               <button
@@ -2240,29 +2352,10 @@ function SetupWorkspace({
                   </button>
                 ))}
               </div>
-              <p className="narrationOptionLabel">元動画の音</p>
-              <div className="narrationMixCards">
-                <button
-                  type="button"
-                  className={
-                    narrationOriginalAudio === "mute" ? "selected" : ""
-                  }
-                  onClick={() => setNarrationOriginalAudio("mute")}
-                >
-                  <strong>AI音声だけ（おすすめ）</strong>
-                  <small>元動画の声を消し、試聴どおり明瞭に仕上げる</small>
-                </button>
-                <button
-                  type="button"
-                  className={
-                    narrationOriginalAudio === "duck" ? "selected" : ""
-                  }
-                  onClick={() => setNarrationOriginalAudio("duck")}
-                >
-                  <strong>環境音を薄く残す</strong>
-                  <small>8%で重ねる。会話入り動画では声が重なります</small>
-                </button>
-              </div>
+              <OriginalAudioMixControl
+                value={narrationOriginalAudio}
+                onChange={setNarrationOriginalAudio}
+              />
               <label className="narrationBrief">
                 <span>伝えたい内容・商品名など <small>任意</small></span>
                 <textarea
@@ -2299,7 +2392,7 @@ function SetupWorkspace({
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
                 ・
                 {audioMode === "narration"
-                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・${narrationOriginalAudio === "duck" ? "環境音8%" : "元音なし"}`
+                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・元動画の音${Math.round(narrationOriginalAudio)}%`
                   : "おまかせテロップ"}
                 ・{length}秒
               </p>
@@ -2462,8 +2555,10 @@ function ResultWorkspace({
   setNarrationPlan: (plan: NarrationPlan | null) => void;
   narrationAudioUrl: string;
   narrationStyle: NarrationStyle;
-  narrationOriginalAudio: NarrationOriginalAudioMode;
-  setNarrationOriginalAudio: (mode: NarrationOriginalAudioMode) => void;
+  narrationOriginalAudio: NarrationOriginalAudioLevel;
+  setNarrationOriginalAudio: (
+    percent: NarrationOriginalAudioLevel,
+  ) => void;
   regenerateNarration: (
     script: string,
     style: NarrationStyle,
@@ -2479,6 +2574,10 @@ function ResultWorkspace({
   } | null>(null);
   const previewPlaybackReadyRef = useRef(false);
   const previewHoldingFinalFrameRef = useRef(false);
+  const originalAudioPreviewGraphRef =
+    useRef<OriginalAudioPreviewGraph | null>(null);
+  const originalAudioPreviewUnavailableRef = useRef(false);
+  const captionEditStartTextRef = useRef(new Map<number, string>());
   const [currentTime, setCurrentTime] = useState(0);
   const [sourceDuration, setSourceDuration] = useState(0);
   const [narrationDuration, setNarrationDuration] = useState(0);
@@ -2494,9 +2593,19 @@ function ResultWorkspace({
     useState<NarrationStyle>(narrationStyle);
   const [isRegeneratingNarration, setIsRegeneratingNarration] =
     useState(false);
+  const isMediaBusy =
+    isExporting ||
+    isGeneratingThumbnail ||
+    isRegeneratingNarration;
   const [showDisclosureConfirm, setShowDisclosureConfirm] = useState(false);
   const [disclosureConfirmed, setDisclosureConfirmed] = useState(false);
   const [isRecordingDisclosure, setIsRecordingDisclosure] = useState(false);
+  const [initialCutState] = useState(
+    () =>
+      new Map(
+        transcript.map((line) => [line.id, line.removed] as const),
+      ),
+  );
   const captionDesign = useMemo(
     () => resolveCaptionDesign(captionProfile, goal),
     [captionProfile, goal],
@@ -2542,6 +2651,11 @@ function ResultWorkspace({
   const exportName =
     file?.name.replace(/\.[^.]+$/, "") ?? "sample_reel_video";
   const removedCount = transcript.filter((line) => line.removed).length;
+  const hasCutChanges = transcript.some(
+    (line) =>
+      initialCutState.get(line.id) !== undefined &&
+      initialCutState.get(line.id) !== line.removed,
+  );
 
   useEffect(() => {
     previewPlaybackReadyRef.current = false;
@@ -2550,6 +2664,15 @@ function ResultWorkspace({
     previewNarrationAudioRef.current?.pause();
     videoRef.current?.pause();
   }, [narrationAudioUrl]);
+
+  useEffect(() => {
+    return () => {
+      void originalAudioPreviewGraphRef.current?.context
+        .close()
+        .catch(() => undefined);
+      originalAudioPreviewGraphRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isPlaying || isExporting || !narrationPlan) return;
@@ -2689,15 +2812,101 @@ function ResultWorkspace({
     return () => window.cancelAnimationFrame(animationFrame);
   }, [isExporting, isPlaying, narrationPlan, previewRanges]);
 
-  function toggleLine(id: number) {
-    setTranscript(
-      transcript.map((line) =>
-        line.id === id ? { ...line, removed: !line.removed } : line,
-      ),
+  function movePreviewOutOfCut(
+    nextTranscript: TranscriptLine[],
+    cutLine: TranscriptLine,
+  ) {
+    const video = videoRef.current;
+    if (
+      !video ||
+      video.currentTime < cutLine.start - 0.03 ||
+      video.currentTime >= cutLine.end + 0.03
+    ) {
+      return;
+    }
+
+    const nextRanges = buildEditRanges(nextTranscript);
+    const currentSourceTime = video.currentTime;
+    const remainsIncluded = nextRanges.some(
+      (range) =>
+        currentSourceTime >= range.start &&
+        currentSourceTime < range.end,
     );
+    if (remainsIncluded) return;
+    const nextRange = nextRanges.find(
+      (range) => range.start > currentSourceTime,
+    );
+    previewInternalSeekRef.current = null;
+    previewHoldingFinalFrameRef.current = false;
+    if (nextRange) {
+      video.currentTime = nextRange.start;
+      setCurrentTime(nextRange.start);
+      return;
+    }
+
+    video.pause();
+    setIsPlaying(false);
+    const previousRange = nextRanges.at(-1);
+    if (previousRange) {
+      video.currentTime = previousRange.end;
+      setCurrentTime(previousRange.end);
+    }
+  }
+
+  function toggleLine(id: number) {
+    if (narrationPlan || isMediaBusy) return;
+    const line = transcript.find((candidate) => candidate.id === id);
+    if (!line) return;
+
+    const shouldCut = !line.removed;
+    const result = setCaptionCut(transcript, id, shouldCut);
+    if (result.blockedReason === "would-remove-all") {
+      notify("仕上がり動画には、残す区間が1つ以上必要です");
+      return;
+    }
+    if (!result.changed) return;
+
+    setTranscript(result.captions);
+    if (shouldCut) {
+      movePreviewOutOfCut(result.captions, line);
+      notify("映像・元音声・テロップを仕上がりからカットしました");
+    } else {
+      notify("この区間を仕上がり動画へ戻しました");
+    }
+  }
+
+  function resetCaptionCuts() {
+    if (!hasCutChanges || isMediaBusy) return;
+    const restored = transcript.map((line) => ({
+      ...line,
+      removed: initialCutState.get(line.id) ?? line.removed,
+    }));
+    setTranscript(restored);
+    const video = videoRef.current;
+    if (video) {
+      const restoredRanges = buildEditRanges(restored);
+      const isInsideRestoredRange = restoredRanges.some(
+        (range) =>
+          video.currentTime >= range.start &&
+          video.currentTime < range.end,
+      );
+      if (!isInsideRestoredRange && restoredRanges[0]) {
+        video.pause();
+        setIsPlaying(false);
+        const nextRange = restoredRanges.find(
+          (range) => range.start > video.currentTime,
+        );
+        const targetTime =
+          nextRange?.start ?? restoredRanges.at(-1)!.end;
+        video.currentTime = targetTime;
+        setCurrentTime(targetTime);
+      }
+    }
+    notify("カットの選択を最初の自動編集に戻しました");
   }
 
   function updateLine(id: number, text: string) {
+    if (isMediaBusy) return;
     const highlight = selectCaptionHighlight(text);
     setTranscript(
       transcript.map((line) =>
@@ -2708,8 +2917,109 @@ function ResultWorkspace({
     );
   }
 
+  function finishLineEdit(id: number) {
+    const line = transcript.find((candidate) => candidate.id === id);
+    if (!line || line.text.trim()) return;
+    const previousText = captionEditStartTextRef.current.get(id);
+    if (!previousText?.trim()) return;
+    setTranscript(
+      transcript.map((candidate) =>
+        candidate.id === id
+          ? {
+              ...candidate,
+              text: previousText,
+              highlight: selectCaptionHighlight(previousText),
+              accent: Boolean(selectCaptionHighlight(previousText)),
+            }
+          : candidate,
+      ),
+    );
+    notify("テロップは空欄にできないため、編集前の文へ戻しました");
+  }
+
+  function setOriginalAudioPreviewGain(
+    percent: NarrationOriginalAudioLevel,
+  ) {
+    const graph = originalAudioPreviewGraphRef.current;
+    if (!graph) return false;
+    const gain = getNarrationOriginalAudioGain(percent);
+    graph.gain.gain.setTargetAtTime(
+      gain,
+      graph.context.currentTime,
+      0.015,
+    );
+    graph.video.volume = 1;
+    return true;
+  }
+
+  async function ensureOriginalAudioPreviewGraph(
+    video: HTMLVideoElement,
+    narrationAudio: HTMLAudioElement,
+  ) {
+    if (setOriginalAudioPreviewGain(narrationOriginalAudio)) {
+      const context = originalAudioPreviewGraphRef.current!.context;
+      if (context.state === "suspended") {
+        await context.resume().catch(() => undefined);
+      }
+      return true;
+    }
+    if (originalAudioPreviewUnavailableRef.current) return false;
+
+    const AudioContextConstructor =
+      window.AudioContext ??
+      (
+        window as typeof window & {
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    if (!AudioContextConstructor) {
+      originalAudioPreviewUnavailableRef.current = true;
+      return false;
+    }
+
+    let context: AudioContext | null = null;
+    try {
+      context = new AudioContextConstructor();
+      const originalSource = context.createMediaElementSource(video);
+      const narrationSource =
+        context.createMediaElementSource(narrationAudio);
+      const gain = context.createGain();
+      gain.gain.value = getNarrationOriginalAudioGain(
+        narrationOriginalAudio,
+      );
+      const limiter = context.createDynamicsCompressor();
+      limiter.threshold.value = -1;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.08;
+      originalSource.connect(gain).connect(limiter);
+      narrationSource.connect(limiter);
+      limiter.connect(context.destination);
+      originalAudioPreviewGraphRef.current = {
+        context,
+        originalSource,
+        narrationSource,
+        gain,
+        limiter,
+        video,
+        narrationAudio,
+      };
+      video.volume = 1;
+      narrationAudio.volume = 1;
+      if (context.state === "suspended") {
+        await context.resume().catch(() => undefined);
+      }
+      return true;
+    } catch {
+      void context?.close().catch(() => undefined);
+      originalAudioPreviewUnavailableRef.current = true;
+      return false;
+    }
+  }
+
   function seekTo(seconds: number) {
-    if (isExportingRef.current) return;
+    if (isExportingRef.current || isMediaBusy) return;
     const video = videoRef.current;
     if (!video) return;
     previewInternalSeekRef.current = null;
@@ -2723,6 +3033,7 @@ function ResultWorkspace({
   }
 
   function seekToEditedTime(seconds: number) {
+    if (isExportingRef.current || isMediaBusy) return;
     const safeSeconds = Math.max(0, Math.min(seconds, editDuration));
     const sourceSeconds = narrationPlan
       ? resolveEditedPreviewPosition(previewRanges, safeSeconds).sourceTime
@@ -2838,7 +3149,7 @@ function ResultWorkspace({
   }
 
   async function togglePlayback() {
-    if (isExportingRef.current) return;
+    if (isExportingRef.current || isMediaBusy) return;
     const video = videoRef.current;
     if (!video) {
       notify("実際の動画を選ぶと再生できます");
@@ -2850,9 +3161,19 @@ function ResultWorkspace({
     }
     if (video.paused && !previewHoldingFinalFrameRef.current) {
       narrationSampleAudioRef.current?.pause();
-      video.volume = narrationPlan
-        ? getNarrationOriginalAudioGain(narrationOriginalAudio)
-        : 1;
+      const previewNarrationAudio =
+        previewNarrationAudioRef.current;
+      const usesAudioGraph =
+        narrationPlan &&
+        previewNarrationAudio &&
+        (await ensureOriginalAudioPreviewGraph(
+          video,
+          previewNarrationAudio,
+        ));
+      video.volume =
+        narrationPlan && !usesAudioGraph
+          ? getNarrationOriginalAudioGain(narrationOriginalAudio)
+          : 1;
       const isInsideKeptRange = editRanges.some(
         (range) =>
           video.currentTime >= range.start &&
@@ -2928,7 +3249,7 @@ function ResultWorkspace({
   }
 
   async function handleNarrationRegeneration() {
-    if (isRegeneratingNarration) return;
+    if (isMediaBusy || isExportingRef.current) return;
     previewPlaybackReadyRef.current = false;
     previewHoldingFinalFrameRef.current = false;
     previewInternalSeekRef.current = null;
@@ -2979,17 +3300,26 @@ function ResultWorkspace({
   }
 
   function updateNarrationOriginalAudio(
-    mode: NarrationOriginalAudioMode,
+    percent: NarrationOriginalAudioLevel,
   ) {
-    setNarrationOriginalAudio(mode);
-    if (videoRef.current) {
-      videoRef.current.volume = getNarrationOriginalAudioGain(mode);
+    if (isExportingRef.current || isMediaBusy) return;
+    setNarrationOriginalAudio(percent);
+    if (
+      videoRef.current &&
+      !setOriginalAudioPreviewGain(percent)
+    ) {
+      videoRef.current.volume = getNarrationOriginalAudioGain(percent);
     }
   }
 
   async function generateThumbnail() {
     const video = videoRef.current;
-    if (!video || !file || isGeneratingThumbnail) {
+    if (
+      !video ||
+      !file ||
+      isMediaBusy ||
+      isExportingRef.current
+    ) {
       if (!file) notify("実際の動画を選ぶと表紙を生成できます");
       return;
     }
@@ -3230,7 +3560,15 @@ function ResultWorkspace({
 
   async function exportCaptionedVideo() {
     const video = videoRef.current;
-    if (!video || !file || isExportingRef.current) return;
+    if (
+      !video ||
+      !file ||
+      isExportingRef.current ||
+      isGeneratingThumbnail ||
+      isRegeneratingNarration
+    ) {
+      return;
+    }
     const playableRanges = editRanges
       .map((range) => ({
         start: Math.max(0, range.start),
@@ -3521,6 +3859,13 @@ function ResultWorkspace({
         exportAudioContext = new AudioContextConstructor();
         const destination =
           exportAudioContext.createMediaStreamDestination();
+        const limiter = exportAudioContext.createDynamicsCompressor();
+        limiter.threshold.value = -1;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.08;
+        limiter.connect(destination);
         const sourceAudioTracks = sourceStream.getAudioTracks();
         if (sourceAudioTracks.length) {
           const originalSource =
@@ -3530,7 +3875,7 @@ function ResultWorkspace({
           const originalGain = exportAudioContext.createGain();
           originalGain.gain.value =
             getNarrationOriginalAudioGain(narrationOriginalAudio);
-          originalSource.connect(originalGain).connect(destination);
+          originalSource.connect(originalGain).connect(limiter);
         }
 
         exportNarration = new Audio(narrationAudioUrl);
@@ -3556,7 +3901,7 @@ function ResultWorkspace({
           exportAudioContext.createMediaElementSource(exportNarration);
         const narrationGain = exportAudioContext.createGain();
         narrationGain.gain.value = 1;
-        narrationSource.connect(narrationGain).connect(destination);
+        narrationSource.connect(narrationGain).connect(limiter);
         destination.stream
           .getAudioTracks()
           .forEach((track) => outputStream.addTrack(track));
@@ -3773,6 +4118,7 @@ function ResultWorkspace({
   }
 
   function requestVideoExport() {
+    if (isMediaBusy || isExportingRef.current) return;
     if (narrationPlan) {
       setDisclosureConfirmed(false);
       setShowDisclosureConfirm(true);
@@ -3850,6 +4196,7 @@ function ResultWorkspace({
                   value={narrationDraft}
                   rows={6}
                   maxLength={2_000}
+                  disabled={isMediaBusy}
                   onChange={(event) => setNarrationDraft(event.target.value)}
                 />
               </label>
@@ -3863,6 +4210,7 @@ function ResultWorkspace({
                       draftNarrationStyle === style.id ? "active" : ""
                     }
                     onClick={() => setDraftNarrationStyle(style.id)}
+                    disabled={isMediaBusy}
                   >
                     <strong>{style.label}</strong>
                     <small>{style.note}</small>
@@ -3870,34 +4218,16 @@ function ResultWorkspace({
                 ))}
               </div>
               <div className="resultAudioMix">
-                <span>元動画の音</span>
-                <div className="narrationMixCards">
-                  <button
-                    type="button"
-                    className={
-                      narrationOriginalAudio === "mute" ? "selected" : ""
-                    }
-                    onClick={() => updateNarrationOriginalAudio("mute")}
-                  >
-                    <strong>AI音声だけ（おすすめ）</strong>
-                    <small>試聴どおり明瞭に再生</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      narrationOriginalAudio === "duck" ? "selected" : ""
-                    }
-                    onClick={() => updateNarrationOriginalAudio("duck")}
-                  >
-                    <strong>環境音を薄く残す</strong>
-                    <small>8%。会話入りでは声が重なります</small>
-                  </button>
-                </div>
+                <OriginalAudioMixControl
+                  value={narrationOriginalAudio}
+                  onChange={updateNarrationOriginalAudio}
+                  disabled={isMediaBusy}
+                />
               </div>
               <button
                 type="button"
                 className="quietButton regenerateVoice"
-                disabled={isRegeneratingNarration}
+                disabled={isMediaBusy}
                 onClick={() => void handleNarrationRegeneration()}
               >
                 {isRegeneratingNarration
@@ -3913,7 +4243,11 @@ function ResultWorkspace({
                 onLoadedMetadata={(event) =>
                   setNarrationDuration(event.currentTarget.duration || 0)
                 }
-                onPlay={() => {
+                onPlay={(event) => {
+                  if (isExportingRef.current || isMediaBusy) {
+                    event.currentTarget.pause();
+                    return;
+                  }
                   previewPlaybackReadyRef.current = false;
                   previewHoldingFinalFrameRef.current = false;
                   previewInternalSeekRef.current = null;
@@ -4006,6 +4340,7 @@ function ResultWorkspace({
               className="captionIdentitySummary"
               type="button"
               aria-expanded={isCaptionDesignerOpen}
+              disabled={isMediaBusy}
               onClick={() =>
                 setIsCaptionDesignerOpen((current) => !current)
               }
@@ -4042,6 +4377,7 @@ function ResultWorkspace({
                         key={item.id}
                         type="button"
                         title={item.note}
+                        disabled={isMediaBusy}
                         onClick={() =>
                           setCaptionProfile({
                             ...captionProfile,
@@ -4062,6 +4398,7 @@ function ResultWorkspace({
                     maxLength={30}
                     value={captionProfile.brandName}
                     placeholder="例：emota studio"
+                    disabled={isMediaBusy}
                     onChange={(event) =>
                       setCaptionProfile({
                         ...captionProfile,
@@ -4084,6 +4421,7 @@ function ResultWorkspace({
                         }
                         key={color}
                         type="button"
+                        disabled={isMediaBusy}
                         style={{ backgroundColor: color }}
                         onClick={() =>
                           setCaptionProfile({
@@ -4097,6 +4435,7 @@ function ResultWorkspace({
                       <input
                         aria-label="好きなブランドカラー"
                         type="color"
+                        disabled={isMediaBusy}
                         value={captionProfile.accentColor}
                         onChange={(event) =>
                           setCaptionProfile({
@@ -4255,6 +4594,7 @@ function ResultWorkspace({
             <button
               className="playButton"
               onClick={() => void togglePlayback()}
+              disabled={isMediaBusy}
               aria-label={isPlaying ? "一時停止" : "再生"}
             >
               {isPlaying ? "Ⅱ" : "▶"}
@@ -4312,32 +4652,42 @@ function ResultWorkspace({
               <h2>
                 {narrationPlan
                   ? "音声とテロップを確認"
-                  : "文字でカットを確認"}
+                  : "残す区間を選ぶ"}
               </h2>
             </div>
-            <span>自動保存</span>
+            <span>プレビューへ自動反映</span>
           </div>
           <p className="editHelp">
             {narrationPlan
               ? "テロップはAI音声と同期しています。内容を変えるときは、上の台本を編集して「この台本と声で再生成」を押してください。"
-              : "グレーの文は自動カット候補です。左のボタンで動画へ戻す・外すを切り替えられます。"}
+              : "使わない区間を「カット」にすると、同じ時間の映像・元音声・テロップが仕上がり動画から外れます。元動画は変更されず、いつでも戻せます。"}
           </p>
+          {!narrationPlan && (
+            <div className="captionCutToolbar">
+              <span aria-live="polite">
+                <strong>{keptLines.length}</strong>区間を残す
+                <i aria-hidden="true">/</i>
+                <strong>{removedCount}</strong>区間をカット
+              </span>
+              <button
+                type="button"
+                onClick={resetCaptionCuts}
+                disabled={!hasCutChanges || isMediaBusy}
+              >
+                最初の編集に戻す
+              </button>
+            </div>
+          )}
           <div className="transcriptList">
             {transcript.map((line) => (
               <div
                 className={`transcriptLine ${line.removed ? "removed" : ""} ${line.accent ? "accent" : ""}`}
                 key={line.id}
               >
-                <button
-                  onClick={() => toggleLine(line.id)}
-                  disabled={Boolean(narrationPlan)}
-                  aria-label={line.removed ? "この文を戻す" : "この文を削除する"}
-                >
-                  {line.removed ? "↶" : "✓"}
-                </button>
                 <div className="captionEditor">
                   <button
                     className="captionTime"
+                    disabled={isMediaBusy}
                     onClick={() =>
                       narrationPlan
                         ? seekToEditedTime(
@@ -4347,29 +4697,66 @@ function ResultWorkspace({
                     }
                     type="button"
                   >
-                    {line.removed ? "元動画 " : ""}
+                    元動画{" "}
                     {formatCaptionClock(line.start)}–
                     {formatCaptionClock(line.end)}
                   </button>
                   <input
                     value={line.text}
                     onChange={(event) => updateLine(line.id, event.target.value)}
-                    disabled={line.removed}
+                    disabled={line.removed || isMediaBusy}
                     readOnly={Boolean(narrationPlan)}
+                    aria-label={`元動画${formatCaptionClock(line.start)}から${formatCaptionClock(line.end)}のテロップ`}
+                    onFocus={() =>
+                      captionEditStartTextRef.current.set(line.id, line.text)
+                    }
+                    onBlur={() => finishLineEdit(line.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      }
+                    }}
                   />
                 </div>
-                {line.accent && !line.removed && <span>強調</span>}
+                <div className="captionLineControls">
+                  {line.removed ? (
+                    <span className="captionCutStatus">カット中</span>
+                  ) : (
+                    line.accent && (
+                      <span className="captionAccentStatus">強調</span>
+                    )
+                  )}
+                  {!narrationPlan && (
+                    <button
+                      type="button"
+                      className="captionCutToggle"
+                      onClick={() => toggleLine(line.id)}
+                      disabled={isMediaBusy}
+                      aria-pressed={line.removed}
+                      aria-label={
+                        line.removed
+                          ? `元動画${formatCaptionClock(line.start)}から${formatCaptionClock(line.end)}の区間を仕上がり動画へ戻す`
+                          : `元動画${formatCaptionClock(line.start)}から${formatCaptionClock(line.end)}の映像・元音声・テロップを仕上がりからカット`
+                      }
+                    >
+                      <span aria-hidden="true">
+                        {line.removed ? "↶" : "✂"}
+                      </span>
+                      {line.removed ? "元に戻す" : "この区間をカット"}
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
           <div className="cutSummary">
             <div>
-              <span>自動カット</span>
-              <strong>{removedCount}枚</strong>
+              <span>カット</span>
+              <strong>{removedCount}区間</strong>
             </div>
             <div>
-              <span>表示中</span>
-              <strong>{keptLines.length}枚</strong>
+              <span>残す</span>
+              <strong>{keptLines.length}区間</strong>
             </div>
             <div>
               <span>仕上がり</span>
@@ -4387,7 +4774,7 @@ function ResultWorkspace({
         <div className="deliverableCards">
           <button
             onClick={() => void generateThumbnail()}
-            disabled={isGeneratingThumbnail}
+            disabled={isMediaBusy}
           >
             <span className="deliverableIcon thumbnail">表</span>
             <p>
@@ -4471,13 +4858,18 @@ function ResultWorkspace({
           </p>
         </div>
         <div className="exportActions">
-          <button className="quietButton" onClick={reset}>
+          <button
+            className="quietButton"
+            onClick={reset}
+            disabled={isMediaBusy}
+          >
             別の動画を作る
           </button>
           {file && !usedHighAccuracy && !narrationPlan && (
             <button
               className="quietButton highAccuracyButton"
               onClick={() => void regenerateHighAccuracy()}
+              disabled={isMediaBusy}
             >
               高精度で再生成
             </button>
@@ -4486,7 +4878,7 @@ function ResultWorkspace({
             <button
               className="mainCta reviewCta"
               onClick={requestVideoExport}
-              disabled={isExporting}
+              disabled={isMediaBusy}
             >
               <span>
                 {isExporting
