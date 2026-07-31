@@ -35,12 +35,12 @@ export const NARRATION_STYLES: Array<{
 }> = [
   { id: "bright", label: "自然な女性", note: "素直な女性声｜日常・説明" },
   { id: "calm", label: "自然な男性", note: "素直な男性声｜商品・解説" },
-  { id: "tempo", label: "萌えアニメ", note: "高めのキャラ声｜推し・日常" },
+  { id: "tempo", label: "ポップボイス", note: "明るく弾む声｜推し・日常" },
   { id: "refined", label: "低音シネマ", note: "深く重厚な声｜ブランド・作品" },
   {
     id: "comedy",
-    label: "関西ツッコミ",
-    note: "クセ強ツッコミ声｜検証・オチ",
+    label: "テンポコメディ",
+    note: "緩急のある楽しい声｜検証・オチ",
   },
 ];
 
@@ -179,6 +179,24 @@ export function getNarrationPlaybackRate() {
   return 1;
 }
 
+export function getNarrationBufferSlice(
+  elapsed: number,
+  rangeDuration: number,
+  bufferDuration: number,
+) {
+  if (
+    !Number.isFinite(elapsed) ||
+    !Number.isFinite(rangeDuration) ||
+    !Number.isFinite(bufferDuration)
+  ) {
+    return null;
+  }
+  const offset = Math.max(0, elapsed);
+  const availableDuration = Math.max(0, bufferDuration - offset);
+  const duration = Math.min(Math.max(0, rangeDuration), availableDuration);
+  return duration > 0.01 ? { offset, duration } : null;
+}
+
 export function buildDisclosedPostCaption(socialCaption: string) {
   const body = socialCaption
     .replaceAll(NARRATION_DISCLOSURE_TEXT, "")
@@ -195,6 +213,15 @@ export function getNarrationOriginalAudioGain(
     Math.max(0, percent),
   );
   return Math.round(safePercent) / 100;
+}
+
+export function getNarrationMixLevels(
+  percent: NarrationOriginalAudioLevel,
+) {
+  return {
+    original: getNarrationOriginalAudioGain(percent),
+    narration: 1,
+  };
 }
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {

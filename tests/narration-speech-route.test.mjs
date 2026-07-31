@@ -56,11 +56,11 @@ test("sends five distinct voice characters at natural fixed speeds", async () =>
 
     assert.deepEqual(
       requests.map((request) => request.body.voice),
-      ["coral", "cedar", "nova", "onyx", "fable"],
+      ["coral", "cedar", "nova", "onyx", "ash"],
     );
     assert.deepEqual(
       requests.map((request) => request.body.speed),
-      [1, 0.99, 1.06, 0.97, 1.02],
+      [1, 0.99, 1.06, 0.97, 1.04],
     );
     assert.equal(
       new Set(requests.map((request) => request.body.instructions)).size,
@@ -80,6 +80,19 @@ test("sends five distinct voice characters at natural fixed speeds", async () =>
           request.body.model === "gpt-4o-mini-tts" &&
           request.body.instructions.length >= 70,
       ),
+    );
+    assert.match(requests[2].body.instructions, /成人のポップボイス/);
+    assert.match(
+      requests[4].body.instructions,
+      /明るくエネルギッシュな成人のオリジナル話者/,
+    );
+    assert.match(
+      requests[4].body.instructions,
+      /特定の実在人物の声質、話速、笑い方、口癖、決め台詞、間合いを模倣しない/,
+    );
+    assert.doesNotMatch(
+      requests.map((request) => request.body.instructions).join("\n"),
+      /萌えアニメ|関西ツッコミ|明石家|さんま/,
     );
   } finally {
     globalThis.fetch = originalFetch;

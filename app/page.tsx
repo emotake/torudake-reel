@@ -54,7 +54,8 @@ import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
   DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT,
-  getNarrationOriginalAudioGain,
+  getNarrationBufferSlice,
+  getNarrationMixLevels,
   getNarrationPlaybackRate,
   MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
   NARRATION_DISCLOSURE_TEXT,
@@ -71,16 +72,6 @@ type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = CaptionGoal;
 type PreviewMode = "before" | "after";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
-
-type OriginalAudioPreviewGraph = {
-  context: AudioContext;
-  originalSource: MediaElementAudioSourceNode;
-  narrationSource: MediaElementAudioSourceNode;
-  gain: GainNode;
-  limiter: DynamicsCompressorNode;
-  video: HTMLVideoElement;
-  narrationAudio: HTMLAudioElement;
-};
 
 type UploadedPart = {
   partNumber: number;
@@ -117,6 +108,39 @@ class ApiRequestError extends Error {
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
+
+function getAudioContextConstructor() {
+  return (
+    window.AudioContext ??
+    (
+      window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }
+    ).webkitAudioContext
+  );
+}
+
+async function createRunningNarrationAudioContext() {
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) {
+    throw new Error("このブラウザはAI音声の書き出しに対応していません。");
+  }
+  const context = new AudioContextConstructor();
+  try {
+    if (context.state !== "running") await context.resume();
+    if (context.state !== "running") throw new Error();
+    const unlockSource = context.createBufferSource();
+    unlockSource.buffer = context.createBuffer(1, 1, context.sampleRate);
+    unlockSource.connect(context.destination);
+    unlockSource.start();
+    return context;
+  } catch {
+    await context.close().catch(() => undefined);
+    throw new Error(
+      "AI音声の書き出しを開始できませんでした。画面を開いたまま、もう一度お試しください。",
+    );
+  }
+}
 
 function RichCaptionText({
   caption,
@@ -2574,9 +2598,6 @@ function ResultWorkspace({
   } | null>(null);
   const previewPlaybackReadyRef = useRef(false);
   const previewHoldingFinalFrameRef = useRef(false);
-  const originalAudioPreviewGraphRef =
-    useRef<OriginalAudioPreviewGraph | null>(null);
-  const originalAudioPreviewUnavailableRef = useRef(false);
   const captionEditStartTextRef = useRef(new Map<number, string>());
   const [currentTime, setCurrentTime] = useState(0);
   const [sourceDuration, setSourceDuration] = useState(0);
@@ -2664,15 +2685,6 @@ function ResultWorkspace({
     previewNarrationAudioRef.current?.pause();
     videoRef.current?.pause();
   }, [narrationAudioUrl]);
-
-  useEffect(() => {
-    return () => {
-      void originalAudioPreviewGraphRef.current?.context
-        .close()
-        .catch(() => undefined);
-      originalAudioPreviewGraphRef.current = null;
-    };
-  }, []);
 
   useEffect(() => {
     if (!isPlaying || isExporting || !narrationPlan) return;
@@ -2937,85 +2949,14 @@ function ResultWorkspace({
     notify("テロップは空欄にできないため、編集前の文へ戻しました");
   }
 
-  function setOriginalAudioPreviewGain(
-    percent: NarrationOriginalAudioLevel,
-  ) {
-    const graph = originalAudioPreviewGraphRef.current;
-    if (!graph) return false;
-    const gain = getNarrationOriginalAudioGain(percent);
-    graph.gain.gain.setTargetAtTime(
-      gain,
-      graph.context.currentTime,
-      0.015,
-    );
-    graph.video.volume = 1;
-    return true;
-  }
-
-  async function ensureOriginalAudioPreviewGraph(
+  function applyNarrationPreviewMix(
     video: HTMLVideoElement,
     narrationAudio: HTMLAudioElement,
+    percent: NarrationOriginalAudioLevel,
   ) {
-    if (setOriginalAudioPreviewGain(narrationOriginalAudio)) {
-      const context = originalAudioPreviewGraphRef.current!.context;
-      if (context.state === "suspended") {
-        await context.resume().catch(() => undefined);
-      }
-      return true;
-    }
-    if (originalAudioPreviewUnavailableRef.current) return false;
-
-    const AudioContextConstructor =
-      window.AudioContext ??
-      (
-        window as typeof window & {
-          webkitAudioContext?: typeof AudioContext;
-        }
-      ).webkitAudioContext;
-    if (!AudioContextConstructor) {
-      originalAudioPreviewUnavailableRef.current = true;
-      return false;
-    }
-
-    let context: AudioContext | null = null;
-    try {
-      context = new AudioContextConstructor();
-      const originalSource = context.createMediaElementSource(video);
-      const narrationSource =
-        context.createMediaElementSource(narrationAudio);
-      const gain = context.createGain();
-      gain.gain.value = getNarrationOriginalAudioGain(
-        narrationOriginalAudio,
-      );
-      const limiter = context.createDynamicsCompressor();
-      limiter.threshold.value = -1;
-      limiter.knee.value = 0;
-      limiter.ratio.value = 20;
-      limiter.attack.value = 0.002;
-      limiter.release.value = 0.08;
-      originalSource.connect(gain).connect(limiter);
-      narrationSource.connect(limiter);
-      limiter.connect(context.destination);
-      originalAudioPreviewGraphRef.current = {
-        context,
-        originalSource,
-        narrationSource,
-        gain,
-        limiter,
-        video,
-        narrationAudio,
-      };
-      video.volume = 1;
-      narrationAudio.volume = 1;
-      if (context.state === "suspended") {
-        await context.resume().catch(() => undefined);
-      }
-      return true;
-    } catch {
-      void context?.close().catch(() => undefined);
-      originalAudioPreviewUnavailableRef.current = true;
-      return false;
-    }
+    const mix = getNarrationMixLevels(percent);
+    video.volume = mix.original;
+    narrationAudio.volume = mix.narration;
   }
 
   function seekTo(seconds: number) {
@@ -3163,17 +3104,15 @@ function ResultWorkspace({
       narrationSampleAudioRef.current?.pause();
       const previewNarrationAudio =
         previewNarrationAudioRef.current;
-      const usesAudioGraph =
-        narrationPlan &&
-        previewNarrationAudio &&
-        (await ensureOriginalAudioPreviewGraph(
+      if (narrationPlan && previewNarrationAudio) {
+        applyNarrationPreviewMix(
           video,
           previewNarrationAudio,
-        ));
-      video.volume =
-        narrationPlan && !usesAudioGraph
-          ? getNarrationOriginalAudioGain(narrationOriginalAudio)
-          : 1;
+          narrationOriginalAudio,
+        );
+      } else {
+        video.volume = 1;
+      }
       const isInsideKeptRange = editRanges.some(
         (range) =>
           video.currentTime >= range.start &&
@@ -3304,11 +3243,12 @@ function ResultWorkspace({
   ) {
     if (isExportingRef.current || isMediaBusy) return;
     setNarrationOriginalAudio(percent);
-    if (
-      videoRef.current &&
-      !setOriginalAudioPreviewGain(percent)
-    ) {
-      videoRef.current.volume = getNarrationOriginalAudioGain(percent);
+    if (videoRef.current && previewNarrationAudioRef.current) {
+      applyNarrationPreviewMix(
+        videoRef.current,
+        previewNarrationAudioRef.current,
+        percent,
+      );
     }
   }
 
@@ -3558,7 +3498,9 @@ function ResultWorkspace({
     }
   }
 
-  async function exportCaptionedVideo() {
+  async function exportCaptionedVideo(
+    preparedAudioContext: AudioContext | null = null,
+  ) {
     const video = videoRef.current;
     if (
       !video ||
@@ -3567,6 +3509,7 @@ function ResultWorkspace({
       isGeneratingThumbnail ||
       isRegeneratingNarration
     ) {
+      await preparedAudioContext?.close().catch(() => undefined);
       return;
     }
     const playableRanges = editRanges
@@ -3579,6 +3522,7 @@ function ResultWorkspace({
       }))
       .filter((range) => range.end > range.start);
     if (playableRanges.length === 0) {
+      await preparedAudioContext?.close().catch(() => undefined);
       notify("残す文を1つ以上選んでください");
       return;
     }
@@ -3595,6 +3539,7 @@ function ResultWorkspace({
       typeof HTMLCanvasElement.prototype.captureStream !== "function" ||
       !captureVideoStream
     ) {
+      await preparedAudioContext?.close().catch(() => undefined);
       notify("このブラウザは動画書き出しに対応していません");
       return;
     }
@@ -3616,8 +3561,10 @@ function ResultWorkspace({
     let animationFrame = 0;
     let keepDrawing = true;
     let sourceStream: MediaStream | null = null;
-    let exportAudioContext: AudioContext | null = null;
-    let exportNarration: HTMLAudioElement | null = null;
+    let exportAudioContext: AudioContext | null = preparedAudioContext;
+    let exportNarrationBuffer: AudioBuffer | null = null;
+    let exportNarrationGain: GainNode | null = null;
+    let activeExportNarrationSource: AudioBufferSourceNode | null = null;
     let recorder: MediaRecorder | null = null;
     const seekExportMedia = async (
       media: HTMLMediaElement,
@@ -3846,17 +3793,18 @@ function ResultWorkspace({
       const outputStream = canvas.captureStream(30);
       sourceStream = captureVideoStream.call(capturableVideo);
       if (narrationPlan && narrationAudioUrl) {
-        const AudioContextConstructor =
-          window.AudioContext ??
-          (
-            window as typeof window & {
-              webkitAudioContext?: typeof AudioContext;
-            }
-          ).webkitAudioContext;
-        if (!AudioContextConstructor) {
-          throw new Error("このブラウザはAI音声の書き出しに対応していません。");
+        if (!exportAudioContext) {
+          exportAudioContext = await createRunningNarrationAudioContext();
+        } else {
+          if (exportAudioContext.state !== "running") {
+            await exportAudioContext.resume().catch(() => undefined);
+          }
+          if (exportAudioContext.state !== "running") {
+            throw new Error(
+              "AI音声の書き出しを開始できませんでした。画面を開いたまま、もう一度お試しください。",
+            );
+          }
         }
-        exportAudioContext = new AudioContextConstructor();
         const destination =
           exportAudioContext.createMediaStreamDestination();
         const limiter = exportAudioContext.createDynamicsCompressor();
@@ -3874,34 +3822,29 @@ function ResultWorkspace({
             );
           const originalGain = exportAudioContext.createGain();
           originalGain.gain.value =
-            getNarrationOriginalAudioGain(narrationOriginalAudio);
+            getNarrationMixLevels(narrationOriginalAudio).original;
           originalSource.connect(originalGain).connect(limiter);
         }
 
-        exportNarration = new Audio(narrationAudioUrl);
-        exportNarration.preload = "auto";
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(
-            () => reject(new Error("AI音声を読み込めませんでした。")),
-            10_000,
-          );
-          exportNarration!.onloadedmetadata = () => {
-            window.clearTimeout(timeout);
-            resolve();
-          };
-          exportNarration!.onerror = () => {
-            window.clearTimeout(timeout);
-            reject(new Error("AI音声を読み込めませんでした。"));
-          };
-          exportNarration!.load();
-        });
-        exportNarration.playbackRate = getNarrationPlaybackRate();
-        exportNarration.preservesPitch = true;
-        const narrationSource =
-          exportAudioContext.createMediaElementSource(exportNarration);
-        const narrationGain = exportAudioContext.createGain();
-        narrationGain.gain.value = 1;
-        narrationSource.connect(narrationGain).connect(limiter);
+        try {
+          const narrationResponse = await fetch(narrationAudioUrl);
+          if (!narrationResponse.ok) throw new Error();
+          const narrationBytes = await narrationResponse.arrayBuffer();
+          exportNarrationBuffer =
+            await exportAudioContext.decodeAudioData(narrationBytes);
+        } catch {
+          throw new Error("AI音声を読み込めませんでした。");
+        }
+        if (
+          !Number.isFinite(exportNarrationBuffer.duration) ||
+          exportNarrationBuffer.duration <= 0
+        ) {
+          throw new Error("AI音声を読み込めませんでした。");
+        }
+        exportNarrationGain = exportAudioContext.createGain();
+        exportNarrationGain.gain.value =
+          getNarrationMixLevels(narrationOriginalAudio).narration;
+        exportNarrationGain.connect(limiter);
         destination.stream
           .getAudioTracks()
           .forEach((track) => outputStream.addTrack(track));
@@ -3995,7 +3938,6 @@ function ResultWorkspace({
             if (settled) return;
             settled = true;
             video.pause();
-            exportNarration?.pause();
             cleanup();
             resolve();
           };
@@ -4028,7 +3970,14 @@ function ResultWorkspace({
 
       activeRecorder.start(1000);
       drawFrame();
-      await exportAudioContext?.resume();
+      if (exportAudioContext?.state !== "running") {
+        await exportAudioContext?.resume().catch(() => undefined);
+      }
+      if (exportAudioContext && exportAudioContext.state !== "running") {
+        throw new Error(
+          "AI音声の書き出しを開始できませんでした。画面を開いたまま、もう一度お試しください。",
+        );
+      }
       let narrationElapsed = 0;
 
       for (
@@ -4039,19 +3988,51 @@ function ResultWorkspace({
         const range = playableRanges[rangeIndex];
         if (rangeIndex > 0) await pauseRecorderForSeek();
         await seekExportMedia(video, range.start);
-        if (exportNarration) {
-          await seekExportMedia(exportNarration, narrationElapsed);
-        }
         if (rangeIndex > 0) await resumeRecorderAfterSeek();
 
         const rangeEnded = waitForRangeEnd(range);
-        const playback = [video.play()];
-        if (exportNarration) playback.push(exportNarration.play());
-        await Promise.all([...playback, rangeEnded]);
-        narrationElapsed += range.end - range.start;
+        const rangeDuration = range.end - range.start;
+        const narrationSlice = exportNarrationBuffer
+          ? getNarrationBufferSlice(
+              narrationElapsed,
+              rangeDuration,
+              exportNarrationBuffer.duration,
+            )
+          : null;
+        if (
+          narrationSlice &&
+          exportAudioContext &&
+          exportNarrationGain &&
+          exportNarrationBuffer
+        ) {
+          activeExportNarrationSource =
+            exportAudioContext.createBufferSource();
+          activeExportNarrationSource.buffer = exportNarrationBuffer;
+          activeExportNarrationSource.playbackRate.value =
+            getNarrationPlaybackRate();
+          activeExportNarrationSource.connect(exportNarrationGain);
+        }
+        const videoPlayback = video.play();
+        if (activeExportNarrationSource && narrationSlice) {
+          activeExportNarrationSource.start(
+            0,
+            narrationSlice.offset,
+            narrationSlice.duration,
+          );
+        }
+        await Promise.all([videoPlayback, rangeEnded]);
+        if (activeExportNarrationSource) {
+          try {
+            activeExportNarrationSource.stop();
+          } catch {
+            // The source may already have stopped at the end of the slice.
+          }
+          activeExportNarrationSource.disconnect();
+          activeExportNarrationSource = null;
+        }
+        narrationElapsed += rangeDuration;
       }
       video.pause();
-      exportNarration?.pause();
       keepDrawing = false;
       activeRecorder.stop();
       await stopped;
@@ -4085,9 +4066,14 @@ function ResultWorkspace({
         }
       }
       sourceStream?.getTracks().forEach((track) => track.stop());
-      exportNarration?.pause();
-      exportNarration?.removeAttribute("src");
-      exportNarration?.load();
+      if (activeExportNarrationSource) {
+        try {
+          activeExportNarrationSource.stop();
+        } catch {
+          // The source may already have stopped after a recorder error.
+        }
+        activeExportNarrationSource.disconnect();
+      }
       await exportAudioContext?.close().catch(() => undefined);
       video.pause();
       video.loop = previous.loop;
@@ -4130,10 +4116,13 @@ function ResultWorkspace({
   async function confirmNarrationExport() {
     if (!disclosureConfirmed || isRecordingDisclosure) return;
     setIsRecordingDisclosure(true);
+    let preparedAudioContext: AudioContext | null = null;
     try {
+      preparedAudioContext = await createRunningNarrationAudioContext();
       await recordDisclosureConfirmation();
       setShowDisclosureConfirm(false);
-      await exportCaptionedVideo();
+      await exportCaptionedVideo(preparedAudioContext);
+      preparedAudioContext = null;
     } catch (error) {
       notify(
         error instanceof Error
@@ -4141,6 +4130,7 @@ function ResultWorkspace({
           : "確認を記録できませんでした。",
       );
     } finally {
+      await preparedAudioContext?.close().catch(() => undefined);
       setIsRecordingDisclosure(false);
     }
   }

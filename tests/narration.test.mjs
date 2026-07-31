@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   buildDisclosedPostCaption,
   buildNarrationTimeline,
+  getNarrationBufferSlice,
+  getNarrationMixLevels,
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
   NARRATION_DISCLOSURE_TEXT,
@@ -75,9 +77,9 @@ test("keeps the four voice ids stable and adds a distinct comedy voice", () => {
     [
       "自然な女性",
       "自然な男性",
-      "萌えアニメ",
+      "ポップボイス",
       "低音シネマ",
-      "関西ツッコミ",
+      "テンポコメディ",
     ],
   );
 });
@@ -121,4 +123,34 @@ test("converts the selected original-audio percentage into a safe gain", () => {
   assert.equal(getNarrationOriginalAudioGain(-5), 0);
   assert.equal(getNarrationOriginalAudioGain(80), 0.2);
   assert.equal(getNarrationOriginalAudioGain(Number.NaN), 0);
+});
+
+test("keeps narration at full volume for every original-audio setting", () => {
+  for (const [percent, expectedOriginal] of [
+    [0, 0],
+    [8, 0.08],
+    [12, 0.12],
+    [17, 0.17],
+  ]) {
+    assert.deepEqual(getNarrationMixLevels(percent), {
+      original: expectedOriginal,
+      narration: 1,
+    });
+  }
+});
+
+test("slices decoded narration continuously across edited ranges", () => {
+  assert.deepEqual(getNarrationBufferSlice(0, 4, 9.5), {
+    offset: 0,
+    duration: 4,
+  });
+  assert.deepEqual(getNarrationBufferSlice(4, 4, 9.5), {
+    offset: 4,
+    duration: 4,
+  });
+  assert.deepEqual(getNarrationBufferSlice(8, 4, 9.5), {
+    offset: 8,
+    duration: 1.5,
+  });
+  assert.equal(getNarrationBufferSlice(9.5, 4, 9.5), null);
 });

@@ -79,7 +79,7 @@ test("shortens only an overlong narration while preserving its intent", async ()
   }
 });
 
-test("builds the Kansai comedy style around a safe setup and punchline", async () => {
+test("builds the tempo comedy style around a safe setup and punchline", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
     USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
@@ -143,11 +143,18 @@ test("builds the Kansai comedy style around a safe setup and punchline", async (
 
     assert.equal(response.status, 200);
     const prompt = openAiRequest.input[0].content[0].text;
-    assert.match(prompt, /激しい関西芸人風/);
-    assert.match(prompt, /妙に真剣な実況→一拍→短く激しい関西弁のツッコミ／オチ/);
-    assert.match(prompt, /実在する芸人の口癖は使わない/);
+    assert.match(prompt, /テンポのよいバラエティトーク/);
+    assert.match(prompt, /真剣な実況→一拍→短く勢いのある返し／オチ/);
+    assert.match(
+      prompt,
+      /特定の実在人物の声質、口癖、笑い方、決め台詞、話速、間合いは模倣しない/,
+    );
     assert.match(prompt, /人物の容姿・属性・失敗を嘲笑しない/);
     assert.match(prompt, /台本の文字数: 103〜123字/);
+    assert.doesNotMatch(
+      prompt,
+      /萌えアニメ|関西ツッコミ|激しい関西芸人風|明石家|さんま/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__cloudflareEnv;
