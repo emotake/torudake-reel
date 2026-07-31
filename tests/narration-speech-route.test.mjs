@@ -20,7 +20,10 @@ async function loadWorker(testName) {
 }
 
 test("sends five distinct voice characters at natural fixed speeds", async () => {
-  globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, init) => {
@@ -85,7 +88,10 @@ test("sends five distinct voice characters at natural fixed speeds", async () =>
 });
 
 test("uses the matching HD fallback voice when the primary model is unavailable", async () => {
-  globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (_url, init) => {

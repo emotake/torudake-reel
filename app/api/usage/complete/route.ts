@@ -1,13 +1,15 @@
 import { completeUsage } from "../../../../lib/billing-store";
-import {
-  authenticationRequired,
-  getCurrentUser,
-} from "../../../../lib/current-user";
-import { isBillingConfigured } from "../../../../lib/stripe";
+import { authenticationRequired } from "../../../../lib/current-user";
+import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 export async function POST(request: Request) {
-  if (!isBillingConfigured()) return Response.json({ completed: true });
-  const currentUser = getCurrentUser(request, { allowTrial: true });
+  if (!isUsageEnforcementEnabled()) {
+    return Response.json({ completed: true });
+  }
+  const { currentUser } = await getUsagePrincipal(request, {
+    allowTrial: true,
+  });
   if (!currentUser) return authenticationRequired();
   const payload = (await request.json().catch(() => null)) as {
     reservationId?: string;

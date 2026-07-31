@@ -3,6 +3,7 @@ export const FREE_SECONDS_LIMIT = 180;
 export const LIGHT_MONTHLY_VIDEO_LIMIT = 8;
 export const LIGHT_MONTHLY_PRICE_JPY = 1480;
 export const ONE_TIME_PRICE_JPY = 300;
+export const OPERATOR_DAILY_VIDEO_LIMIT = 20;
 
 export type BillingUsageSnapshot = {
   freeVideosUsed: number;
@@ -10,14 +11,27 @@ export type BillingUsageSnapshot = {
   monthlyVideosUsed: number;
   monthlyPlanActive: boolean;
   oneTimeCreditsRemaining: number;
+  operatorActive?: boolean;
+  operatorVideosUsedToday?: number;
 };
 
-export type BillingBucket = "free" | "subscription" | "one_time";
+export type BillingBucket =
+  | "free"
+  | "subscription"
+  | "one_time"
+  | "operator";
 
 export function chooseBillingBucket(
   usage: BillingUsageSnapshot,
   sourceDurationSeconds: number,
 ): BillingBucket | null {
+  if (usage.operatorActive) {
+    return (usage.operatorVideosUsedToday ?? 0) <
+      OPERATOR_DAILY_VIDEO_LIMIT
+      ? "operator"
+      : null;
+  }
+
   if (
     usage.monthlyPlanActive &&
     usage.monthlyVideosUsed < LIGHT_MONTHLY_VIDEO_LIMIT
@@ -38,4 +52,14 @@ export function chooseBillingBucket(
   }
 
   return null;
+}
+
+export function startOfTokyoDaySeconds(nowSeconds: number) {
+  const secondsPerDay = 24 * 60 * 60;
+  const tokyoOffsetSeconds = 9 * 60 * 60;
+  return (
+    Math.floor((nowSeconds + tokyoOffsetSeconds) / secondsPerDay) *
+      secondsPerDay -
+    tokyoOffsetSeconds
+  );
 }

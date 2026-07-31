@@ -2056,6 +2056,191 @@ footer > small {
   font-size: 8px;
 }
 
+.operatorAccessPage {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 28px 18px;
+  background:
+    radial-gradient(circle at 12% 4%, rgba(234, 129, 103, 0.2), transparent 30%),
+    linear-gradient(155deg, #f8f3ed 0%, #f3ebe2 52%, #eee4da 100%);
+  color: #241d19;
+}
+
+.operatorAccessCard {
+  width: min(100%, 440px);
+  padding: 34px 28px 26px;
+  border: 1px solid rgba(64, 47, 38, 0.12);
+  border-radius: 28px;
+  background: rgba(255, 252, 248, 0.94);
+  box-shadow: 0 24px 70px rgba(56, 37, 26, 0.13);
+}
+
+.operatorAccessMark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 22px;
+  border-radius: 15px;
+  background: #29221e;
+  color: #fff7ef;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.operatorAccessEyebrow {
+  margin: 0 0 8px;
+  color: #9f5a49;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.operatorAccessCard h1 {
+  margin: 0;
+  font-size: clamp(26px, 7vw, 34px);
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+}
+
+.operatorAccessLead {
+  margin: 14px 0 24px;
+  color: #6c5e56;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.operatorAccessForm {
+  display: grid;
+  gap: 18px;
+}
+
+.operatorAccessForm label {
+  display: grid;
+  gap: 8px;
+  color: #51453e;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.operatorAccessForm input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 15px;
+  border: 1px solid rgba(58, 42, 33, 0.19);
+  border-radius: 14px;
+  background: #fff;
+  color: #251e1a;
+  font: inherit;
+  outline: none;
+}
+
+.operatorAccessForm input:focus {
+  border-color: #cb765f;
+  box-shadow: 0 0 0 4px rgba(203, 118, 95, 0.13);
+}
+
+.operatorAccessPrimary,
+.operatorAccessQuiet {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.operatorAccessPrimary {
+  border: 0;
+  background: #29221e;
+  color: #fff;
+}
+
+.operatorAccessPrimary:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.operatorAccessQuiet {
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: #796a61;
+}
+
+.operatorAccessDetails {
+  margin: 0 0 22px;
+  overflow: hidden;
+  border: 1px solid rgba(58, 42, 33, 0.11);
+  border-radius: 16px;
+}
+
+.operatorAccessDetails div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 15px;
+}
+
+.operatorAccessDetails div + div {
+  border-top: 1px solid rgba(58, 42, 33, 0.09);
+}
+
+.operatorAccessDetails dt {
+  color: #88776d;
+  font-size: 13px;
+}
+
+.operatorAccessDetails dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.operatorAccessError,
+.operatorAccessUnavailable {
+  margin: 18px 0 0;
+  padding: 13px 14px;
+  border-radius: 13px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.operatorAccessError {
+  background: #fff0eb;
+  color: #9c3f2b;
+}
+
+.operatorAccessUnavailable {
+  background: #f1ebe5;
+  color: #6e5e55;
+}
+
+.operatorAccessNote {
+  margin: 22px 0 0;
+  color: #9a8c83;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+@media (max-width: 520px) {
+  .operatorAccessPage {
+    align-items: start;
+    padding-top: max(24px, env(safe-area-inset-top));
+  }
+
+  .operatorAccessCard {
+    padding: 28px 21px 23px;
+    border-radius: 24px;
+  }
+}
+
 .autoTelopNote {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) auto;

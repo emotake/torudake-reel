@@ -107,7 +107,7 @@ export const usageReservations = sqliteTable(
     idempotencyKey: text("idempotency_key").notNull(),
     sourceDurationSeconds: integer("source_duration_seconds").notNull(),
     bucket: text("bucket", {
-      enum: ["free", "subscription", "one_time"],
+      enum: ["free", "subscription", "one_time", "operator"],
     }).notNull(),
     status: text("status", {
       enum: ["reserved", "completed", "released"],
@@ -124,6 +124,58 @@ export const usageReservations = sqliteTable(
     ),
     index("usage_reservations_user_id_idx").on(table.userId),
     index("usage_reservations_status_idx").on(table.status),
+  ],
+);
+
+export const operatorDevices = sqliteTable(
+  "operator_devices",
+  {
+    slot: text("slot").primaryKey(),
+    sessionHash: text("session_hash").notNull(),
+    label: text("label").notNull(),
+    activatedAt: integer("activated_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    revokedAt: integer("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("operator_devices_session_hash_unique").on(table.sessionHash),
+    index("operator_devices_expires_at_idx").on(table.expiresAt),
+    index("operator_devices_revoked_at_idx").on(table.revokedAt),
+  ],
+);
+
+export const operatorUsageOperations = sqliteTable(
+  "operator_usage_operations",
+  {
+    id: text("id").primaryKey(),
+    reservationId: text("reservation_id").notNull(),
+    operation: text("operation", {
+      enum: ["transcribe", "narration_script", "narration_speech"],
+    }).notNull(),
+    count: integer("count").notNull().default(1),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("operator_usage_operations_reservation_id_idx").on(
+      table.reservationId,
+    ),
+    index("operator_usage_operations_updated_at_idx").on(table.updatedAt),
+  ],
+);
+
+export const operatorEnrollmentAttempts = sqliteTable(
+  "operator_enrollment_attempts",
+  {
+    fingerprint: text("fingerprint").primaryKey(),
+    windowStartedAt: integer("window_started_at").notNull(),
+    attempts: integer("attempts").notNull().default(1),
+    blockedUntil: integer("blocked_until").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("operator_enrollment_attempts_updated_at_idx").on(
+      table.updatedAt,
+    ),
   ],
 );
 

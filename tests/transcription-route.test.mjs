@@ -4,6 +4,7 @@ import test from "node:test";
 test("turns an audio transcription into timestamped captions", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -89,6 +90,7 @@ test("turns an audio transcription into timestamped captions", async () => {
 test("uses the full transcript when timed segments are omitted", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -155,6 +157,7 @@ test("uses the full transcript when timed segments are omitted", async () => {
 test("falls back to diarization when Whisper timestamping errors", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -255,6 +258,7 @@ test("falls back to diarization when Whisper timestamping errors", async () => {
 test("retries a temporary timed transcription failure once", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -337,6 +341,7 @@ test("retries a temporary timed transcription failure once", async () => {
 test("uses a second high-accuracy pass only when requested", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -429,6 +434,7 @@ test("uses a second high-accuracy pass only when requested", async () => {
 test("keeps the timed transcript when a high-accuracy pass omits speech", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -522,6 +528,7 @@ test("keeps the timed transcript when a high-accuracy pass omits speech", async 
 test("marks a silent audio chunk as skippable", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;
@@ -588,6 +595,7 @@ test("marks a silent audio chunk as skippable", async () => {
 test("explains when the OpenAI API credit is exhausted", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
   };
 
   const nativeFetch = globalThis.fetch;

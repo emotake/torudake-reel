@@ -1,18 +1,19 @@
 import {
+  OperatorUsageLimitError,
   reserveUsage,
   UsageLimitError,
 } from "../../../../lib/billing-store";
-import {
-  authenticationRequired,
-  getCurrentUser,
-} from "../../../../lib/current-user";
-import { isBillingConfigured } from "../../../../lib/stripe";
+import { authenticationRequired } from "../../../../lib/current-user";
+import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 export async function POST(request: Request) {
-  if (!isBillingConfigured()) {
+  if (!isUsageEnforcementEnabled()) {
     return Response.json({ required: false });
   }
-  const currentUser = getCurrentUser(request, { allowTrial: true });
+  const { currentUser, isOperator } = await getUsagePrincipal(request, {
+    allowTrial: true,
+  });
   if (!currentUser) return authenticationRequired();
 
   let payload: {
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
       currentUser,
       duration,
       payload.idempotencyKey,
+      { operator: isOperator },
     );
     return Response.json({
       required: true,
@@ -48,6 +50,12 @@ export async function POST(request: Request) {
       bucket: reservation.bucket,
     });
   } catch (error) {
+    if (error instanceof OperatorUsageLimitError) {
+      return Response.json(
+        { error: error.message, code: "operator_daily_limit_reached" },
+        { status: 429 },
+      );
+    }
     if (error instanceof UsageLimitError) {
       return Response.json(
         { error: error.message, code: "usage_limit_reached" },

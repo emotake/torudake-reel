@@ -17,9 +17,9 @@ import {
   removeTransfer,
   safeFileName,
 } from "../../../lib/transfers";
-import { findOwnedUsageReservation } from "../../../lib/billing-store";
-import { getCurrentUser } from "../../../lib/current-user";
-import { isBillingConfigured } from "../../../lib/stripe";
+import { authorizeUsageOperation } from "../../../lib/billing-store";
+import { getUsagePrincipal } from "../../../lib/operator-access";
+import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 45_000;
@@ -352,22 +352,6 @@ export async function POST(request: Request) {
       }
     }
 
-    if (isBillingConfigured()) {
-      const currentUser = getCurrentUser(request, { allowTrial: true });
-      if (!currentUser) {
-        return jsonError("続けるにはアカウントへのログインが必要です。", 401);
-      }
-      if (
-        !usageReservationId ||
-        !(await findOwnedUsageReservation(currentUser, usageReservationId))
-      ) {
-        return jsonError(
-          "利用枠を確認できませんでした。動画を選び直してください。",
-          402,
-        );
-      }
-    }
-
     if (!file || file.size <= 0) {
       return jsonError("字幕を付ける動画を選んでください。");
     }
@@ -379,6 +363,33 @@ export async function POST(request: Request) {
     }
     if (!isSupportedTranscriptionMedia(file.name, file.type || "video/mp4")) {
       return jsonError("対応している動画または音声ファイルを選んでください。");
+    }
+
+    if (isUsageEnforcementEnabled()) {
+      const { currentUser } = await getUsagePrincipal(request, {
+        allowTrial: true,
+      });
+      if (!currentUser) {
+        return jsonError("続けるにはアカウントへのログインが必要です。", 401);
+      }
+      const authorization = usageReservationId
+        ? await authorizeUsageOperation(
+            currentUser,
+            usageReservationId,
+            "transcribe",
+          )
+        : null;
+      if (!authorization?.allowed) {
+        return authorization?.reason === "operator_operation_limit"
+          ? jsonError(
+              "この動画での音声認識回数が安全上限に達しました。新しい動画としてやり直してください。",
+              429,
+            )
+          : jsonError(
+              "利用枠を確認できませんでした。動画を選び直してください。",
+              402,
+            );
+      }
     }
 
     const timedResult = await requestTimedTranscription(apiKey, file);

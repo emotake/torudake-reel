@@ -1,12 +1,13 @@
 import { env } from "cloudflare:workers";
-import { findOwnedUsageReservation } from "../../../../lib/billing-store";
+import { authorizeUsageOperation } from "../../../../lib/billing-store";
 import { getCurrentUser } from "../../../../lib/current-user";
+import { getUsagePrincipal } from "../../../../lib/operator-access";
 import {
   isNarrationStyle,
   normalizeNarrationPlan,
   type NarrationStyle,
 } from "../../../../lib/narration";
-import { isBillingConfigured } from "../../../../lib/stripe";
+import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
@@ -148,20 +149,38 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isBillingConfigured()) {
-    const currentUser = getCurrentUser(request, { allowTrial: true });
+  if (isUsageEnforcementEnabled()) {
+    const { currentUser } = await getUsagePrincipal(request, {
+      allowTrial: true,
+    });
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId
         : "";
-    if (
-      !currentUser ||
-      !reservationId ||
-      !(await findOwnedUsageReservation(currentUser, reservationId))
-    ) {
+    const authorization =
+      currentUser && reservationId
+        ? await authorizeUsageOperation(
+            currentUser,
+            reservationId,
+            "narration_script",
+          )
+        : null;
+    if (!authorization?.allowed) {
       return Response.json(
-        { error: "利用枠を確認できませんでした。動画を選び直してください。" },
-        { status: currentUser ? 402 : 401 },
+        {
+          error:
+            authorization?.reason === "operator_operation_limit"
+              ? "この動画での台本生成回数が安全上限に達しました。新しい動画としてやり直してください。"
+              : "利用枠を確認できませんでした。動画を選び直してください。",
+        },
+        {
+          status:
+            authorization?.reason === "operator_operation_limit"
+              ? 429
+              : currentUser
+                ? 402
+                : 401,
+        },
       );
     }
   }

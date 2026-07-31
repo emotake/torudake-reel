@@ -1,11 +1,11 @@
 import { env } from "cloudflare:workers";
-import { findOwnedUsageReservation } from "../../../../lib/billing-store";
-import { getCurrentUser } from "../../../../lib/current-user";
+import { authorizeUsageOperation } from "../../../../lib/billing-store";
+import { getUsagePrincipal } from "../../../../lib/operator-access";
 import {
   isNarrationStyle,
   type NarrationStyle,
 } from "../../../../lib/narration";
-import { isBillingConfigured } from "../../../../lib/stripe";
+import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
@@ -132,20 +132,38 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isBillingConfigured()) {
-    const currentUser = getCurrentUser(request, { allowTrial: true });
+  if (isUsageEnforcementEnabled()) {
+    const { currentUser } = await getUsagePrincipal(request, {
+      allowTrial: true,
+    });
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId
         : "";
-    if (
-      !currentUser ||
-      !reservationId ||
-      !(await findOwnedUsageReservation(currentUser, reservationId))
-    ) {
+    const authorization =
+      currentUser && reservationId
+        ? await authorizeUsageOperation(
+            currentUser,
+            reservationId,
+            "narration_speech",
+          )
+        : null;
+    if (!authorization?.allowed) {
       return Response.json(
-        { error: "利用枠を確認できませんでした。動画を選び直してください。" },
-        { status: currentUser ? 402 : 401 },
+        {
+          error:
+            authorization?.reason === "operator_operation_limit"
+              ? "この動画でのAI音声生成回数が安全上限に達しました。新しい動画としてやり直してください。"
+              : "利用枠を確認できませんでした。動画を選び直してください。",
+        },
+        {
+          status:
+            authorization?.reason === "operator_operation_limit"
+              ? 429
+              : currentUser
+                ? 402
+                : 401,
+        },
       );
     }
   }

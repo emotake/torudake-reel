@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-async function render() {
+async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
+    new Request(`http://localhost${path}`, {
       headers: { accept: "text/html" },
     }),
     {
@@ -44,6 +44,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /1本あたり185円/);
   assert.match(html, /¥(?:<!-- -->)?300/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
+  assert.doesNotMatch(
+    html,
+    /device-access-7k9m2p|運営端末を登録|登録コード/,
+  );
 });
 
 test("ships production metadata without starter markers", async () => {
@@ -54,4 +58,17 @@ test("ships production metadata without starter markers", async () => {
   assert.match(html, /property="og:image"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project|30秒ジャッジ/);
+});
+
+test("keeps the operator enrollment page out of search results", async () => {
+  const response = await render("/internal/device-access-7k9m2p");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /端末の状態を確認中/);
+  assert.match(
+    html,
+    /name="robots" content="[^"]*noindex[^"]*nofollow[^"]*noarchive/,
+  );
+  assert.doesNotMatch(html, /OPERATOR_ENROLLMENT_CODE/);
 });

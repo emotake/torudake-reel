@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import {
   billingPurchases,
@@ -12,12 +13,32 @@ import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
   LIGHT_MONTHLY_VIDEO_LIMIT,
+  OPERATOR_DAILY_VIDEO_LIMIT,
+  startOfTokyoDaySeconds,
 } from "./billing-policy";
 import type { CurrentUser } from "./current-user";
+import {
+  consumeOperatorUsageOperation,
+  type OperatorUsageOperation,
+} from "./operator-usage";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
 const ACTIVE_USAGE_STATUSES = ["reserved", "completed"] as const;
 const RESERVATION_LIFETIME_SECONDS = 60 * 60;
+
+type AtomicD1Result = {
+  meta?: { changes?: number };
+};
+
+type AtomicD1Statement = {
+  bind: (...values: unknown[]) => {
+    run: () => Promise<AtomicD1Result>;
+  };
+};
+
+type AtomicD1Database = {
+  prepare: (query: string) => AtomicD1Statement;
+};
 
 export class UsageLimitError extends Error {
   constructor() {
@@ -25,6 +46,15 @@ export class UsageLimitError extends Error {
       `無料枠を使い切りました。月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランまたは1本購入を選んでください。`,
     );
     this.name = "UsageLimitError";
+  }
+}
+
+export class OperatorUsageLimitError extends Error {
+  constructor() {
+    super(
+      `運営端末の1日あたりの安全上限（${OPERATOR_DAILY_VIDEO_LIMIT}本）に達しました。日本時間の午前0時以降にもう一度お試しください。`,
+    );
+    this.name = "OperatorUsageLimitError";
   }
 }
 
@@ -136,6 +166,12 @@ export async function getBillingStatusForUser(userId: string) {
 
   const freeUsage = usage.filter((item) => item.bucket === "free");
   const oneTimeUsage = usage.filter((item) => item.bucket === "one_time");
+  const operatorDayStart = startOfTokyoDaySeconds(now);
+  const operatorVideosUsedToday = usage.filter(
+    (item) =>
+      item.bucket === "operator" &&
+      item.createdAt >= operatorDayStart,
+  ).length;
   const monthlyUsage = subscription
     ? usage.filter(
         (item) =>
@@ -158,6 +194,7 @@ export async function getBillingStatusForUser(userId: string) {
     ),
     monthlyVideosUsed: monthlyUsage.length,
     monthlyPlanActive: Boolean(subscription),
+    operatorVideosUsedToday,
     oneTimeCreditsRemaining: Math.max(
       0,
       purchasedCredits - oneTimeUsage.length,
@@ -169,6 +206,7 @@ export async function reserveUsage(
   currentUser: CurrentUser,
   sourceDurationSeconds: number,
   idempotencyKey: string,
+  options: { operator?: boolean } = {},
 ) {
   const db = getDb();
   const user = await getOrCreateBillingUser(currentUser);
@@ -183,8 +221,17 @@ export async function reserveUsage(
 
   const status = await getBillingStatusForUser(user.id);
   const roundedDuration = Math.max(1, Math.ceil(sourceDurationSeconds));
-  const bucket = chooseBillingBucket(status, roundedDuration);
-  if (!bucket) throw new UsageLimitError();
+  const bucket = chooseBillingBucket(
+    {
+      ...status,
+      operatorActive: options.operator === true,
+    },
+    roundedDuration,
+  );
+  if (!bucket) {
+    if (options.operator) throw new OperatorUsageLimitError();
+    throw new UsageLimitError();
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const reservation = {
@@ -198,8 +245,83 @@ export async function reserveUsage(
     expiresAt: now + RESERVATION_LIFETIME_SECONDS,
     completedAt: null,
   };
+  if (bucket === "operator") {
+    const inserted = await insertOperatorReservationAtomically(
+      reservation,
+      startOfTokyoDaySeconds(now),
+    );
+    if (!inserted) {
+      const concurrent = await db
+        .select()
+        .from(usageReservations)
+        .where(eq(usageReservations.idempotencyKey, idempotencyKey))
+        .limit(1);
+      if (concurrent[0]?.userId === user.id) return concurrent[0];
+      throw new OperatorUsageLimitError();
+    }
+    return reservation;
+  }
+
   await db.insert(usageReservations).values(reservation);
   return reservation;
+}
+
+async function insertOperatorReservationAtomically(
+  reservation: {
+    id: string;
+    userId: string;
+    idempotencyKey: string;
+    sourceDurationSeconds: number;
+    bucket: "operator";
+    status: "reserved";
+    createdAt: number;
+    expiresAt: number;
+    completedAt: null;
+  },
+  dayStartSeconds: number,
+) {
+  const database = env.DB as unknown as AtomicD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+
+  const result = await database
+    .prepare(`
+      INSERT INTO usage_reservations (
+        id,
+        user_id,
+        idempotency_key,
+        source_duration_seconds,
+        bucket,
+        status,
+        created_at,
+        expires_at,
+        completed_at
+      )
+      SELECT ?, ?, ?, ?, 'operator', 'reserved', ?, ?, NULL
+      WHERE (
+        SELECT COUNT(*)
+        FROM usage_reservations
+        WHERE user_id = ?
+          AND bucket = 'operator'
+          AND status IN ('reserved', 'completed')
+          AND created_at >= ?
+      ) < ?
+      ON CONFLICT(idempotency_key) DO NOTHING
+    `)
+    .bind(
+      reservation.id,
+      reservation.userId,
+      reservation.idempotencyKey,
+      reservation.sourceDurationSeconds,
+      reservation.createdAt,
+      reservation.expiresAt,
+      reservation.userId,
+      dayStartSeconds,
+      OPERATOR_DAILY_VIDEO_LIMIT,
+    )
+    .run();
+  return result.meta?.changes === 1;
 }
 
 export async function findOwnedUsageReservation(
@@ -223,6 +345,47 @@ export async function findOwnedUsageReservation(
     return null;
   }
   return reservation;
+}
+
+export async function authorizeUsageOperation(
+  currentUser: CurrentUser,
+  reservationId: string,
+  operation: OperatorUsageOperation,
+) {
+  const reservation = await findOwnedUsageReservation(
+    currentUser,
+    reservationId,
+  );
+  if (!reservation) {
+    return {
+      allowed: false,
+      reason: "reservation_not_found",
+      reservation: null,
+    } as const;
+  }
+  if (reservation.bucket !== "operator") {
+    return {
+      allowed: true,
+      reason: null,
+      reservation,
+    } as const;
+  }
+
+  const allowed = await consumeOperatorUsageOperation(
+    reservation.id,
+    operation,
+  );
+  return allowed
+    ? {
+        allowed: true,
+        reason: null,
+        reservation,
+      } as const
+    : {
+        allowed: false,
+        reason: "operator_operation_limit",
+        reservation,
+      } as const;
 }
 
 export async function completeUsage(
@@ -255,6 +418,17 @@ export async function releaseUsage(
     reservationId,
   );
   if (!reservation || reservation.status !== "reserved") return false;
+
+  if (reservation.bucket === "operator") {
+    await getDb()
+      .update(usageReservations)
+      .set({
+        status: "completed",
+        completedAt: Math.floor(Date.now() / 1000),
+      })
+      .where(eq(usageReservations.id, reservation.id));
+    return true;
+  }
 
   await getDb()
     .update(usageReservations)

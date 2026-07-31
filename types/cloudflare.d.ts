@@ -15,6 +15,7 @@ declare module "cloudflare:workers" {
     STRIPE_WEBHOOK_SECRET?: string;
     STRIPE_PRICE_LIGHT_MONTHLY?: string;
     STRIPE_PRICE_ONE_TIME?: string;
+    OPERATOR_ENROLLMENT_CODE?: string;
     [binding: string]: unknown;
   };
 }

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 test("shortens only an overlong narration while preserving its intent", async () => {
-  globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
@@ -77,7 +80,10 @@ test("shortens only an overlong narration while preserving its intent", async ()
 });
 
 test("builds the Kansai comedy style around a safe setup and punchline", async () => {
-  globalThis.__cloudflareEnv = { OPENAI_API_KEY: "test-key" };
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
