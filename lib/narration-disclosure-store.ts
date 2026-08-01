@@ -7,32 +7,47 @@ import { getOrCreateBillingUser } from "./billing-store";
 
 let disclosureSchemaReady = false;
 
+type D1SchemaStatement = {
+  bind?: (...values: unknown[]) => D1SchemaStatement;
+};
+
+type D1SchemaDatabase = {
+  prepare: (query: string) => D1SchemaStatement;
+  batch: (statements: D1SchemaStatement[]) => Promise<unknown>;
+};
+
 async function ensureDisclosureSchema() {
   if (disclosureSchemaReady) return;
-  const database = env.DB as
-    | { exec?: (query: string) => Promise<unknown> }
-    | undefined;
-  if (!database?.exec) {
+  const database = env.DB as unknown as D1SchemaDatabase | undefined;
+  if (!database?.prepare || !database?.batch) {
     throw new Error("AI disclosure database binding is unavailable.");
   }
-  await database.exec(`
-    CREATE TABLE IF NOT EXISTS ai_disclosure_confirmations (
-      id text PRIMARY KEY NOT NULL,
-      confirmation_id text NOT NULL,
-      user_id text,
-      session_hash text NOT NULL,
-      action text NOT NULL,
-      disclosure_method text NOT NULL,
-      terms_version text NOT NULL,
-      created_at integer NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS ai_disclosure_confirmation_id_unique
-      ON ai_disclosure_confirmations (confirmation_id);
-    CREATE INDEX IF NOT EXISTS ai_disclosure_user_id_idx
-      ON ai_disclosure_confirmations (user_id);
-    CREATE INDEX IF NOT EXISTS ai_disclosure_created_at_idx
-      ON ai_disclosure_confirmations (created_at);
-  `);
+  await database.batch([
+    database.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_disclosure_confirmations (
+        id text PRIMARY KEY NOT NULL,
+        confirmation_id text NOT NULL,
+        user_id text,
+        session_hash text NOT NULL,
+        action text NOT NULL,
+        disclosure_method text NOT NULL,
+        terms_version text NOT NULL,
+        created_at integer NOT NULL
+      )
+    `),
+    database.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ai_disclosure_confirmation_id_unique
+      ON ai_disclosure_confirmations (confirmation_id)
+    `),
+    database.prepare(`
+      CREATE INDEX IF NOT EXISTS ai_disclosure_user_id_idx
+      ON ai_disclosure_confirmations (user_id)
+    `),
+    database.prepare(`
+      CREATE INDEX IF NOT EXISTS ai_disclosure_created_at_idx
+      ON ai_disclosure_confirmations (created_at)
+    `),
+  ]);
   disclosureSchemaReady = true;
 }
 
