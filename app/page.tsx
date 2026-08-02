@@ -2634,6 +2634,11 @@ function ResultWorkspace({
   );
   const [isExporting, setIsExporting] = useState(false);
   const isExportingRef = useRef(false);
+  const [exportedVideoFile, setExportedVideoFile] = useState<File | null>(null);
+  const [exportedVideoRevision, setExportedVideoRevision] = useState<
+    string | null
+  >(null);
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [isCaptionDesignerOpen, setIsCaptionDesignerOpen] = useState(false);
   const [narrationDraft, setNarrationDraft] = useState(
@@ -2719,6 +2724,29 @@ function ResultWorkspace({
   } as CSSProperties;
   const exportName =
     file?.name.replace(/\.[^.]+$/, "") ?? "sample_reel_video";
+  const exportInputRevision = useMemo(
+    () =>
+      JSON.stringify({
+        file: file
+          ? [file.name, file.size, file.lastModified, file.type]
+          : null,
+        transcript,
+        captionProfile,
+        narrationAudioUrl,
+        narrationOriginalAudio,
+      }),
+    [
+      captionProfile,
+      file,
+      narrationAudioUrl,
+      narrationOriginalAudio,
+      transcript,
+    ],
+  );
+  const readyExportedVideoFile =
+    exportedVideoRevision === exportInputRevision
+      ? exportedVideoFile
+      : null;
   const removedCount = transcript.filter((line) => line.removed).length;
   const hasCutChanges = transcript.some(
     (line) =>
@@ -3979,6 +4007,151 @@ function ResultWorkspace({
     }
   }
 
+  function drawCaptionOverlay(
+    context: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    sourceTime: number,
+  ) {
+    const caption = transcript.find(
+      (line) =>
+        !line.removed &&
+        line.text.trim() &&
+        sourceTime >= line.start &&
+        sourceTime < line.end,
+    );
+
+    if (!caption) return;
+
+    const keptIndex = keptLines.findIndex((line) => line.id === caption.id);
+    const presentation = getCaptionPresentation(
+      caption,
+      Math.max(0, keptIndex),
+    );
+    const palette = captionDesign.palette;
+    const presentationScale =
+      presentation === "hook"
+        ? 1.12
+        : presentation === "metric"
+          ? 1.08
+          : 1;
+    const fontSize =
+      Math.max(26, Math.min(64, canvas.width * 0.052)) * presentationScale;
+    const horizontalPadding = fontSize * (tone === "cinema" ? 0.32 : 0.72);
+    const verticalPadding = fontSize * (tone === "cinema" ? 0.18 : 0.44);
+    const maxTextWidth = canvas.width * 0.82;
+    const charactersPerLine = Math.max(
+      8,
+      Math.floor(maxTextWidth / fontSize),
+    );
+    const lines = wrapCaptionLines(caption.text, charactersPerLine, 2);
+    const showBrand =
+      presentation === "hook" && Boolean(captionProfile.brandName);
+    const brandHeight = showBrand ? fontSize * 0.52 : 0;
+
+    context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const widestLine = Math.max(
+      ...lines.map((line) => context.measureText(line).width),
+    );
+    const lineHeight = fontSize * 1.25;
+    const boxWidth = Math.min(
+      canvas.width - horizontalPadding * 2,
+      widestLine + horizontalPadding * 2,
+    );
+    const boxHeight =
+      lines.length * lineHeight + verticalPadding * 2 + brandHeight;
+    const boxX = (canvas.width - boxWidth) / 2;
+    const boxY = canvas.height - boxHeight - canvas.height * 0.08;
+    const entrance = getCaptionEntranceProgress(sourceTime, caption.start);
+    context.save();
+    context.globalAlpha = 0.35 + entrance * 0.65;
+    context.translate(0, (1 - entrance) * fontSize * 0.18);
+    if (palette.background) {
+      context.save();
+      context.shadowColor = "rgba(8,15,25,.26)";
+      context.shadowBlur = fontSize * 0.4;
+      context.shadowOffsetY = fontSize * 0.16;
+      context.fillStyle = palette.background;
+      context.beginPath();
+      context.roundRect(
+        boxX,
+        boxY,
+        boxWidth,
+        boxHeight,
+        tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
+      );
+      context.fill();
+      context.restore();
+    }
+    if (palette.border) {
+      context.lineWidth =
+        tone === "editorial"
+          ? Math.max(3, fontSize * 0.055)
+          : Math.max(2, fontSize * 0.035);
+      context.strokeStyle = palette.border;
+      context.beginPath();
+      context.roundRect(
+        boxX,
+        boxY,
+        boxWidth,
+        boxHeight,
+        tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
+      );
+      context.stroke();
+    }
+    if (showBrand) {
+      context.fillStyle = palette.highlight;
+      context.font = `750 ${fontSize * 0.34}px "Noto Sans JP", "Yu Gothic", sans-serif`;
+      context.textAlign = "left";
+      context.fillText(
+        captionProfile.brandName,
+        boxX + horizontalPadding,
+        boxY + verticalPadding * 0.72,
+        boxWidth - horizontalPadding * 2,
+      );
+    }
+    const highlight = caption.highlight?.trim() ?? "";
+    context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
+    context.textAlign = "left";
+    lines.forEach((line, index) => {
+      const lineY =
+        boxY +
+        verticalPadding +
+        brandHeight +
+        lineHeight * (index + 0.5);
+      const highlightIndex = highlight ? line.indexOf(highlight) : -1;
+      const parts =
+        highlightIndex >= 0
+          ? [
+              {
+                text: line.slice(0, highlightIndex),
+                color: palette.text,
+              },
+              { text: highlight, color: palette.highlight },
+              {
+                text: line.slice(highlightIndex + highlight.length),
+                color: palette.text,
+              },
+            ]
+          : [{ text: line, color: palette.text }];
+      let textX = canvas.width / 2 - context.measureText(line).width / 2;
+
+      parts.forEach((part) => {
+        if (palette.stroke) {
+          context.lineWidth = Math.max(5, fontSize * 0.12);
+          context.lineJoin = "round";
+          context.strokeStyle = palette.stroke;
+          context.strokeText(part.text, textX, lineY);
+        }
+        context.fillStyle = part.color;
+        context.fillText(part.text, textX, lineY);
+        textX += context.measureText(part.text).width;
+      });
+    });
+    context.restore();
+  }
+
   async function exportCaptionedVideo(
     preparedAudioContext: AudioContext | null = null,
   ) {
@@ -4015,18 +4188,15 @@ function ResultWorkspace({
     const captureVideoStream =
       capturableVideo.captureStream ?? capturableVideo.mozCaptureStream;
 
-    if (
+    const usePortableMp4Exporter =
       typeof MediaRecorder === "undefined" ||
-      typeof HTMLCanvasElement.prototype.captureStream !== "function" ||
-      !captureVideoStream
-    ) {
-      await preparedAudioContext?.close().catch(() => undefined);
-      notify("このブラウザは動画書き出しに対応していません");
-      return;
-    }
+      typeof HTMLCanvasElement.prototype.captureStream !== "function";
 
     isExportingRef.current = true;
     setIsExporting(true);
+    setExportedVideoFile(null);
+    setExportedVideoRevision(null);
+    setExportProgress(0);
     const previous = {
       currentTime: video.currentTime,
       editedTime: editedCurrentTime,
@@ -4047,10 +4217,17 @@ function ResultWorkspace({
     let animationFrame = 0;
     let keepDrawing = true;
     let sourceStream: MediaStream | null = null;
+    let outputStream: MediaStream | null = null;
     let exportAudioContext: AudioContext | null = preparedAudioContext;
     let exportNarrationBuffer: AudioBuffer | null = null;
     let exportNarrationGain: GainNode | null = null;
+    let exportOriginalAudioSource: AudioNode | null = null;
+    let exportOriginalGain: GainNode | null = null;
+    let exportLimiter: DynamicsCompressorNode | null = null;
     let activeExportNarrationSource: AudioBufferSourceNode | null = null;
+    let exportPreviewOriginalGain: GainNode | null = null;
+    let exportPreviewOriginalGainValue = 1;
+    let shouldCloseExportAudioContext = true;
     let recorder: MediaRecorder | null = null;
     const seekExportMedia = async (
       media: HTMLMediaElement,
@@ -4104,6 +4281,51 @@ function ResultWorkspace({
     };
 
     try {
+      if (usePortableMp4Exporter) {
+        let portableNarrationBuffer: AudioBuffer | null = null;
+        if (narrationPlan && narrationAudioUrl) {
+          if (!exportAudioContext) {
+            exportAudioContext = await createRunningNarrationAudioContext();
+          }
+          const narrationResponse = await fetch(narrationAudioUrl);
+          if (!narrationResponse.ok) {
+            throw new Error("AI音声を読み込めませんでした。");
+          }
+          portableNarrationBuffer = await exportAudioContext.decodeAudioData(
+            await narrationResponse.arrayBuffer(),
+          );
+        }
+
+        const { exportPortableVideoMp4 } = await import(
+          "../lib/portable-video-export"
+        );
+        const mix = narrationPlan
+          ? getNarrationMixLevels(narrationOriginalAudio)
+          : { original: 1, narration: 0 };
+        const output = await exportPortableVideoMp4({
+          file,
+          ranges: playableRanges,
+          originalGain: mix.original,
+          narrationBuffer: portableNarrationBuffer,
+          narrationGain: mix.narration,
+          drawCaption: ({ context, canvas, sourceTime }) => {
+            drawCaptionOverlay(context, canvas, sourceTime);
+          },
+          onProgress: (progress) => setExportProgress(progress * 100),
+        });
+        if (!output.size) throw new Error("書き出した動画が空でした。");
+        const completedFile = new File(
+          [output],
+          `${exportName}_captioned.mp4`,
+          { type: "video/mp4" },
+        );
+        setExportProgress(100);
+        setExportedVideoFile(completedFile);
+        setExportedVideoRevision(exportInputRevision);
+        notify("動画ができました。下の「動画を保存・共有」を押してください");
+        return;
+      }
+
       video.pause();
       video.loop = false;
       video.muted = false;
@@ -4117,201 +4339,84 @@ function ResultWorkspace({
 
       const drawFrame = () => {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const caption = transcript.find(
-          (line) =>
-            !line.removed &&
-            line.text.trim() &&
-            video.currentTime >= line.start &&
-            video.currentTime < line.end,
-        );
-
-        if (caption) {
-          const keptIndex = keptLines.findIndex(
-            (line) => line.id === caption.id,
-          );
-          const presentation = getCaptionPresentation(
-            caption,
-            Math.max(0, keptIndex),
-          );
-          const palette = captionDesign.palette;
-          const presentationScale =
-            presentation === "hook"
-              ? 1.12
-              : presentation === "metric"
-                ? 1.08
-                : 1;
-          const fontSize =
-            Math.max(26, Math.min(64, canvas.width * 0.052)) *
-            presentationScale;
-          const horizontalPadding = fontSize * (tone === "cinema" ? 0.32 : 0.72);
-          const verticalPadding = fontSize * (tone === "cinema" ? 0.18 : 0.44);
-          const maxTextWidth = canvas.width * 0.82;
-          const charactersPerLine = Math.max(
-            8,
-            Math.floor(maxTextWidth / fontSize),
-          );
-          const lines = wrapCaptionLines(
-            caption.text,
-            charactersPerLine,
-            2,
-          );
-          const showBrand =
-            presentation === "hook" && Boolean(captionProfile.brandName);
-          const brandHeight = showBrand ? fontSize * 0.52 : 0;
-
-          context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
-          context.textAlign = "center";
-          context.textBaseline = "middle";
-          const widestLine = Math.max(
-            ...lines.map((line) => context.measureText(line).width),
-          );
-          const lineHeight = fontSize * 1.25;
-          const boxWidth = Math.min(
-            canvas.width - horizontalPadding * 2,
-            widestLine + horizontalPadding * 2,
-          );
-          const boxHeight =
-            lines.length * lineHeight +
-            verticalPadding * 2 +
-            brandHeight;
-          const boxX = (canvas.width - boxWidth) / 2;
-          const boxY = canvas.height - boxHeight - canvas.height * 0.08;
-          const entrance = getCaptionEntranceProgress(
-            video.currentTime,
-            caption.start,
-          );
-          context.save();
-          context.globalAlpha = 0.35 + entrance * 0.65;
-          context.translate(0, (1 - entrance) * fontSize * 0.18);
-          if (palette.background) {
-            context.save();
-            context.shadowColor = "rgba(8,15,25,.26)";
-            context.shadowBlur = fontSize * 0.4;
-            context.shadowOffsetY = fontSize * 0.16;
-            context.fillStyle = palette.background;
-            context.beginPath();
-            context.roundRect(
-              boxX,
-              boxY,
-              boxWidth,
-              boxHeight,
-              tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
-            );
-            context.fill();
-            context.restore();
-          }
-          if (palette.border) {
-            context.lineWidth =
-              tone === "editorial"
-                ? Math.max(3, fontSize * 0.055)
-                : Math.max(2, fontSize * 0.035);
-            context.strokeStyle = palette.border;
-            context.beginPath();
-            context.roundRect(
-              boxX,
-              boxY,
-              boxWidth,
-              boxHeight,
-              tone === "mono" ? fontSize * 0.08 : fontSize * 0.28,
-            );
-            context.stroke();
-          }
-          if (showBrand) {
-            context.fillStyle = palette.highlight;
-            context.font = `750 ${fontSize * 0.34}px "Noto Sans JP", "Yu Gothic", sans-serif`;
-            context.textAlign = "left";
-            context.fillText(
-              captionProfile.brandName,
-              boxX + horizontalPadding,
-              boxY + verticalPadding * 0.72,
-              boxWidth - horizontalPadding * 2,
-            );
-          }
-          const highlight = caption.highlight?.trim() ?? "";
-          context.font = `${palette.fontWeight} ${fontSize}px "Noto Sans JP", "Yu Gothic", sans-serif`;
-          context.textAlign = "left";
-          lines.forEach((line, index) => {
-            const lineY =
-              boxY +
-              verticalPadding +
-              brandHeight +
-              lineHeight * (index + 0.5);
-            const highlightIndex = highlight
-              ? line.indexOf(highlight)
-              : -1;
-            const parts =
-              highlightIndex >= 0
-                ? [
-                    {
-                      text: line.slice(0, highlightIndex),
-                      color: palette.text,
-                    },
-                    { text: highlight, color: palette.highlight },
-                    {
-                      text: line.slice(highlightIndex + highlight.length),
-                      color: palette.text,
-                    },
-                  ]
-                : [{ text: line, color: palette.text }];
-            let textX =
-              canvas.width / 2 - context.measureText(line).width / 2;
-
-            parts.forEach((part) => {
-              if (palette.stroke) {
-                context.lineWidth = Math.max(5, fontSize * 0.12);
-                context.lineJoin = "round";
-                context.strokeStyle = palette.stroke;
-                context.strokeText(part.text, textX, lineY);
-              }
-              context.fillStyle = part.color;
-              context.fillText(part.text, textX, lineY);
-              textX += context.measureText(part.text).width;
-            });
-          });
-          context.restore();
-        }
+        drawCaptionOverlay(context, canvas, video.currentTime);
 
         if (keepDrawing) {
           animationFrame = window.requestAnimationFrame(drawFrame);
         }
       };
 
-      const outputStream = canvas.captureStream(30);
-      sourceStream = captureVideoStream.call(capturableVideo);
+      outputStream = canvas.captureStream(30);
+      const liveOutputStream = outputStream;
       if (narrationPlan && narrationAudioUrl) {
+        const previewEngine = await ensurePreviewNarrationEngine(true);
+        if (exportAudioContext && exportAudioContext !== previewEngine.context) {
+          await exportAudioContext.close().catch(() => undefined);
+        }
+        exportAudioContext = previewEngine.context;
+        shouldCloseExportAudioContext = false;
+        exportOriginalAudioSource = previewEngine.mediaSource;
+        exportPreviewOriginalGain = previewEngine.originalGain;
+        if (exportPreviewOriginalGain) {
+          exportPreviewOriginalGainValue = exportPreviewOriginalGain.gain.value;
+          exportPreviewOriginalGain.gain.setValueAtTime(
+            0,
+            exportAudioContext.currentTime,
+          );
+        }
+        exportNarrationBuffer = previewEngine.buffer;
+      } else {
         if (!exportAudioContext) {
           exportAudioContext = await createRunningNarrationAudioContext();
-        } else {
-          if (exportAudioContext.state !== "running") {
-            await exportAudioContext.resume().catch(() => undefined);
-          }
-          if (exportAudioContext.state !== "running") {
-            throw new Error(
-              "AI音声の書き出しを開始できませんでした。画面を開いたまま、もう一度お試しください。",
-            );
+        }
+        try {
+          exportOriginalAudioSource =
+            exportAudioContext.createMediaElementSource(video);
+        } catch {
+          if (captureVideoStream) {
+            sourceStream = captureVideoStream.call(capturableVideo);
+            const audioTracks = sourceStream.getAudioTracks();
+            if (audioTracks.length) {
+              exportOriginalAudioSource = exportAudioContext.createMediaStreamSource(
+                new MediaStream(audioTracks),
+              );
+            }
           }
         }
-        const destination =
-          exportAudioContext.createMediaStreamDestination();
-        const limiter = exportAudioContext.createDynamicsCompressor();
-        limiter.threshold.value = -1;
-        limiter.knee.value = 0;
-        limiter.ratio.value = 20;
-        limiter.attack.value = 0.002;
-        limiter.release.value = 0.08;
-        limiter.connect(destination);
-        const sourceAudioTracks = sourceStream.getAudioTracks();
-        if (sourceAudioTracks.length) {
-          const originalSource =
-            exportAudioContext.createMediaStreamSource(
-              new MediaStream(sourceAudioTracks),
-            );
-          const originalGain = exportAudioContext.createGain();
-          originalGain.gain.value =
-            getNarrationMixLevels(narrationOriginalAudio).original;
-          originalSource.connect(originalGain).connect(limiter);
-        }
+      }
 
+      if (!exportAudioContext) {
+        throw new Error("動画の音声処理を開始できませんでした。");
+      }
+      if (exportAudioContext.state !== "running") {
+        await exportAudioContext.resume().catch(() => undefined);
+      }
+      if (exportAudioContext.state !== "running") {
+        throw new Error(
+          "動画の書き出しを開始できませんでした。画面を開いたまま、もう一度お試しください。",
+        );
+      }
+
+      const destination = exportAudioContext.createMediaStreamDestination();
+      exportLimiter = exportAudioContext.createDynamicsCompressor();
+      exportLimiter.threshold.value = -1;
+      exportLimiter.knee.value = 0;
+      exportLimiter.ratio.value = 20;
+      exportLimiter.attack.value = 0.002;
+      exportLimiter.release.value = 0.08;
+      exportLimiter.connect(destination);
+      if (exportOriginalAudioSource) {
+        exportOriginalGain = exportAudioContext.createGain();
+        exportOriginalGain.gain.value = narrationPlan
+          ? getNarrationMixLevels(narrationOriginalAudio).original
+          : 1;
+        exportOriginalAudioSource
+          .connect(exportOriginalGain)
+          .connect(exportLimiter);
+      }
+
+      if (narrationPlan && narrationAudioUrl) {
+        if (!exportNarrationBuffer) {
         try {
           const narrationResponse = await fetch(narrationAudioUrl);
           if (!narrationResponse.ok) throw new Error();
@@ -4320,6 +4425,7 @@ function ResultWorkspace({
             await exportAudioContext.decodeAudioData(narrationBytes);
         } catch {
           throw new Error("AI音声を読み込めませんでした。");
+        }
         }
         if (
           !Number.isFinite(exportNarrationBuffer.duration) ||
@@ -4330,17 +4436,20 @@ function ResultWorkspace({
         exportNarrationGain = exportAudioContext.createGain();
         exportNarrationGain.gain.value =
           getNarrationMixLevels(narrationOriginalAudio).narration;
-        exportNarrationGain.connect(limiter);
+        exportNarrationGain.connect(exportLimiter);
         destination.stream
           .getAudioTracks()
-          .forEach((track) => outputStream.addTrack(track));
+          .forEach((track) => liveOutputStream.addTrack(track));
       } else {
-        sourceStream
+        destination.stream
           .getAudioTracks()
-          .forEach((track) => outputStream.addTrack(track));
+          .forEach((track) => liveOutputStream.addTrack(track));
       }
 
       const preferredMimeTypes = [
+        "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+        "video/mp4;codecs=avc1.42E01E",
+        "video/mp4",
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
         "video/webm",
@@ -4349,7 +4458,7 @@ function ResultWorkspace({
         preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) ??
         "";
       recorder = new MediaRecorder(
-        outputStream,
+        liveOutputStream,
         mimeType ? { mimeType, videoBitsPerSecond: 6_000_000 } : undefined,
       );
       const activeRecorder = recorder;
@@ -4517,6 +4626,9 @@ function ResultWorkspace({
           activeExportNarrationSource = null;
         }
         narrationElapsed += rangeDuration;
+        setExportProgress(
+          ((rangeIndex + 1) / playableRanges.length) * 100,
+        );
       }
       video.pause();
       keepDrawing = false;
@@ -4524,17 +4636,21 @@ function ResultWorkspace({
       await stopped;
 
       const output = new Blob(chunks, {
-        type: activeRecorder.mimeType || "video/webm",
+        type: activeRecorder.mimeType || mimeType || "video/webm",
       });
       if (!output.size) throw new Error("書き出した動画が空でした。");
 
-      const url = URL.createObjectURL(output);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${exportName}_captioned.webm`;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify("字幕付き動画を書き出しました");
+      const outputType = output.type.toLowerCase();
+      const extension = outputType.includes("mp4") ? "mp4" : "webm";
+      const completedFile = new File(
+        [output],
+        `${exportName}_captioned.${extension}`,
+        { type: output.type || `video/${extension}` },
+      );
+      setExportProgress(100);
+      setExportedVideoFile(completedFile);
+      setExportedVideoRevision(exportInputRevision);
+      notify("動画ができました。下の「動画を保存・共有」を押してください");
     } catch (error) {
       notify(
         error instanceof Error
@@ -4552,6 +4668,7 @@ function ResultWorkspace({
         }
       }
       sourceStream?.getTracks().forEach((track) => track.stop());
+      outputStream?.getTracks().forEach((track) => track.stop());
       if (activeExportNarrationSource) {
         try {
           activeExportNarrationSource.stop();
@@ -4560,7 +4677,29 @@ function ResultWorkspace({
         }
         activeExportNarrationSource.disconnect();
       }
-      await exportAudioContext?.close().catch(() => undefined);
+      if (exportOriginalAudioSource && exportOriginalGain) {
+        try {
+          exportOriginalAudioSource.disconnect(exportOriginalGain);
+        } catch {
+          // The temporary export connection may already be gone.
+        }
+      }
+      exportOriginalGain?.disconnect();
+      exportNarrationGain?.disconnect();
+      exportLimiter?.disconnect();
+      if (
+        exportPreviewOriginalGain &&
+        exportAudioContext &&
+        exportAudioContext.state !== "closed"
+      ) {
+        exportPreviewOriginalGain.gain.setValueAtTime(
+          exportPreviewOriginalGainValue,
+          exportAudioContext.currentTime,
+        );
+      }
+      if (shouldCloseExportAudioContext) {
+        await exportAudioContext?.close().catch(() => undefined);
+      }
       video.pause();
       video.loop = previous.loop;
       video.muted = previous.muted;
@@ -4569,6 +4708,7 @@ function ResultWorkspace({
       await seekVideoBeforePlayback(video, previous.currentTime);
       setCurrentTime(video.currentTime);
       setIsExporting(false);
+      setExportProgress(null);
       if (previous.wasPlaying) {
         const operation = previewOperationRef.current + 1;
         previewOperationRef.current = operation;
@@ -4577,6 +4717,37 @@ function ResultWorkspace({
         );
       }
     }
+  }
+
+  async function saveExportedVideo() {
+    if (!readyExportedVideoFile) return;
+
+    const shareData = {
+      files: [readyExportedVideoFile],
+      title: "撮るだけリール",
+    };
+    try {
+      if (
+        typeof navigator.share === "function" &&
+        (typeof navigator.canShare !== "function" ||
+          navigator.canShare(shareData))
+      ) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+
+    const url = URL.createObjectURL(readyExportedVideoFile);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = readyExportedVideoFile.name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    notify("動画の保存を開始しました");
   }
 
   function requestVideoExport() {
@@ -5316,11 +5487,17 @@ function ResultWorkspace({
         <div>
           <span className="exportIcon">▶</span>
           <p>
-            <strong>{exportName}_captioned.webm</strong>
+            <strong>
+              {readyExportedVideoFile?.name ?? `${exportName}_captioned.mp4`}
+            </strong>
             <small>
-              {file
-                ? "編集した字幕を動画へ焼き付けて保存します"
-                : "実際の動画を選ぶと書き出せます"}
+              {readyExportedVideoFile
+                ? "動画の準備ができました。iPhoneでは共有画面から「ビデオを保存」を選べます"
+                : isExporting && exportProgress !== null
+                  ? `MP4動画を準備しています（${Math.round(exportProgress)}%）`
+                  : file
+                    ? "編集した字幕と音声をiPhoneで使える動画へまとめます"
+                    : "実際の動画を選ぶと書き出せます"}
             </small>
           </p>
         </div>
@@ -5344,11 +5521,17 @@ function ResultWorkspace({
           {file ? (
             <button
               className="mainCta reviewCta"
-              onClick={requestVideoExport}
+              onClick={
+                readyExportedVideoFile
+                  ? () => void saveExportedVideo()
+                  : requestVideoExport
+              }
               disabled={isMediaBusy}
             >
               <span>
-                {isExporting
+                {readyExportedVideoFile
+                  ? "動画を保存・共有"
+                  : isExporting
                   ? "書き出し中…"
                   : narrationPlan
                     ? "AI音声付き動画を書き出す"

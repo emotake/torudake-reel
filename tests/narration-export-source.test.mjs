@@ -40,3 +40,24 @@ test("exports decoded narration through an AudioBuffer source", () => {
     /createMediaElementSource\(exportNarration\)/,
   );
 });
+
+test("does not require HTMLVideoElement.captureStream on iPhone", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const setupEnd = pageSource.indexOf("isExportingRef.current = true", start);
+  const capabilityCheck = pageSource.slice(start, setupEnd);
+
+  assert.doesNotMatch(capabilityCheck, /!captureVideoStream/);
+  assert.match(capabilityCheck, /HTMLCanvasElement\.prototype\.captureStream/);
+  assert.match(capabilityCheck, /usePortableMp4Exporter/);
+  assert.match(pageSource, /exportPortableVideoMp4/);
+});
+
+test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", () => {
+  assert.match(
+    pageSource,
+    /video\/mp4;codecs=avc1\.42E01E,mp4a\.40\.2/,
+  );
+  assert.match(pageSource, /navigator\.share\(shareData\)/);
+  assert.match(pageSource, /動画を保存・共有/);
+  assert.match(pageSource, /「ビデオを保存」を選べます/);
+});
