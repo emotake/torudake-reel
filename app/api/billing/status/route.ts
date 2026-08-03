@@ -3,17 +3,23 @@ import {
   getOrCreateBillingUser,
   publicBillingStatus,
 } from "../../../../lib/billing-store";
-import { getCurrentUser } from "../../../../lib/current-user";
+import {
+  getCurrentUser,
+  isSitesAuthenticationTrusted,
+} from "../../../../lib/current-user";
 import { isBillingConfigured } from "../../../../lib/stripe";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const configured = isBillingConfigured();
+  const authenticationAvailable = isSitesAuthenticationTrusted();
+  const stripeConfigured = isBillingConfigured();
+  const configured = authenticationAvailable && stripeConfigured;
   const currentUser = getCurrentUser(request);
   if (!currentUser) {
-    return Response.json({
+    return privateJson({
       configured,
+      authenticationAvailable,
       authenticated: false,
     });
   }
@@ -21,8 +27,9 @@ export async function GET(request: Request) {
   try {
     const user = await getOrCreateBillingUser(currentUser);
     const status = await getBillingStatusForUser(user.id);
-    return Response.json({
+    return privateJson({
       configured,
+      authenticationAvailable,
       authenticated: true,
       user: {
         email: user.email,
@@ -33,9 +40,16 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("billing status failed", error);
-    return Response.json(
+    return privateJson(
       { error: "利用状況を読み込めませんでした。" },
       { status: 500 },
     );
   }
+}
+
+function privateJson(body: Record<string, unknown>, init: ResponseInit = {}) {
+  const response = Response.json(body, init);
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Vary", "oai-authenticated-user-email, Cookie");
+  return response;
 }

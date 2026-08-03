@@ -45,6 +45,47 @@ test("builds a natural edit near the requested duration from the full source", (
   assert.match(kept.at(-1).text, /。$/);
 });
 
+test("a 30 second edit keeps representative moments from early, middle, and late", () => {
+  const source = Array.from({ length: 18 }, (_, index) =>
+    caption(
+      index + 1,
+      index * 4,
+      index * 4 + 3.4,
+      `要点${index + 1}を分かりやすく説明します。`,
+    ),
+  );
+
+  const edited = createNaturalEdit(source, 30, "sales");
+  const kept = edited.filter((item) => !item.removed);
+  const duration = getEditedDuration(buildEditRanges(edited));
+
+  assert.ok(duration >= 28.5);
+  assert.ok(duration <= 30.35);
+  assert.ok(kept.some((item) => item.start < 24));
+  assert.ok(kept.some((item) => item.start >= 24 && item.start < 48));
+  assert.ok(kept.some((item) => item.start >= 48));
+});
+
+test("clips an oversized single transcript segment to the requested duration", () => {
+  const edited = createNaturalEdit(
+    [
+      caption(
+        1,
+        0,
+        72,
+        "長い説明の中から必要な部分だけを自然な長さに収めて紹介します。",
+      ),
+    ],
+    30,
+    "reach",
+  );
+
+  assert.equal(edited.length, 1);
+  assert.equal(edited[0].removed, false);
+  assert.equal(getEditedDuration(buildEditRanges(edited)), 30);
+  assert.ok(edited[0].text.length > 0);
+});
+
 test("maps source timestamps onto the cut timeline", () => {
   const edited = [
     caption(1, 0, 5, "最初の文です。"),

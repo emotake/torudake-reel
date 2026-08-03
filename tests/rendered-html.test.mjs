@@ -32,8 +32,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
-  assert.match(html, /動画を預ける/);
-  assert.match(html, /安全な受け渡し画面へ/);
+  assert.doesNotMatch(html, /動画を預ける|安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /目的に合わせて自動編集/);
   assert.doesNotMatch(html, /AIが全部整える/);
@@ -71,4 +70,26 @@ test("keeps the operator enrollment page out of search results", async () => {
     /name="robots" content="[^"]*noindex[^"]*nofollow[^"]*noarchive/,
   );
   assert.doesNotMatch(html, /OPERATOR_ENROLLMENT_CODE/);
+});
+
+test("shows a safe account message when public authentication is unavailable", async () => {
+  const response = await render("/account");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /アカウント機能を安全に準備しています/);
+  assert.match(html, /購入と決済管理を一時停止/);
+  assert.doesNotMatch(html, /\/signin-with-chatgpt/);
+});
+
+test("publishes a privacy policy for uploaded media and external processors", async () => {
+  const response = await render("/privacy");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /プライバシーポリシー/);
+  assert.match(html, /OpenAI/);
+  assert.match(html, /Cloudflare/);
+  assert.match(html, /Stripe/);
+  assert.match(html, /72時間/);
 });

@@ -1,10 +1,19 @@
 import worker from "./dist/server/index.js";
 import { setRuntimeEnvironment } from "./cloudflare-pages-env-shim.mjs";
 
-export default {
+const pagesWorker = {
   async fetch(request, env, context) {
     setRuntimeEnvironment(env);
     const url = new URL(request.url);
+
+    // Pages is a public origin, not the OpenAI Sites dispatcher. Never forward
+    // client-supplied identity headers from this entry point, even if a Pages
+    // environment variable is accidentally configured to trust Sites auth.
+    const headers = new Headers(request.headers);
+    for (const name of [...headers.keys()]) {
+      if (name.startsWith("oai-authenticated-user-")) headers.delete(name);
+    }
+    const sanitizedRequest = new Request(request, { headers });
 
     // Cloudflare Pages advanced mode sends every request through _worker.js.
     // Vinext's generated worker assumes its hashed client assets are served
@@ -14,9 +23,46 @@ export default {
       (request.method === "GET" || request.method === "HEAD") &&
       url.pathname.startsWith("/assets/")
     ) {
-      return env.ASSETS.fetch(request);
+      return withSecurityHeaders(
+        await env.ASSETS.fetch(sanitizedRequest),
+        url,
+      );
     }
 
-    return worker.fetch(request, env, context);
+    return withSecurityHeaders(
+      await worker.fetch(sanitizedRequest, env, context),
+      url,
+    );
   },
 };
+
+export default pagesWorker;
+
+function withSecurityHeaders(response, url) {
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(self)",
+  );
+  headers.set("X-Frame-Options", "DENY");
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set(
+      "Content-Security-Policy",
+      "base-uri 'self'; frame-ancestors 'none'; object-src 'none'",
+    );
+  }
+  if (url.protocol === "https:") {
+    headers.set(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains",
+    );
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}

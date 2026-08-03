@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import {
@@ -9,6 +9,7 @@ import {
   users,
 } from "../db/schema";
 import {
+  type BillingBucket,
   chooseBillingBucket,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
@@ -18,7 +19,13 @@ import {
 } from "./billing-policy";
 import type { CurrentUser } from "./current-user";
 import {
+  acquireUsageOperationLease,
   consumeOperatorUsageOperation,
+  isObservedDurationBlocked,
+  releaseUsageOperationLease,
+  releaseOrCompleteUsageReservation,
+  settleExpiredUsageReservations,
+  TRANSCRIPTION_LEASE_TTL_SECONDS,
   type OperatorUsageOperation,
 } from "./operator-usage";
 
@@ -30,10 +37,12 @@ type AtomicD1Result = {
   meta?: { changes?: number };
 };
 
+type AtomicD1BoundStatement = {
+  run: () => Promise<AtomicD1Result>;
+};
+
 type AtomicD1Statement = {
-  bind: (...values: unknown[]) => {
-    run: () => Promise<AtomicD1Result>;
-  };
+  bind: (...values: unknown[]) => AtomicD1BoundStatement;
 };
 
 type AtomicD1Database = {
@@ -127,16 +136,7 @@ export async function getBillingStatusForUser(userId: string) {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
 
-  await db
-    .update(usageReservations)
-    .set({ status: "released" })
-    .where(
-      and(
-        eq(usageReservations.userId, userId),
-        eq(usageReservations.status, "reserved"),
-        lt(usageReservations.expiresAt, now),
-      ),
-    );
+  await settleExpiredUsageReservations(userId, now);
 
   const subscriptions = await db
     .select()
@@ -219,108 +219,195 @@ export async function reserveUsage(
     return existing[0];
   }
 
-  const status = await getBillingStatusForUser(user.id);
   const roundedDuration = Math.max(1, Math.ceil(sourceDurationSeconds));
-  const bucket = chooseBillingBucket(
-    {
-      ...status,
-      operatorActive: options.operator === true,
-    },
-    roundedDuration,
-  );
-  if (!bucket) {
-    if (options.operator) throw new OperatorUsageLimitError();
-    throw new UsageLimitError();
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const reservation = {
-    id: crypto.randomUUID(),
-    userId: user.id,
-    idempotencyKey,
-    sourceDurationSeconds: roundedDuration,
-    bucket,
-    status: "reserved" as const,
-    createdAt: now,
-    expiresAt: now + RESERVATION_LIFETIME_SECONDS,
-    completedAt: null,
-  };
-  if (bucket === "operator") {
-    const inserted = await insertOperatorReservationAtomically(
-      reservation,
-      startOfTokyoDaySeconds(now),
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const status = await getBillingStatusForUser(user.id);
+    const bucket = chooseBillingBucket(
+      {
+        ...status,
+        operatorActive: options.operator === true,
+      },
+      roundedDuration,
     );
-    if (!inserted) {
-      const concurrent = await db
-        .select()
-        .from(usageReservations)
-        .where(eq(usageReservations.idempotencyKey, idempotencyKey))
-        .limit(1);
-      if (concurrent[0]?.userId === user.id) return concurrent[0];
-      throw new OperatorUsageLimitError();
+    if (!bucket) break;
+
+    const now = Math.floor(Date.now() / 1000);
+    const reservation: AtomicUsageReservation = {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      idempotencyKey,
+      sourceDurationSeconds: roundedDuration,
+      bucket,
+      status: "reserved",
+      createdAt: now,
+      expiresAt: now + RESERVATION_LIFETIME_SECONDS,
+      completedAt: null,
+    };
+    if (await insertUsageReservationAtomically(reservation, status)) {
+      return reservation;
     }
-    return reservation;
+
+    const concurrent = await db
+      .select()
+      .from(usageReservations)
+      .where(eq(usageReservations.idempotencyKey, idempotencyKey))
+      .limit(1);
+    if (concurrent[0]?.userId === user.id) return concurrent[0];
   }
 
-  await db.insert(usageReservations).values(reservation);
-  return reservation;
+  if (options.operator) throw new OperatorUsageLimitError();
+  throw new UsageLimitError();
 }
 
-async function insertOperatorReservationAtomically(
-  reservation: {
-    id: string;
-    userId: string;
-    idempotencyKey: string;
-    sourceDurationSeconds: number;
-    bucket: "operator";
-    status: "reserved";
-    createdAt: number;
-    expiresAt: number;
-    completedAt: null;
-  },
-  dayStartSeconds: number,
+type AtomicUsageReservation = {
+  id: string;
+  userId: string;
+  idempotencyKey: string;
+  sourceDurationSeconds: number;
+  bucket: BillingBucket;
+  status: "reserved";
+  createdAt: number;
+  expiresAt: number;
+  completedAt: null;
+};
+
+async function insertUsageReservationAtomically(
+  reservation: AtomicUsageReservation,
+  status: Awaited<ReturnType<typeof getBillingStatusForUser>>,
 ) {
   const database = env.DB as unknown as AtomicD1Database | undefined;
   if (!database?.prepare) {
     throw new Error("Usage database binding is unavailable.");
   }
 
-  const result = await database
-    .prepare(`
-      INSERT INTO usage_reservations (
-        id,
-        user_id,
-        idempotency_key,
-        source_duration_seconds,
-        bucket,
-        status,
-        created_at,
-        expires_at,
-        completed_at
-      )
-      SELECT ?, ?, ?, ?, 'operator', 'reserved', ?, ?, NULL
-      WHERE (
-        SELECT COUNT(*)
-        FROM usage_reservations
-        WHERE user_id = ?
-          AND bucket = 'operator'
-          AND status IN ('reserved', 'completed')
-          AND created_at >= ?
-      ) < ?
-      ON CONFLICT(idempotency_key) DO NOTHING
-    `)
-    .bind(
-      reservation.id,
-      reservation.userId,
-      reservation.idempotencyKey,
-      reservation.sourceDurationSeconds,
-      reservation.createdAt,
-      reservation.expiresAt,
-      reservation.userId,
-      dayStartSeconds,
-      OPERATOR_DAILY_VIDEO_LIMIT,
-    )
-    .run();
+  const values = [
+    reservation.id,
+    reservation.userId,
+    reservation.idempotencyKey,
+    reservation.sourceDurationSeconds,
+    reservation.createdAt,
+    reservation.expiresAt,
+  ] as const;
+  let statement: AtomicD1BoundStatement;
+
+  if (reservation.bucket === "operator") {
+    statement = database
+      .prepare(`
+        INSERT INTO usage_reservations (
+          id, user_id, idempotency_key, source_duration_seconds,
+          bucket, status, created_at, expires_at, completed_at
+        )
+        SELECT ?, ?, ?, ?, 'operator', 'reserved', ?, ?, NULL
+        WHERE (
+          SELECT COUNT(*)
+          FROM usage_reservations
+          WHERE user_id = ?
+            AND bucket = 'operator'
+            AND status IN ('reserved', 'completed')
+            AND created_at >= ?
+        ) < ?
+        ON CONFLICT(idempotency_key) DO NOTHING
+      `)
+      .bind(
+        ...values,
+        reservation.userId,
+        startOfTokyoDaySeconds(reservation.createdAt),
+        OPERATOR_DAILY_VIDEO_LIMIT,
+      );
+  } else if (reservation.bucket === "subscription" && status.subscription) {
+    statement = database
+      .prepare(`
+        INSERT INTO usage_reservations (
+          id, user_id, idempotency_key, source_duration_seconds,
+          bucket, status, created_at, expires_at, completed_at
+        )
+        SELECT ?, ?, ?, ?, 'subscription', 'reserved', ?, ?, NULL
+        WHERE EXISTS (
+          SELECT 1
+          FROM billing_subscriptions
+          WHERE id = ?
+            AND user_id = ?
+            AND status IN ('active', 'trialing')
+            AND current_period_end > ?
+        )
+        AND (
+          SELECT COUNT(*)
+          FROM usage_reservations
+          WHERE user_id = ?
+            AND bucket = 'subscription'
+            AND status IN ('reserved', 'completed')
+            AND created_at >= ?
+            AND created_at < ?
+        ) < ?
+        ON CONFLICT(idempotency_key) DO NOTHING
+      `)
+      .bind(
+        ...values,
+        status.subscription.id,
+        reservation.userId,
+        reservation.createdAt,
+        reservation.userId,
+        status.subscription.currentPeriodStart,
+        status.subscription.currentPeriodEnd,
+        LIGHT_MONTHLY_VIDEO_LIMIT,
+      );
+  } else if (reservation.bucket === "one_time") {
+    statement = database
+      .prepare(`
+        INSERT INTO usage_reservations (
+          id, user_id, idempotency_key, source_duration_seconds,
+          bucket, status, created_at, expires_at, completed_at
+        )
+        SELECT ?, ?, ?, ?, 'one_time', 'reserved', ?, ?, NULL
+        WHERE (
+          SELECT COALESCE(SUM(credits), 0)
+          FROM billing_purchases
+          WHERE user_id = ?
+        ) > (
+          SELECT COUNT(*)
+          FROM usage_reservations
+          WHERE user_id = ?
+            AND bucket = 'one_time'
+            AND status IN ('reserved', 'completed')
+        )
+        ON CONFLICT(idempotency_key) DO NOTHING
+      `)
+      .bind(...values, reservation.userId, reservation.userId);
+  } else {
+    statement = database
+      .prepare(`
+        INSERT INTO usage_reservations (
+          id, user_id, idempotency_key, source_duration_seconds,
+          bucket, status, created_at, expires_at, completed_at
+        )
+        SELECT ?, ?, ?, ?, 'free', 'reserved', ?, ?, NULL
+        WHERE (
+          SELECT COUNT(*)
+          FROM usage_reservations
+          WHERE user_id = ?
+            AND bucket = 'free'
+            AND status IN ('reserved', 'completed')
+        ) < ?
+        AND COALESCE((
+          SELECT SUM(source_duration_seconds)
+          FROM usage_reservations
+          WHERE user_id = ?
+            AND bucket = 'free'
+            AND status IN ('reserved', 'completed')
+        ), 0) + ? <= ?
+        ON CONFLICT(idempotency_key) DO NOTHING
+      `)
+      .bind(
+        ...values,
+        reservation.userId,
+        FREE_VIDEO_LIMIT,
+        reservation.userId,
+        reservation.sourceDurationSeconds,
+        FREE_SECONDS_LIMIT,
+      );
+  }
+
+  const result = await statement.run();
   return result.meta?.changes === 1;
 }
 
@@ -363,14 +450,13 @@ export async function authorizeUsageOperation(
       reservation: null,
     } as const;
   }
-  if (reservation.bucket !== "operator") {
+  if (await isObservedDurationBlocked(reservation.id)) {
     return {
-      allowed: true,
-      reason: null,
+      allowed: false,
+      reason: "observed_duration_exceeded",
       reservation,
     } as const;
   }
-
   const allowed = await consumeOperatorUsageOperation(
     reservation.id,
     operation,
@@ -386,6 +472,88 @@ export async function authorizeUsageOperation(
         reason: "operator_operation_limit",
         reservation,
       } as const;
+}
+
+/**
+ * Authorizes an expensive operation only after obtaining its D1 lease. This
+ * order means a parallel request rejected as busy does not consume the
+ * reservation's operation count and cannot reach the upstream API.
+ */
+export async function authorizeLeasedUsageOperation(
+  currentUser: CurrentUser,
+  reservationId: string,
+  operation: OperatorUsageOperation,
+) {
+  const reservation = await findOwnedUsageReservation(
+    currentUser,
+    reservationId,
+  );
+  if (!reservation) {
+    return {
+      allowed: false,
+      reason: "reservation_not_found",
+      reservation: null,
+      lease: null,
+    } as const;
+  }
+  if (await isObservedDurationBlocked(reservation.id)) {
+    return {
+      allowed: false,
+      reason: "observed_duration_exceeded",
+      reservation,
+      lease: null,
+    } as const;
+  }
+
+  const lease = await acquireUsageOperationLease(
+    reservation.id,
+    operation,
+    TRANSCRIPTION_LEASE_TTL_SECONDS,
+  );
+  if (!lease) {
+    return {
+      allowed: false,
+      reason: "operation_in_progress",
+      reservation,
+      lease: null,
+    } as const;
+  }
+
+  try {
+    // Recheck after acquiring the lease in case a previous invocation blocked
+    // the duration immediately before its lease expired.
+    if (await isObservedDurationBlocked(reservation.id)) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "observed_duration_exceeded",
+        reservation,
+        lease: null,
+      } as const;
+    }
+    const allowed = await consumeOperatorUsageOperation(
+      reservation.id,
+      operation,
+    );
+    if (!allowed) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "operator_operation_limit",
+        reservation,
+        lease: null,
+      } as const;
+    }
+    return {
+      allowed: true,
+      reason: null,
+      reservation,
+      lease,
+    } as const;
+  } catch (error) {
+    await releaseUsageOperationLease(lease).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function completeUsage(
@@ -419,22 +587,12 @@ export async function releaseUsage(
   );
   if (!reservation || reservation.status !== "reserved") return false;
 
-  if (reservation.bucket === "operator") {
-    await getDb()
-      .update(usageReservations)
-      .set({
-        status: "completed",
-        completedAt: Math.floor(Date.now() / 1000),
-      })
-      .where(eq(usageReservations.id, reservation.id));
-    return true;
-  }
-
-  await getDb()
-    .update(usageReservations)
-    .set({ status: "released" })
-    .where(eq(usageReservations.id, reservation.id));
-  return true;
+  return Boolean(
+    await releaseOrCompleteUsageReservation(
+      reservation.id,
+      reservation.userId,
+    ),
+  );
 }
 
 type StripeSubscriptionRecord = {
@@ -504,23 +662,46 @@ export async function recordOneTimePurchase(values: {
 
 export async function beginStripeEvent(eventId: string, eventType: string) {
   const db = getDb();
-  const existing = await db
-    .select()
-    .from(stripeEvents)
-    .where(eq(stripeEvents.id, eventId))
-    .limit(1);
-  if (existing[0]?.processedAt) return false;
-
-  await db
+  const now = Math.floor(Date.now() / 1000);
+  const inserted = await db
     .insert(stripeEvents)
     .values({
       id: eventId,
       type: eventType,
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: now,
       processedAt: null,
     })
-    .onConflictDoNothing();
-  return true;
+    .onConflictDoNothing()
+    .returning({ id: stripeEvents.id });
+  if (inserted.length === 1) return "claimed" as const;
+
+  const existing = await db
+    .select({
+      type: stripeEvents.type,
+      createdAt: stripeEvents.createdAt,
+      processedAt: stripeEvents.processedAt,
+    })
+    .from(stripeEvents)
+    .where(eq(stripeEvents.id, eventId))
+    .limit(1);
+  if (existing[0]?.processedAt) return "processed" as const;
+  if (!existing[0] || existing[0].type !== eventType) return "busy" as const;
+
+  // Reclaim a Worker invocation that terminated after claiming the event but
+  // before recording completion. The conditional update keeps the claim
+  // exclusive even when Stripe sends concurrent retries.
+  const reclaimed = await db
+    .update(stripeEvents)
+    .set({ createdAt: now })
+    .where(
+      and(
+        eq(stripeEvents.id, eventId),
+        isNull(stripeEvents.processedAt),
+        lt(stripeEvents.createdAt, now - 5 * 60),
+      ),
+    )
+    .returning({ id: stripeEvents.id });
+  return reclaimed.length === 1 ? ("claimed" as const) : ("busy" as const);
 }
 
 export async function finishStripeEvent(eventId: string) {

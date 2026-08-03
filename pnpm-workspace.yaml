@@ -1,0 +1,13 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true
+
+overrides:
+  "brace-expansion@1.1.16": "1.1.17"
+  "esbuild@<=0.24.2": "0.28.1"
+  "postcss@<8.5.25": "8.5.25"
+  "sharp@<0.35.3": "0.35.3"
+  "undici@>=7.0.0 <7.28.0": "7.28.0"
+  "ws@>=8.0.0 <8.21.1": "8.21.1"

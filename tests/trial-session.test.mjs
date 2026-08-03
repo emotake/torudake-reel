@@ -17,7 +17,7 @@ test("creates a secure first-party trial session cookie", () => {
   assert.match(cookie, /Secure/);
 });
 
-test("uses the trial session only when an editing route allows it", () => {
+test("does not turn an unverified trial cookie into a current user", () => {
   const request = new Request("https://torudake-reel.pages.dev/", {
     headers: {
       cookie: `another=value; torudake_trial_id=${sessionId}`,
@@ -26,10 +26,7 @@ test("uses the trial session only when an editing route allows it", () => {
 
   assert.equal(getTrialSessionId(request), sessionId);
   assert.equal(getCurrentUser(request), null);
-  assert.deepEqual(getCurrentUser(request, { allowTrial: true }), {
-    email: `trial-${sessionId}@anonymous.torudake.invalid`,
-    fullName: null,
-  });
+  assert.equal(getCurrentUser(request), null);
 });
 
 test("rejects malformed trial session cookies", () => {
@@ -37,32 +34,17 @@ test("rejects malformed trial session cookies", () => {
     headers: { cookie: "torudake_trial_id=not-a-session" },
   });
   assert.equal(getTrialSessionId(request), null);
-  assert.equal(getCurrentUser(request, { allowTrial: true }), null);
+  assert.equal(getCurrentUser(request), null);
 });
 
-test("serves the trial session endpoint instead of a Not Found response", async () => {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("trial-session", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  const response = await worker.fetch(
-    new Request("https://torudake-reel.pages.dev/api/session/trial", {
-      method: "POST",
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
+test("does not trust public client-supplied Sites identity headers", () => {
+  const request = new Request("https://torudake-reel.pages.dev/account", {
+    headers: {
+      "oai-authenticated-user-email": "victim@example.com",
+      "oai-authenticated-user-full-name": "Victim%20User",
+      "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
     },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+  });
 
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ready: true });
-  assert.match(
-    response.headers.get("set-cookie") ?? "",
-    /^torudake_trial_id=/,
-  );
+  assert.equal(getCurrentUser(request), null);
 });

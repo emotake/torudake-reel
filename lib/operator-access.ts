@@ -12,6 +12,10 @@ import {
   OPERATOR_ACCESS_DAYS,
   randomOperatorToken,
 } from "./operator-session";
+import {
+  getRegisteredTrialSessionId,
+  trialSessionPrincipalEmail,
+} from "./trial-session-store";
 export {
   clearOperatorSessionCookie,
   getOperatorSessionToken,
@@ -200,8 +204,29 @@ export async function getUsagePrincipal(
       isOperator: true,
     } as const;
   }
+  const authenticatedUser = getCurrentUser(request);
+  if (authenticatedUser) {
+    return {
+      currentUser: authenticatedUser,
+      operatorDevice: null,
+      isOperator: false,
+    } as const;
+  }
+
+  const trialSessionId = options.allowTrial
+    ? await getRegisteredTrialSessionId(request)
+    : null;
+  const trialPrincipalEmail = trialSessionId
+    ? await trialSessionPrincipalEmail(trialSessionId)
+    : null;
   return {
-    currentUser: getCurrentUser(request, options),
+    currentUser: trialPrincipalEmail
+      ? {
+          // Never persist the bearer cookie value in user or transfer records.
+          email: trialPrincipalEmail,
+          fullName: null,
+        }
+      : null,
     operatorDevice: null,
     isOperator: false,
   } as const;

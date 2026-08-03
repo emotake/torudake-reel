@@ -5,7 +5,9 @@ import {
 } from "../../../../lib/billing-store";
 import {
   authenticationRequired,
+  authenticationUnavailable,
   getCurrentUser,
+  isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
 import {
   isBillingConfigured,
@@ -15,6 +17,7 @@ import {
   type StripePlan,
 } from "../../../../lib/stripe";
 import { LIGHT_MONTHLY_VIDEO_LIMIT } from "../../../../lib/billing-policy";
+import { isSameOriginMutation } from "../../../../lib/operator-session";
 
 type StripeCustomer = {
   id: string;
@@ -30,6 +33,8 @@ function isStripePlan(value: unknown): value is StripePlan {
 }
 
 export async function POST(request: Request) {
+  if (!isSitesAuthenticationTrusted()) return authenticationUnavailable();
+
   if (!isBillingConfigured()) {
     return Response.json(
       {
@@ -43,6 +48,15 @@ export async function POST(request: Request) {
 
   const currentUser = getCurrentUser(request);
   if (!currentUser) return authenticationRequired();
+  if (!isSameOriginMutation(request)) {
+    return Response.json(
+      {
+        error: "決済リクエストを確認できませんでした。ページを再読み込みしてください。",
+        code: "invalid_request_origin",
+      },
+      { status: 403 },
+    );
+  }
 
   let payload: { plan?: unknown; requestId?: unknown };
   try {

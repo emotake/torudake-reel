@@ -12,3 +12,8 @@ export function isUsageEnforcementEnabled() {
   }
   return Boolean(usageEnv.OPENAI_API_KEY?.trim());
 }
+
+export function isManagedUploadEnforcementEnabled() {
+  const usageEnv = env as typeof env & UsageEnvironment;
+  return usageEnv.USAGE_ENFORCEMENT_TEST_MODE !== "codex-test-only";
+}

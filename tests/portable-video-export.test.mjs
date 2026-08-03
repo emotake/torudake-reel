@@ -3,13 +3,66 @@ import test from "node:test";
 
 import {
   buildPortableFrameSchedule,
+  canUseWholeFileAudioDecode,
   computePortableVideoDimensions,
   getPortableAudioSlicePlacement,
   getPortableEditedDuration,
   mapPortableEditedTimeToSourceTime,
   normalizePortableFrameRate,
   normalizePortableVideoRanges,
+  selectPreferredPortableAudioTrack,
 } from "../lib/portable-video-export.ts";
+
+test("does not use the memory-heavy whole-file audio fallback for large videos", () => {
+  assert.equal(canUseWholeFileAudioDecode(96 * 1024 * 1024), true);
+  assert.equal(canUseWholeFileAudioDecode(96 * 1024 * 1024 + 1), false);
+});
+
+test("prefers a decodable AAC fallback over iPhone spatial primary audio", () => {
+  const spatialTrack = { id: "spatial" };
+  const compatibleTrack = { id: "compatible" };
+
+  assert.equal(
+    selectPreferredPortableAudioTrack([
+      {
+        track: spatialTrack,
+        codec: "eac3",
+        decodable: false,
+        primary: true,
+      },
+      {
+        track: compatibleTrack,
+        codec: "aac",
+        decodable: true,
+        primary: false,
+      },
+    ]),
+    compatibleTrack,
+  );
+});
+
+test("keeps the primary track as the browser decode fallback", () => {
+  const primaryTrack = { id: "primary" };
+  const secondaryTrack = { id: "secondary" };
+
+  assert.equal(
+    selectPreferredPortableAudioTrack([
+      {
+        track: primaryTrack,
+        codec: "eac3",
+        decodable: false,
+        primary: true,
+      },
+      {
+        track: secondaryTrack,
+        codec: null,
+        decodable: false,
+        primary: false,
+      },
+    ]),
+    primaryTrack,
+  );
+});
 
 test("normalizes, clamps, sorts, and merges playable ranges", () => {
   assert.deepEqual(

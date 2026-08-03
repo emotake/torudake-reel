@@ -17,7 +17,13 @@ import {
   removeTransfer,
   safeFileName,
 } from "../../../lib/transfers";
-import { authorizeUsageOperation } from "../../../lib/billing-store";
+import { authorizeLeasedUsageOperation } from "../../../lib/billing-store";
+import {
+  markOperatorUsageOperationSucceeded,
+  recordObservedTranscriptionDuration,
+  releaseUsageOperationLease,
+  type UsageOperationLease,
+} from "../../../lib/operator-usage";
 import { getUsagePrincipal } from "../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
 
@@ -259,6 +265,7 @@ export async function POST(request: Request) {
   let temporaryTransfer:
     | Awaited<ReturnType<typeof findTransfer>>
     | undefined = undefined;
+  let transcriptionLease: UsageOperationLease | null = null;
 
   try {
     const apiKey = (
@@ -277,6 +284,7 @@ export async function POST(request: Request) {
     let file: File | null = null;
     let requestHighAccuracy = false;
     let usageReservationId = "";
+    let enforcedReservationId: string | null = null;
     const requestContentType =
       request.headers.get("content-type")?.toLowerCase() ?? "";
 
@@ -303,8 +311,11 @@ export async function POST(request: Request) {
         return jsonError("動画のアップロードが未完了または期限切れです。", 410);
       }
 
-      const authenticatedEmail =
-        request.headers.get("oai-authenticated-user-email")?.trim() ?? "";
+      const { currentUser: transferPrincipal } = await getUsagePrincipal(
+        request,
+        { allowTrial: true },
+      );
+      const authenticatedEmail = transferPrincipal?.email ?? "";
       if (
         transfer.ownerEmail &&
         transfer.ownerEmail.toLowerCase() !== authenticatedEmail.toLowerCase()
@@ -373,13 +384,19 @@ export async function POST(request: Request) {
         return jsonError("続けるにはアカウントへのログインが必要です。", 401);
       }
       const authorization = usageReservationId
-        ? await authorizeUsageOperation(
+        ? await authorizeLeasedUsageOperation(
             currentUser,
             usageReservationId,
             "transcribe",
           )
         : null;
       if (!authorization?.allowed) {
+        if (authorization?.reason === "operation_in_progress") {
+          return jsonError(
+            "この動画の音声認識はすでに処理中です。完了するまで少しお待ちください。",
+            409,
+          );
+        }
         return authorization?.reason === "operator_operation_limit"
           ? jsonError(
               "この動画での音声認識回数が安全上限に達しました。新しい動画としてやり直してください。",
@@ -390,6 +407,8 @@ export async function POST(request: Request) {
               402,
             );
       }
+      enforcedReservationId = authorization.reservation.id;
+      transcriptionLease = authorization.lease;
     }
 
     const timedResult = await requestTimedTranscription(apiKey, file);
@@ -411,6 +430,26 @@ export async function POST(request: Request) {
     let transcriptionText = transcription.text?.trim() ?? "";
     const transcriptionDuration = Number(transcription.duration);
     let rawSegments = getRawSegments(transcription);
+    if (enforcedReservationId) {
+      const observedDuration = Math.max(
+        Number.isFinite(transcriptionDuration) && transcriptionDuration > 0
+          ? transcriptionDuration
+          : 0,
+        ...rawSegments.map((segment) => segment.end),
+      );
+      const observedUsage = await recordObservedTranscriptionDuration(
+        enforcedReservationId,
+        observedDuration,
+      );
+      if (!observedUsage.allowed) {
+        return jsonError(
+          observedUsage.reason === "duration_exceeded"
+            ? "動画の実際の長さが確保した利用枠を超えています。動画を選び直して、もう一度お試しください。"
+            : "音声の長さを安全に確認できませんでした。動画を選び直して、もう一度お試しください。",
+          observedUsage.reason === "duration_exceeded" ? 402 : 502,
+        );
+      }
+    }
     const qualityReasons = getTranscriptionQualityReasons(transcriptionText);
     const shouldRefine =
       requestHighAccuracy ||
@@ -422,8 +461,8 @@ export async function POST(request: Request) {
       if (refineResult.ok) {
         const refinedText = refineResult.transcription.text?.trim() ?? "";
         const refinedTextIsComplete =
-          qualityReasons.length > 0 ||
-          isRefinedTranscriptComplete(refinedText, rawSegments);
+          isRefinedTranscriptComplete(refinedText, rawSegments) &&
+          getTranscriptionQualityReasons(refinedText).length === 0;
         if (refinedText && refinedTextIsComplete) {
           rawSegments = alignRefinedTextToSegments(refinedText, rawSegments);
           transcriptionText = refinedText;
@@ -446,6 +485,19 @@ export async function POST(request: Request) {
     }
 
     const segments = buildCaptionSegments(rawSegments, 14);
+
+    if (enforcedReservationId) {
+      const recorded = await markOperatorUsageOperationSucceeded(
+        enforcedReservationId,
+        "transcribe",
+      );
+      if (!recorded) {
+        return jsonError(
+          "利用記録を確定できませんでした。もう一度お試しください。",
+          500,
+        );
+      }
+    }
 
     if (segments.length === 0) {
       return Response.json(
@@ -496,6 +548,13 @@ export async function POST(request: Request) {
       500,
     );
   } finally {
+    if (transcriptionLease) {
+      await releaseUsageOperationLease(transcriptionLease).catch(
+        (cleanupError) => {
+          console.error("transcription usage lease cleanup failed", cleanupError);
+        },
+      );
+    }
     if (temporaryTransfer) {
       await removeTransfer(temporaryTransfer).catch((cleanupError) => {
         console.error("temporary transcription upload cleanup failed", cleanupError);

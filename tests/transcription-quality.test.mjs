@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -6,6 +7,37 @@ import {
   getTranscriptionQualityReasons,
   isRefinedTranscriptComplete,
 } from "../lib/transcription-quality.ts";
+
+const transcriptionRouteSource = await readFile(
+  new URL("../app/api/transcribe/route.ts", import.meta.url),
+  "utf8",
+);
+const pageSource = await readFile(
+  new URL("../app/page.tsx", import.meta.url),
+  "utf8",
+);
+
+test("normal MP4 transcription does not depend on temporary R2 video storage", () => {
+  const start = pageSource.indexOf("async function startEditing");
+  const end = pageSource.indexOf("async function startNarrationEditing", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const startEditingSource = pageSource.slice(start, end);
+
+  assert.match(startEditingSource, /transcribeMediaFile\(/);
+  assert.doesNotMatch(startEditingSource, /uploadVideoInChunks\(/);
+});
+
+test("never accepts an incomplete refinement just because the first pass was poor", () => {
+  assert.doesNotMatch(
+    transcriptionRouteSource,
+    /qualityReasons\.length\s*>\s*0\s*\|\|\s*isRefinedTranscriptComplete/,
+  );
+  assert.match(
+    transcriptionRouteSource,
+    /isRefinedTranscriptComplete\(refinedText, rawSegments\)\s*&&/,
+  );
+});
 
 test("flags only clearly suspicious Japanese transcription output", () => {
   assert.deepEqual(

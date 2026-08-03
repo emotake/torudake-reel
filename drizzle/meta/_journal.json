@@ -36,6 +36,41 @@
       "when": 1785545400000,
       "tag": "0004_operator_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785726000000,
+      "tag": "0005_trial_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785729600000,
+      "tag": "0006_trial_issuance",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785733200000,
+      "tag": "0007_observed_usage_duration",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1785819600000,
+      "tag": "0008_usage_operation_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785823200000,
+      "tag": "0009_operation_success",
+      "breakpoints": true
     }
   ]
 }

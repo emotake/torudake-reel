@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { isSitesAuthenticationTrusted } from "../lib/current-user";
 
 export type ChatGPTUser = {
   displayName: string;
@@ -7,9 +8,14 @@ export type ChatGPTUser = {
 };
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (!isSitesAuthenticationTrusted()) return null;
+
   const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  if (!email) return null;
+  const email = requestHeaders
+    .get("oai-authenticated-user-email")
+    ?.trim()
+    .toLowerCase();
+  if (!email?.includes("@")) return null;
 
   const encodedFullName = requestHeaders.get(
     "oai-authenticated-user-full-name",

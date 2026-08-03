@@ -5,6 +5,7 @@ type StripeEnvironment = {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_PRICE_LIGHT_MONTHLY?: string;
   STRIPE_PRICE_ONE_TIME?: string;
+  PUBLIC_ORIGIN?: string;
 };
 
 export type StripePlan = "light" | "one_time";
@@ -91,15 +92,23 @@ export async function verifyStripeSignature(
   webhookSecret: string,
   nowSeconds = Math.floor(Date.now() / 1000),
 ) {
+  if (!webhookSecret || signatureHeader.length > 16_384) return false;
+
   const fields = signatureHeader.split(",").map((field) => field.trim());
-  const timestamp = Number(
-    fields.find((field) => field.startsWith("t="))?.slice(2),
-  );
+  const timestampValue = fields
+    .find((field) => field.startsWith("t="))
+    ?.slice(2);
+  const timestamp = /^\d{1,12}$/.test(timestampValue ?? "")
+    ? Number(timestampValue)
+    : Number.NaN;
   const signatures = fields
     .filter((field) => field.startsWith("v1="))
-    .map((field) => field.slice(3));
+    .map((field) => field.slice(3))
+    .filter((signature) => /^[0-9a-f]{64}$/.test(signature));
 
   if (
+    !Number.isInteger(timestamp) ||
+    timestamp <= 0 ||
     !Number.isFinite(timestamp) ||
     Math.abs(nowSeconds - timestamp) > 300 ||
     signatures.length === 0
@@ -137,15 +146,24 @@ function constantTimeEqual(left: string, right: string) {
 
 export function publicOrigin(request: Request) {
   const requestUrl = new URL(request.url);
-  const forwardedHost = request.headers.get("x-forwarded-host")?.trim();
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.trim();
-  const host =
-    forwardedHost && /^[a-z0-9.-]+(?::\d+)?$/i.test(forwardedHost)
-      ? forwardedHost
-      : requestUrl.host;
-  const protocol =
-    forwardedProto === "http" || forwardedProto === "https"
-      ? forwardedProto
-      : requestUrl.protocol.replace(":", "");
-  return `${protocol}://${host}`;
+  const stripeEnv = env as typeof env & StripeEnvironment;
+  const configuredOrigin = stripeEnv.PUBLIC_ORIGIN?.trim();
+  if (configuredOrigin) {
+    try {
+      const url = new URL(configuredOrigin);
+      if (
+        url.origin === configuredOrigin.replace(/\/$/, "") &&
+        (url.protocol === "https:" || isLocalDevelopmentHost(url.hostname))
+      ) {
+        return url.origin;
+      }
+    } catch {
+      // Fall back to the request's canonical origin.
+    }
+  }
+  return requestUrl.origin;
+}
+
+function isLocalDevelopmentHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }

@@ -2,10 +2,18 @@ import { env } from "cloudflare:workers";
 import { and, eq, lt, ne } from "drizzle-orm";
 import { getDb } from "../db";
 import { videoTransfers } from "../db/schema";
+import type { UploadedPartReceipt } from "./multipart-upload";
+export {
+  expectedUploadPartBytes,
+  expectedUploadPartCount,
+  isValidMultipartCompletion,
+  MAX_VIDEO_BYTES,
+  UPLOAD_CHUNK_BYTES,
+  type UploadedPartReceipt,
+} from "./multipart-upload";
 
-export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
-export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 export const TRANSFER_TTL_MS = 72 * 60 * 60 * 1000;
+const MAX_CLEANUP_BATCH = 64;
 
 type R2UploadedPart = {
   partNumber: number;
@@ -27,6 +35,20 @@ type R2ObjectBody = {
   size: number;
   httpEtag: string;
 };
+
+type D1Statement = {
+  bind: (...values: unknown[]) => D1Statement;
+  all: <T>() => Promise<{ results?: T[] }>;
+  first: <T>() => Promise<T | null>;
+  run: () => Promise<unknown>;
+};
+
+type D1Database = {
+  prepare: (query: string) => D1Statement;
+  batch: (statements: D1Statement[]) => Promise<unknown>;
+};
+
+let transferPartSchemaReady = false;
 
 export type MediaBucket = {
   createMultipartUpload(
@@ -97,6 +119,155 @@ export function isSupportedVideo(fileName: string, contentType: string) {
   );
 }
 
+async function ensureTransferPartSchema() {
+  if (transferPartSchemaReady) return;
+  const database = (env as unknown as { DB?: D1Database }).DB;
+  if (!database?.prepare || !database?.batch) {
+    throw new Error("Transfer database binding is unavailable.");
+  }
+  await database.batch([
+    database.prepare(`
+      CREATE TABLE IF NOT EXISTS video_transfer_parts (
+        id text PRIMARY KEY NOT NULL,
+        transfer_id text NOT NULL,
+        part_number integer NOT NULL,
+        size integer NOT NULL,
+        etag text,
+        created_at integer NOT NULL
+      )
+    `),
+    database.prepare(`
+      CREATE INDEX IF NOT EXISTS video_transfer_parts_transfer_id_idx
+      ON video_transfer_parts (transfer_id)
+    `),
+  ]);
+  transferPartSchemaReady = true;
+}
+
+export async function claimTransferPart(
+  transferId: string,
+  partNumber: number,
+  size: number,
+) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  const now = Date.now();
+  const row = await database
+    .prepare(`
+      INSERT INTO video_transfer_parts (
+        id, transfer_id, part_number, size, etag, created_at
+      )
+      VALUES (?, ?, ?, ?, NULL, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        size = excluded.size,
+        created_at = excluded.created_at
+      WHERE video_transfer_parts.etag IS NULL
+        AND video_transfer_parts.created_at < ?
+      RETURNING id
+    `)
+    .bind(
+      `${transferId}:${partNumber}`,
+      transferId,
+      partNumber,
+      size,
+      now,
+      now - 5 * 60 * 1_000,
+    )
+    .first<{ id: string }>();
+  return Boolean(row?.id);
+}
+
+export async function finishTransferPart(
+  transferId: string,
+  partNumber: number,
+  etag: string,
+) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  const updated = await database
+    .prepare(`
+      UPDATE video_transfer_parts
+      SET etag = ?
+      WHERE id = ?
+        AND transfer_id = ?
+        AND part_number = ?
+        AND etag IS NULL
+      RETURNING id
+    `)
+    .bind(etag, `${transferId}:${partNumber}`, transferId, partNumber)
+    .first<{ id: string }>();
+  if (!updated?.id) {
+    throw new Error("Transfer part claim could not be finalized.");
+  }
+}
+
+export async function getRecordedTransferPart(
+  transferId: string,
+  partNumber: number,
+) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  const row = await database
+    .prepare(`
+      SELECT part_number, etag
+      FROM video_transfer_parts
+      WHERE id = ?
+        AND transfer_id = ?
+        AND etag IS NOT NULL
+      LIMIT 1
+    `)
+    .bind(`${transferId}:${partNumber}`, transferId)
+    .first<{ part_number: number; etag: string }>();
+  return row
+    ? ({ partNumber: row.part_number, etag: row.etag } satisfies UploadedPartReceipt)
+    : null;
+}
+
+export async function releaseTransferPartClaim(
+  transferId: string,
+  partNumber: number,
+) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  await database
+    .prepare(`
+      DELETE FROM video_transfer_parts
+      WHERE id = ?
+        AND etag IS NULL
+    `)
+    .bind(`${transferId}:${partNumber}`)
+    .run();
+}
+
+export async function getRecordedTransferParts(transferId: string) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  const result = await database
+    .prepare(`
+      SELECT part_number, etag
+      FROM video_transfer_parts
+      WHERE transfer_id = ?
+        AND etag IS NOT NULL
+      ORDER BY part_number ASC
+      LIMIT 128
+    `)
+    .bind(transferId)
+    .all<{ part_number: number; etag: string }>();
+  return (result.results ?? []).map((row) => ({
+    partNumber: row.part_number,
+    etag: row.etag,
+  } satisfies UploadedPartReceipt));
+}
+
+async function deleteTransferPartRecords(transferId: string) {
+  await ensureTransferPartSchema();
+  const database = (env as unknown as { DB: D1Database }).DB;
+  await database
+    .prepare("DELETE FROM video_transfer_parts WHERE transfer_id = ?")
+    .bind(transferId)
+    .run();
+}
+
 export function isSupportedTranscriptionMedia(
   fileName: string,
   contentType: string,
@@ -150,9 +321,14 @@ export async function removeTransfer(
     .update(videoTransfers)
     .set({ status: "deleted", deletedAt: Date.now() })
     .where(eq(videoTransfers.id, transfer.id));
+  await deleteTransferPartRecords(transfer.id).catch(() => undefined);
 }
 
-export async function cleanupExpiredTransfers() {
+export async function cleanupExpiredTransfers(limit = 32) {
+  const cleanupLimit = Math.max(
+    1,
+    Math.min(MAX_CLEANUP_BATCH, Math.floor(limit) || 1),
+  );
   const expired = await getDb()
     .select()
     .from(videoTransfers)
@@ -162,9 +338,13 @@ export async function cleanupExpiredTransfers() {
         ne(videoTransfers.status, "deleted"),
       ),
     )
-    .limit(8);
+    .limit(cleanupLimit);
 
-  await Promise.allSettled(expired.map((transfer) => removeTransfer(transfer)));
+  for (let index = 0; index < expired.length; index += 8) {
+    await Promise.allSettled(
+      expired.slice(index, index + 8).map((transfer) => removeTransfer(transfer)),
+    );
+  }
 }
 
 export function jsonError(message: string, status = 400) {

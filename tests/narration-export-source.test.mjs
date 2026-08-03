@@ -41,6 +41,16 @@ test("exports decoded narration through an AudioBuffer source", () => {
   );
 });
 
+test("reuses the media element audio source across repeated original-audio exports", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const end = pageSource.indexOf("\n  function requestVideoExport()", start);
+  const exportFlow = pageSource.slice(start, end);
+
+  assert.match(exportFlow, /ensureVideoAudioEngine\(true\)/);
+  assert.doesNotMatch(exportFlow, /createMediaElementSource\(video\)/);
+  assert.match(exportFlow, /shouldCloseExportAudioContext = false/);
+});
+
 test("does not require HTMLVideoElement.captureStream on iPhone", () => {
   const start = pageSource.indexOf("async function exportCaptionedVideo(");
   const setupEnd = pageSource.indexOf("isExportingRef.current = true", start);
@@ -48,8 +58,20 @@ test("does not require HTMLVideoElement.captureStream on iPhone", () => {
 
   assert.doesNotMatch(capabilityCheck, /!captureVideoStream/);
   assert.match(capabilityCheck, /HTMLCanvasElement\.prototype\.captureStream/);
-  assert.match(capabilityCheck, /usePortableMp4Exporter/);
+  assert.match(capabilityCheck, /canUseLegacyRecorder/);
   assert.match(pageSource, /exportPortableVideoMp4/);
+});
+
+test("tries a deterministic MP4 export before the MediaRecorder fallback", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const end = pageSource.indexOf("\n  function requestVideoExport()", start);
+  const exportFlow = pageSource.slice(start, end);
+  const portableIndex = exportFlow.indexOf("exportPortableVideoMp4({");
+  const recorderIndex = exportFlow.indexOf("new MediaRecorder(");
+
+  assert.ok(portableIndex >= 0);
+  assert.ok(recorderIndex > portableIndex);
+  assert.match(exportFlow, /if \(!canUseLegacyRecorder\) throw portableExportError/);
 });
 
 test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", () => {
@@ -60,4 +82,13 @@ test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", 
   assert.match(pageSource, /navigator\.share\(shareData\)/);
   assert.match(pageSource, /動画を保存・共有/);
   assert.match(pageSource, /「ビデオを保存」を選べます/);
+});
+
+test("rejects unsupported desktop containers before processing", () => {
+  assert.match(pageSource, /UNSUPPORTED_VIDEO_EXTENSION/);
+  assert.match(pageSource, /AVI・MKVなどには対応していません/);
+  assert.match(
+    pageSource,
+    /accept="video\/mp4,video\/quicktime,video\/x-m4v,video\/webm/,
+  );
 });

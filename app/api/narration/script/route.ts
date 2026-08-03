@@ -2,12 +2,14 @@ import { env } from "cloudflare:workers";
 import { authorizeUsageOperation } from "../../../../lib/billing-store";
 import { getCurrentUser } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
 import {
   isNarrationStyle,
   normalizeNarrationPlan,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import { isDurationWithinReservation } from "../../../../lib/usage-duration";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
@@ -149,6 +151,8 @@ export async function POST(request: Request) {
     );
   }
 
+  let authorizedReservationDuration: number | null = null;
+  let authorizedReservationId: string | null = null;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
       allowTrial: true,
@@ -181,6 +185,23 @@ export async function POST(request: Request) {
                 ? 402
                 : 401,
         },
+      );
+    }
+    authorizedReservationDuration =
+      authorization.reservation.sourceDurationSeconds;
+    authorizedReservationId = authorization.reservation.id;
+    if (
+      !isDurationWithinReservation(
+        sourceDuration,
+        authorizedReservationDuration,
+      )
+    ) {
+      return Response.json(
+        {
+          error:
+            "動画の実際の長さが確保した利用枠を超えています。動画を選び直して、もう一度お試しください。",
+        },
+        { status: 402 },
       );
     }
   }
@@ -311,6 +332,18 @@ export async function POST(request: Request) {
     const plan = normalizeNarrationPlan(JSON.parse(outputText(responsePayload)));
     if (!plan.script || !plan.segments.length) {
       throw new Error("empty narration plan");
+    }
+    if (
+      authorizedReservationId &&
+      !(await markOperatorUsageOperationSucceeded(
+        authorizedReservationId,
+        "narration_script",
+      ))
+    ) {
+      return Response.json(
+        { error: "利用記録を確定できませんでした。もう一度お試しください。" },
+        { status: 500 },
+      );
     }
     return Response.json(plan, {
       headers: { "Cache-Control": "private, no-store" },

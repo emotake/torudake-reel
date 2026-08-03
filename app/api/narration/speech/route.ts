@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import { authorizeUsageOperation } from "../../../../lib/billing-store";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
 import {
   isNarrationStyle,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import { narrationScriptCharacterLimit } from "../../../../lib/usage-duration";
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
@@ -132,6 +134,7 @@ export async function POST(request: Request) {
     );
   }
 
+  let authorizedReservationId: string | null = null;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
       allowTrial: true,
@@ -166,6 +169,21 @@ export async function POST(request: Request) {
         },
       );
     }
+    if (
+      script.length >
+      narrationScriptCharacterLimit(
+        authorization.reservation.sourceDurationSeconds,
+      )
+    ) {
+      return Response.json(
+        {
+          error:
+            "ナレーション原稿が動画の長さに対して長すぎます。原稿を短くして、もう一度お試しください。",
+        },
+        { status: 400 },
+      );
+    }
+    authorizedReservationId = authorization.reservation.id;
   }
 
   let response = await requestSpeech(apiKey, script, payload.style);
@@ -200,6 +218,18 @@ export async function POST(request: Request) {
   }
 
   const audio = await response.arrayBuffer();
+  if (
+    authorizedReservationId &&
+    !(await markOperatorUsageOperationSucceeded(
+      authorizedReservationId,
+      "narration_speech",
+    ))
+  ) {
+    return Response.json(
+      { error: "利用記録を確定できませんでした。もう一度お試しください。" },
+      { status: 500 },
+    );
+  }
   return new Response(audio, {
     headers: {
       "Content-Type": "audio/mpeg",

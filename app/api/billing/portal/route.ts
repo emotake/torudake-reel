@@ -1,19 +1,24 @@
 import { getOrCreateBillingUser } from "../../../../lib/billing-store";
 import {
   authenticationRequired,
+  authenticationUnavailable,
   getCurrentUser,
+  isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
 import {
   isBillingConfigured,
   publicOrigin,
   stripeRequest,
 } from "../../../../lib/stripe";
+import { isSameOriginMutation } from "../../../../lib/operator-session";
 
 type StripePortalSession = {
   url: string;
 };
 
 export async function POST(request: Request) {
+  if (!isSitesAuthenticationTrusted()) return authenticationUnavailable();
+
   if (!isBillingConfigured()) {
     return Response.json(
       { error: "決済管理は現在準備中です。" },
@@ -22,6 +27,15 @@ export async function POST(request: Request) {
   }
   const currentUser = getCurrentUser(request);
   if (!currentUser) return authenticationRequired();
+  if (!isSameOriginMutation(request)) {
+    return Response.json(
+      {
+        error: "決済管理リクエストを確認できませんでした。ページを再読み込みしてください。",
+        code: "invalid_request_origin",
+      },
+      { status: 403 },
+    );
+  }
 
   try {
     const user = await getOrCreateBillingUser(currentUser);

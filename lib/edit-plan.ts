@@ -287,16 +287,13 @@ function buildSentenceBlocks(captions: CaptionSegment[]) {
   return blocks;
 }
 
-function scoreEditWindow(
-  blocks: SentenceBlock[],
-  duration: number,
-  targetDuration: number,
-  goal: EditGoal,
-  sourceEnd: number,
-) {
-  const first = blocks[0];
-  const last = blocks.at(-1)!;
-  const text = blocks.map((block) => block.text).join("");
+type EditUnit = SentenceBlock & {
+  phase: 0 | 1 | 2;
+};
+
+function scoreEditUnit(unit: EditUnit, goal: EditGoal, sourceEnd: number) {
+  const duration = unit.end - unit.start;
+  const text = unit.text;
   const goalHits = text.match(GOAL_KEYWORDS[goal])?.length ?? 0;
   const numberHits = text.match(/[0-9０-９]+/g)?.length ?? 0;
   const characterDensity = Math.min(
@@ -304,23 +301,121 @@ function scoreEditWindow(
     normalizeForComparison(text).length / Math.max(duration, 1),
   );
   let score =
-    -Math.abs(targetDuration - duration) * 1.7 +
-    Math.min(duration / targetDuration, 1) * 11 +
-    Math.min(goalHits, 4) * 1.6 +
-    Math.min(numberHits, 3) * 0.7 +
-    characterDensity * 0.35;
+    Math.min(goalHits, 4) * 2.2 +
+    Math.min(numberHits, 3) * 0.8 +
+    characterDensity * 0.45 +
+    Math.min(duration, 8) * 0.28;
 
-  if (!CONNECTIVE_OPENING.test(first.text)) score += 2.4;
-  if (SENTENCE_ENDING.test(last.text)) score += 3.2;
-  if (duration >= targetDuration * 0.88) score += 2;
-  if (first.start <= sourceEnd * 0.16) {
+  if (!CONNECTIVE_OPENING.test(unit.captions[0]?.text ?? "")) score += 1.5;
+  if (SENTENCE_ENDING.test(unit.captions.at(-1)?.text.trim() ?? "")) {
+    score += 2.2;
+  }
+  if (unit.start <= sourceEnd * 0.16) {
     score += goal === "reach" ? 2.2 : 0.8;
   }
-  if (last.end >= sourceEnd * 0.78) {
+  if (unit.end >= sourceEnd * 0.78) {
     score += goal === "sales" ? 2.4 : 0.7;
   }
 
   return score;
+}
+
+function buildEditUnits(
+  blocks: SentenceBlock[],
+  targetDuration: number,
+  sourceStart: number,
+  sourceEnd: number,
+) {
+  const maximumUnitDuration = Math.min(
+    8,
+    Math.max(3, targetDuration * 0.26),
+  );
+  const sourceSpan = Math.max(0.001, sourceEnd - sourceStart);
+  const units: EditUnit[] = [];
+
+  const pushUnit = (captions: CaptionSegment[]) => {
+    if (!captions.length) return;
+    const start = captions[0].start;
+    const end = captions.at(-1)!.end;
+    const midpointRatio =
+      (start + (end - start) / 2 - sourceStart) / sourceSpan;
+    units.push({
+      captions,
+      start,
+      end,
+      text: captions.map((caption) => caption.text.trim()).join(""),
+      phase: midpointRatio < 1 / 3 ? 0 : midpointRatio < 2 / 3 ? 1 : 2,
+    });
+  };
+
+  blocks.forEach((block) => {
+    let current: CaptionSegment[] = [];
+    block.captions.forEach((caption) => {
+      const nextDuration = current.length
+        ? caption.end - current[0].start
+        : caption.end - caption.start;
+      if (current.length && nextDuration > maximumUnitDuration) {
+        pushUnit(current);
+        current = [];
+      }
+      current.push(caption);
+    });
+    pushUnit(current);
+  });
+
+  return units;
+}
+
+function clipCaptionToDuration(
+  caption: CaptionSegment,
+  duration: number,
+  preferEnd: boolean,
+) {
+  const originalDuration = caption.end - caption.start;
+  const safeDuration = Math.min(originalDuration, Math.max(0, duration));
+  if (safeDuration >= originalDuration - 0.001) return { ...caption };
+
+  const characters = Array.from(caption.text.trim());
+  const characterCount = Math.max(
+    1,
+    Math.min(
+      characters.length,
+      Math.round(characters.length * (safeDuration / originalDuration)),
+    ),
+  );
+  return {
+    ...caption,
+    start: preferEnd ? roundSeconds(caption.end - safeDuration) : caption.start,
+    end: preferEnd ? caption.end : roundSeconds(caption.start + safeDuration),
+    text: preferEnd
+      ? characters.slice(-characterCount).join("")
+      : characters.slice(0, characterCount).join(""),
+  };
+}
+
+function takeUnitWithinDuration(unit: EditUnit, duration: number) {
+  const preferEnd = unit.phase === 2;
+  const captions = preferEnd
+    ? [...unit.captions].reverse()
+    : unit.captions;
+  const selected: CaptionSegment[] = [];
+  let remaining = duration;
+
+  for (const caption of captions) {
+    if (remaining <= 0.04) break;
+    const captionDuration = caption.end - caption.start;
+    if (captionDuration <= remaining + 0.001) {
+      selected.push({ ...caption });
+      remaining -= captionDuration;
+      continue;
+    }
+    if (remaining >= 0.35) {
+      selected.push(clipCaptionToDuration(caption, remaining, preferEnd));
+    }
+    break;
+  }
+
+  return selected.sort((left, right) => left.start - right.start);
 }
 
 export function createNaturalEdit(
@@ -373,54 +468,168 @@ export function createNaturalEdit(
 
   if (usefulDuration > safeTarget + 0.35) {
     const blocks = buildSentenceBlocks(usefulCaptions);
+    const sourceStart = usefulCaptions[0].start;
     const sourceEnd = usefulCaptions.at(-1)!.end;
-    let best:
-      | {
-          ids: Set<number>;
-          duration: number;
-          score: number;
-        }
-      | undefined;
+    const units = buildEditUnits(
+      blocks,
+      safeTarget,
+      sourceStart,
+      sourceEnd,
+    );
+    const availablePhaseMask = units.reduce(
+      (mask, unit) => mask | (1 << unit.phase),
+      0,
+    );
+    const requireWholeStory = sourceEnd - sourceStart > safeTarget * 1.3;
+    const requiredPhaseMask = requireWholeStory ? availablePhaseMask : 0;
+    const capacity = Math.floor((safeTarget + 0.35) * 10);
+    type SelectionState = {
+      duration: number;
+      score: number;
+      unitIndexes: number[];
+      phaseMask: number;
+    };
+    let states = new Map<string, SelectionState>([
+      ["0:0", { duration: 0, score: 0, unitIndexes: [], phaseMask: 0 }],
+    ]);
 
-    for (let start = 0; start < blocks.length; start += 1) {
-      const windowBlocks: SentenceBlock[] = [];
-      for (let end = start; end < blocks.length; end += 1) {
-        windowBlocks.push(blocks[end]);
-        const windowCaptions = windowBlocks.flatMap(
-          (block) => block.captions,
-        );
-        const duration = getEditedDuration(
+    units.forEach((unit, unitIndex) => {
+      const duration = getEditedDuration(
+        buildEditRanges(
+          unit.captions.map((caption) => ({ ...caption, removed: false })),
+        ),
+      );
+      const durationTicks = Math.ceil(duration * 10);
+      if (durationTicks > capacity) return;
+      const unitScore = scoreEditUnit(unit, goal, sourceEnd);
+      const snapshot = [...states.values()];
+      const nextStates = new Map(states);
+      snapshot.forEach((state) => {
+        const nextTicks = Math.ceil(state.duration * 10) + durationTicks;
+        if (nextTicks > capacity) return;
+        const phaseMask = state.phaseMask | (1 << unit.phase);
+        const next: SelectionState = {
+          duration: state.duration + duration,
+          score: state.score + unitScore,
+          unitIndexes: [...state.unitIndexes, unitIndex],
+          phaseMask,
+        };
+        const key = `${nextTicks}:${phaseMask}`;
+        const current = nextStates.get(key);
+        if (!current || next.score > current.score) nextStates.set(key, next);
+      });
+      states = nextStates;
+    });
+
+    const countBits = (value: number) =>
+      [1, 2, 4].filter((bit) => (value & bit) !== 0).length;
+    let best: SelectionState | undefined;
+    let bestTotalScore = Number.NEGATIVE_INFINITY;
+    states.forEach((state) => {
+      if (state.duration <= 0 || state.duration > safeTarget + 0.35) return;
+      const missingPhases = countBits(requiredPhaseMask & ~state.phaseMask);
+      const totalScore =
+        state.score +
+        countBits(state.phaseMask & requiredPhaseMask) * 16 -
+        missingPhases * 22 -
+        Math.abs(safeTarget - state.duration) * 1.55 +
+        Math.min(1, state.duration / safeTarget) * 13;
+      if (totalScore > bestTotalScore) {
+        best = state;
+        bestTotalScore = totalScore;
+      }
+    });
+
+    const selectedCaptions = new Map<number, CaptionSegment>();
+    best?.unitIndexes.forEach((unitIndex) => {
+      units[unitIndex].captions.forEach((caption) => {
+        selectedCaptions.set(caption.id, { ...caption });
+      });
+    });
+    let selectedDuration = best?.duration ?? 0;
+    let selectedPhaseMask = best?.phaseMask ?? 0;
+
+    if (selectedDuration < safeTarget - 0.75) {
+      const selectedUnitIndexes = new Set(best?.unitIndexes ?? []);
+      const fillCandidates = units
+        .map((unit, index) => ({ unit, index }))
+        .filter(({ index }) => !selectedUnitIndexes.has(index))
+        .sort((left, right) => {
+          const leftMissing =
+            (requiredPhaseMask & ~selectedPhaseMask & (1 << left.unit.phase)) !==
+            0;
+          const rightMissing =
+            (requiredPhaseMask & ~selectedPhaseMask & (1 << right.unit.phase)) !==
+            0;
+          if (leftMissing !== rightMissing) return leftMissing ? -1 : 1;
+          return (
+            scoreEditUnit(right.unit, goal, sourceEnd) -
+            scoreEditUnit(left.unit, goal, sourceEnd)
+          );
+        });
+
+      for (const { unit } of fillCandidates) {
+        const remaining = safeTarget - selectedDuration;
+        if (remaining < 0.35) break;
+        const picked = takeUnitWithinDuration(unit, remaining);
+        if (!picked.length) continue;
+        picked.forEach((caption) => selectedCaptions.set(caption.id, caption));
+        selectedPhaseMask |= 1 << unit.phase;
+        selectedDuration = getEditedDuration(
           buildEditRanges(
-            windowCaptions.map((caption) => ({
+            [...selectedCaptions.values()].map((caption) => ({
               ...caption,
               removed: false,
             })),
           ),
         );
-
-        if (duration > safeTarget + 0.35) break;
-        if (duration < Math.min(safeTarget * 0.58, usefulDuration)) {
-          continue;
-        }
-
-        const score = scoreEditWindow(
-          windowBlocks,
-          duration,
-          safeTarget,
-          goal,
-          sourceEnd,
-        );
-        if (!best || score > best.score) {
-          best = {
-            ids: new Set(windowCaptions.map((caption) => caption.id)),
-            duration,
-            score,
-          };
-        }
+        if (selectedDuration >= safeTarget - 0.75) break;
       }
     }
 
-    if (best) selectedIds = best.ids;
+    if (selectedCaptions.size > 0) {
+      let actualDuration = getEditedDuration(
+        buildEditRanges(
+          [...selectedCaptions.values()].map((caption) => ({
+            ...caption,
+            removed: false,
+          })),
+        ),
+      );
+      while (
+        actualDuration > safeTarget + 0.35 &&
+        selectedCaptions.size > 0
+      ) {
+        const last = [...selectedCaptions.values()].sort(
+          (left, right) => right.end - left.end,
+        )[0];
+        const excess = actualDuration - safeTarget;
+        const lastDuration = last.end - last.start;
+        if (lastDuration - excess >= 0.35) {
+          selectedCaptions.set(
+            last.id,
+            clipCaptionToDuration(last, lastDuration - excess, true),
+          );
+        } else {
+          selectedCaptions.delete(last.id);
+        }
+        actualDuration = getEditedDuration(
+          buildEditRanges(
+            [...selectedCaptions.values()].map((caption) => ({
+              ...caption,
+              removed: false,
+            })),
+          ),
+        );
+      }
+      selectedIds = new Set(selectedCaptions.keys());
+      return sorted.map((caption) => {
+        const selected = selectedCaptions.get(caption.id);
+        return selected
+          ? { ...selected, removed: false }
+          : { ...caption, removed: true };
+      });
+    }
   }
 
   return sorted.map((caption) => ({

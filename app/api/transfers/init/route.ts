@@ -1,6 +1,11 @@
 import { getDb } from "../../../../db";
 import { videoTransfers } from "../../../../db/schema";
 import {
+  authorizeUsageOperation,
+} from "../../../../lib/billing-store";
+import { authenticationRequired } from "../../../../lib/current-user";
+import { getUsagePrincipal } from "../../../../lib/operator-access";
+import {
   cleanupExpiredTransfers,
   contentDisposition,
   createTransferCode,
@@ -13,6 +18,7 @@ import {
   TRANSFER_TTL_MS,
   UPLOAD_CHUNK_BYTES,
 } from "../../../../lib/transfers";
+import { isManagedUploadEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 export async function POST(request: Request) {
   let upload:
@@ -27,12 +33,19 @@ export async function POST(request: Request) {
       fileName?: string;
       contentType?: string;
       size?: number;
+      usageReservationId?: string;
     };
     const fileName = payload.fileName?.trim() ?? "";
     const contentType = payload.contentType?.trim() || "video/mp4";
     const size = Number(payload.size);
 
-    if (!fileName || !Number.isSafeInteger(size) || size <= 0) {
+    if (
+      !fileName ||
+      fileName.length > 240 ||
+      contentType.length > 100 ||
+      !Number.isSafeInteger(size) ||
+      size <= 0
+    ) {
       return jsonError("動画ファイルの情報が正しくありません。");
     }
     if (!isSupportedVideo(fileName, contentType)) {
@@ -42,7 +55,35 @@ export async function POST(request: Request) {
       return jsonError("動画は1GB以下にしてください。", 413);
     }
 
-    await cleanupExpiredTransfers();
+    await cleanupExpiredTransfers(32);
+
+    let ownerEmail: string | null = null;
+    const usageReservationId = payload.usageReservationId?.trim() ?? "";
+    if (isManagedUploadEnforcementEnabled()) {
+      const { currentUser, isOperator } = await getUsagePrincipal(request, {
+        allowTrial: true,
+      });
+      if (!currentUser) return authenticationRequired();
+      ownerEmail = currentUser.email;
+
+      const authorization = usageReservationId
+        ? await authorizeUsageOperation(
+            currentUser,
+            usageReservationId,
+            "transfer_upload",
+          )
+        : isOperator
+          ? { allowed: true as const, reason: null }
+          : null;
+      if (!authorization?.allowed) {
+        return jsonError(
+          authorization?.reason === "operator_operation_limit"
+            ? "この動画で開始できるアップロード回数を超えました。動画を選び直してください。"
+            : "有効な利用枠を確認できませんでした。動画を選び直してください。",
+          authorization?.reason === "operator_operation_limit" ? 429 : 402,
+        );
+      }
+    }
 
     const id = crypto.randomUUID();
     const code = createTransferCode();
@@ -56,7 +97,10 @@ export async function POST(request: Request) {
         contentType,
         contentDisposition: contentDisposition(fileName),
       },
-      customMetadata: { transferId: id },
+      customMetadata: {
+        transferId: id,
+        ...(usageReservationId ? { usageReservationId } : {}),
+      },
     });
 
     await getDb().insert(videoTransfers).values({
@@ -68,8 +112,7 @@ export async function POST(request: Request) {
       objectKey,
       uploadId: upload.uploadId,
       status: "uploading",
-      ownerEmail:
-        request.headers.get("oai-authenticated-user-email")?.trim() || null,
+      ownerEmail,
       createdAt: now,
       expiresAt: now + TRANSFER_TTL_MS,
     });

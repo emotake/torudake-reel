@@ -113,7 +113,28 @@ class ApiRequestError extends Error {
 
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
+const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
+const SUPPORTED_VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm)$/i;
+const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
+
+function isSupportedVideoFile(selectedFile: File) {
+  if (UNSUPPORTED_VIDEO_EXTENSION.test(selectedFile.name)) return false;
+  if (SUPPORTED_VIDEO_EXTENSION.test(selectedFile.name)) return true;
+  const contentType = selectedFile.type.toLowerCase();
+  return [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-m4v",
+    "video/webm",
+  ].includes(contentType);
+}
+
+function throwIfProcessingAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("処理を中止しました。", "AbortError");
+  }
+}
 
 function getAudioContextConstructor() {
   return (
@@ -219,6 +240,7 @@ async function uploadVideoInChunks(
   selectedFile: File,
   controller: AbortController,
   onProgress: (progress: number) => void,
+  usageReservationId: string | null = null,
 ) {
   let activeReceipt: TransferReceipt | null = null;
 
@@ -230,6 +252,7 @@ async function uploadVideoInChunks(
         fileName: selectedFile.name,
         contentType: selectedFile.type || "video/mp4",
         size: selectedFile.size,
+        usageReservationId,
       }),
       signal: controller.signal,
     });
@@ -344,6 +367,7 @@ async function transcribeMediaFile(
   mediaFile: File,
   highAccuracy = false,
   usageReservationId: string | null = null,
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
   formData.set("file", mediaFile, mediaFile.name);
@@ -356,6 +380,7 @@ async function transcribeMediaFile(
   const response = await fetch("/api/transcribe", {
     method: "POST",
     body: formData,
+    signal,
   });
   const payload = await readApiResponse<
     ApiPayload & {
@@ -382,6 +407,7 @@ async function transcribeLargeVideo(
   onProgress: (progress: number) => void,
   highAccuracy = false,
   usageReservationId: string | null = null,
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   let extractionDetail = "";
   try {
@@ -391,6 +417,7 @@ async function transcribeLargeVideo(
       MIN_AUDIO_CHUNK_BYTES,
       extractTranscriptionAudioChunks,
     } = await import("../lib/transcription-media");
+    throwIfProcessingAborted(signal);
     let maxChunkBytes = DEFAULT_MAX_AUDIO_CHUNK_BYTES;
 
     while (maxChunkBytes >= MIN_AUDIO_CHUNK_BYTES) {
@@ -403,11 +430,13 @@ async function transcribeLargeVideo(
           selectedFile,
           { maxChunkBytes },
         )) {
+          throwIfProcessingAborted(signal);
           onProgress(Math.min(84, 14 + completedChunks * 6));
           const chunkResult = await transcribeMediaFile(
             chunk.file,
             highAccuracy,
             usageReservationId,
+            signal,
           );
           refined ||= chunkResult.refined;
 
@@ -448,6 +477,12 @@ async function transcribeLargeVideo(
       }
     }
   } catch (transmuxError) {
+    if (
+      transmuxError instanceof DOMException &&
+      transmuxError.name === "AbortError"
+    ) {
+      throw transmuxError;
+    }
     if (transmuxError instanceof ApiRequestError) {
       throw transmuxError;
     }
@@ -458,6 +493,14 @@ async function transcribeLargeVideo(
     console.warn(
       "Direct audio extraction failed; falling back to browser decoding.",
       transmuxError,
+    );
+  }
+
+  if (selectedFile.size > MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES) {
+    throw new Error(
+      `動画から音声を取り出せませんでした。${
+        extractionDetail ? `音声抽出の詳細：${extractionDetail}。` : ""
+      }この端末では大容量動画の一括変換を安全に行えません。動画を100MB以下に圧縮するか、PC版Chromeでお試しください。`,
     );
   }
 
@@ -478,11 +521,16 @@ async function transcribeLargeVideo(
   let decodedAudio: AudioBuffer;
   const audioContext = new AudioContextConstructor();
   try {
+    throwIfProcessingAborted(signal);
     onProgress(8);
     const sourceBytes = await selectedFile.arrayBuffer();
+    throwIfProcessingAborted(signal);
     onProgress(14);
     decodedAudio = await audioContext.decodeAudioData(sourceBytes);
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
     throw new Error(
       `動画から音声を取り出せませんでした。音声抽出の詳細：${
         extractionDetail || "ブラウザーが動画の音声形式に対応していません"
@@ -507,6 +555,7 @@ async function transcribeLargeVideo(
     "video";
 
   for (let index = 0; index < chunkCount; index += 1) {
+    throwIfProcessingAborted(signal);
     const chunkStart = index * TRANSCRIPTION_AUDIO_CHUNK_SECONDS;
     const chunkDuration = Math.min(
       TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
@@ -528,6 +577,7 @@ async function transcribeLargeVideo(
       audioFile,
       highAccuracy,
       usageReservationId,
+      signal,
     );
     refined ||= chunkResult.refined;
 
@@ -583,7 +633,11 @@ async function getVideoDurationSeconds(selectedFile: File) {
   }
 }
 
-async function extractNarrationFrames(selectedFile: File, count = 6) {
+async function extractNarrationFrames(
+  selectedFile: File,
+  count = 6,
+  signal?: AbortSignal,
+) {
   const objectUrl = URL.createObjectURL(selectedFile);
   const video = document.createElement("video");
   video.preload = "auto";
@@ -591,6 +645,7 @@ async function extractNarrationFrames(selectedFile: File, count = 6) {
   video.playsInline = true;
 
   try {
+    throwIfProcessingAborted(signal);
     const duration = await new Promise<number>((resolve, reject) => {
       const timeout = window.setTimeout(
         () => reject(new Error("動画の場面を読み取れませんでした。")),
@@ -630,6 +685,7 @@ async function extractNarrationFrames(selectedFile: File, count = 6) {
     const frameCount = Math.max(3, Math.min(8, count));
 
     for (let index = 0; index < frameCount; index += 1) {
+      throwIfProcessingAborted(signal);
       const ratio = frameCount === 1 ? 0.5 : 0.06 + (index / (frameCount - 1)) * 0.88;
       const time = Math.min(Math.max(0, duration - 0.05), duration * ratio);
       await new Promise<void>((resolve, reject) => {
@@ -669,6 +725,7 @@ async function requestNarrationPlan({
   usageReservationId,
   timingScale,
   previousScript,
+  signal,
 }: {
   frames: string[];
   brief: string;
@@ -679,6 +736,7 @@ async function requestNarrationPlan({
   usageReservationId: string | null;
   timingScale?: number;
   previousScript?: string;
+  signal?: AbortSignal;
 }) {
   const response = await fetch("/api/narration/script", {
     method: "POST",
@@ -694,6 +752,7 @@ async function requestNarrationPlan({
       timingScale,
       previousScript,
     }),
+    signal,
   });
   return readApiResponse<ApiPayload & NarrationPlan>(
     response,
@@ -701,7 +760,8 @@ async function requestNarrationPlan({
   );
 }
 
-async function reserveVideoUsage(selectedFile: File) {
+async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
+  throwIfProcessingAborted(signal);
   const requestBody = JSON.stringify({
     sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
     idempotencyKey: crypto.randomUUID(),
@@ -711,12 +771,14 @@ async function reserveVideoUsage(selectedFile: File) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: requestBody,
+      signal,
     });
   let response = await requestReservation();
 
   if (response.status === 401) {
     const sessionResponse = await fetch("/api/session/trial", {
       method: "POST",
+      signal,
     });
     await readApiResponse<ApiPayload & { ready?: boolean }>(
       sessionResponse,
@@ -754,11 +816,13 @@ async function requestNarrationSpeech(
   script: string,
   style: NarrationStyle,
   usageReservationId: string | null,
+  signal?: AbortSignal,
 ) {
   const response = await fetch("/api/narration/speech", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ script, style, usageReservationId }),
+    signal,
   });
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";
@@ -855,7 +919,12 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const transferInputRef = useRef<HTMLInputElement>(null);
   const transferAbortRef = useRef<AbortController | null>(null);
+  const editAbortRef = useRef<AbortController | null>(null);
+  const editGenerationRef = useRef(0);
   const usageReservationRef = useRef<string | null>(null);
+  const [usageReservationId, setUsageReservationId] = useState<string | null>(
+    null,
+  );
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
   const [captionProfile, setCaptionProfile] = useState<CaptionProfile>(() => {
@@ -906,11 +975,24 @@ export default function Home() {
   >(null);
   const [billingError, setBillingError] = useState("");
 
+  function rememberUsageReservation(nextReservationId: string | null) {
+    usageReservationRef.current = nextReservationId;
+    setUsageReservationId(nextReservationId);
+  }
+
   useEffect(() => {
     return () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, [videoUrl]);
+
+  useEffect(
+    () => () => {
+      editAbortRef.current?.abort();
+      transferAbortRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     return () => {
@@ -959,35 +1041,43 @@ export default function Home() {
 
   function chooseFile(selected?: File) {
     if (!selected) return;
-    const looksLikeVideo =
-      selected.type.startsWith("video/") ||
-      /\.(mp4|mov|m4v|webm)$/i.test(selected.name);
-    if (!looksLikeVideo) {
-      notify("動画ファイルを選んでください");
+    if (!isSupportedVideoFile(selected)) {
+      notify(
+        UNSUPPORTED_VIDEO_EXTENSION.test(selected.name)
+          ? "AVI・MKVなどには対応していません。MP4・MOV・M4V・WebMの動画を選んでください"
+          : "MP4・MOV・M4V・WebMの動画を選んでください",
+      );
       return;
     }
     if (selected.size > MAX_EDIT_VIDEO_BYTES) {
       notify("字幕の自動生成は500MBまでです");
       return;
     }
+    editAbortRef.current?.abort();
+    editAbortRef.current = null;
+    editGenerationRef.current += 1;
     setFile(selected);
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    usageReservationRef.current = null;
+    rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function useSample() {
+    editAbortRef.current?.abort();
+    editAbortRef.current = null;
+    editGenerationRef.current += 1;
     setFile(null);
     setEditError("");
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -999,6 +1089,17 @@ export default function Home() {
       );
       return;
     }
+
+    editAbortRef.current?.abort();
+    const controller = new AbortController();
+    editAbortRef.current = controller;
+    const generation = editGenerationRef.current + 1;
+    editGenerationRef.current = generation;
+    const isCurrent = () =>
+      editGenerationRef.current === generation && !controller.signal.aborted;
+    const updateProgress = (nextProgress: number) => {
+      if (isCurrent()) setProgress(nextProgress);
+    };
 
     setEditError("");
     setIsHighAccuracyRun(highAccuracy);
@@ -1012,8 +1113,9 @@ export default function Home() {
       let nextTranscript = initialTranscript;
       let refined = false;
       if (file && !highAccuracy) {
-        newlyReservedUsage = await reserveVideoUsage(file);
-        usageReservationRef.current = newlyReservedUsage;
+        newlyReservedUsage = await reserveVideoUsage(file, controller.signal);
+        throwIfProcessingAborted(controller.signal);
+        rememberUsageReservation(newlyReservedUsage);
       }
       const usageReservationId = usageReservationRef.current;
 
@@ -1021,56 +1123,38 @@ export default function Home() {
         if (needsBrowserAudioExtraction(file)) {
           const transcriptionResult = await transcribeLargeVideo(
             file,
-            setProgress,
+            updateProgress,
             highAccuracy,
             usageReservationId,
+            controller.signal,
           );
           nextTranscript = transcriptionResult.segments;
           refined = transcriptionResult.refined;
         } else {
-          const controller = new AbortController();
-          const receipt = await uploadVideoInChunks(
-            file,
-            controller,
-            (uploadProgress) => {
-              setProgress(Math.max(4, Math.round(uploadProgress * 0.44)));
-            },
-          );
-          setProgress(48);
           progressTimer = window.setInterval(() => {
-            setProgress((current) => Math.min(current + 2, 88));
-          }, 600);
-
-          const response = await fetch("/api/transcribe", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: receipt.id,
-              code: receipt.code,
-              quality: highAccuracy ? "high" : "standard",
-              usageReservationId,
-            }),
-          });
-          const payload = await readApiResponse<
-            ApiPayload & {
-              refined?: boolean;
-              segments?: TranscriptLine[];
+            if (isCurrent()) {
+              setProgress((current) => Math.min(current + 2, 88));
             }
-          >(response, "字幕を生成できませんでした。もう一度お試しください。");
-
-          if (!payload.segments?.length) {
-            throw new Error("字幕を生成できませんでした。もう一度お試しください。");
-          }
-          nextTranscript = payload.segments;
-          refined = Boolean(payload.refined);
+          }, 600);
+          const transcriptionResult = await transcribeMediaFile(
+            file,
+            highAccuracy,
+            usageReservationId,
+            controller.signal,
+          );
+          nextTranscript = transcriptionResult.segments;
+          refined = transcriptionResult.refined;
         }
       } else {
         progressTimer = window.setInterval(() => {
-          setProgress((current) => Math.min(current + 7, 88));
+          if (isCurrent()) {
+            setProgress((current) => Math.min(current + 7, 88));
+          }
         }, 500);
         await new Promise((resolve) => window.setTimeout(resolve, 1200));
       }
 
+      throwIfProcessingAborted(controller.signal);
       nextTranscript = createNaturalEdit(nextTranscript, length, goal);
       if (progressTimer !== undefined) {
         window.clearInterval(progressTimer);
@@ -1080,8 +1164,10 @@ export default function Home() {
       if (newlyReservedUsage) {
         await updateVideoUsage("complete", newlyReservedUsage);
       }
+      if (!isCurrent()) return;
       setProgress(100);
       window.setTimeout(() => {
+        if (!isCurrent()) return;
         setPreviewMode("after");
         setStage("result");
       }, 320);
@@ -1091,8 +1177,11 @@ export default function Home() {
       }
       if (newlyReservedUsage) {
         await updateVideoUsage("release", newlyReservedUsage);
-        usageReservationRef.current = null;
+        if (usageReservationRef.current === newlyReservedUsage) {
+          rememberUsageReservation(null);
+        }
       }
+      if (!isCurrent()) return;
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -1100,6 +1189,8 @@ export default function Home() {
           : "字幕を生成できませんでした。もう一度お試しください。",
       );
       setStage("setup");
+    } finally {
+      if (editAbortRef.current === controller) editAbortRef.current = null;
     }
   }
 
@@ -1111,6 +1202,17 @@ export default function Home() {
       return;
     }
 
+    editAbortRef.current?.abort();
+    const controller = new AbortController();
+    editAbortRef.current = controller;
+    const generation = editGenerationRef.current + 1;
+    editGenerationRef.current = generation;
+    const isCurrent = () =>
+      editGenerationRef.current === generation && !controller.signal.aborted;
+    const updateProgress = (nextProgress: number) => {
+      if (isCurrent()) setProgress(nextProgress);
+    };
+
     setEditError("");
     setIsHighAccuracyRun(false);
     setProgress(4);
@@ -1118,11 +1220,13 @@ export default function Home() {
     let newlyReservedUsage: string | null = null;
 
     try {
-      newlyReservedUsage = await reserveVideoUsage(file);
-      usageReservationRef.current = newlyReservedUsage;
-      setProgress(14);
-      const extracted = await extractNarrationFrames(file);
-      setProgress(36);
+      newlyReservedUsage = await reserveVideoUsage(file, controller.signal);
+      throwIfProcessingAborted(controller.signal);
+      rememberUsageReservation(newlyReservedUsage);
+      updateProgress(14);
+      const extracted = await extractNarrationFrames(file, 6, controller.signal);
+      throwIfProcessingAborted(controller.signal);
+      updateProgress(36);
 
       let nextPlan = await requestNarrationPlan({
         frames: extracted.frames,
@@ -1132,12 +1236,15 @@ export default function Home() {
         style: narrationStyle,
         sourceDuration: extracted.duration,
         usageReservationId: newlyReservedUsage,
+        signal: controller.signal,
       });
-      setProgress(68);
+      throwIfProcessingAborted(controller.signal);
+      updateProgress(68);
       let audio = await requestNarrationSpeech(
         nextPlan.script,
         narrationStyle,
         newlyReservedUsage,
+        controller.signal,
       );
       let audioDuration = await getNarrationAudioDuration(audio);
       const maximumDuration = Math.max(
@@ -1149,7 +1256,7 @@ export default function Home() {
         audioDuration >
         maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
       ) {
-        setProgress(76);
+        updateProgress(76);
         const timingScale = Math.max(
           0.55,
           Math.min(0.94, (maximumDuration / audioDuration) * 0.9),
@@ -1164,11 +1271,13 @@ export default function Home() {
           usageReservationId: newlyReservedUsage,
           timingScale,
           previousScript: nextPlan.script,
+          signal: controller.signal,
         });
         audio = await requestNarrationSpeech(
           nextPlan.script,
           narrationStyle,
           newlyReservedUsage,
+          controller.signal,
         );
         audioDuration = await getNarrationAudioDuration(audio);
       }
@@ -1180,7 +1289,8 @@ export default function Home() {
           `AI音声が${Math.ceil(audioDuration)}秒になり、${Math.floor(maximumDuration)}秒以内へ自然に収まりませんでした。台本を短くしてもう一度お試しください。`,
         );
       }
-      setProgress(90);
+      throwIfProcessingAborted(controller.signal);
+      updateProgress(90);
       const timeline = buildNarrationTimeline(
         nextPlan.segments,
         extracted.duration,
@@ -1198,16 +1308,21 @@ export default function Home() {
       if (newlyReservedUsage) {
         await updateVideoUsage("complete", newlyReservedUsage);
       }
+      if (!isCurrent()) return;
       setProgress(100);
       window.setTimeout(() => {
+        if (!isCurrent()) return;
         setPreviewMode("after");
         setStage("result");
       }, 320);
     } catch (error) {
       if (newlyReservedUsage) {
         await updateVideoUsage("release", newlyReservedUsage);
-        usageReservationRef.current = null;
+        if (usageReservationRef.current === newlyReservedUsage) {
+          rememberUsageReservation(null);
+        }
       }
+      if (!isCurrent()) return;
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -1215,6 +1330,8 @@ export default function Home() {
           : "AIナレーションを生成できませんでした。もう一度お試しください。",
       );
       setStage("setup");
+    } finally {
+      if (editAbortRef.current === controller) editAbortRef.current = null;
     }
   }
 
@@ -1256,6 +1373,9 @@ export default function Home() {
   function reset() {
     transferAbortRef.current?.abort();
     transferAbortRef.current = null;
+    editAbortRef.current?.abort();
+    editAbortRef.current = null;
+    editGenerationRef.current += 1;
     setFile(null);
     setStage("start");
     setProgress(0);
@@ -1268,7 +1388,7 @@ export default function Home() {
     setNarrationOriginalAudio(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    usageReservationRef.current = null;
+    rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1307,25 +1427,9 @@ export default function Home() {
     }
   }
 
-  function openTransfer() {
-    setStage("transfer");
-    setTransferError("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function openTransferWithCurrentVideo() {
-    if (file) {
-      chooseTransferFile(file);
-    }
-    openTransfer();
-  }
-
   function chooseTransferFile(selected?: File) {
     if (!selected) return;
-    const looksLikeVideo =
-      selected.type.startsWith("video/") ||
-      /\.(mp4|mov|m4v|webm)$/i.test(selected.name);
-    if (!looksLikeVideo) {
+    if (!isSupportedVideoFile(selected)) {
       setTransferError("MP4・MOV・M4V・WebMの動画を選んでください。");
       return;
     }
@@ -1391,7 +1495,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260730-trial-session">
+    <main className="siteShell" data-build="20260802-release-hardening">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -1413,7 +1517,7 @@ export default function Home() {
         ) : (
           <div className="workspaceStatus">
             <span className="statusDot" />
-            限定プレビュー
+            動画を編集中
           </div>
         )}
 
@@ -1424,11 +1528,6 @@ export default function Home() {
           {stage !== "start" && stage !== "transfer" && (
             <button className="quietButton" onClick={reset}>
               新しく作る
-            </button>
-          )}
-          {stage === "start" && (
-            <button className="transferButton" onClick={openTransfer}>
-              動画を預ける
             </button>
           )}
           <button
@@ -1450,7 +1549,7 @@ export default function Home() {
         ref={inputRef}
         className="visuallyHidden"
         type="file"
-        accept="video/mp4,video/quicktime,video/webm,video/*"
+        accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
         onChange={(event) => chooseFile(event.target.files?.[0])}
       />
       <input
@@ -1465,7 +1564,6 @@ export default function Home() {
         <Landing
           openPicker={() => inputRef.current?.click()}
           useSample={useSample}
-          openTransfer={openTransfer}
           startCheckout={startCheckout}
           billingBusyPlan={billingBusyPlan}
           billingError={billingError}
@@ -1520,6 +1618,7 @@ export default function Home() {
           progress={progress}
           highAccuracy={isHighAccuracyRun}
           narration={audioMode === "narration"}
+          cancel={reset}
         />
       )}
 
@@ -1538,7 +1637,7 @@ export default function Home() {
           length={length}
           notify={notify}
           reset={reset}
-          openTransfer={openTransferWithCurrentVideo}
+          chooseVideo={() => inputRef.current?.click()}
           regenerateHighAccuracy={() => startEditing(true)}
           usedHighAccuracy={usedHighAccuracy}
           narrationPlan={narrationPlan}
@@ -1546,6 +1645,7 @@ export default function Home() {
           narrationAudioUrl={narrationAudioUrl}
           narrationStyle={narrationStyle}
           narrationOriginalAudio={narrationOriginalAudio}
+          usageReservationId={usageReservationId}
           setNarrationOriginalAudio={setNarrationOriginalAudio}
           regenerateNarration={regenerateNarration}
         />
@@ -1559,10 +1659,10 @@ export default function Home() {
         <div className="footerLinks">
           <a href="#how">使い方</a>
           <a href="#price">料金</a>
-          <span>プライバシー</span>
+          <a href="/privacy">プライバシー</a>
           <a href="/terms">利用規約</a>
         </div>
-        <small>© 2026 撮るだけリール・限定プレビュー</small>
+        <small>© 2026 撮るだけリール</small>
       </footer>
 
       {toast && (
@@ -1790,14 +1890,12 @@ function TransferPortal({
 function Landing({
   openPicker,
   useSample,
-  openTransfer,
   startCheckout,
   billingBusyPlan,
   billingError,
 }: {
   openPicker: () => void;
   useSample: () => void;
-  openTransfer: () => void;
   startCheckout: (plan: "light" | "one_time") => void;
   billingBusyPlan: "light" | "one_time" | null;
   billingError: string;
@@ -1834,10 +1932,6 @@ function Landing({
             <span>✓ 体験版では動画を送信しません</span>
             <span>✓ スマホ動画対応</span>
           </div>
-          <button className="transferLink" onClick={openTransfer}>
-            <span>実際のテスト動画を開発者へ送る</span>
-            <i>安全な受け渡し画面へ →</i>
-          </button>
         </div>
 
         <div className="heroVisual" aria-label="編集前と編集後のイメージ">
@@ -2025,7 +2119,7 @@ function Landing({
             <ul>
               <li>✓ 自動カット・自動テロップ</li>
               <li>✓ 1動画90秒まで</li>
-              <li>✓ 低画質・透かしあり</li>
+              <li>✓ 標準画質・透かしなし</li>
             </ul>
             <button onClick={openPicker}>無料で動画を試す</button>
           </article>
@@ -2453,11 +2547,13 @@ function Processing({
   progress,
   highAccuracy,
   narration,
+  cancel,
 }: {
   file: File | null;
   progress: number;
   highAccuracy: boolean;
   narration: boolean;
+  cancel: () => void;
 }) {
   const steps = narration
     ? [
@@ -2534,6 +2630,9 @@ function Processing({
               </div>
             ))}
           </div>
+          <button className="quietButton" type="button" onClick={cancel}>
+            処理を中止して戻る
+          </button>
         </div>
       </div>
     </section>
@@ -2554,7 +2653,7 @@ function ResultWorkspace({
   length,
   notify,
   reset,
-  openTransfer,
+  chooseVideo,
   regenerateHighAccuracy,
   usedHighAccuracy,
   narrationPlan,
@@ -2562,6 +2661,7 @@ function ResultWorkspace({
   narrationAudioUrl,
   narrationStyle,
   narrationOriginalAudio,
+  usageReservationId,
   setNarrationOriginalAudio,
   regenerateNarration,
 }: {
@@ -2578,7 +2678,7 @@ function ResultWorkspace({
   length: number;
   notify: (message: string) => void;
   reset: () => void;
-  openTransfer: () => void;
+  chooseVideo: () => void;
   regenerateHighAccuracy: () => Promise<void>;
   usedHighAccuracy: boolean;
   narrationPlan: NarrationPlan | null;
@@ -2586,6 +2686,7 @@ function ResultWorkspace({
   narrationAudioUrl: string;
   narrationStyle: NarrationStyle;
   narrationOriginalAudio: NarrationOriginalAudioLevel;
+  usageReservationId: string | null;
   setNarrationOriginalAudio: (
     percent: NarrationOriginalAudioLevel,
   ) => void;
@@ -2858,6 +2959,9 @@ function ResultWorkspace({
     if (narrationAudioUrl) {
       void ensurePreviewNarrationEngine(false).catch(() => undefined);
     }
+    // The engine helpers deliberately read the latest media refs; a URL change
+    // is the only lifecycle boundary that should recreate this preparation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [narrationAudioUrl]);
 
   useEffect(
@@ -2881,6 +2985,8 @@ function ResultWorkspace({
         "visibilitychange",
         handleVisibilityChange,
       );
+    // Visibility handling is registered once and operates on current refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2999,6 +3105,9 @@ function ResultWorkspace({
 
     scheduleNextFrame();
     return () => window.cancelAnimationFrame(animationFrame);
+    // Playback helpers act on current refs; these values are the animation
+    // lifecycle boundaries and avoid restarting the loop for unrelated UI state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExporting, isPlaying, narrationPlan, previewRanges]);
 
   function movePreviewOutOfCut(
@@ -3145,10 +3254,7 @@ function ResultWorkspace({
     }
   }
 
-  async function ensurePreviewNarrationEngine(shouldResume = true) {
-    if (!narrationAudioUrl) {
-      throw new Error("AI音声を読み込めませんでした。");
-    }
+  async function ensureVideoAudioEngine(shouldResume = true) {
     let engine = previewNarrationEngineRef.current;
     if (!engine || engine.context.state === "closed") {
       const AudioContextConstructor = getAudioContextConstructor();
@@ -3208,13 +3314,28 @@ function ResultWorkspace({
       originalGain.connect(engine.context.destination);
       engine.originalGain = originalGain;
       engine.mediaSource = mediaSource;
-      applyNarrationPreviewMix(video, narrationOriginalAudio);
+      if (narrationPlan) {
+        applyNarrationPreviewMix(video, narrationOriginalAudio);
+      } else {
+        originalGain.gain.setValueAtTime(1, engine.context.currentTime);
+      }
     }
 
-    const resumePromise =
-      shouldResume && engine.context.state !== "running"
-        ? engine.context.resume()
-        : Promise.resolve();
+    if (shouldResume && engine.context.state !== "running") {
+      await engine.context.resume();
+    }
+    if (shouldResume && engine.context.state !== "running") {
+      throw new Error("動画の音声処理を開始できませんでした。");
+    }
+    return engine;
+  }
+
+  async function ensurePreviewNarrationEngine(shouldResume = true) {
+    if (!narrationAudioUrl) {
+      throw new Error("AI音声を読み込めませんでした。");
+    }
+    const engine = await ensureVideoAudioEngine(shouldResume);
+    const resumePromise = Promise.resolve();
     if (engine.url === narrationAudioUrl && engine.buffer) {
       await resumePromise;
       return engine;
@@ -3332,6 +3453,17 @@ function ResultWorkspace({
   ) {
     const video = videoRef.current;
     if (!video) return false;
+    const existingAudioEngine = previewNarrationEngineRef.current;
+    if (
+      !narrationPlan &&
+      existingAudioEngine?.mediaSource &&
+      existingAudioEngine.context.state !== "running"
+    ) {
+      await existingAudioEngine.context.resume().catch(() => undefined);
+      if ((existingAudioEngine.context.state as AudioContextState) !== "running") {
+        throw new Error("動画の音声を再開できませんでした。");
+      }
+    }
     const safeEditedSeconds = Math.max(
       0,
       Math.min(requestedEditedSeconds, editDuration),
@@ -3523,9 +3655,13 @@ function ResultWorkspace({
     video: HTMLVideoElement,
     target: number,
   ) {
+    const maximumTarget = Number.isFinite(video.duration)
+      ? Math.max(0, video.duration - 0.02)
+      : Math.max(0, target);
+    const safeTarget = Math.max(0, Math.min(target, maximumTarget));
     if (
       !video.seeking &&
-      Math.abs(video.currentTime - target) <= 0.015
+      Math.abs(video.currentTime - safeTarget) <= 0.015
     ) {
       return true;
     }
@@ -3554,7 +3690,7 @@ function ResultWorkspace({
         }
         if (
           !video.seeking &&
-          Math.abs(video.currentTime - target) <= 0.12
+          Math.abs(video.currentTime - safeTarget) <= 0.12
         ) {
           finish(true);
         }
@@ -3563,7 +3699,7 @@ function ResultWorkspace({
 
       previewInternalSeekRef.current = {
         id,
-        target,
+        target: safeTarget,
         startedAt: performance.now(),
         cancel: () => finish(false),
       };
@@ -3571,11 +3707,11 @@ function ResultWorkspace({
       video.addEventListener("error", handleError);
       timeout = window.setTimeout(() => {
         finish(
-          !video.seeking && Math.abs(video.currentTime - target) <= 0.18,
+          !video.seeking && Math.abs(video.currentTime - safeTarget) <= 0.18,
         );
       }, 2_000);
       try {
-        video.currentTime = target;
+        video.currentTime = safeTarget;
         window.queueMicrotask(inspectPosition);
       } catch {
         finish(false);
@@ -3755,6 +3891,7 @@ function ResultWorkspace({
         clientSessionId,
         termsVersion: NARRATION_TERMS_VERSION,
         confirmed: true,
+        usageReservationId,
       }),
     });
     await readApiResponse<ApiPayload & { recorded?: boolean }>(
@@ -4181,16 +4318,9 @@ function ResultWorkspace({
       return;
     }
 
-    const capturableVideo = video as HTMLVideoElement & {
-      captureStream?: () => MediaStream;
-      mozCaptureStream?: () => MediaStream;
-    };
-    const captureVideoStream =
-      capturableVideo.captureStream ?? capturableVideo.mozCaptureStream;
-
-    const usePortableMp4Exporter =
-      typeof MediaRecorder === "undefined" ||
-      typeof HTMLCanvasElement.prototype.captureStream !== "function";
+    const canUseLegacyRecorder =
+      typeof MediaRecorder !== "undefined" &&
+      typeof HTMLCanvasElement.prototype.captureStream === "function";
 
     isExportingRef.current = true;
     setIsExporting(true);
@@ -4216,7 +4346,6 @@ function ResultWorkspace({
     narrationSampleAudioRef.current?.pause();
     let animationFrame = 0;
     let keepDrawing = true;
-    let sourceStream: MediaStream | null = null;
     let outputStream: MediaStream | null = null;
     let exportAudioContext: AudioContext | null = preparedAudioContext;
     let exportNarrationBuffer: AudioBuffer | null = null;
@@ -4281,7 +4410,7 @@ function ResultWorkspace({
     };
 
     try {
-      if (usePortableMp4Exporter) {
+      try {
         let portableNarrationBuffer: AudioBuffer | null = null;
         if (narrationPlan && narrationAudioUrl) {
           if (!exportAudioContext) {
@@ -4324,6 +4453,13 @@ function ResultWorkspace({
         setExportedVideoRevision(exportInputRevision);
         notify("動画ができました。下の「動画を保存・共有」を押してください");
         return;
+      } catch (portableExportError) {
+        if (!canUseLegacyRecorder) throw portableExportError;
+        console.warn(
+          "Portable MP4 export was unavailable; using the browser recorder fallback.",
+          portableExportError,
+        );
+        setExportProgress(0);
       }
 
       video.pause();
@@ -4366,22 +4502,23 @@ function ResultWorkspace({
         }
         exportNarrationBuffer = previewEngine.buffer;
       } else {
-        if (!exportAudioContext) {
-          exportAudioContext = await createRunningNarrationAudioContext();
+        const videoAudioEngine = await ensureVideoAudioEngine(true);
+        if (
+          exportAudioContext &&
+          exportAudioContext !== videoAudioEngine.context
+        ) {
+          await exportAudioContext.close().catch(() => undefined);
         }
-        try {
-          exportOriginalAudioSource =
-            exportAudioContext.createMediaElementSource(video);
-        } catch {
-          if (captureVideoStream) {
-            sourceStream = captureVideoStream.call(capturableVideo);
-            const audioTracks = sourceStream.getAudioTracks();
-            if (audioTracks.length) {
-              exportOriginalAudioSource = exportAudioContext.createMediaStreamSource(
-                new MediaStream(audioTracks),
-              );
-            }
-          }
+        exportAudioContext = videoAudioEngine.context;
+        shouldCloseExportAudioContext = false;
+        exportOriginalAudioSource = videoAudioEngine.mediaSource;
+        exportPreviewOriginalGain = videoAudioEngine.originalGain;
+        if (exportPreviewOriginalGain) {
+          exportPreviewOriginalGainValue = exportPreviewOriginalGain.gain.value;
+          exportPreviewOriginalGain.gain.setValueAtTime(
+            0,
+            exportAudioContext.currentTime,
+          );
         }
       }
 
@@ -4667,7 +4804,6 @@ function ResultWorkspace({
           // The recorder may already be stopping after an asynchronous error.
         }
       }
-      sourceStream?.getTracks().forEach((track) => track.stop());
       outputStream?.getTracks().forEach((track) => track.stop());
       if (activeExportNarrationSource) {
         try {
@@ -5476,7 +5612,7 @@ function ResultWorkspace({
               動画を選ぶと、音声を解析して時刻付きの日本語字幕を自動生成します。
             </p>
           </div>
-          <button onClick={openTransfer}>
+          <button onClick={chooseVideo}>
             <span>動画を選ぶ</span>
             <i>→</i>
           </button>
@@ -5540,7 +5676,7 @@ function ResultWorkspace({
               <i>{isExporting ? "●" : "↓"}</i>
             </button>
           ) : (
-            <button className="mainCta reviewCta" onClick={openTransfer}>
+            <button className="mainCta reviewCta" onClick={chooseVideo}>
               <span>実際の動画で試す</span>
               <i>→</i>
             </button>

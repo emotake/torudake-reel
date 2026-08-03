@@ -28,6 +28,21 @@ export const videoTransfers = sqliteTable(
   ],
 );
 
+export const videoTransferParts = sqliteTable(
+  "video_transfer_parts",
+  {
+    id: text("id").primaryKey(),
+    transferId: text("transfer_id").notNull(),
+    partNumber: integer("part_number").notNull(),
+    size: integer("size").notNull(),
+    etag: text("etag"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("video_transfer_parts_transfer_id_idx").on(table.transferId),
+  ],
+);
+
 export const users = sqliteTable(
   "users",
   {
@@ -150,9 +165,16 @@ export const operatorUsageOperations = sqliteTable(
     id: text("id").primaryKey(),
     reservationId: text("reservation_id").notNull(),
     operation: text("operation", {
-      enum: ["transcribe", "narration_script", "narration_speech"],
+      enum: [
+        "transfer_upload",
+        "transcribe",
+        "narration_script",
+        "narration_speech",
+        "narration_disclosure",
+      ],
     }).notNull(),
     count: integer("count").notNull().default(1),
+    successfulCount: integer("successful_count").notNull().default(0),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
@@ -160,6 +182,45 @@ export const operatorUsageOperations = sqliteTable(
       table.reservationId,
     ),
     index("operator_usage_operations_updated_at_idx").on(table.updatedAt),
+  ],
+);
+
+export const usageObservedDurations = sqliteTable(
+  "usage_observed_durations",
+  {
+    reservationId: text("reservation_id").primaryKey(),
+    observedMilliseconds: integer("observed_milliseconds")
+      .notNull()
+      .default(0),
+    blockedAt: integer("blocked_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("usage_observed_durations_blocked_at_idx").on(table.blockedAt),
+  ],
+);
+
+export const usageOperationLeases = sqliteTable(
+  "usage_operation_leases",
+  {
+    id: text("id").primaryKey(),
+    reservationId: text("reservation_id").notNull(),
+    operation: text("operation", {
+      enum: [
+        "transfer_upload",
+        "transcribe",
+        "narration_script",
+        "narration_speech",
+        "narration_disclosure",
+      ],
+    }).notNull(),
+    leaseToken: text("lease_token").notNull(),
+    acquiredAt: integer("acquired_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("usage_operation_leases_expires_at_idx").on(table.expiresAt),
   ],
 );
 
@@ -176,6 +237,36 @@ export const operatorEnrollmentAttempts = sqliteTable(
     index("operator_enrollment_attempts_updated_at_idx").on(
       table.updatedAt,
     ),
+  ],
+);
+
+export const trialSessions = sqliteTable(
+  "trial_sessions",
+  {
+    sessionHash: text("session_hash").primaryKey(),
+    createdAt: integer("created_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [index("trial_sessions_expires_at_idx").on(table.expiresAt)],
+);
+
+export const trialIssuanceFingerprints = sqliteTable(
+  "trial_issuance_fingerprints",
+  {
+    fingerprintHash: text("fingerprint_hash").primaryKey(),
+    networkHash: text("network_hash").notNull(),
+    sessionHash: text("session_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("trial_issuance_session_hash_unique").on(table.sessionHash),
+    index("trial_issuance_network_created_idx").on(
+      table.networkHash,
+      table.createdAt,
+    ),
+    index("trial_issuance_created_at_idx").on(table.createdAt),
   ],
 );
 

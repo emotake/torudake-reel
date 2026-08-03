@@ -1,4 +1,5 @@
 import type { InputAudioTrack } from "mediabunny";
+import { getAudioCodecPriority } from "./transcription-media";
 
 const DEFAULT_FRAME_RATE = 30;
 const MAX_FRAME_RATE = 30;
@@ -9,6 +10,15 @@ const DEFAULT_AUDIO_BITRATE = 192_000;
 const OUTPUT_SAMPLE_RATE = 48_000;
 const OUTPUT_CHANNELS = 2;
 const RANGE_EPSILON = 1e-7;
+export const MAX_SAFE_WHOLE_FILE_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
+
+export function canUseWholeFileAudioDecode(fileSize: number) {
+  return (
+    Number.isFinite(fileSize) &&
+    fileSize >= 0 &&
+    fileSize <= MAX_SAFE_WHOLE_FILE_AUDIO_DECODE_BYTES
+  );
+}
 
 export type PortableVideoRange = Readonly<{
   start: number;
@@ -40,6 +50,32 @@ export type PortableAudioSlicePlacement = Readonly<{
   offset: number;
   duration: number;
 }>;
+
+export type PortableAudioTrackCandidate<T> = Readonly<{
+  track: T;
+  codec: string | null;
+  decodable: boolean;
+  primary: boolean;
+}>;
+
+export function selectPreferredPortableAudioTrack<T>(
+  candidates: readonly PortableAudioTrackCandidate<T>[],
+) {
+  const preferredDecodable = candidates
+    .filter((candidate) => candidate.decodable)
+    .sort(
+      (left, right) =>
+        getAudioCodecPriority(left.codec) -
+        getAudioCodecPriority(right.codec),
+    )[0];
+
+  return (
+    preferredDecodable?.track ??
+    candidates.find((candidate) => candidate.primary)?.track ??
+    candidates[0]?.track ??
+    null
+  );
+}
 
 export type PortableVideoExportOptions = Readonly<{
   file: File;
@@ -404,8 +440,22 @@ async function renderMixedAudio(
     signal?: AbortSignal;
   },
 ): Promise<AudioBuffer | null> {
-  const audioTrack =
-    options.originalGain > 0 ? await input.getPrimaryAudioTrack() : null;
+  let audioTrack: InputAudioTrack | null = null;
+  if (options.originalGain > 0) {
+    const [audioTracks, primaryAudioTrack] = await Promise.all([
+      input.getAudioTracks(),
+      input.getPrimaryAudioTrack(),
+    ]);
+    const candidates = await Promise.all(
+      audioTracks.map(async (track) => ({
+        track,
+        codec: await track.getCodec().catch(() => null),
+        decodable: await track.canDecode().catch(() => false),
+        primary: track === primaryAudioTrack,
+      })),
+    );
+    audioTrack = selectPreferredPortableAudioTrack(candidates);
+  }
   if (!audioTrack && !options.narrationBuffer) return null;
 
   const OfflineAudioContextConstructor = getOfflineAudioContextConstructor();
@@ -443,6 +493,13 @@ async function renderMixedAudio(
         throw new Error("No source audio samples were decoded.");
       }
     } catch (webCodecsError) {
+      if (!canUseWholeFileAudioDecode(options.file.size)) {
+        throw new PortableVideoExportUnsupportedError(
+          "audio-decode",
+          "この端末では大容量動画の元音声を安全に処理できません。動画を100MB以下に圧縮するか、PC版Chromeで書き出してください。",
+          { cause: webCodecsError },
+        );
+      }
       try {
         const sourceBytes = await options.file.arrayBuffer();
         throwIfAborted(options.signal);
