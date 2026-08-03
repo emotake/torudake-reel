@@ -72,13 +72,12 @@ test("keeps the operator enrollment page out of search results", async () => {
   assert.doesNotMatch(html, /OPERATOR_ENROLLMENT_CODE/);
 });
 
-test("shows a safe account message when public authentication is unavailable", async () => {
+test("loads the passkey account screen without a broken ChatGPT sign-in route", async () => {
   const response = await render("/account");
   assert.equal(response.status, 200);
   const html = await response.text();
 
-  assert.match(html, /アカウント機能を安全に準備しています/);
-  assert.match(html, /購入と決済管理を一時停止/);
+  assert.match(html, /利用状況を確認中/);
   assert.doesNotMatch(html, /\/signin-with-chatgpt/);
 });
 

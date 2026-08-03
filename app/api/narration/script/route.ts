@@ -55,7 +55,7 @@ function outputText(payload: OpenAIResponse) {
 }
 
 async function safetyIdentifier(request: Request) {
-  const user = getCurrentUser(request);
+  const user = await getCurrentUser(request);
   const source =
     user?.email ??
     request.headers.get("cf-connecting-ip") ??

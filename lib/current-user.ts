@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
+import { getAccountIdentity } from "./account-auth";
 
 export type CurrentUser = {
+  id: string | null;
   email: string;
+  billingEmail: string | null;
   fullName: string | null;
 };
 
@@ -24,7 +27,7 @@ export function isSitesAuthenticationTrusted() {
   return authenticationEnv.TRUST_SITES_AUTH_HEADERS?.trim() === "true";
 }
 
-export function getCurrentUser(request: Request): CurrentUser | null {
+export async function getCurrentUser(request: Request): Promise<CurrentUser | null> {
   if (isSitesAuthenticationTrusted()) {
     const email = request.headers
       .get(USER_EMAIL_HEADER)
@@ -38,9 +41,12 @@ export function getCurrentUser(request: Request): CurrentUser | null {
           "percent-encoded-utf-8"
           ? safeDecode(encodedName)
           : null;
-      return { email, fullName };
+      return { id: null, email, billingEmail: email, fullName };
     }
   }
+
+  const account = await getAccountIdentity(request);
+  if (account) return account;
 
   // Anonymous identities are accepted only through getUsagePrincipal(),
   // which verifies that the opaque cookie was issued and registered in D1.
@@ -69,7 +75,7 @@ export function authenticationUnavailable() {
   return Response.json(
     {
       error:
-        "安全なアカウント認証を準備中のため、現在このURLでは決済を利用できません。この操作では新しい決済は開始されていません。",
+        "アカウント認証を現在利用できません。少し待ってからお試しください。",
       code: "authentication_temporarily_unavailable",
     },
     { status: 503 },

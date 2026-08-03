@@ -48,6 +48,7 @@ export const users = sqliteTable(
   {
     id: text("id").primaryKey(),
     email: text("email").notNull(),
+    billingEmail: text("billing_email"),
     fullName: text("full_name"),
     stripeCustomerId: text("stripe_customer_id"),
     createdAt: integer("created_at").notNull(),
@@ -56,6 +57,65 @@ export const users = sqliteTable(
   (table) => [
     uniqueIndex("users_email_unique").on(table.email),
     uniqueIndex("users_stripe_customer_id_unique").on(table.stripeCustomerId),
+  ],
+);
+
+export const accountPasskeys = sqliteTable(
+  "account_passkeys",
+  {
+    credentialId: text("credential_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    counter: integer("counter").notNull().default(0),
+    transports: text("transports"),
+    deviceType: text("device_type").notNull(),
+    backedUp: integer("backed_up", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+  },
+  (table) => [index("account_passkeys_user_id_idx").on(table.userId)],
+);
+
+export const accountAuthChallenges = sqliteTable(
+  "account_auth_challenges",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    challenge: text("challenge").notNull(),
+    ceremony: text("ceremony", {
+      enum: ["registration", "authentication"],
+    }).notNull(),
+    userId: text("user_id"),
+    expectedOrigin: text("expected_origin").notNull(),
+    rpId: text("rp_id").notNull(),
+    networkHash: text("network_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    consumedAt: integer("consumed_at"),
+  },
+  (table) => [
+    index("account_auth_challenges_expires_at_idx").on(table.expiresAt),
+    index("account_auth_challenges_network_created_idx").on(
+      table.networkHash,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const accountSessions = sqliteTable(
+  "account_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    index("account_sessions_user_id_idx").on(table.userId),
+    index("account_sessions_expires_at_idx").on(table.expiresAt),
   ],
 );
 

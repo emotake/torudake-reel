@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "確認内容が正しくありません。" }, { status: 400 });
   }
 
-  let currentUser = getCurrentUser(request);
+  let currentUser = await getCurrentUser(request);
   let authorizedReservationId: string | null = null;
   if (isUsageEnforcementEnabled()) {
     const principal = await getUsagePrincipal(request, { allowTrial: true });

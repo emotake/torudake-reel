@@ -73,23 +73,35 @@ export async function getOrCreateBillingUser(currentUser: CurrentUser) {
   const existing = await db
     .select()
     .from(users)
-    .where(eq(users.email, currentUser.email))
+    .where(
+      currentUser.id
+        ? eq(users.id, currentUser.id)
+        : eq(users.email, currentUser.email),
+    )
     .limit(1);
 
   if (existing[0]) {
+    const billingEmail = currentUser.billingEmail ?? existing[0].billingEmail;
     await db
       .update(users)
       .set({
         fullName: currentUser.fullName,
+        billingEmail,
         updatedAt: now,
       })
       .where(eq(users.id, existing[0].id));
-    return { ...existing[0], fullName: currentUser.fullName, updatedAt: now };
+    return {
+      ...existing[0],
+      fullName: currentUser.fullName,
+      billingEmail,
+      updatedAt: now,
+    };
   }
 
   const user = {
-    id: crypto.randomUUID(),
+    id: currentUser.id ?? crypto.randomUUID(),
     email: currentUser.email,
+    billingEmail: currentUser.billingEmail,
     fullName: currentUser.fullName,
     stripeCustomerId: null,
     createdAt: now,
@@ -119,6 +131,24 @@ export async function setStripeCustomerId(
       updatedAt: Math.floor(Date.now() / 1000),
     })
     .where(eq(users.id, userId));
+}
+
+export async function setStripeCustomerIdentity(
+  userId: string,
+  values: { stripeCustomerId: string; billingEmail?: string | null; fullName?: string | null },
+) {
+  const update: {
+    stripeCustomerId: string;
+    updatedAt: number;
+    billingEmail?: string | null;
+    fullName?: string | null;
+  } = {
+    stripeCustomerId: values.stripeCustomerId,
+    updatedAt: Math.floor(Date.now() / 1000),
+  };
+  if (values.billingEmail !== undefined) update.billingEmail = values.billingEmail;
+  if (values.fullName !== undefined) update.fullName = values.fullName;
+  await getDb().update(users).set(update).where(eq(users.id, userId));
 }
 
 export async function getBillingUserByStripeCustomer(

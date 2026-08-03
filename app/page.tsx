@@ -1406,8 +1406,7 @@ export default function Home() {
         }),
       });
       if (response.status === 401) {
-        const continuePath = `/account?checkout=${plan}`;
-        window.location.href = `/signin-with-chatgpt?return_to=${encodeURIComponent(continuePath)}`;
+        window.location.href = `/account?checkout=${plan}`;
         return;
       }
       const payload = await readApiResponse<

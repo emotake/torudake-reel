@@ -4,6 +4,11 @@ import {
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_TERMS_VERSION,
 } from "../../lib/narration";
+import {
+  LIGHT_MONTHLY_PRICE_JPY,
+  LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
+} from "../../lib/billing-policy";
 
 export const metadata: Metadata = {
   title: "利用規約｜撮るだけリール",
@@ -68,7 +73,26 @@ export default function TermsPage() {
       </article>
 
       <article>
-        <h2>5. 生成結果とサービス運営</h2>
+        <h2>5. 有料プランとお支払い</h2>
+        <ul>
+          <li>
+            月{LIGHT_MONTHLY_VIDEO_LIMIT}本プランは月額
+            {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
+          </li>
+          <li>
+            1本購入は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。
+          </li>
+          <li>
+            支払いと解約はStripeの決済画面およびアカウント画面から行います。月額プランを解約した場合、支払済み期間の終了時に月額利用枠が終了します。
+          </li>
+          <li>
+            デジタルサービスの性質上、利用済みの利用枠は、法令上必要な場合または本サービス側の不具合が認められる場合を除き返金対象外です。
+          </li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>6. 生成結果とサービス運営</h2>
         <p>
           AIによる生成結果は常に正確または完全とは限りません。本サービスは、確認画面、開示文の自動追加、確認記録など、適切な利用を支える合理的な仕組みを継続して整備します。
         </p>

@@ -7,32 +7,52 @@ import {
   getCurrentUser,
   isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
-import { isBillingConfigured } from "../../../../lib/stripe";
+import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
+import {
+  isBillingConfigured,
+  getStripeReadiness,
+  stripeBillingMode,
+} from "../../../../lib/stripe";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const authenticationAvailable = isSitesAuthenticationTrusted();
+  const authenticationAvailable =
+    isSitesAuthenticationTrusted() || isPasskeyAuthenticationConfigured();
   const stripeConfigured = isBillingConfigured();
   const configured = authenticationAvailable && stripeConfigured;
-  const currentUser = getCurrentUser(request);
+  const billingMode = stripeBillingMode();
+  const currentUser = await getCurrentUser(request);
   if (!currentUser) {
     return privateJson({
       configured,
       authenticationAvailable,
+      billingMode,
       authenticated: false,
     });
   }
 
   try {
+    const readiness = stripeConfigured
+      ? await getStripeReadiness()
+      : null;
     const user = await getOrCreateBillingUser(currentUser);
     const status = await getBillingStatusForUser(user.id);
     return privateJson({
-      configured,
+      configured: configured && readiness?.ready === true,
       authenticationAvailable,
+      billingMode,
+      billingReadiness: readiness
+        ? {
+            catalogValid: readiness.catalogValid,
+            chargesEnabled: readiness.chargesEnabled,
+            detailsSubmitted: readiness.detailsSubmitted,
+            problem: readiness.problem,
+          }
+        : null,
       authenticated: true,
       user: {
-        email: user.email,
+        email: user.billingEmail,
         fullName: user.fullName,
         hasStripeCustomer: Boolean(user.stripeCustomerId),
       },

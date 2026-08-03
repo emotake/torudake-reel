@@ -36,6 +36,7 @@ test("keeps billing disabled until every Stripe secret is configured", async () 
   assert.deepEqual(await response.json(), {
     configured: false,
     authenticationAvailable: false,
+    billingMode: "unconfigured",
     authenticated: false,
   });
 
@@ -102,6 +103,7 @@ test("spoofed identity headers cannot activate billing on public hosting", async
   assert.deepEqual(await response.json(), {
     configured: false,
     authenticationAvailable: false,
+    billingMode: "test",
     authenticated: false,
   });
 });
@@ -134,6 +136,7 @@ test("the Cloudflare Pages entry strips identity headers defensively", async () 
   assert.deepEqual(await response.json(), {
     configured: true,
     authenticationAvailable: true,
+    billingMode: "test",
     authenticated: false,
   });
 });

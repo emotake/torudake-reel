@@ -9,8 +9,10 @@ import {
   getCurrentUser,
   isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
+import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
 import {
   isBillingConfigured,
+  getStripeReadiness,
   publicOrigin,
   stripePriceForPlan,
   stripeRequest,
@@ -33,7 +35,14 @@ function isStripePlan(value: unknown): value is StripePlan {
 }
 
 export async function POST(request: Request) {
-  if (!isSitesAuthenticationTrusted()) return authenticationUnavailable();
+  if (
+    !isSitesAuthenticationTrusted() &&
+    !isPasskeyAuthenticationConfigured()
+  ) {
+    return authenticationUnavailable();
+  }
+  const currentUser = await getCurrentUser(request);
+  if (!currentUser) return authenticationRequired();
 
   if (!isBillingConfigured()) {
     return Response.json(
@@ -46,8 +55,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const currentUser = getCurrentUser(request);
-  if (!currentUser) return authenticationRequired();
   if (!isSameOriginMutation(request)) {
     return Response.json(
       {
@@ -69,6 +76,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    const readiness = await getStripeReadiness();
+    if (!readiness.ready) {
+      const message =
+        readiness.problem === "price_mismatch"
+          ? "料金設定を安全に確認できないため、決済を停止しました。運営へお知らせください。"
+          : readiness.problem === "account_not_activated"
+            ? "Stripeの本人確認が完了していないため、決済を開始できません。"
+            : "Stripeの決済設定を確認できませんでした。少し待ってからお試しください。";
+      return Response.json(
+        { error: message, code: readiness.problem ?? "billing_not_ready" },
+        { status: 503 },
+      );
+    }
     const user = await getOrCreateBillingUser(currentUser);
     if (payload.plan === "light") {
       const billingStatus = await getBillingStatusForUser(user.id);
@@ -86,8 +106,8 @@ export async function POST(request: Request) {
     let stripeCustomerId = user.stripeCustomerId;
     if (!stripeCustomerId) {
       const customerParams = new URLSearchParams();
-      customerParams.set("email", user.email);
       customerParams.set("metadata[app_user_id]", user.id);
+      if (user.billingEmail) customerParams.set("email", user.billingEmail);
       if (user.fullName) customerParams.set("name", user.fullName);
       const customer = await stripeRequest<StripeCustomer>(
         "/v1/customers",
@@ -115,7 +135,7 @@ export async function POST(request: Request) {
     sessionParams.set("metadata[plan]", payload.plan);
     sessionParams.set(
       "success_url",
-      `${origin}/account?checkout=success`,
+      `${origin}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     );
     sessionParams.set("cancel_url", `${origin}/account?checkout=cancelled`);
 

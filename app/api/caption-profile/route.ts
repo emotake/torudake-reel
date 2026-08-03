@@ -11,7 +11,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const currentUser = getCurrentUser(request);
+  const currentUser = await getCurrentUser(request);
   if (!currentUser) return authenticationRequired();
 
   try {
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const currentUser = getCurrentUser(request);
+  const currentUser = await getCurrentUser(request);
   if (!currentUser) return authenticationRequired();
 
   let payload: unknown;

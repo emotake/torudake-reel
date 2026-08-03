@@ -3476,10 +3476,13 @@ footer > small {
 
 .accountSignOut,
 .accountSecondaryAction {
+  border: 0;
+  background: transparent;
   color: #17243a;
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .accountIntro {
@@ -3652,6 +3655,35 @@ footer > small {
 }
 
 .accountSignInCard .accountPrimaryAction {
+  width: 100%;
+}
+
+.accountAuthActions {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.accountAuthActions button {
+  width: 100%;
+  border: 0;
+  cursor: pointer;
+}
+
+.accountAuthActions .accountSecondaryAction {
+  border: 1px solid rgba(22, 36, 58, 0.18);
+  color: #17243a;
+  background: white;
+}
+
+.accountAuthActions button:disabled,
+.accountSignOut:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.accountSignInCard .legalBack {
+  display: inline-block;
   margin-top: 24px;
 }
 

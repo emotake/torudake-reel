@@ -29,7 +29,9 @@ export {
 export const OPERATOR_SLOT = "primary";
 
 const OPERATOR_INTERNAL_USER: CurrentUser = {
+  id: null,
   email: "operator-device@internal.torudake.invalid",
+  billingEmail: null,
   fullName: "運営端末",
 };
 
@@ -204,7 +206,7 @@ export async function getUsagePrincipal(
       isOperator: true,
     } as const;
   }
-  const authenticatedUser = getCurrentUser(request);
+  const authenticatedUser = await getCurrentUser(request);
   if (authenticatedUser) {
     return {
       currentUser: authenticatedUser,
@@ -223,7 +225,9 @@ export async function getUsagePrincipal(
     currentUser: trialPrincipalEmail
       ? {
           // Never persist the bearer cookie value in user or transfer records.
+          id: null,
           email: trialPrincipalEmail,
+          billingEmail: null,
           fullName: null,
         }
       : null,

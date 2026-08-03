@@ -17,7 +17,7 @@ test("creates a secure first-party trial session cookie", () => {
   assert.match(cookie, /Secure/);
 });
 
-test("does not turn an unverified trial cookie into a current user", () => {
+test("does not turn an unverified trial cookie into a current user", async () => {
   const request = new Request("https://torudake-reel.pages.dev/", {
     headers: {
       cookie: `another=value; torudake_trial_id=${sessionId}`,
@@ -25,19 +25,19 @@ test("does not turn an unverified trial cookie into a current user", () => {
   });
 
   assert.equal(getTrialSessionId(request), sessionId);
-  assert.equal(getCurrentUser(request), null);
-  assert.equal(getCurrentUser(request), null);
+  assert.equal(await getCurrentUser(request), null);
+  assert.equal(await getCurrentUser(request), null);
 });
 
-test("rejects malformed trial session cookies", () => {
+test("rejects malformed trial session cookies", async () => {
   const request = new Request("https://torudake-reel.pages.dev/", {
     headers: { cookie: "torudake_trial_id=not-a-session" },
   });
   assert.equal(getTrialSessionId(request), null);
-  assert.equal(getCurrentUser(request), null);
+  assert.equal(await getCurrentUser(request), null);
 });
 
-test("does not trust public client-supplied Sites identity headers", () => {
+test("does not trust public client-supplied Sites identity headers", async () => {
   const request = new Request("https://torudake-reel.pages.dev/account", {
     headers: {
       "oai-authenticated-user-email": "victim@example.com",
@@ -46,5 +46,5 @@ test("does not trust public client-supplied Sites identity headers", () => {
     },
   });
 
-  assert.equal(getCurrentUser(request), null);
+  assert.equal(await getCurrentUser(request), null);
 });

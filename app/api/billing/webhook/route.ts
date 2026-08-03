@@ -6,6 +6,7 @@ import {
   getBillingUserByStripeCustomer,
   recordOneTimePurchase,
   setStripeCustomerId,
+  setStripeCustomerIdentity,
   upsertSubscription,
 } from "../../../../lib/billing-store";
 import {
@@ -93,6 +94,11 @@ export async function POST(request: Request) {
       event.type === "customer.subscription.deleted"
     ) {
       await handleSubscriptionChanged(event.data.object);
+    } else if (
+      event.type === "invoice.paid" ||
+      event.type === "invoice.payment_failed"
+    ) {
+      await handleInvoiceChanged(event.data.object);
     }
 
     await finishStripeEvent(event.id);
@@ -120,6 +126,14 @@ async function handleCheckoutCompleted(session: StripeObject) {
     throw new Error("Checkout session identifiers are incomplete.");
   }
   const user = await resolveCheckoutUser(session, customerId);
+  const customerDetails = recordValue(session.customer_details);
+  const billingEmail = normalizedEmail(customerDetails?.email);
+  const billingName = normalizedName(customerDetails?.name);
+  await setStripeCustomerIdentity(user.id, {
+    stripeCustomerId: customerId,
+    ...(billingEmail ? { billingEmail } : {}),
+    ...(billingName ? { fullName: billingName } : {}),
+  });
 
   const mode = stringValue(session.mode);
   if (plan === "light") {
@@ -159,6 +173,17 @@ async function handleCheckoutCompleted(session: StripeObject) {
     stripePaymentIntentId: paymentIntentId,
     stripePriceId: expectedPriceId,
   });
+}
+
+async function handleInvoiceChanged(invoice: StripeObject) {
+  const subscriptionId =
+    objectId(invoice.subscription) ??
+    objectId(recordValue(recordValue(invoice.parent)?.subscription_details)?.subscription);
+  if (!subscriptionId) return;
+  const subscription = await stripeGet<StripeObject>(
+    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  await handleSubscriptionChanged(subscription);
 }
 
 async function resolveCheckoutUser(
@@ -299,6 +324,20 @@ function stringValue(value: unknown) {
 
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedEmail(value: unknown) {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  return email.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ? email
+    : null;
+}
+
+function normalizedName(value: unknown) {
+  if (typeof value !== "string") return null;
+  const name = value.replace(/\s+/g, " ").trim().slice(0, 120);
+  return name || null;
 }
 
 function recordValue(value: unknown): StripeObject | null {

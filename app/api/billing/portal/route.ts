@@ -5,6 +5,7 @@ import {
   getCurrentUser,
   isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
+import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
 import {
   isBillingConfigured,
   publicOrigin,
@@ -17,7 +18,14 @@ type StripePortalSession = {
 };
 
 export async function POST(request: Request) {
-  if (!isSitesAuthenticationTrusted()) return authenticationUnavailable();
+  if (
+    !isSitesAuthenticationTrusted() &&
+    !isPasskeyAuthenticationConfigured()
+  ) {
+    return authenticationUnavailable();
+  }
+  const currentUser = await getCurrentUser(request);
+  if (!currentUser) return authenticationRequired();
 
   if (!isBillingConfigured()) {
     return Response.json(
@@ -25,8 +33,6 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
-  const currentUser = getCurrentUser(request);
-  if (!currentUser) return authenticationRequired();
   if (!isSameOriginMutation(request)) {
     return Response.json(
       {

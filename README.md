@@ -34,6 +34,10 @@ pnpm run test
 `TRUST_SITES_AUTH_HEADERS` は未設定または `false` のままにしてください。
 この値を `true` にできるのは、OpenAI Sitesの認証ディスパッチャー配下だけです。
 
+一般公開環境のアカウント認証にはパスキーを使用します。認証用の秘密鍵は
+利用者の端末から送信されず、サーバーには公開鍵とハッシュ化したセッションだけを
+保存します。D1へ `drizzle/0010_passkey_accounts.sql` を適用してから公開してください。
+
 無料体験の新規発行には、32文字以上のランダムな
 `TRIAL_ISSUANCE_SECRET` が必要です。値はCloudflareのシークレットとして設定し、
 リポジトリへ保存しないでください。
@@ -41,6 +45,12 @@ pnpm run test
 通常の動画編集はR2を使用せず、25MB以下の対応動画を直接音声認識へ送り、
 それを超える動画やMOV/M4Vはブラウザ内で音声だけを分割します。
 R2の `MEDIA` bindingは、公開導線のない開発用ファイル転送APIを使う場合だけ任意です。
+
+Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
+`STRIPE_PRICE_LIGHT_MONTHLY`、`STRIPE_PRICE_ONE_TIME` が必要です。月額価格は
+1,480円・月8本、単品価格は300円・1本としてStripe側の価格を検証し、金額、通貨、
+課金周期のいずれかが異なる場合はCheckoutを開始しません。本番キーを使う場合は、
+Stripeアカウントの本人確認、事業者情報、入金口座を完了してから設定してください。
 
 ## コマンド
 

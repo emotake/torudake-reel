@@ -1,4 +1,8 @@
 import { env } from "cloudflare:workers";
+import {
+  LIGHT_MONTHLY_PRICE_JPY,
+  ONE_TIME_PRICE_JPY,
+} from "./billing-policy";
 
 type StripeEnvironment = {
   STRIPE_SECRET_KEY?: string;
@@ -9,6 +13,37 @@ type StripeEnvironment = {
 };
 
 export type StripePlan = "light" | "one_time";
+
+type StripePrice = {
+  id?: string;
+  active?: boolean;
+  currency?: string;
+  unit_amount?: number | null;
+  type?: string;
+  recurring?: {
+    interval?: string;
+    interval_count?: number;
+    usage_type?: string;
+  } | null;
+};
+
+type StripeAccount = {
+  charges_enabled?: boolean;
+  details_submitted?: boolean;
+};
+
+export type StripeReadiness = {
+  ready: boolean;
+  mode: "live" | "test" | "unconfigured";
+  catalogValid: boolean;
+  chargesEnabled: boolean | null;
+  detailsSubmitted: boolean | null;
+  problem: "not_configured" | "price_mismatch" | "account_not_activated" | "stripe_unreachable" | null;
+};
+
+let cachedReadiness:
+  | { expiresAt: number; value: StripeReadiness }
+  | undefined;
 
 export function getStripeConfig() {
   const stripeEnv = env as typeof env & StripeEnvironment;
@@ -28,6 +63,75 @@ export function isBillingConfigured() {
       config.lightPriceId &&
       config.oneTimePriceId,
   );
+}
+
+export function stripeBillingMode() {
+  const { secretKey } = getStripeConfig();
+  if (secretKey.startsWith("sk_live_")) return "live" as const;
+  if (secretKey.startsWith("sk_test_")) return "test" as const;
+  return "unconfigured" as const;
+}
+
+export async function getStripeReadiness(): Promise<StripeReadiness> {
+  const mode = stripeBillingMode();
+  if (!isBillingConfigured() || mode === "unconfigured") {
+    return {
+      ready: false,
+      mode,
+      catalogValid: false,
+      chargesEnabled: null,
+      detailsSubmitted: null,
+      problem: "not_configured",
+    };
+  }
+  const now = Date.now();
+  if (cachedReadiness && cachedReadiness.expiresAt > now) {
+    return cachedReadiness.value;
+  }
+
+  let value: StripeReadiness;
+  try {
+    const config = getStripeConfig();
+    const [lightPrice, oneTimePrice, account] = await Promise.all([
+      stripeGet<StripePrice>(
+        `/v1/prices/${encodeURIComponent(config.lightPriceId)}`,
+      ),
+      stripeGet<StripePrice>(
+        `/v1/prices/${encodeURIComponent(config.oneTimePriceId)}`,
+      ),
+      stripeGet<StripeAccount>("/v1/account"),
+    ]);
+    const catalogValid =
+      validMonthlyPrice(lightPrice, config.lightPriceId) &&
+      validOneTimePrice(oneTimePrice, config.oneTimePriceId);
+    const chargesEnabled = account.charges_enabled === true;
+    const detailsSubmitted = account.details_submitted === true;
+    const liveAccountReady =
+      mode !== "live" || (chargesEnabled && detailsSubmitted);
+    value = {
+      ready: catalogValid && liveAccountReady,
+      mode,
+      catalogValid,
+      chargesEnabled,
+      detailsSubmitted,
+      problem: !catalogValid
+        ? "price_mismatch"
+        : !liveAccountReady
+          ? "account_not_activated"
+          : null,
+    };
+  } catch {
+    value = {
+      ready: false,
+      mode,
+      catalogValid: false,
+      chargesEnabled: null,
+      detailsSubmitted: null,
+      problem: "stripe_unreachable",
+    };
+  }
+  cachedReadiness = { expiresAt: now + 5 * 60 * 1_000, value };
+  return value;
 }
 
 export function stripePriceForPlan(plan: StripePlan) {
@@ -166,4 +270,28 @@ export function publicOrigin(request: Request) {
 
 function isLocalDevelopmentHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function validMonthlyPrice(price: StripePrice, expectedId: string) {
+  return (
+    price.id === expectedId &&
+    price.active === true &&
+    price.currency?.toLowerCase() === "jpy" &&
+    price.unit_amount === LIGHT_MONTHLY_PRICE_JPY &&
+    price.type === "recurring" &&
+    price.recurring?.interval === "month" &&
+    price.recurring.interval_count === 1 &&
+    price.recurring.usage_type === "licensed"
+  );
+}
+
+function validOneTimePrice(price: StripePrice, expectedId: string) {
+  return (
+    price.id === expectedId &&
+    price.active === true &&
+    price.currency?.toLowerCase() === "jpy" &&
+    price.unit_amount === ONE_TIME_PRICE_JPY &&
+    price.type === "one_time" &&
+    !price.recurring
+  );
 }
