@@ -2392,8 +2392,8 @@ function CaptionStylePicker({
       aria-label="テロップの雰囲気"
     >
       <div className="captionStylePickerHeading">
-        <strong>4種類から選ぶ</strong>
-        <span>選んだ見た目をプレビューと書き出しへ反映</span>
+        <strong>5種類から選ぶ</strong>
+        <span>枠付き2種類・文字のみ3種類をプレビューと書き出しへ反映</span>
       </div>
       <div className="captionStyleChoices">
         {CAPTION_MOODS.map((item) => {
@@ -4631,8 +4631,12 @@ function ResultWorkspace({
         : presentation === "metric"
           ? 1.08
           : 1;
+    const toneScale =
+      tone === "pop" ? 1.06 : tone === "signature" ? 0.96 : 1;
     const fontSize =
-      Math.max(26, Math.min(64, canvas.width * 0.052)) * presentationScale;
+      Math.max(26, Math.min(64, canvas.width * 0.052)) *
+      presentationScale *
+      toneScale;
     const horizontalPadding =
       fontSize * (frame.borderPlacement === "none" ? 0.32 : 0.72);
     const verticalPadding =
@@ -4719,7 +4723,7 @@ function ResultWorkspace({
       );
       context.fill();
     }
-    if (tone === "signature") {
+    if (tone === "signature" && frame.borderPlacement !== "none") {
       context.strokeStyle = palette.border;
       context.lineWidth = Math.max(1, fontSize * 0.018);
       context.beginPath();
@@ -4749,6 +4753,18 @@ function ResultWorkspace({
     const highlight = caption.highlight?.trim() ?? "";
     context.font = `${palette.fontWeight} ${fontSize}px ${frame.fontFamily}`;
     context.textAlign = "left";
+    if (!palette.background && frame.borderPlacement === "none") {
+      context.shadowColor =
+        tone === "pop"
+          ? palette.highlight
+          : tone === "signature"
+            ? "rgba(20,14,10,.78)"
+            : "rgba(0,0,0,.68)";
+      context.shadowBlur = tone === "pop" ? 0 : fontSize * 0.18;
+      context.shadowOffsetX = tone === "pop" ? fontSize * 0.055 : 0;
+      context.shadowOffsetY =
+        tone === "pop" ? fontSize * 0.07 : fontSize * 0.08;
+    }
     lines.forEach((line, index) => {
       const lineY =
         boxY +
@@ -4804,7 +4820,9 @@ function ResultWorkspace({
           context.fill();
         }
         if (palette.stroke) {
-          context.lineWidth = Math.max(5, fontSize * 0.12);
+          const strokeRatio =
+            tone === "signature" ? 0.055 : tone === "cinema" ? 0.095 : 0.115;
+          context.lineWidth = Math.max(3, fontSize * strokeRatio);
           context.lineJoin = "round";
           context.strokeStyle = palette.stroke;
           context.strokeText(part.text, textX, lineY);

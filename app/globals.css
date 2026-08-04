@@ -2916,7 +2916,7 @@ footer > small {
 
 .captionStyleChoices {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -3012,6 +3012,35 @@ footer > small {
   font-style: normal;
 }
 
+.captionStyleSample.cinema,
+.captionStyleSample.pop,
+.captionStyleSample.signature {
+  padding-inline: 2px;
+  border: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: white;
+}
+
+.captionStyleSample.cinema {
+  font-weight: 850;
+  text-shadow:
+    -1px -1px 0 #10151f,
+    1px -1px 0 #10151f,
+    -1px 1px 0 #10151f,
+    1px 1px 0 #10151f,
+    0 4px 9px #000a;
+}
+
+.captionStyleSample.cinema em,
+.captionStyleSample.pop em,
+.captionStyleSample.signature em {
+  background: transparent;
+  color: var(--caption-accent, #e45f4d);
+}
+
 .captionStyleSample.studio {
   border: 1px solid #ffffff26;
   border-bottom: 4px solid var(--caption-border, #d5a850);
@@ -3040,17 +3069,34 @@ footer > small {
   color: white;
 }
 
+.captionStyleSample.pop {
+  color: #fffdf7;
+  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 7.5px;
+  font-weight: 900;
+  text-shadow:
+    -1px -1px 0 #172033,
+    1px -1px 0 #172033,
+    -1px 1px 0 #172033,
+    1px 1px 0 #172033,
+    1.5px 2px 0 var(--caption-accent, #e45f4d),
+    0 5px 10px #0008;
+}
+
 .captionStyleSample.signature {
-  border: 1px solid var(--caption-border, #bf9660);
-  border-radius: 10px 2px 10px 2px;
-  background: rgba(255,243,229,.98);
-  box-shadow: 0 8px 18px #4b2c1d2e;
-  color: #3e2d28;
+  color: #fffaf0;
   font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-shadow:
+    -1px 0 0 #211915,
+    1px 0 0 #211915,
+    0 2px 4px #000c,
+    0 6px 14px #0009;
 }
 
 .captionStyleSample.signature em {
-  background: linear-gradient(transparent 66%, #dc776c55 0);
+  color: var(--caption-accent, #e2b45f);
 }
 
 .captionStylePicker.compact .captionStyleSample {
@@ -3099,6 +3145,11 @@ footer > small {
   border-width: 2px;
   border-radius: 2px;
   box-shadow: 3px 3px 0 #181818;
+}
+
+.identityMonogram.pop {
+  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", sans-serif;
+  text-shadow: 2px 2px 0 #172033;
 }
 
 .identityMonogram.signature {
@@ -3290,11 +3341,19 @@ footer > small {
   color: #181818;
 }
 
+.patternSwatch.pop {
+  border-color: #172033;
+  background: #243147;
+  color: #fffdf7;
+  text-shadow: 1px 1px 0 var(--caption-accent, #e45f4d);
+}
+
 .patternSwatch.signature {
-  border-color: #c7a273;
-  background: #fff3e5;
-  color: #d95a48;
+  border-color: #5f554b;
+  background: #28231f;
+  color: #fffaf0;
   font-family: Georgia, serif;
+  text-shadow: 0 2px 3px #000;
 }
 
 .resultVideo {
@@ -3410,7 +3469,7 @@ footer > small {
   box-shadow: none;
   backdrop-filter: none;
   color: white;
-  font-weight: 800;
+  font-weight: 850;
   letter-spacing: .055em;
   text-shadow:
     -2px -2px 0 #10151f,
@@ -3423,6 +3482,32 @@ footer > small {
 .resultCaption.cinema strong {
   background: transparent;
   color: var(--caption-accent, #f4d57a);
+}
+
+.resultCaption.pop {
+  padding-inline: 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  color: #fffdf7;
+  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: .025em;
+  text-shadow:
+    -2px -2px 0 #172033,
+    2px -2px 0 #172033,
+    -2px 2px 0 #172033,
+    2px 2px 0 #172033,
+    2px 3px 0 var(--caption-accent, #e45f4d),
+    0 8px 18px #0009;
+}
+
+.resultCaption.pop strong {
+  padding: 0 .08em;
+  background: transparent;
+  color: var(--caption-accent, #ffd35a);
 }
 
 .resultCaption.studio {
@@ -3473,38 +3558,27 @@ footer > small {
 }
 
 .resultCaption.signature {
-  border: 1px solid var(--caption-border, #bf9660);
-  border-radius: 12px 2px 12px 2px;
-  background: rgba(255,243,229,.96);
-  box-shadow: 0 15px 38px #4b2c1d42;
-  color: #3e2d28;
+  padding-inline: 5px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  color: #fffaf0;
   font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
   font-weight: 700;
-  letter-spacing: .045em;
-}
-
-.resultCaption.signature::before,
-.resultCaption.signature::after {
-  position: absolute;
-  width: 22px;
-  height: 1px;
-  background: var(--caption-border, #bf9660);
-  content: "";
-}
-
-.resultCaption.signature::before {
-  top: 7px;
-  left: 9px;
-}
-
-.resultCaption.signature::after {
-  right: 9px;
-  bottom: 7px;
+  letter-spacing: .075em;
+  text-shadow:
+    -1px -1px 0 rgba(18,16,15,.82),
+    1px -1px 0 rgba(18,16,15,.82),
+    -1px 1px 0 rgba(18,16,15,.82),
+    1px 1px 0 rgba(18,16,15,.82),
+    0 3px 5px #000c,
+    0 9px 24px #0009;
 }
 
 .resultCaption.signature strong {
-  background: linear-gradient(transparent 68%, #dc776c55 0);
-  color: var(--caption-accent, #d95a48);
+  background: transparent;
+  color: var(--caption-accent, #e2b45f);
 }
 
 @keyframes captionPop {

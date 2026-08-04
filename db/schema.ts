@@ -122,7 +122,7 @@ export const accountSessions = sqliteTable(
 export const captionProfiles = sqliteTable("caption_profiles", {
   userId: text("user_id").primaryKey(),
   mood: text("mood", {
-    enum: ["auto", "soft", "refined", "bold"],
+    enum: ["auto", "soft", "refined", "bold", "pop"],
   })
     .notNull()
     .default("auto"),

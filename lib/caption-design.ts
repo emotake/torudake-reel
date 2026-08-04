@@ -6,9 +6,10 @@ export type CaptionTone =
   | "studio"
   | "glass"
   | "mono"
+  | "pop"
   | "signature";
 
-export type CaptionMood = "auto" | "soft" | "refined" | "bold";
+export type CaptionMood = "auto" | "soft" | "refined" | "bold" | "pop";
 
 export type CaptionProfile = {
   mood: CaptionMood;
@@ -59,26 +60,32 @@ export const CAPTION_MOODS: {
   {
     id: "auto",
     label: "ナチュラル",
-    note: "日常・Vlogに自然になじむ",
+    note: "枠付き｜日常・Vlogになじむ",
     tone: "editorial",
-  },
-  {
-    id: "soft",
-    label: "ウォーム",
-    note: "暮らし・美容をやさしく見せる",
-    tone: "signature",
-  },
-  {
-    id: "refined",
-    label: "シック",
-    note: "商品・仕事を端正に見せる",
-    tone: "studio",
   },
   {
     id: "bold",
     label: "インパクト",
-    note: "短い言葉を強く届ける",
+    note: "枠付き｜短い言葉を強く届ける",
     tone: "mono",
+  },
+  {
+    id: "soft",
+    label: "クリア",
+    note: "文字のみ｜くっきり読みやすい",
+    tone: "cinema",
+  },
+  {
+    id: "pop",
+    label: "ポップ",
+    note: "文字のみ｜明るくテンポよく",
+    tone: "pop",
+  },
+  {
+    id: "refined",
+    label: "シネマ",
+    note: "文字のみ｜静かで上質に見せる",
+    tone: "signature",
   },
 ];
 
@@ -92,7 +99,13 @@ export const CAPTION_ACCENT_PRESETS = [
 ] as const;
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-const MOODS = new Set<CaptionMood>(["auto", "soft", "refined", "bold"]);
+const MOODS = new Set<CaptionMood>([
+  "auto",
+  "soft",
+  "refined",
+  "bold",
+  "pop",
+]);
 
 export function normalizeCaptionProfile(value: unknown): CaptionProfile {
   if (!value || typeof value !== "object") {
@@ -155,12 +168,19 @@ const TONE_PALETTES: Record<
     label: "#ffffff",
     fontWeight: 850,
   },
+  pop: {
+    background: "",
+    text: "#fffdf7",
+    stroke: "#172033",
+    label: "#ffffff",
+    fontWeight: 900,
+  },
   signature: {
-    background: "rgba(255,243,229,.96)",
-    text: "#3e2d28",
-    stroke: "",
-    label: "#fff7ed",
-    fontWeight: 750,
+    background: "",
+    text: "#fffaf0",
+    stroke: "rgba(18,16,15,.82)",
+    label: "#fffaf0",
+    fontWeight: 700,
   },
 };
 
@@ -175,7 +195,7 @@ const TONE_FRAMES: Record<CaptionTone, CaptionFrameStyle> = {
   cinema: {
     fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
     borderPlacement: "none",
-    shadow: "none",
+    shadow: "deep",
     highlight: "text",
     cornerRadius: 0,
   },
@@ -200,12 +220,20 @@ const TONE_FRAMES: Record<CaptionTone, CaptionFrameStyle> = {
     highlight: "block",
     cornerRadius: 0.08,
   },
+  pop: {
+    fontFamily:
+      '"Hiragino Maru Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "none",
+    shadow: "offset",
+    highlight: "text",
+    cornerRadius: 0,
+  },
   signature: {
     fontFamily: '"Yu Mincho", "Hiragino Mincho ProN", Georgia, serif',
-    borderPlacement: "outline",
+    borderPlacement: "none",
     shadow: "warm",
-    highlight: "marker",
-    cornerRadius: 0.24,
+    highlight: "text",
+    cornerRadius: 0,
   },
 };
 

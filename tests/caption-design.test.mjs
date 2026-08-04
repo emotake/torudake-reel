@@ -24,18 +24,27 @@ test("normalizes customer caption profiles safely", () => {
       brandName: "emota studio",
     },
   );
+  assert.equal(
+    normalizeCaptionProfile({
+      mood: "pop",
+      accentColor: "#E45F4D",
+      brandName: "",
+    }).mood,
+    "pop",
+  );
   assert.deepEqual(normalizeCaptionProfile(null), DEFAULT_CAPTION_PROFILE);
 });
 
-test("offers four fixed caption styles without another API call", () => {
-  assert.equal(CAPTION_MOODS.length, 4);
+test("offers two framed and three text-only caption styles without another API call", () => {
+  assert.equal(CAPTION_MOODS.length, 5);
   assert.deepEqual(
     CAPTION_MOODS.map(({ id, tone }) => [id, tone]),
     [
       ["auto", "editorial"],
-      ["soft", "signature"],
-      ["refined", "studio"],
       ["bold", "mono"],
+      ["soft", "cinema"],
+      ["pop", "pop"],
+      ["refined", "signature"],
     ],
   );
 
@@ -45,6 +54,24 @@ test("offers four fixed caption styles without another API call", () => {
       "editorial",
     );
   }
+
+  const resolved = CAPTION_MOODS.map(({ id }) =>
+    resolveCaptionDesign({ ...DEFAULT_CAPTION_PROFILE, mood: id }, "follow"),
+  );
+  assert.equal(
+    resolved.filter(
+      ({ frame, palette }) =>
+        frame.borderPlacement !== "none" && Boolean(palette.background),
+    ).length,
+    2,
+  );
+  assert.equal(
+    resolved.filter(
+      ({ frame, palette }) =>
+        frame.borderPlacement === "none" && palette.background === "",
+    ).length,
+    3,
+  );
 });
 
 test("exposes the rendering frame used by preview and video export", () => {
@@ -53,26 +80,30 @@ test("exposes the rendering frame used by preview and video export", () => {
       .borderPlacement,
     "left",
   );
-  assert.match(
-    resolveCaptionDesign(
-      { ...DEFAULT_CAPTION_PROFILE, mood: "soft" },
-      "follow",
-    ).frame.fontFamily,
-    /Mincho/u,
-  );
-  assert.equal(
-    resolveCaptionDesign(
-      { ...DEFAULT_CAPTION_PROFILE, mood: "refined" },
-      "follow",
-    ).frame.borderPlacement,
-    "bottom",
-  );
   assert.equal(
     resolveCaptionDesign(
       { ...DEFAULT_CAPTION_PROFILE, mood: "bold" },
       "follow",
     ).frame.highlight,
     "block",
+  );
+
+  for (const mood of ["soft", "pop", "refined"]) {
+    const design = resolveCaptionDesign(
+      { ...DEFAULT_CAPTION_PROFILE, mood },
+      "follow",
+    );
+    assert.equal(design.frame.borderPlacement, "none");
+    assert.equal(design.palette.background, "");
+    assert.equal(design.frame.highlight, "text");
+  }
+
+  assert.match(
+    resolveCaptionDesign(
+      { ...DEFAULT_CAPTION_PROFILE, mood: "refined" },
+      "follow",
+    ).frame.fontFamily,
+    /Mincho/u,
   );
 });
 
