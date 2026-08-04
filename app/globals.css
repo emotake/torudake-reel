@@ -3041,6 +3041,16 @@ footer > small {
   color: var(--caption-accent, #e45f4d);
 }
 
+.captionStyleSample.cinema em,
+.captionStyleSample.pop em {
+  text-shadow:
+    -1px -1px 0 var(--caption-highlight-stroke, #172033),
+    1px -1px 0 var(--caption-highlight-stroke, #172033),
+    -1px 1px 0 var(--caption-highlight-stroke, #172033),
+    1px 1px 0 var(--caption-highlight-stroke, #172033),
+    0 4px 9px #000a;
+}
+
 .captionStyleSample.studio {
   border: 1px solid #ffffff26;
   border-bottom: 4px solid var(--caption-border, #d5a850);
@@ -3097,6 +3107,11 @@ footer > small {
 
 .captionStyleSample.signature em {
   color: var(--caption-accent, #e2b45f);
+  text-shadow:
+    -1px 0 0 var(--caption-highlight-stroke, #211915),
+    1px 0 0 var(--caption-highlight-stroke, #211915),
+    0 2px 4px #000c,
+    0 6px 14px #0009;
 }
 
 .captionStylePicker.compact .captionStyleSample {
@@ -3482,6 +3497,12 @@ footer > small {
 .resultCaption.cinema strong {
   background: transparent;
   color: var(--caption-accent, #f4d57a);
+  text-shadow:
+    -2px -2px 0 var(--caption-highlight-stroke, #10151f),
+    2px -2px 0 var(--caption-highlight-stroke, #10151f),
+    -2px 2px 0 var(--caption-highlight-stroke, #10151f),
+    2px 2px 0 var(--caption-highlight-stroke, #10151f),
+    0 4px 10px #000c;
 }
 
 .resultCaption.pop {
@@ -3507,6 +3528,12 @@ footer > small {
   padding: 0 .08em;
   background: transparent;
   color: var(--caption-accent, #ffd35a);
+  text-shadow:
+    -2px -2px 0 var(--caption-highlight-stroke, #172033),
+    2px -2px 0 var(--caption-highlight-stroke, #172033),
+    -2px 2px 0 var(--caption-highlight-stroke, #172033),
+    2px 2px 0 var(--caption-highlight-stroke, #172033),
+    0 8px 18px #0009;
 }
 
 .resultCaption.studio {
@@ -3578,6 +3605,13 @@ footer > small {
 .resultCaption.signature strong {
   background: transparent;
   color: var(--caption-accent, #e2b45f);
+  text-shadow:
+    -1px -1px 0 var(--caption-highlight-stroke, rgba(18,16,15,.82)),
+    1px -1px 0 var(--caption-highlight-stroke, rgba(18,16,15,.82)),
+    -1px 1px 0 var(--caption-highlight-stroke, rgba(18,16,15,.82)),
+    1px 1px 0 var(--caption-highlight-stroke, rgba(18,16,15,.82)),
+    0 3px 5px #000c,
+    0 9px 24px #0009;
 }
 
 @keyframes captionPop {

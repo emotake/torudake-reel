@@ -2406,6 +2406,10 @@ function CaptionStylePicker({
             "--caption-border": design.palette.border,
             "--caption-text": design.palette.text,
             "--caption-panel": design.palette.background,
+            "--caption-highlight-stroke":
+              design.palette.highlight === "#181818"
+                ? "#fffdf7"
+                : design.palette.stroke || "#172033",
           } as CSSProperties;
           return (
             <button
@@ -3127,6 +3131,10 @@ function ResultWorkspace({
     "--caption-border": captionDesign.palette.border,
     "--caption-text": captionDesign.palette.text,
     "--caption-panel": captionDesign.palette.background,
+    "--caption-highlight-stroke":
+      captionDesign.palette.highlight === "#181818"
+        ? "#fffdf7"
+        : captionDesign.palette.stroke || "#172033",
   } as CSSProperties;
   const thumbnailCandidates = useMemo(
     () => selectThumbnailCandidates(keptLines),
@@ -4821,7 +4829,12 @@ function ResultWorkspace({
             tone === "signature" ? 0.055 : tone === "cinema" ? 0.095 : 0.115;
           context.lineWidth = Math.max(3, fontSize * strokeRatio);
           context.lineJoin = "round";
-          context.strokeStyle = palette.stroke;
+          context.strokeStyle =
+            part.highlighted &&
+            frame.borderPlacement === "none" &&
+            palette.highlight === "#181818"
+              ? "#fffdf7"
+              : palette.stroke;
           context.strokeText(part.text, textX, lineY);
         }
         context.fillStyle = part.color;
