@@ -79,7 +79,93 @@ test("shortens only an overlong narration while preserving its intent", async ()
   }
 });
 
-test("builds the tempo comedy style around a safe setup and punchline", async () => {
+test("builds an emotional story without inventing feelings or imitating a speaker", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
+  const originalFetch = globalThis.fetch;
+  let openAiRequest;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/responses") {
+      openAiRequest = JSON.parse(init.body);
+      return Response.json({
+        output_text: JSON.stringify({
+          title: "いつもの帰り道",
+          script: "立ち止まった先に、いつもと違う景色がありました。今日の記憶を、静かに残します。",
+          socialCaption: "何気ない一日にも、残したい瞬間がある。",
+          segments: [
+            { text: "立ち止まった先に、", emphasis: false },
+            { text: "いつもと違う景色がありました。", emphasis: true },
+            { text: "今日の記憶を、静かに残します。", emphasis: false },
+          ],
+        }),
+      });
+    }
+
+    return originalFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set(
+      "narration-emotional-story-style",
+      `${process.pid}-${Date.now()}`,
+    );
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: ["data:image/jpeg;base64,AA=="],
+          brief: "夕方の散歩で見つけた景色",
+          goal: "follow",
+          length: 30,
+          style: "refined",
+          sourceDuration: 45,
+        }),
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const prompt = openAiRequest.input[0].content[0].text;
+    assert.match(prompt, /感情に寄り添うストーリートーク/);
+    assert.match(prompt, /状況→小さな気づきや変化→静かな結び/);
+    assert.match(
+      prompt,
+      /映像から確認できない気持ち、関係性、過去、未来、会話を作らず/,
+    );
+    assert.match(
+      prompt,
+      /実在人物、投稿者、声優、既存キャラクターの声質、口癖、固有の感情表現、間合いは模倣しない/,
+    );
+    assert.match(prompt, /台本の文字数: 100〜120字/);
+    assert.doesNotMatch(
+      prompt,
+      /instagram\.com|低音シネマ|明石家|さんま/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("builds the rhythm comedy style around a safe setup and punchline", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
     USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
@@ -143,17 +229,17 @@ test("builds the tempo comedy style around a safe setup and punchline", async ()
 
     assert.equal(response.status, 200);
     const prompt = openAiRequest.input[0].content[0].text;
-    assert.match(prompt, /テンポのよいバラエティトーク/);
-    assert.match(prompt, /真剣な実況→一拍→短く勢いのある返し／オチ/);
+    assert.match(prompt, /リズムのよいオリジナルコメディトーク/);
+    assert.match(prompt, /短い状況説明→一拍→意外な返し／オチ/);
     assert.match(
       prompt,
-      /特定の実在人物の声質、口癖、笑い方、決め台詞、話速、間合いは模倣しない/,
+      /実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、笑い方、決め台詞、話速、固有のイントネーション、間合いは模倣しない/,
     );
     assert.match(prompt, /人物の容姿・属性・失敗を嘲笑しない/);
-    assert.match(prompt, /台本の文字数: 103〜123字/);
+    assert.match(prompt, /台本の文字数: 107〜129字/);
     assert.doesNotMatch(
       prompt,
-      /萌えアニメ|関西ツッコミ|激しい関西芸人風|明石家|さんま/,
+      /instagram\.com|萌えアニメ|関西ツッコミ|激しい関西芸人風|明石家|さんま/,
     );
   } finally {
     globalThis.fetch = originalFetch;

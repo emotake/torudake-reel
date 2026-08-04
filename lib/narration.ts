@@ -51,11 +51,15 @@ export const NARRATION_STYLES: Array<{
   { id: "bright", label: "自然な女性", note: "温かくクリアな声｜日常・説明" },
   { id: "calm", label: "自然な男性", note: "穏やかで信頼感のある声｜商品・解説" },
   { id: "tempo", label: "ポップボイス", note: "明るく表情豊かな声｜推し・日常" },
-  { id: "refined", label: "低音シネマ", note: "余韻のある重厚な声｜ブランド・作品" },
+  {
+    id: "refined",
+    label: "エモーショナルストーリー",
+    note: "感情にそっと寄り添う声｜思い出・物語",
+  },
   {
     id: "comedy",
-    label: "テンポコメディ",
-    note: "緩急と間が楽しい声｜検証・オチ",
+    label: "リズムコメディ",
+    note: "緩急と間で引き込む声｜日常・オチ",
   },
 ];
 

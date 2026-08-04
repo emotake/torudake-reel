@@ -182,7 +182,7 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["marin", "cedar", "shimmer", "echo", "ash"],
+      ["coral", "cedar", "shimmer", "marin", "ash"],
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
@@ -190,7 +190,7 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
-      [1, 0.99, 1.06, 0.97, 1.04],
+      [1, 0.99, 1.06, 1, 1],
     );
     assert.ok(
       sessions.every(
@@ -223,14 +223,14 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     assert.match(responses[0].instructions, /温かくクリア/);
     assert.match(responses[1].instructions, /聞き取りやすい中低音/);
     assert.match(responses[2].instructions, /成人のポップボイス/);
-    assert.match(responses[3].instructions, /深く重厚な低音/);
+    assert.match(responses[3].instructions, /感情にそっと寄り添って語る/);
     assert.match(
       responses[4].instructions,
-      /明るくエネルギッシュな成人のオリジナル話者/,
+      /日常の発見や比較を、短い起伏で楽しく伝える/,
     );
     assert.doesNotMatch(
       responses.map((response) => response.instructions).join("\n"),
-      /萌えアニメ|関西ツッコミ|明石家|さんま/,
+      /instagram\.com|萌えアニメ|関西ツッコミ|明石家|さんま/,
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -260,7 +260,7 @@ test("uses the matching HD fallback when realtime cannot connect", async () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          script: "深く静かな声で読みます。",
+          script: "大切な出来事を自然な声で読みます。",
           style: "refined",
         }),
       }),
@@ -279,8 +279,8 @@ test("uses the matching HD fallback when realtime cannot connect", async () => {
       "https://api.openai.com/v1/audio/speech",
     );
     assert.equal(fallbackBody.model, "tts-1-hd");
-    assert.equal(fallbackBody.voice, "onyx");
-    assert.equal(fallbackBody.speed, 0.97);
+    assert.equal(fallbackBody.voice, "echo");
+    assert.equal(fallbackBody.speed, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

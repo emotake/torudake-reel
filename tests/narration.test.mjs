@@ -147,7 +147,7 @@ test("samples the whole source while matching the natural audio duration", () =>
   assert.equal(timeline.at(-1).end, 72);
 });
 
-test("keeps the four voice ids stable and adds a distinct comedy voice", () => {
+test("keeps five distinct narration templates with stable ids", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
     ["bright", "calm", "tempo", "refined", "comedy"],
@@ -160,8 +160,8 @@ test("keeps the four voice ids stable and adds a distinct comedy voice", () => {
       "自然な女性",
       "自然な男性",
       "ポップボイス",
-      "低音シネマ",
-      "テンポコメディ",
+      "エモーショナルストーリー",
+      "リズムコメディ",
     ],
   );
 });
