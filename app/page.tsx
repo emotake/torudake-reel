@@ -4631,12 +4631,9 @@ function ResultWorkspace({
         : presentation === "metric"
           ? 1.08
           : 1;
-    const toneScale =
-      tone === "pop" ? 1.06 : tone === "signature" ? 0.96 : 1;
     const fontSize =
       Math.max(26, Math.min(64, canvas.width * 0.052)) *
-      presentationScale *
-      toneScale;
+      presentationScale;
     const horizontalPadding =
       fontSize * (frame.borderPlacement === "none" ? 0.32 : 0.72);
     const verticalPadding =
