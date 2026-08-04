@@ -182,7 +182,11 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["coral", "cedar", "shimmer", "echo", "ash"],
+      ["marin", "cedar", "shimmer", "echo", "ash"],
+    );
+    assert.equal(
+      new Set(sessions.map((session) => session.audio.output.voice)).size,
+      5,
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
@@ -216,7 +220,10 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
       new Set(responses.map((response) => response.instructions)).size,
       5,
     );
+    assert.match(responses[0].instructions, /温かくクリア/);
+    assert.match(responses[1].instructions, /聞き取りやすい中低音/);
     assert.match(responses[2].instructions, /成人のポップボイス/);
+    assert.match(responses[3].instructions, /深く重厚な低音/);
     assert.match(
       responses[4].instructions,
       /明るくエネルギッシュな成人のオリジナル話者/,
@@ -386,7 +393,8 @@ test("supports an emergency rollback to the legacy TTS model", async () => {
     assert.equal(requests[0].url, "https://api.openai.com/v1/audio/speech");
     assert.equal(requests[0].body.model, "gpt-4o-mini-tts");
     assert.equal(requests[0].body.voice, "cedar");
-    assert.match(requests[0].body.instructions, /飾りすぎない聞き取りやすい男性/);
+    assert.match(requests[0].body.instructions, /穏やかで信頼感/);
+    assert.match(requests[0].body.instructions, /聞き取りやすい中低音/);
   } finally {
     globalThis.fetch = originalFetch;
     delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;

@@ -48,14 +48,14 @@ export const NARRATION_STYLES: Array<{
   label: string;
   note: string;
 }> = [
-  { id: "bright", label: "自然な女性", note: "素直な女性声｜日常・説明" },
-  { id: "calm", label: "自然な男性", note: "素直な男性声｜商品・解説" },
-  { id: "tempo", label: "ポップボイス", note: "明るく弾む声｜推し・日常" },
-  { id: "refined", label: "低音シネマ", note: "深く重厚な声｜ブランド・作品" },
+  { id: "bright", label: "自然な女性", note: "温かくクリアな声｜日常・説明" },
+  { id: "calm", label: "自然な男性", note: "穏やかで信頼感のある声｜商品・解説" },
+  { id: "tempo", label: "ポップボイス", note: "明るく表情豊かな声｜推し・日常" },
+  { id: "refined", label: "低音シネマ", note: "余韻のある重厚な声｜ブランド・作品" },
   {
     id: "comedy",
     label: "テンポコメディ",
-    note: "緩急のある楽しい声｜検証・オチ",
+    note: "緩急と間が楽しい声｜検証・オチ",
   },
 ];
 
