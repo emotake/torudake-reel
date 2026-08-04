@@ -4595,15 +4595,68 @@ footer > small {
 }
 
 .pronunciationEditor {
-  padding: 11px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
   border: 1px solid #eadfd3;
-  border-radius: 11px;
+  border-radius: 14px;
   background: #fffaf4;
 }
 
-.pronunciationEditor > small {
+.pronunciationEditorHeading,
+.pronunciationEditorHeading > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pronunciationEditorHeading {
+  justify-content: space-between;
+}
+
+.pronunciationEditorHeading strong {
+  font-size: 15px;
+}
+
+.pronunciationEditorHeading > div > small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pronunciationEditorHeading > span {
+  padding: 5px 8px;
+  border: 1px solid #dfd6c9;
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.pronunciationEditorHeading > span.isPending {
+  border-color: #e8b72f;
+  background: #fff7d8;
+  color: #725600;
+}
+
+.pronunciationEditorHeading > span.isApplied {
+  border-color: #8ec9ac;
+  background: #effbf5;
+  color: #17633f;
+}
+
+.pronunciationEditorHeading > span.hasError {
+  border-color: #e3a497;
+  background: #fff0ec;
+  color: #a02b1e;
+}
+
+.pronunciationEditor > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -4612,9 +4665,171 @@ footer > small {
   background: #fff5f2;
 }
 
-.pronunciationEditor.hasError > small {
+.pronunciationRows {
+  display: grid;
+  gap: 9px;
+}
+
+.pronunciationRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #e8dfd3;
+  border-radius: 11px;
+  background: white;
+}
+
+.pronunciationRow.hasNoMatch {
+  border-color: #df9c8d;
+  background: #fff9f7;
+}
+
+.pronunciationRow label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pronunciationRow label > span {
+  color: #4b5565;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pronunciationRow input {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #d8d3cb;
+  border-radius: 9px;
+  outline: none;
+  background: white;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.pronunciationRow input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 90, 60, 0.09);
+}
+
+.pronunciationRow input[aria-invalid="true"] {
+  border-color: #d83a24;
+}
+
+.pronunciationArrow {
+  align-self: end;
+  padding-bottom: 12px;
+  color: var(--coral);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.pronunciationRemove,
+.pronunciationActions button {
+  min-height: 44px;
+  border: 1px solid #d8d3cb;
+  border-radius: 9px;
+  background: white;
+  color: #394150;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pronunciationRemove {
+  padding: 0 12px;
+}
+
+.pronunciationRemove:disabled,
+.pronunciationActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.pronunciationRowStatus {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pronunciationRowStatus.isMatched {
+  color: #17633f;
+  font-weight: 800;
+}
+
+.pronunciationRowStatus.hasError {
+  color: #a02b1e;
+  font-weight: 800;
+}
+
+.pronunciationActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.pronunciationActions button {
+  padding: 0 14px;
+}
+
+.pronunciationActions > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pronunciationHelp {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.pronunciationEditor.hasError .pronunciationHelp {
   color: #b42d1e;
   font-weight: 800;
+}
+
+.pronunciationImpact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #f5f1ea;
+}
+
+.pronunciationImpact span,
+.pronunciationImpact strong,
+.pronunciationImpact i {
+  font-size: 11px;
+  font-style: normal;
+}
+
+.pronunciationImpact span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.pronunciationImpact strong {
+  color: var(--ink);
+}
+
+.pronunciationImpact i {
+  margin-left: auto;
+  color: var(--coral);
+  font-weight: 900;
+}
+
+.pronunciationCostNote {
+  padding-left: 9px;
+  border-left: 3px solid #ebba40;
+  color: #5d4a18 !important;
+  font-weight: 700;
 }
 
 .voiceStylePicker {
@@ -4999,6 +5214,48 @@ footer > small {
 
   .resultNarrationCutActions {
     grid-template-columns: 1fr;
+  }
+
+  .pronunciationEditor {
+    padding: 13px;
+  }
+
+  .pronunciationEditorHeading {
+    align-items: flex-start;
+  }
+
+  .pronunciationEditorHeading > div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .pronunciationRow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .pronunciationArrow {
+    display: none;
+  }
+
+  .pronunciationRemove {
+    justify-self: start;
+    padding: 0 18px;
+  }
+
+  .pronunciationActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pronunciationActions button,
+  .regenerateVoice {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .pronunciationActions > span {
+    text-align: right;
   }
 
   .modalActions {

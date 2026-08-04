@@ -133,6 +133,41 @@ export function parseNarrationPronunciationGuide(
   return validateNarrationPronunciationGuide(guide).entries;
 }
 
+export function canonicalizeNarrationPronunciationGuide(guide: string) {
+  const normalizedGuide = guide
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+  const validation = validateNarrationPronunciationGuide(normalizedGuide);
+  if (validation.error) return normalizedGuide;
+  return validation.entries
+    .map(({ surface, reading }) => ({ surface, reading }))
+    .sort(
+      (left, right) =>
+        left.surface.localeCompare(right.surface, "ja") ||
+        left.reading.localeCompare(right.reading, "ja"),
+    )
+    .map(({ surface, reading }) => `${surface} → ${reading}`)
+    .join("\n");
+}
+
+export function countNarrationPronunciationOccurrences(
+  script: string,
+  surface: string,
+) {
+  if (!script || !surface) return 0;
+  let count = 0;
+  let cursor = 0;
+  while (cursor <= script.length - surface.length) {
+    const index = script.indexOf(surface, cursor);
+    if (index < 0) break;
+    count += 1;
+    cursor = index + surface.length;
+  }
+  return count;
+}
+
 function escapeRegularExpression(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -6,6 +6,8 @@ import {
   buildDisclosedPostCaption,
   buildNarrationEditRanges,
   buildNarrationTimeline,
+  canonicalizeNarrationPronunciationGuide,
+  countNarrationPronunciationOccurrences,
   getNarrationBufferSlice,
   getNarrationMixLevels,
   getNarrationOriginalAudioGain,
@@ -77,6 +79,32 @@ test("uses the longest pronunciation match without cascading replacements", () =
     applyNarrationPronunciationGuide("東京駅から東京へ向かいます。", guide),
     "とうきょうえきからとうきょうへ向かいます。",
   );
+});
+
+test("canonicalizes equivalent pronunciation settings without another generation", () => {
+  assert.equal(
+    canonicalizeNarrationPronunciationGuide(
+      "御厨 = みくりや\n撮るだけリール：とるだけりーる",
+    ),
+    canonicalizeNarrationPronunciationGuide(
+      "撮るだけリール → とるだけりーる\n御厨 → みくりや",
+    ),
+  );
+});
+
+test("counts every exact pronunciation target before spending a generation", () => {
+  assert.equal(
+    countNarrationPronunciationOccurrences(
+      "御厨さんと御厨駅で待ち合わせます。",
+      "御厨",
+    ),
+    2,
+  );
+  assert.equal(
+    countNarrationPronunciationOccurrences("御厨さんです。", "みくりや"),
+    0,
+  );
+  assert.equal(countNarrationPronunciationOccurrences("C++入門", "C++"), 1);
 });
 
 test("reports invalid pronunciation guide lines without silently applying the rest", () => {

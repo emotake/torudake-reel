@@ -6,6 +6,10 @@ const pageSource = await readFile(
   new URL("../app/page.tsx", import.meta.url),
   "utf8",
 );
+const globalCssSource = await readFile(
+  new URL("../app/globals.css", import.meta.url),
+  "utf8",
+);
 
 test("prepares the narration audio context before recording disclosure", () => {
   const start = pageSource.indexOf("async function confirmNarrationExport()");
@@ -114,8 +118,44 @@ test("keeps display text separate from user-specified narration readings", () =>
   assert.match(regenerationFlow, /applyNarrationPronunciationGuide/);
   assert.match(regenerationFlow, /requestNarrationSpeech\(\s*speechScript/);
   assert.match(regenerationFlow, /splitNarrationScript\(cleanScript\)/);
-  assert.match(pageSource, /漢字の読み方を直す/);
-  assert.match(pageSource, /テロップの漢字は変わりません/);
+  assert.match(pageSource, /読み間違いを直す/);
+  assert.match(pageSource, /台本の言葉/);
+  assert.match(pageSource, /正しい読み方/);
+  assert.match(pageSource, /漢字の表示はそのまま/);
+  const matchValidationIndex = regenerationFlow.indexOf(
+    "unmatchedPronunciationEntries",
+  );
+  const speechRequestIndex = regenerationFlow.indexOf(
+    "requestNarrationSpeech(",
+  );
+  assert.ok(matchValidationIndex >= 0);
+  assert.ok(matchValidationIndex < speechRequestIndex);
+});
+
+test("offers a mobile-friendly pronunciation editor without using the API while typing", () => {
+  const editorStart = pageSource.indexOf(
+    "function updateNarrationPronunciationRow(",
+  );
+  const editorEnd = pageSource.indexOf(
+    "\n  async function handleNarrationRegeneration()",
+    editorStart,
+  );
+  const editorFlow = pageSource.slice(editorStart, editorEnd);
+
+  assert.ok(editorStart >= 0);
+  assert.match(pageSource, /別の読み方を追加/);
+  assert.match(pageSource, /台本内\$\{matchCount\}か所の読みを変更します/);
+  assert.match(pageSource, /入力中はAPIを使いません/);
+  assert.match(pageSource, /読み方を反映してAI音声を作り直す（1回使用）/);
+  assert.doesNotMatch(editorFlow, /requestNarrationSpeech|regenerateNarration/);
+  assert.match(
+    globalCssSource,
+    /\.pronunciationRow input\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/,
+  );
+  assert.match(
+    globalCssSource,
+    /\.pronunciationActions button,[\s\S]*?\.regenerateVoice\s*\{[\s\S]*?min-height:\s*48px;/,
+  );
 });
 
 test("shows and enforces the server-backed narration generation allowance", () => {
