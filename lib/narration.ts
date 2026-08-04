@@ -1,4 +1,8 @@
 import { selectCaptionHighlight, type CaptionSegment } from "./captions";
+import {
+  buildEditRanges,
+  type EditRange,
+} from "./edit-plan";
 
 export const NARRATION_DISCLOSURE_TEXT =
   "※この動画ではAIナレーションを使用しています。";
@@ -13,11 +17,17 @@ export type NarrationStyle =
   | "comedy";
 export type NarrationOriginalAudioLevel = number;
 
+export type NarrationPronunciationEntry = {
+  surface: string;
+  reading: string;
+};
+
 export const DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT = 8;
 export const MAX_NARRATION_ORIGINAL_AUDIO_PERCENT = 20;
 
 export type NarrationSegment = {
   text: string;
+  speechText?: string;
   emphasis?: boolean;
 };
 
@@ -26,6 +36,10 @@ export type NarrationPlan = {
   script: string;
   socialCaption: string;
   segments: NarrationSegment[];
+};
+
+export type NarrationTimelineOptions = {
+  autoCut?: boolean;
 };
 
 export const NARRATION_STYLES: Array<{
@@ -48,6 +62,91 @@ function cleanText(value: unknown, maxLength: number) {
   return typeof value === "string"
     ? value.replace(/\s+/g, " ").trim().slice(0, maxLength)
     : "";
+}
+
+export function validateNarrationPronunciationGuide(
+  guide: string,
+): { entries: NarrationPronunciationEntry[]; error: string } {
+  if (typeof guide !== "string" || !guide.trim()) {
+    return { entries: [], error: "" };
+  }
+
+  const entries = new Map<string, string>();
+  const lines = guide.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length > 20) {
+    return { entries: [], error: "読み方は20件まで指定できます。" };
+  }
+
+  for (const [index, rawLine] of lines.entries()) {
+    const line = rawLine.trim();
+    const match = line.match(/^(.+?)\s*(?:=>|→|=|：|:)\s*(.+)$/u);
+    if (!match) {
+      return {
+        entries: [],
+        error: `${index + 1}行目を「漢字 → よみがな」の形式で入力してください。`,
+      };
+    }
+    const surface = match[1].replace(/\s+/g, " ").trim();
+    const reading = match[2].replace(/\s+/g, " ").trim();
+    if (!surface || !reading) {
+      return {
+        entries: [],
+        error: `${index + 1}行目の言葉と読み方を両方入力してください。`,
+      };
+    }
+    if (surface.length > 50 || reading.length > 80) {
+      return {
+        entries: [],
+        error: `${index + 1}行目が長すぎます。言葉は50文字、読み方は80文字以内にしてください。`,
+      };
+    }
+    if (surface === reading) {
+      return {
+        entries: [],
+        error: `${index + 1}行目は元の表記と異なる読み方を入力してください。`,
+      };
+    }
+    if (entries.has(surface)) {
+      return {
+        entries: [],
+        error: `「${surface}」の読み方が重複しています。1行にまとめてください。`,
+      };
+    }
+    entries.set(surface, reading);
+  }
+
+  return {
+    entries: Array.from(entries, ([surface, reading]) => ({ surface, reading }))
+      .sort((left, right) => right.surface.length - left.surface.length),
+    error: "",
+  };
+}
+
+export function parseNarrationPronunciationGuide(
+  guide: string,
+): NarrationPronunciationEntry[] {
+  return validateNarrationPronunciationGuide(guide).entries;
+}
+
+function escapeRegularExpression(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function applyNarrationPronunciationGuide(
+  script: string,
+  guide: string,
+) {
+  const entries = parseNarrationPronunciationGuide(guide);
+  if (!entries.length) return script;
+
+  const readingBySurface = new Map(
+    entries.map((entry) => [entry.surface, entry.reading] as const),
+  );
+  const pattern = new RegExp(
+    entries.map((entry) => escapeRegularExpression(entry.surface)).join("|"),
+    "gu",
+  );
+  return script.replace(pattern, (surface) => readingBySurface.get(surface) ?? surface);
 }
 
 export function splitNarrationScript(script: string) {
@@ -118,10 +217,12 @@ export function buildNarrationTimeline(
   sourceDuration: number,
   requestedDuration: number,
   narrationDuration?: number,
+  options: NarrationTimelineOptions = {},
 ): CaptionSegment[] {
   const validSegments = segments
     .map((segment) => ({
       text: cleanText(segment.text, 120),
+      speechText: cleanText(segment.speechText, 240),
       emphasis: Boolean(segment.emphasis),
     }))
     .filter((segment) => segment.text)
@@ -138,10 +239,13 @@ export function buildNarrationTimeline(
       ? Math.max(1, Math.min(Number(narrationDuration), maximumDuration))
       : maximumDuration;
   const weights = validSegments.map((segment) =>
-    Math.max(5, Array.from(segment.text).length),
+    Math.max(5, Array.from(segment.speechText || segment.text).length),
   );
   const totalWeight = weights.reduce((total, weight) => total + weight, 0);
-  const sourceGapBudget = Math.max(0, safeSourceDuration - targetDuration);
+  const autoCut = options.autoCut !== false;
+  const sourceGapBudget = autoCut
+    ? Math.max(0, safeSourceDuration - targetDuration)
+    : 0;
   const sourceGap =
     validSegments.length > 1
       ? sourceGapBudget / (validSegments.length - 1)
@@ -154,10 +258,11 @@ export function buildNarrationTimeline(
         ? targetDuration - outputCursor
         : (weights[index] / totalWeight) * targetDuration;
     const duration = Math.max(0.4, remaining);
-    const sourceStart =
-      validSegments.length === 1
+    const sourceStart = autoCut
+      ? validSegments.length === 1
         ? sourceGapBudget / 2
-        : outputCursor + sourceGap * index;
+        : outputCursor + sourceGap * index
+      : outputCursor;
     const start = Math.min(sourceStart, Math.max(0, safeSourceDuration - 0.2));
     const end = Math.min(safeSourceDuration, start + duration);
     outputCursor += remaining;
@@ -173,6 +278,22 @@ export function buildNarrationTimeline(
       highlight,
     };
   });
+}
+
+export function buildNarrationEditRanges(
+  timeline: CaptionSegment[],
+  sourceDuration: number,
+  autoCut: boolean,
+): EditRange[] {
+  if (!autoCut && Number.isFinite(sourceDuration) && sourceDuration > 0) {
+    return [
+      {
+        start: 0,
+        end: Math.round(sourceDuration * 1_000) / 1_000,
+      },
+    ];
+  }
+  return buildEditRanges(timeline, { maxJoinGapSeconds: 0.001 });
 }
 
 export function getNarrationPlaybackRate() {

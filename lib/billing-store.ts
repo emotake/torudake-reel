@@ -52,7 +52,7 @@ type AtomicD1Database = {
 export class UsageLimitError extends Error {
   constructor() {
     super(
-      `無料枠を使い切りました。月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランまたは1本購入を選んでください。`,
+      `無料枠を使い切りました。月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランまたは1動画作成を選んでください。`,
     );
     this.name = "UsageLimitError";
   }

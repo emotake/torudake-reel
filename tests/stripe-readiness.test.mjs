@@ -27,7 +27,7 @@ function stripeFetch(lightAmount = 1480, usageType = "licensed") {
         id: "price_one",
         active: true,
         currency: "jpy",
-        unit_amount: 300,
+        unit_amount: 200,
         type: "one_time",
         recurring: null,
       });

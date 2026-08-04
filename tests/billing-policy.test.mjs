@@ -23,7 +23,7 @@ const emptyUsage = {
 test("keeps the simple launch pricing in one policy", () => {
   assert.equal(LIGHT_MONTHLY_VIDEO_LIMIT, 8);
   assert.equal(LIGHT_MONTHLY_PRICE_JPY, 1480);
-  assert.equal(ONE_TIME_PRICE_JPY, 300);
+  assert.equal(ONE_TIME_PRICE_JPY, 200);
   assert.equal(
     Math.floor(LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT),
     185,

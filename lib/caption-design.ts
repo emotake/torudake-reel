@@ -24,6 +24,7 @@ export type CaptionPresentation =
 
 export type CaptionDesign = {
   tone: CaptionTone;
+  frame: CaptionFrameStyle;
   palette: {
     background: string;
     border: string;
@@ -33,6 +34,14 @@ export type CaptionDesign = {
     label: string;
     fontWeight: number;
   };
+};
+
+export type CaptionFrameStyle = {
+  fontFamily: string;
+  borderPlacement: "left" | "outline" | "bottom" | "none";
+  shadow: "soft" | "deep" | "offset" | "warm" | "none";
+  highlight: "marker" | "text" | "block";
+  cornerRadius: number;
 };
 
 export const DEFAULT_CAPTION_PROFILE: CaptionProfile = {
@@ -45,11 +54,32 @@ export const CAPTION_MOODS: {
   id: CaptionMood;
   label: string;
   note: string;
+  tone: CaptionTone;
 }[] = [
-  { id: "auto", label: "おまかせ", note: "目的に合わせて自動設計" },
-  { id: "soft", label: "やわらかい", note: "親しみと温度感" },
-  { id: "refined", label: "洗練", note: "端正で上質" },
-  { id: "bold", label: "力強い", note: "短く印象的" },
+  {
+    id: "auto",
+    label: "ナチュラル",
+    note: "日常・Vlogに自然になじむ",
+    tone: "editorial",
+  },
+  {
+    id: "soft",
+    label: "ウォーム",
+    note: "暮らし・美容をやさしく見せる",
+    tone: "signature",
+  },
+  {
+    id: "refined",
+    label: "シック",
+    note: "商品・仕事を端正に見せる",
+    tone: "studio",
+  },
+  {
+    id: "bold",
+    label: "インパクト",
+    note: "短い言葉を強く届ける",
+    tone: "mono",
+  },
 ];
 
 export const CAPTION_ACCENT_PRESETS = [
@@ -134,26 +164,66 @@ const TONE_PALETTES: Record<
   },
 };
 
+const TONE_FRAMES: Record<CaptionTone, CaptionFrameStyle> = {
+  editorial: {
+    fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "left",
+    shadow: "soft",
+    highlight: "marker",
+    cornerRadius: 0.28,
+  },
+  cinema: {
+    fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "none",
+    shadow: "none",
+    highlight: "text",
+    cornerRadius: 0,
+  },
+  studio: {
+    fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "bottom",
+    shadow: "deep",
+    highlight: "text",
+    cornerRadius: 0.1,
+  },
+  glass: {
+    fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "outline",
+    shadow: "deep",
+    highlight: "text",
+    cornerRadius: 0.32,
+  },
+  mono: {
+    fontFamily: '"Noto Sans JP", "Yu Gothic", sans-serif',
+    borderPlacement: "outline",
+    shadow: "offset",
+    highlight: "block",
+    cornerRadius: 0.08,
+  },
+  signature: {
+    fontFamily: '"Yu Mincho", "Hiragino Mincho ProN", Georgia, serif',
+    borderPlacement: "outline",
+    shadow: "warm",
+    highlight: "marker",
+    cornerRadius: 0.24,
+  },
+};
+
+const MOOD_TONES: Record<CaptionMood, CaptionTone> = Object.fromEntries(
+  CAPTION_MOODS.map((mood) => [mood.id, mood.tone]),
+) as Record<CaptionMood, CaptionTone>;
+
 export function resolveCaptionDesign(
   profile: CaptionProfile,
-  goal: CaptionGoal,
+  _goal: CaptionGoal,
 ): CaptionDesign {
+  void _goal;
   const normalized = normalizeCaptionProfile(profile);
-  const tone: CaptionTone =
-    normalized.mood === "soft"
-      ? "signature"
-      : normalized.mood === "refined"
-        ? "studio"
-        : normalized.mood === "bold"
-          ? "mono"
-          : goal === "sales"
-            ? "studio"
-            : goal === "reach"
-              ? "mono"
-              : "editorial";
+  const tone = MOOD_TONES[normalized.mood];
   const base = TONE_PALETTES[tone];
   return {
     tone,
+    frame: TONE_FRAMES[tone],
     palette: {
       ...base,
       border: normalized.accentColor,

@@ -2,7 +2,7 @@ export const FREE_VIDEO_LIMIT = 2;
 export const FREE_SECONDS_LIMIT = 180;
 export const LIGHT_MONTHLY_VIDEO_LIMIT = 8;
 export const LIGHT_MONTHLY_PRICE_JPY = 1480;
-export const ONE_TIME_PRICE_JPY = 300;
+export const ONE_TIME_PRICE_JPY = 200;
 export const OPERATOR_DAILY_VIDEO_LIMIT = 20;
 
 export type BillingUsageSnapshot = {

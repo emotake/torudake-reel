@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyNarrationPronunciationGuide,
   buildDisclosedPostCaption,
+  buildNarrationEditRanges,
   buildNarrationTimeline,
   getNarrationBufferSlice,
   getNarrationMixLevels,
@@ -11,7 +13,9 @@ import {
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   normalizeNarrationPlan,
+  parseNarrationPronunciationGuide,
   splitNarrationScript,
+  validateNarrationPronunciationGuide,
 } from "../lib/narration.ts";
 import {
   buildEditRanges,
@@ -42,6 +46,79 @@ test("falls back to sentence boundaries when segments are missing", () => {
     plan.segments.map((segment) => segment.text),
     splitNarrationScript(plan.script),
   );
+});
+
+test("changes only the narration reading while preserving the display script", () => {
+  const displayScript = "御厨さんが撮るだけリールを紹介します。";
+  const guide = [
+    "御厨 → みくりや",
+    "撮るだけリール = とるだけりーる",
+  ].join("\n");
+
+  assert.deepEqual(parseNarrationPronunciationGuide(guide), [
+    { surface: "撮るだけリール", reading: "とるだけりーる" },
+    { surface: "御厨", reading: "みくりや" },
+  ]);
+  assert.equal(
+    applyNarrationPronunciationGuide(displayScript, guide),
+    "みくりやさんがとるだけりーるを紹介します。",
+  );
+  assert.equal(displayScript, "御厨さんが撮るだけリールを紹介します。");
+});
+
+test("uses the longest pronunciation match without cascading replacements", () => {
+  const guide = ["東京 → とうきょう", "東京駅 → とうきょうえき"].join("\n");
+  assert.equal(
+    applyNarrationPronunciationGuide("東京駅から東京へ向かいます。", guide),
+    "とうきょうえきからとうきょうへ向かいます。",
+  );
+});
+
+test("reports invalid pronunciation guide lines without silently applying the rest", () => {
+  const validation = validateNarrationPronunciationGuide(
+    "商品名：しょうひんめい\n形式が違う行",
+  );
+  assert.deepEqual(validation.entries, []);
+  assert.match(validation.error, /2行目/);
+  assert.deepEqual(
+    parseNarrationPronunciationGuide("商品名：しょうひんめい\n形式が違う行"),
+    [],
+  );
+});
+
+test("reports duplicate and excessive pronunciation entries", () => {
+  assert.match(
+    validateNarrationPronunciationGuide("御厨 → みくりや\n御厨 → みくりやさん").error,
+    /重複/,
+  );
+  const tooMany = Array.from(
+    { length: 21 },
+    (_, index) => `商品${index + 1} → しょうひん${index + 1}`,
+  ).join("\n");
+  assert.match(validateNarrationPronunciationGuide(tooMany).error, /20件/);
+});
+
+test("supports product names containing regular-expression symbols", () => {
+  assert.equal(
+    applyNarrationPronunciationGuide("C++入門です。", "C++ → シープラスプラス"),
+    "シープラスプラス入門です。",
+  );
+});
+
+test("uses corrected speech length for caption timing without changing caption text", () => {
+  const timeline = buildNarrationTimeline(
+    [
+      { text: "甲。", speechText: "とてもながいよみかたです。" },
+      { text: "乙。", speechText: "おつ。" },
+    ],
+    30,
+    30,
+    12,
+    { autoCut: false },
+  );
+  assert.equal(timeline[0].text, "甲。");
+  assert.equal(timeline[1].text, "乙。");
+  assert.ok(timeline[0].end - timeline[0].start > timeline[1].end - timeline[1].start);
 });
 
 test("samples the whole source while matching the natural audio duration", () => {
@@ -103,6 +180,28 @@ test("preserves short narration cut gaps instead of rejoining the source", () =>
   });
   assert.ok(ranges.length > 1);
   assert.ok(Math.abs(getEditedDuration(ranges) - 52.8) < 0.02);
+});
+
+test("keeps the complete source when narration auto cut is disabled", () => {
+  const timeline = buildNarrationTimeline(
+    [
+      { text: "最初の説明です", emphasis: true },
+      { text: "続きの説明です" },
+    ],
+    72,
+    30,
+    18,
+    { autoCut: false },
+  );
+  assert.equal(timeline[0].start, 0);
+  assert.ok(timeline.at(-1).end <= 18.01);
+  assert.deepEqual(buildNarrationEditRanges(timeline, 72, false), [
+    { start: 0, end: 72 },
+  ]);
+  assert.ok(buildNarrationEditRanges(timeline, 72, true).length >= 1);
+  assert.ok(
+    getEditedDuration(buildNarrationEditRanges(timeline, 72, true)) < 72,
+  );
 });
 
 test("always appends one visible AI narration disclosure", () => {

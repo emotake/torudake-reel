@@ -10,7 +10,7 @@ export async function generateMetadata(): Promise<Metadata> {
     "torudake-reel.pages.dev";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
   const baseUrl = new URL(`${protocol}://${host}`);
-  const imageUrl = new URL("/og.png", baseUrl).toString();
+  const imageUrl = new URL("/og.png?v=20260804-final", baseUrl).toString();
   const title = "撮るだけリール｜動画を選ぶだけの自動動画編集";
   const description =
     "撮った動画を選ぶだけ。自動カット、高精度字幕、AIナレーション、テロップ、表紙、投稿文までまとめて仕上げます。";
@@ -24,7 +24,7 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       type: "website",
       locale: "ja_JP",
-      images: [{ url: imageUrl, width: 1680, height: 944, alt: "撮るだけリール" }],
+      images: [{ url: imageUrl, width: 1734, height: 907, alt: "撮るだけリール" }],
     },
     twitter: {
       card: "summary_large_image",

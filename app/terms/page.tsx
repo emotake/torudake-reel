@@ -80,7 +80,7 @@ export default function TermsPage() {
             {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
           </li>
           <li>
-            1本購入は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。
+            1動画作成は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。
           </li>
           <li>
             支払いと解約はStripeの決済画面およびアカウント画面から行います。月額プランを解約した場合、支払済み期間の終了時に月額利用枠が終了します。

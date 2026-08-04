@@ -41,7 +41,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /合計3分または2動画まで/);
   assert.match(html, /月8本プランを始める/);
   assert.match(html, /1本あたり185円/);
-  assert.match(html, /¥(?:<!-- -->)?300/);
+  assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
   assert.doesNotMatch(
     html,
@@ -91,4 +91,18 @@ test("publishes a privacy policy for uploaded media and external processors", as
   assert.match(html, /Cloudflare/);
   assert.match(html, /Stripe/);
   assert.match(html, /72時間/);
+});
+
+test("publishes the commercial disclosure and contact route before checkout", async () => {
+  const response = await render("/commercial-disclosure");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /特定商取引法に基づく表記/);
+  assert.match(html, /torudake\.reel@gmail\.com/);
+  assert.match(html, /遅滞なく電子メールで開示/);
+  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本プラン/);
+  assert.match(html, /1動画作成/);
+  assert.match(html, /Stripe/);
+  assert.match(html, /最大500MB/);
 });

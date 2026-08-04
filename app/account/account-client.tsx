@@ -264,6 +264,10 @@ export default function AccountClient() {
           <small>
             パスキーの秘密情報は端末から送信されません。カード情報はStripeが管理します。
           </small>
+          <div className="accountLegalLinks">
+            <Link href="/terms">利用規約</Link>
+            <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
+          </div>
           <Link className="legalBack" href="/">← 動画編集へ戻る</Link>
         </section>
       </main>
@@ -321,7 +325,7 @@ export default function AccountClient() {
               </span>
             </article>
             <article>
-              <p>1本購入の残り</p>
+              <p>購入済みの作成枠</p>
               <strong>{status.oneTimeCredits ?? 0}本</strong>
               <span>期限なしで利用できます</span>
             </article>
@@ -350,13 +354,13 @@ export default function AccountClient() {
             </article>
             <article>
               <p>ONE TIME</p>
-              <h2>1本だけ</h2>
+              <h2>1動画作成</h2>
               <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
               <button
                 disabled={busy !== null || !status.configured}
                 onClick={() => startCheckout("one_time")}
               >
-                {busy === "one_time" ? "準備中…" : "1本購入する"}
+                {busy === "one_time" ? "準備中…" : "1動画作成を購入する"}
               </button>
             </article>
           </section>
@@ -373,6 +377,11 @@ export default function AccountClient() {
       <p className="accountSecurity">
         カード番号はStripeが安全に管理し、撮るだけリールのデータベースには保存しません。
       </p>
+      <div className="accountLegalLinks">
+        <Link href="/terms">利用規約</Link>
+        <Link href="/privacy">プライバシーポリシー</Link>
+        <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
+      </div>
     </main>
   );
 }

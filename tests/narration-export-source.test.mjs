@@ -92,3 +92,28 @@ test("rejects unsupported desktop containers before processing", () => {
     /accept="video\/mp4,video\/quicktime,video\/x-m4v,video\/webm/,
   );
 });
+
+test("lets the result switch to a full-length source without another AI request", () => {
+  const start = pageSource.indexOf("async function updateNarrationCutMode(");
+  const end = pageSource.indexOf("\n  function reset()", start);
+  const cutModeFlow = pageSource.slice(start, end);
+
+  assert.ok(start >= 0);
+  assert.match(cutModeFlow, /buildNarrationTimeline\(/);
+  assert.match(cutModeFlow, /setNarrationAutoCutEnabled\(autoCut\)/);
+  assert.doesNotMatch(cutModeFlow, /requestNarrationPlan|requestNarrationSpeech/);
+  assert.match(pageSource, /元動画にAI音声だけ追加/);
+  assert.match(pageSource, /映像・順番・長さを変更しない/);
+});
+
+test("keeps display text separate from user-specified narration readings", () => {
+  const start = pageSource.indexOf("async function regenerateNarration(");
+  const end = pageSource.indexOf("\n  async function updateNarrationCutMode", start);
+  const regenerationFlow = pageSource.slice(start, end);
+
+  assert.match(regenerationFlow, /applyNarrationPronunciationGuide/);
+  assert.match(regenerationFlow, /requestNarrationSpeech\(\s*speechScript/);
+  assert.match(regenerationFlow, /splitNarrationScript\(cleanScript\)/);
+  assert.match(pageSource, /漢字の読み方を直す/);
+  assert.match(pageSource, /テロップの漢字は変わりません/);
+});

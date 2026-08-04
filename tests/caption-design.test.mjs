@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CAPTION_MOODS,
   DEFAULT_CAPTION_PROFILE,
   getCaptionEntranceProgress,
   getCaptionPresentation,
@@ -26,14 +27,52 @@ test("normalizes customer caption profiles safely", () => {
   assert.deepEqual(normalizeCaptionProfile(null), DEFAULT_CAPTION_PROFILE);
 });
 
-test("resolves an automatic tone from the reel goal without another API call", () => {
+test("offers four fixed caption styles without another API call", () => {
+  assert.equal(CAPTION_MOODS.length, 4);
+  assert.deepEqual(
+    CAPTION_MOODS.map(({ id, tone }) => [id, tone]),
+    [
+      ["auto", "editorial"],
+      ["soft", "signature"],
+      ["refined", "studio"],
+      ["bold", "mono"],
+    ],
+  );
+
+  for (const goal of ["follow", "sales", "reach"]) {
+    assert.equal(
+      resolveCaptionDesign(DEFAULT_CAPTION_PROFILE, goal).tone,
+      "editorial",
+    );
+  }
+});
+
+test("exposes the rendering frame used by preview and video export", () => {
   assert.equal(
-    resolveCaptionDesign(DEFAULT_CAPTION_PROFILE, "sales").tone,
-    "studio",
+    resolveCaptionDesign(DEFAULT_CAPTION_PROFILE, "follow").frame
+      .borderPlacement,
+    "left",
+  );
+  assert.match(
+    resolveCaptionDesign(
+      { ...DEFAULT_CAPTION_PROFILE, mood: "soft" },
+      "follow",
+    ).frame.fontFamily,
+    /Mincho/u,
   );
   assert.equal(
-    resolveCaptionDesign(DEFAULT_CAPTION_PROFILE, "reach").tone,
-    "mono",
+    resolveCaptionDesign(
+      { ...DEFAULT_CAPTION_PROFILE, mood: "refined" },
+      "follow",
+    ).frame.borderPlacement,
+    "bottom",
+  );
+  assert.equal(
+    resolveCaptionDesign(
+      { ...DEFAULT_CAPTION_PROFILE, mood: "bold" },
+      "follow",
+    ).frame.highlight,
+    "block",
   );
 });
 
