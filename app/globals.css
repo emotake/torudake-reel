@@ -2515,6 +2515,54 @@ footer > small {
   color: var(--mint);
 }
 
+.originalLengthSelection {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #101827, #202b3e);
+  color: white;
+}
+
+.originalLengthSelection > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--coral);
+  font-size: 12px;
+}
+
+.originalLengthSelection p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.originalLengthSelection strong {
+  font-size: 11px;
+}
+
+.originalLengthSelection small {
+  color: #d8e0ec;
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.originalLengthSelection b {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--ink);
+  font-size: 7px;
+  white-space: nowrap;
+}
+
 .editSummary {
   display: flex;
   justify-content: space-between;

@@ -177,6 +177,22 @@ export function buildEditRanges(
   }));
 }
 
+export function buildSpokenEditRanges(
+  captions: CaptionSegment[],
+  sourceDuration: number,
+  reconnectToSpeech: boolean,
+): EditRange[] {
+  if (
+    !reconnectToSpeech &&
+    Number.isFinite(sourceDuration) &&
+    sourceDuration > 0
+  ) {
+    return [{ start: 0, end: roundSeconds(sourceDuration) }];
+  }
+
+  return buildEditRanges(captions);
+}
+
 export function getEditedDuration(ranges: EditRange[]) {
   return roundSeconds(
     ranges.reduce(

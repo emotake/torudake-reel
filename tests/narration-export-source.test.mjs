@@ -137,3 +137,40 @@ test("shows and enforces the server-backed narration generation allowance", () =
   assert.match(regenerationFlow, /controller\.signal/);
   assert.match(regenerationFlow, /recordNarrationSpeechResult\(speechResult\)/);
 });
+
+test("uses video length language and gives spoken videos independent output choices", () => {
+  assert.doesNotMatch(pageSource, /AIナレーションの長さ/);
+  assert.match(pageSource, />\s*動画の長さ\s*</);
+  assert.match(pageSource, /元動画の長さ/);
+  assert.match(pageSource, /音声に合わせてつなぎ直す/);
+  assert.match(pageSource, /元動画の流れを保つ/);
+  assert.match(pageSource, /spokenCaptionsEnabled/);
+  assert.match(pageSource, /spokenAutoCutEnabled/);
+  assert.match(
+    pageSource,
+    /const narrationPlanLength = narrationAutoCutEnabled \? length : 90/,
+  );
+});
+
+test("keeps spoken caption and cut choices aligned across preview and export", () => {
+  const editRangesStart = pageSource.indexOf("const editRanges = useMemo(");
+  const editRangesEnd = pageSource.indexOf(
+    "const previewRanges = useMemo(",
+    editRangesStart,
+  );
+  const editRangesFlow = pageSource.slice(editRangesStart, editRangesEnd);
+  const overlayStart = pageSource.indexOf("function drawCaptionOverlay(");
+  const overlayEnd = pageSource.indexOf(
+    "async function exportCaptionedVideo(",
+    overlayStart,
+  );
+  const overlayFlow = pageSource.slice(overlayStart, overlayEnd);
+
+  assert.match(editRangesFlow, /buildSpokenEditRanges\(/);
+  assert.match(editRangesFlow, /spokenAutoCutEnabled/);
+  assert.match(pageSource, /spokenAutoCutEnabled\s*\?\s*createNaturalEdit/);
+  assert.match(pageSource, /const captionsVisible = narrationPlan[\s\S]*spokenCaptionsEnabled/);
+  assert.match(overlayFlow, /if \(!captionsVisible\) return/);
+  assert.match(pageSource, /spokenCaptionsEnabled,[\s\S]*spokenAutoCutEnabled/);
+  assert.match(pageSource, /!narrationPlan && spokenAutoCutEnabled/);
+});

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildEditRanges,
+  buildSpokenEditRanges,
   createNaturalEdit,
   editedTimeToSourceTime,
   getEditedDuration,
@@ -137,6 +138,21 @@ test("still joins a short natural gap when no caption was explicitly cut", () =>
   ];
 
   assert.deepEqual(buildEditRanges(edited), [{ start: 0, end: 4 }]);
+});
+
+test("keeps the complete source range when spoken-video reconnection is off", () => {
+  const transcript = [
+    caption(1, 2, 4, "冒頭の無音後に話します。"),
+    caption(2, 8, 11, "途中にも間があります。"),
+  ];
+
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, false), [
+    { start: 0, end: 15.432 },
+  ]);
+  assert.deepEqual(
+    buildSpokenEditRanges(transcript, 15.4321, true),
+    buildEditRanges(transcript),
+  );
 });
 
 test("sets and restores a caption cut without mutating other captions", () => {
