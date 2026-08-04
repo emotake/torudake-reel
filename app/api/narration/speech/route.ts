@@ -1,9 +1,18 @@
 import { env } from "cloudflare:workers";
-import { authorizeUsageOperation } from "../../../../lib/billing-store";
+import {
+  authorizeLeasedUsageOperation,
+  findOwnedUsageReservation,
+} from "../../../../lib/billing-store";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
-import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
+import {
+  consumeOperatorUsageOperation,
+  markOperatorUsageOperationSucceeded,
+  releaseUsageOperationLease,
+  type UsageOperationLease,
+} from "../../../../lib/operator-usage";
 import {
   isNarrationStyle,
+  NARRATION_SPEECH_SUCCESS_LIMIT,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
@@ -102,6 +111,15 @@ function speechError(status: number, payload: OpenAIError) {
   return "AI音声を生成できませんでした。もう一度お試しください。";
 }
 
+function generationQuotaHeaders(remaining: number) {
+  return {
+    "X-Narration-Generation-Limit": String(NARRATION_SPEECH_SUCCESS_LIMIT),
+    "X-Narration-Generations-Remaining": String(
+      Math.max(0, Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, remaining)),
+    ),
+  };
+}
+
 export async function POST(request: Request) {
   const apiKey =
     typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
@@ -116,6 +134,7 @@ export async function POST(request: Request) {
     script?: unknown;
     style?: unknown;
     usageReservationId?: unknown;
+    targetDurationSeconds?: unknown;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -127,6 +146,11 @@ export async function POST(request: Request) {
     typeof payload.script === "string"
       ? payload.script.replace(/\s+/g, " ").trim()
       : "";
+  const requestedTargetDuration = Number(payload.targetDurationSeconds);
+  const targetDurationSeconds =
+    Number.isFinite(requestedTargetDuration) && requestedTargetDuration > 0
+      ? Math.min(90, requestedTargetDuration)
+      : 90;
   if (!script || script.length > 2_000 || !isNarrationStyle(payload.style)) {
     return Response.json(
       { error: "台本は1〜2,000文字で入力してください。" },
@@ -135,6 +159,8 @@ export async function POST(request: Request) {
   }
 
   let authorizedReservationId: string | null = null;
+  let narrationLease: UsageOperationLease | null = null;
+  let successfulGenerationsBefore = 0;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
       allowTrial: true,
@@ -143,36 +169,30 @@ export async function POST(request: Request) {
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId
         : "";
-    const authorization =
-      currentUser && reservationId
-        ? await authorizeUsageOperation(
-            currentUser,
-            reservationId,
-            "narration_speech",
-          )
-        : null;
-    if (!authorization?.allowed) {
+    if (!currentUser || !reservationId) {
       return Response.json(
         {
-          error:
-            authorization?.reason === "operator_operation_limit"
-              ? "この動画でのAI音声生成回数が安全上限に達しました。新しい動画としてやり直してください。"
-              : "利用枠を確認できませんでした。動画を選び直してください。",
+          error: "利用枠を確認できませんでした。動画を選び直してください。",
         },
+        { status: currentUser ? 402 : 401 },
+      );
+    }
+    const reservation = await findOwnedUsageReservation(
+      currentUser,
+      reservationId,
+    );
+    if (!reservation) {
+      return Response.json(
         {
-          status:
-            authorization?.reason === "operator_operation_limit"
-              ? 429
-              : currentUser
-                ? 402
-                : 401,
+          error: "利用枠を確認できませんでした。動画を選び直してください。",
         },
+        { status: 402 },
       );
     }
     if (
       script.length >
       narrationScriptCharacterLimit(
-        authorization.reservation.sourceDurationSeconds,
+        Math.min(reservation.sourceDurationSeconds, targetDurationSeconds, 90),
       )
     ) {
       return Response.json(
@@ -183,58 +203,152 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const authorization = await authorizeLeasedUsageOperation(
+      currentUser,
+      reservationId,
+      "narration_speech",
+      { successfulLimit: NARRATION_SPEECH_SUCCESS_LIMIT },
+    );
+    if (!authorization?.allowed) {
+      const hitGenerationLimit =
+        authorization?.reason === "operator_success_limit";
+      const hitAttemptLimit =
+        authorization?.reason === "operator_operation_limit";
+      const alreadyProcessing =
+        authorization?.reason === "operation_in_progress";
+      return Response.json(
+        {
+          error: hitGenerationLimit
+            ? `この動画で作成できるAI音声の上限（${NARRATION_SPEECH_SUCCESS_LIMIT}回）に達しました。現在の音声で仕上げるか、新しい動画として開始してください。`
+            : hitAttemptLimit
+              ? "この動画でのAI音声生成回数が安全上限に達しました。現在の音声で仕上げるか、新しい動画として開始してください。"
+              : alreadyProcessing
+                ? "この動画のAI音声はすでに生成中です。完了するまで少しお待ちください。"
+                : "利用枠を確認できませんでした。動画を選び直してください。",
+        },
+        {
+          status: hitGenerationLimit || hitAttemptLimit
+            ? 429
+            : alreadyProcessing
+              ? 409
+              : 402,
+          headers:
+            hitGenerationLimit || hitAttemptLimit
+              ? generationQuotaHeaders(0)
+              : undefined,
+        },
+      );
+    }
     authorizedReservationId = authorization.reservation.id;
+    narrationLease = authorization.lease;
+    successfulGenerationsBefore = authorization.successfulCount;
   }
 
-  let response = await requestSpeech(apiKey, script, payload.style);
-  let fallbackModel = false;
-  if (!response.ok) {
-    const firstError = (await response.clone().json().catch(() => ({}))) as OpenAIError;
-    const detail = `${firstError.error?.code ?? ""} ${firstError.error?.type ?? ""} ${firstError.error?.message ?? ""}`;
+  try {
+    let response = await requestSpeech(apiKey, script, payload.style);
+    let fallbackModel = false;
+    if (!response.ok) {
+      const firstError = (await response
+        .clone()
+        .json()
+        .catch(() => ({}))) as OpenAIError;
+      const detail = `${firstError.error?.code ?? ""} ${firstError.error?.type ?? ""} ${firstError.error?.message ?? ""}`;
+      if (
+        (response.status === 400 ||
+          response.status === 404 ||
+          response.status === 410) &&
+        /model|voice|deprecated|not.found/i.test(detail)
+      ) {
+        if (
+          authorizedReservationId &&
+          !(await consumeOperatorUsageOperation(
+            authorizedReservationId,
+            "narration_speech",
+          ))
+        ) {
+          return Response.json(
+            {
+              error:
+                "この動画でのAI音声生成回数が安全上限に達しました。現在の音声で仕上げるか、新しい動画として開始してください。",
+            },
+            {
+              status: 429,
+              headers: generationQuotaHeaders(0),
+            },
+          );
+        }
+        response = await requestSpeech(apiKey, script, payload.style, true);
+        fallbackModel = true;
+      }
+    }
+
+    if (!response.ok) {
+      const errorPayload = (await response
+        .json()
+        .catch(() => ({}))) as OpenAIError;
+      console.error(
+        "OpenAI narration speech failed",
+        response.status,
+        response.headers.get("x-request-id"),
+        errorPayload.error?.code,
+        errorPayload.error?.type,
+      );
+      return Response.json(
+        { error: speechError(response.status, errorPayload) },
+        {
+          status: response.status,
+          headers: authorizedReservationId
+            ? generationQuotaHeaders(
+                NARRATION_SPEECH_SUCCESS_LIMIT - successfulGenerationsBefore,
+              )
+            : undefined,
+        },
+      );
+    }
+
+    const audio = await response.arrayBuffer();
+    if (!audio.byteLength) {
+      return Response.json(
+        { error: "AI音声を生成できませんでした。もう一度お試しください。" },
+        {
+          status: 502,
+          headers: authorizedReservationId
+            ? generationQuotaHeaders(
+                NARRATION_SPEECH_SUCCESS_LIMIT - successfulGenerationsBefore,
+              )
+            : undefined,
+        },
+      );
+    }
     if (
-      (response.status === 400 ||
-        response.status === 404 ||
-        response.status === 410) &&
-      /model|voice|deprecated|not.found/i.test(detail)
+      authorizedReservationId &&
+      !(await markOperatorUsageOperationSucceeded(
+        authorizedReservationId,
+        "narration_speech",
+      ))
     ) {
-      response = await requestSpeech(apiKey, script, payload.style, true);
-      fallbackModel = true;
+      return Response.json(
+        { error: "利用記録を確定できませんでした。もう一度お試しください。" },
+        { status: 500 },
+      );
+    }
+    return new Response(audio, {
+      headers: {
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "private, no-store",
+        "X-Narration-Model": fallbackModel ? "tts-1-hd" : "gpt-4o-mini-tts",
+        ...(authorizedReservationId
+          ? generationQuotaHeaders(
+              NARRATION_SPEECH_SUCCESS_LIMIT -
+                successfulGenerationsBefore -
+                1,
+            )
+          : {}),
+      },
+    });
+  } finally {
+    if (narrationLease) {
+      await releaseUsageOperationLease(narrationLease).catch(() => undefined);
     }
   }
-
-  if (!response.ok) {
-    const errorPayload = (await response.json().catch(() => ({}))) as OpenAIError;
-    console.error(
-      "OpenAI narration speech failed",
-      response.status,
-      response.headers.get("x-request-id"),
-      errorPayload.error?.code,
-      errorPayload.error?.type,
-    );
-    return Response.json(
-      { error: speechError(response.status, errorPayload) },
-      { status: response.status },
-    );
-  }
-
-  const audio = await response.arrayBuffer();
-  if (
-    authorizedReservationId &&
-    !(await markOperatorUsageOperationSucceeded(
-      authorizedReservationId,
-      "narration_speech",
-    ))
-  ) {
-    return Response.json(
-      { error: "利用記録を確定できませんでした。もう一度お試しください。" },
-      { status: 500 },
-    );
-  }
-  return new Response(audio, {
-    headers: {
-      "Content-Type": "audio/mpeg",
-      "Cache-Control": "private, no-store",
-      "X-Narration-Model": fallbackModel ? "tts-1-hd" : "gpt-4o-mini-tts",
-    },
-  });
 }

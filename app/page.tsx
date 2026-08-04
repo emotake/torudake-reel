@@ -66,6 +66,7 @@ import {
   getNarrationPlaybackRate,
   MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
   NARRATION_DISCLOSURE_TEXT,
+  NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
@@ -113,6 +114,7 @@ class ApiRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly narrationGenerationsRemaining: number | null = null,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -824,14 +826,27 @@ async function requestNarrationSpeech(
   script: string,
   style: NarrationStyle,
   usageReservationId: string | null,
+  targetDurationSeconds: number,
   signal?: AbortSignal,
 ) {
   const response = await fetch("/api/narration/speech", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ script, style, usageReservationId }),
+    body: JSON.stringify({
+      script,
+      style,
+      usageReservationId,
+      targetDurationSeconds,
+    }),
     signal,
   });
+  const remainingHeader = Number(
+    response.headers.get("X-Narration-Generations-Remaining"),
+  );
+  const narrationGenerationsRemaining =
+    Number.isInteger(remainingHeader) && remainingHeader >= 0
+      ? Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, remainingHeader)
+      : null;
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";
     const payload = contentType.includes("application/json")
@@ -840,11 +855,26 @@ async function requestNarrationSpeech(
     throw new ApiRequestError(
       payload.error || "AI音声を生成できませんでした。もう一度お試しください。",
       response.status,
+      narrationGenerationsRemaining,
     );
   }
   const audio = await response.blob();
   if (!audio.size) throw new Error("AI音声を生成できませんでした。");
-  return audio;
+  return { audio, narrationGenerationsRemaining };
+}
+
+function narrationGenerationKey(
+  script: string,
+  style: NarrationStyle,
+  pronunciationGuide: string,
+) {
+  const normalizedScript = script.replace(/\s+/g, " ").trim();
+  const normalizedGuide = pronunciationGuide
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+  return JSON.stringify([normalizedScript, style, normalizedGuide]);
 }
 
 async function getNarrationAudioDuration(audio: Blob) {
@@ -930,6 +960,10 @@ export default function Home() {
   const editAbortRef = useRef<AbortController | null>(null);
   const editGenerationRef = useRef(0);
   const usageReservationRef = useRef<string | null>(null);
+  const narrationRegenerationAbortRef = useRef<AbortController | null>(null);
+  const narrationGenerationsRemainingRef = useRef(
+    NARRATION_SPEECH_SUCCESS_LIMIT,
+  );
   const [usageReservationId, setUsageReservationId] = useState<string | null>(
     null,
   );
@@ -962,6 +996,8 @@ export default function Home() {
     null,
   );
   const [narrationAudioUrl, setNarrationAudioUrl] = useState("");
+  const [narrationGenerationsRemaining, setNarrationGenerationsRemaining] =
+    useState(NARRATION_SPEECH_SUCCESS_LIMIT);
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : ""),
@@ -992,6 +1028,25 @@ export default function Home() {
     setUsageReservationId(nextReservationId);
   }
 
+  function rememberNarrationGenerationsRemaining(nextRemaining: number) {
+    const normalized = Math.max(
+      0,
+      Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, Math.floor(nextRemaining)),
+    );
+    narrationGenerationsRemainingRef.current = normalized;
+    setNarrationGenerationsRemaining(normalized);
+    return normalized;
+  }
+
+  function recordNarrationSpeechResult(result: {
+    narrationGenerationsRemaining: number | null;
+  }) {
+    return rememberNarrationGenerationsRemaining(
+      result.narrationGenerationsRemaining ??
+        narrationGenerationsRemainingRef.current - 1,
+    );
+  }
+
   useEffect(() => {
     return () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -1001,6 +1056,7 @@ export default function Home() {
   useEffect(
     () => () => {
       editAbortRef.current?.abort();
+      narrationRegenerationAbortRef.current?.abort();
       transferAbortRef.current?.abort();
     },
     [],
@@ -1066,6 +1122,8 @@ export default function Home() {
       return;
     }
     editAbortRef.current?.abort();
+    narrationRegenerationAbortRef.current?.abort();
+    narrationRegenerationAbortRef.current = null;
     editAbortRef.current = null;
     editGenerationRef.current += 1;
     setFile(selected);
@@ -1074,6 +1132,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1081,6 +1140,8 @@ export default function Home() {
 
   function useSample() {
     editAbortRef.current?.abort();
+    narrationRegenerationAbortRef.current?.abort();
+    narrationRegenerationAbortRef.current = null;
     editAbortRef.current = null;
     editGenerationRef.current += 1;
     setFile(null);
@@ -1089,6 +1150,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1252,17 +1314,20 @@ export default function Home() {
       });
       throwIfProcessingAborted(controller.signal);
       updateProgress(68);
-      let audio = await requestNarrationSpeech(
-        nextPlan.script,
-        narrationStyle,
-        newlyReservedUsage,
-        controller.signal,
-      );
-      let audioDuration = await getNarrationAudioDuration(audio);
       const maximumDuration = Math.max(
         1,
         Math.min(length, extracted.duration),
       );
+      let speechResult = await requestNarrationSpeech(
+        nextPlan.script,
+        narrationStyle,
+        newlyReservedUsage,
+        maximumDuration,
+        controller.signal,
+      );
+      recordNarrationSpeechResult(speechResult);
+      let audio = speechResult.audio;
+      let audioDuration = await getNarrationAudioDuration(audio);
 
       if (
         audioDuration >
@@ -1285,12 +1350,15 @@ export default function Home() {
           previousScript: nextPlan.script,
           signal: controller.signal,
         });
-        audio = await requestNarrationSpeech(
+        speechResult = await requestNarrationSpeech(
           nextPlan.script,
           narrationStyle,
           newlyReservedUsage,
+          maximumDuration,
           controller.signal,
         );
+        recordNarrationSpeechResult(speechResult);
+        audio = speechResult.audio;
         audioDuration = await getNarrationAudioDuration(audio);
       }
       if (
@@ -1353,7 +1421,17 @@ export default function Home() {
     style: NarrationStyle,
     pronunciationGuide: string,
   ) {
-    if (!file || !narrationPlan) return;
+    if (!file || !narrationPlan) {
+      throw new Error("AI音声を更新する動画が見つかりませんでした。");
+    }
+    if (narrationRegenerationAbortRef.current) {
+      throw new Error("AI音声を生成中です。完了まで少しお待ちください。");
+    }
+    if (narrationGenerationsRemainingRef.current <= 0) {
+      throw new Error(
+        `この動画で作成できるAI音声の上限（${NARRATION_SPEECH_SUCCESS_LIMIT}回）に達しました。`,
+      );
+    }
     const cleanScript = script.replace(/\s+/g, " ").trim();
     if (!cleanScript) throw new Error("ナレーション台本を入力してください。");
     const pronunciationValidation = validateNarrationPronunciationGuide(
@@ -1373,35 +1451,67 @@ export default function Home() {
     if (speechScript.length > 2_000) {
       throw new Error("読み方を反映した台本が長すぎます。指定を短くしてください。");
     }
-    const audio = await requestNarrationSpeech(
-      speechScript,
-      style,
-      usageReservationRef.current,
-    );
-    const audioDuration = await getNarrationAudioDuration(audio);
-    const duration = await getVideoDurationSeconds(file);
-    const maximumDuration = Math.max(1, Math.min(length, duration));
-    if (
-      audioDuration >
-      maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
-    ) {
-      throw new Error(
-        `この台本は約${Math.ceil(audioDuration)}秒です。自然な速さを保つため、${Math.floor(maximumDuration)}秒以内になるよう少し短くしてください。`,
+    const controller = new AbortController();
+    const generation = editGenerationRef.current;
+    narrationRegenerationAbortRef.current = controller;
+    try {
+      const duration = await getVideoDurationSeconds(file);
+      const maximumDuration = Math.max(1, Math.min(length, duration));
+      const speechResult = await requestNarrationSpeech(
+        speechScript,
+        style,
+        usageReservationRef.current,
+        maximumDuration,
+        controller.signal,
       );
+      throwIfProcessingAborted(controller.signal);
+      if (editGenerationRef.current !== generation) {
+        throw new DOMException("処理を中止しました。", "AbortError");
+      }
+      const remaining = recordNarrationSpeechResult(speechResult);
+      const audio = speechResult.audio;
+      const audioDuration = await getNarrationAudioDuration(audio);
+      if (
+        audioDuration >
+        maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
+      ) {
+        throw new Error(
+          `この台本は約${Math.ceil(audioDuration)}秒です。自然な速さを保つため、${Math.floor(maximumDuration)}秒以内になるよう少し短くしてください。残り${remaining}回です。`,
+        );
+      }
+      const segments = splitNarrationScript(cleanScript).map((text, index) => ({
+        text,
+        speechText: applyNarrationPronunciationGuide(text, pronunciationGuide),
+        emphasis: index === 0,
+      }));
+      throwIfProcessingAborted(controller.signal);
+      if (editGenerationRef.current !== generation) {
+        throw new DOMException("処理を中止しました。", "AbortError");
+      }
+      setNarrationStyle(style);
+      setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
+      setTranscript(
+        buildNarrationTimeline(segments, duration, length, audioDuration, {
+          autoCut: narrationAutoCutEnabled,
+        }),
+      );
+      setNarrationAudioUrl(URL.createObjectURL(audio));
+      return remaining;
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.narrationGenerationsRemaining !== null
+      ) {
+        rememberNarrationGenerationsRemaining(
+          error.narrationGenerationsRemaining,
+        );
+      }
+      throw error;
+    } finally {
+      if (narrationRegenerationAbortRef.current === controller) {
+        narrationRegenerationAbortRef.current = null;
+      }
     }
-    const segments = splitNarrationScript(cleanScript).map((text, index) => ({
-      text,
-      speechText: applyNarrationPronunciationGuide(text, pronunciationGuide),
-      emphasis: index === 0,
-    }));
-    setNarrationStyle(style);
-    setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
-    setTranscript(
-      buildNarrationTimeline(segments, duration, length, audioDuration, {
-        autoCut: narrationAutoCutEnabled,
-      }),
-    );
-    setNarrationAudioUrl(URL.createObjectURL(audio));
   }
 
   async function updateNarrationCutMode(autoCut: boolean) {
@@ -1439,6 +1549,8 @@ export default function Home() {
     transferAbortRef.current = null;
     editAbortRef.current?.abort();
     editAbortRef.current = null;
+    narrationRegenerationAbortRef.current?.abort();
+    narrationRegenerationAbortRef.current = null;
     editGenerationRef.current += 1;
     setFile(null);
     setStage("start");
@@ -1454,6 +1566,7 @@ export default function Home() {
     setNarrationAutoCutEnabled(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1717,6 +1830,7 @@ export default function Home() {
           setNarrationPlan={setNarrationPlan}
           narrationAudioUrl={narrationAudioUrl}
           narrationStyle={narrationStyle}
+          narrationGenerationsRemaining={narrationGenerationsRemaining}
           narrationOriginalAudio={narrationOriginalAudio}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
           setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
@@ -2926,6 +3040,7 @@ function ResultWorkspace({
   setNarrationPlan,
   narrationAudioUrl,
   narrationStyle,
+  narrationGenerationsRemaining,
   narrationOriginalAudio,
   narrationCaptionsEnabled,
   setNarrationCaptionsEnabled,
@@ -2955,6 +3070,7 @@ function ResultWorkspace({
   setNarrationPlan: (plan: NarrationPlan | null) => void;
   narrationAudioUrl: string;
   narrationStyle: NarrationStyle;
+  narrationGenerationsRemaining: number;
   narrationOriginalAudio: NarrationOriginalAudioLevel;
   narrationCaptionsEnabled: boolean;
   setNarrationCaptionsEnabled: (enabled: boolean) => void;
@@ -2968,7 +3084,7 @@ function ResultWorkspace({
     script: string,
     style: NarrationStyle,
     pronunciationGuide: string,
-  ) => Promise<void>;
+  ) => Promise<number>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const narrationSampleAudioRef = useRef<HTMLAudioElement>(null);
@@ -3034,6 +3150,9 @@ function ResultWorkspace({
     useState("");
   const [draftNarrationStyle, setDraftNarrationStyle] =
     useState<NarrationStyle>(narrationStyle);
+  const [lastNarrationGenerationKey, setLastNarrationGenerationKey] = useState(
+    () => narrationGenerationKey(narrationPlan?.script ?? "", narrationStyle, ""),
+  );
   const [isRegeneratingNarration, setIsRegeneratingNarration] =
     useState(false);
   const [isUpdatingNarrationCutMode, setIsUpdatingNarrationCutMode] =
@@ -3043,6 +3162,19 @@ function ResultWorkspace({
     [narrationPronunciationGuide],
   );
   const pronunciationEntryCount = pronunciationValidation.entries.length;
+  const pendingNarrationGenerationKey = useMemo(
+    () =>
+      narrationGenerationKey(
+        narrationDraft,
+        draftNarrationStyle,
+        narrationPronunciationGuide,
+      ),
+    [narrationDraft, draftNarrationStyle, narrationPronunciationGuide],
+  );
+  const hasPendingNarrationChanges =
+    pendingNarrationGenerationKey !== lastNarrationGenerationKey;
+  const narrationGenerationLimitReached =
+    narrationGenerationsRemaining <= 0;
   const isMediaBusy =
     isExporting ||
     isGeneratingThumbnail ||
@@ -4222,22 +4354,30 @@ function ResultWorkspace({
   }
 
   async function handleNarrationRegeneration() {
-    if (isMediaBusy || isExportingRef.current) return;
+    if (
+      isMediaBusy ||
+      isExportingRef.current ||
+      narrationGenerationLimitReached ||
+      !hasPendingNarrationChanges
+    ) {
+      return;
+    }
     pausePreviewTransport();
     narrationSampleAudioRef.current?.pause();
     setIsRegeneratingNarration(true);
     try {
-      await regenerateNarration(
+      const remaining = await regenerateNarration(
         narrationDraft,
         draftNarrationStyle,
         narrationPronunciationGuide,
       );
+      setLastNarrationGenerationKey(pendingNarrationGenerationKey);
       notify(
         pronunciationEntryCount
-          ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました`
+          ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました（残り${remaining}回）`
           : narrationCaptionsEnabled
-            ? "AI音声とテロップを更新しました"
-            : "AI音声を更新しました",
+            ? `AI音声とテロップを更新しました（残り${remaining}回）`
+            : `AI音声を更新しました（残り${remaining}回）`,
       );
     } catch (error) {
       notify(
@@ -5612,17 +5752,43 @@ function ResultWorkspace({
                   disabled={isMediaBusy}
                 />
               </div>
+              <div
+                className={`narrationGenerationQuota${narrationGenerationsRemaining <= 1 ? " isLow" : ""}${narrationGenerationLimitReached ? " isExhausted" : ""}`}
+                aria-live="polite"
+              >
+                <div>
+                  <strong>AI音声の生成</strong>
+                  <span>
+                    残り <b>{narrationGenerationsRemaining}</b> / {NARRATION_SPEECH_SUCCESS_LIMIT}回
+                  </span>
+                </div>
+                <small>
+                  1動画につき合計{NARRATION_SPEECH_SUCCESS_LIMIT}回までです。初回生成と自動的な尺調整も含みます。下のボタンからAI音声の生成が完了すると残り回数を1回使いますが、1動画作成の利用枠やお支払いは増えません。
+                </small>
+                {narrationGenerationLimitReached && (
+                  <p>
+                    現在のAI音声はそのままプレビュー・書き出しできます。新たに作る場合は「別の動画を作る」から開始してください。
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 className="quietButton regenerateVoice"
-                disabled={isMediaBusy || Boolean(pronunciationValidation.error)}
+                disabled={
+                  isMediaBusy ||
+                  Boolean(pronunciationValidation.error) ||
+                  narrationGenerationLimitReached ||
+                  !hasPendingNarrationChanges
+                }
                 onClick={() => void handleNarrationRegeneration()}
               >
                 {isRegeneratingNarration
                   ? "AI音声を再生成中…"
-                  : pronunciationEntryCount
-                    ? "台本・読み方・声を反映"
-                    : "この台本と声で再生成"}
+                  : narrationGenerationLimitReached
+                    ? "AI音声の生成上限に達しました"
+                    : hasPendingNarrationChanges
+                      ? "変更内容でAI音声を作り直す"
+                      : "変更は反映済み"}
               </button>
               <audio
                 ref={narrationSampleAudioRef}

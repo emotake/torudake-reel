@@ -11,6 +11,7 @@ import {
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
   NARRATION_DISCLOSURE_TEXT,
+  NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
   normalizeNarrationPlan,
   parseNarrationPronunciationGuide,
@@ -21,6 +22,10 @@ import {
   buildEditRanges,
   getEditedDuration,
 } from "../lib/edit-plan.ts";
+
+test("caps successful AI voice outputs for one video", () => {
+  assert.equal(NARRATION_SPEECH_SUCCESS_LIMIT, 5);
+});
 
 test("normalizes a structured narration plan", () => {
   const plan = normalizeNarrationPlan({

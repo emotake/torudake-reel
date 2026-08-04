@@ -4631,6 +4631,60 @@ footer > small {
   justify-self: start;
 }
 
+.narrationGenerationQuota {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid #d8e1ea;
+  border-radius: 10px;
+  background: #f7fafc;
+}
+
+.narrationGenerationQuota > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.narrationGenerationQuota strong,
+.narrationGenerationQuota span {
+  font-size: 8px;
+}
+
+.narrationGenerationQuota span {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.narrationGenerationQuota span b {
+  color: var(--coral-dark);
+  font-size: 12px;
+}
+
+.narrationGenerationQuota small,
+.narrationGenerationQuota p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.65;
+}
+
+.narrationGenerationQuota.isLow {
+  border-color: #edc37a;
+  background: #fff9ec;
+}
+
+.narrationGenerationQuota.isExhausted {
+  border-color: #efb0a8;
+  background: #fff3f1;
+}
+
+.narrationGenerationQuota.isExhausted p {
+  color: #9d3428;
+  font-weight: 800;
+}
+
 .narrationAudio {
   width: 100%;
   height: 38px;

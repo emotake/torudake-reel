@@ -21,6 +21,7 @@ import type { CurrentUser } from "./current-user";
 import {
   acquireUsageOperationLease,
   consumeOperatorUsageOperation,
+  getOperatorUsageOperationCounts,
   isObservedDurationBlocked,
   releaseUsageOperationLease,
   releaseOrCompleteUsageReservation,
@@ -513,6 +514,7 @@ export async function authorizeLeasedUsageOperation(
   currentUser: CurrentUser,
   reservationId: string,
   operation: OperatorUsageOperation,
+  options: { successfulLimit?: number } = {},
 ) {
   const reservation = await findOwnedUsageReservation(
     currentUser,
@@ -561,6 +563,27 @@ export async function authorizeLeasedUsageOperation(
         lease: null,
       } as const;
     }
+    const successfulLimit =
+      Number.isFinite(options.successfulLimit) &&
+      Number(options.successfulLimit) > 0
+        ? Math.floor(Number(options.successfulLimit))
+        : null;
+    const operationCounts = successfulLimit
+      ? await getOperatorUsageOperationCounts(reservation.id, operation)
+      : { count: 0, successfulCount: 0 };
+    if (
+      successfulLimit &&
+      operationCounts.successfulCount >= successfulLimit
+    ) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "operator_success_limit",
+        reservation,
+        lease: null,
+        successfulCount: operationCounts.successfulCount,
+      } as const;
+    }
     const allowed = await consumeOperatorUsageOperation(
       reservation.id,
       operation,
@@ -579,6 +602,7 @@ export async function authorizeLeasedUsageOperation(
       reason: null,
       reservation,
       lease,
+      successfulCount: operationCounts.successfulCount,
     } as const;
   } catch (error) {
     await releaseUsageOperationLease(lease).catch(() => undefined);

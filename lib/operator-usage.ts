@@ -406,6 +406,30 @@ export async function consumeOperatorUsageOperation(
   return Boolean(row && row.count <= OPERATOR_OPERATION_LIMITS[operation]);
 }
 
+export async function getOperatorUsageOperationCounts(
+  reservationId: string,
+  operation: OperatorUsageOperation,
+) {
+  await ensureOperatorUsageSchema();
+  const database = env.DB as unknown as D1Database;
+  const id = `${reservationId}:${operation}`;
+  const row = await database
+    .prepare(`
+      SELECT count, successful_count
+      FROM operator_usage_operations
+      WHERE id = ?
+        AND reservation_id = ?
+        AND operation = ?
+      LIMIT 1
+    `)
+    .bind(id, reservationId, operation)
+    .first<{ count: number; successful_count: number }>();
+  return {
+    count: Math.max(0, row?.count ?? 0),
+    successfulCount: Math.max(0, row?.successful_count ?? 0),
+  };
+}
+
 /** Records that an upstream operation returned a usable result. */
 export async function markOperatorUsageOperationSucceeded(
   reservationId: string,

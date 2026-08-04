@@ -117,3 +117,23 @@ test("keeps display text separate from user-specified narration readings", () =>
   assert.match(pageSource, /漢字の読み方を直す/);
   assert.match(pageSource, /テロップの漢字は変わりません/);
 });
+
+test("shows and enforces the server-backed narration generation allowance", () => {
+  const regenerationStart = pageSource.indexOf(
+    "async function regenerateNarration(",
+  );
+  const regenerationEnd = pageSource.indexOf(
+    "\n  async function updateNarrationCutMode",
+    regenerationStart,
+  );
+  const regenerationFlow = pageSource.slice(regenerationStart, regenerationEnd);
+
+  assert.match(pageSource, /X-Narration-Generations-Remaining/);
+  assert.match(pageSource, /AI音声の生成/);
+  assert.match(pageSource, /初回生成と自動的な尺調整も含みます/);
+  assert.match(pageSource, /1動画作成の利用枠やお支払いは増えません/);
+  assert.match(pageSource, /変更は反映済み/);
+  assert.match(regenerationFlow, /narrationRegenerationAbortRef\.current/);
+  assert.match(regenerationFlow, /controller\.signal/);
+  assert.match(regenerationFlow, /recordNarrationSpeechResult\(speechResult\)/);
+});

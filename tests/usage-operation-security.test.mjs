@@ -13,6 +13,17 @@ function createUsageDatabase() {
         return this;
       },
       async first() {
+        if (/SELECT count, successful_count/i.test(query)) {
+          const [id, reservationId, operation] = this.values;
+          const existing = operations.get(id);
+          return existing?.reservationId === reservationId &&
+            existing.operation === operation
+            ? {
+                count: existing.count,
+                successful_count: existing.successfulCount,
+              }
+            : null;
+        }
         if (/INSERT INTO operator_usage_operations/i.test(query)) {
           const [id, reservationId, operation, now, , , limit] = this.values;
           const reservation = reservations.get(reservationId);
@@ -129,6 +140,7 @@ test("limits operations for a free reservation and refuses a post-use refund", a
     moduleUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
     const {
       consumeOperatorUsageOperation,
+      getOperatorUsageOperationCounts,
       markOperatorUsageOperationSucceeded,
       releaseOrCompleteUsageReservation,
     } = await import(moduleUrl.href);
@@ -158,6 +170,13 @@ test("limits operations for a free reservation and refuses a post-use refund", a
         now,
       ),
       true,
+    );
+    assert.deepEqual(
+      await getOperatorUsageOperationCounts(
+        "free-reservation",
+        "transcribe",
+      ),
+      { count: 24, successfulCount: 1 },
     );
     assert.equal(
       await releaseOrCompleteUsageReservation(

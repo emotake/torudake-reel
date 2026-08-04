@@ -170,3 +170,45 @@ test("the transcribe route leases before charging and always releases in finally
     "a busy request must be rejected before its operation count is charged",
   );
 });
+
+test("the narration speech route leases, caps successful output, and releases safely", async () => {
+  const routeSource = await readFile(
+    new URL("../app/api/narration/speech/route.ts", import.meta.url),
+    "utf8",
+  );
+  const billingSource = await readFile(
+    new URL("../lib/billing-store.ts", import.meta.url),
+    "utf8",
+  );
+  const postSource = routeSource.slice(
+    routeSource.indexOf("export async function POST"),
+  );
+  const leasedAuthorizationSource = billingSource.slice(
+    billingSource.indexOf("export async function authorizeLeasedUsageOperation"),
+  );
+
+  assert.ok(
+    postSource.indexOf("authorizeLeasedUsageOperation(") <
+      postSource.indexOf("requestSpeech(apiKey, script, payload.style)"),
+  );
+  assert.match(postSource, /successfulLimit:\s*NARRATION_SPEECH_SUCCESS_LIMIT/);
+  assert.match(postSource, /reason === "operator_success_limit"/);
+  assert.match(postSource, /reason === "operation_in_progress"[\s\S]*409/);
+  assert.match(
+    postSource,
+    /Math\.min\(reservation\.sourceDurationSeconds, targetDurationSeconds, 90\)/,
+  );
+  assert.match(postSource, /if \(!audio\.byteLength\)/);
+  assert.match(
+    postSource,
+    /finally\s*\{[\s\S]*releaseUsageOperationLease\(narrationLease\)/,
+  );
+  assert.ok(
+    leasedAuthorizationSource.indexOf("acquireUsageOperationLease(") <
+      leasedAuthorizationSource.indexOf("getOperatorUsageOperationCounts("),
+  );
+  assert.ok(
+    leasedAuthorizationSource.indexOf("getOperatorUsageOperationCounts(") <
+      leasedAuthorizationSource.indexOf("consumeOperatorUsageOperation("),
+  );
+});

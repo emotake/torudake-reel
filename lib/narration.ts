@@ -7,6 +7,7 @@ import {
 export const NARRATION_DISCLOSURE_TEXT =
   "※この動画ではAIナレーションを使用しています。";
 export const NARRATION_TERMS_VERSION = "2026-07-30";
+export const NARRATION_SPEECH_SUCCESS_LIMIT = 5;
 
 export type VideoAudioMode = "spoken" | "narration";
 export type NarrationStyle =
