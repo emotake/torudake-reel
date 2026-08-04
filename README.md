@@ -42,6 +42,11 @@ pnpm run test
 `TRIAL_ISSUANCE_SECRET` が必要です。値はCloudflareのシークレットとして設定し、
 リポジトリへ保存しないでください。
 
+AIナレーションは `gpt-realtime-2.1-mini` を主モデルとして使用し、Realtime接続を
+PCM 24kHzのWAVへ変換してプレビューと書き出しへ渡します。接続開始前に失敗した
+場合は `tts-1-hd` へ安全に切り替わります。緊急時だけ
+`NARRATION_SPEECH_MODE=legacy` を設定すると、従来の `gpt-4o-mini-tts` に戻せます。
+
 通常の動画編集はR2を使用せず、25MB以下の対応動画を直接音声認識へ送り、
 それを超える動画やMOV/M4Vはブラウザ内で音声だけを分割します。
 R2の `MEDIA` bindingは、公開導線のない開発用ファイル転送APIを使う場合だけ任意です。

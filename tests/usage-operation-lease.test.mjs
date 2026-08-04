@@ -189,7 +189,7 @@ test("the narration speech route leases, caps successful output, and releases sa
 
   assert.ok(
     postSource.indexOf("authorizeLeasedUsageOperation(") <
-      postSource.indexOf("requestSpeech(apiKey, script, payload.style)"),
+      postSource.indexOf("requestSpeech("),
   );
   assert.match(postSource, /successfulLimit:\s*NARRATION_SPEECH_SUCCESS_LIMIT/);
   assert.match(postSource, /reason === "operator_success_limit"/);

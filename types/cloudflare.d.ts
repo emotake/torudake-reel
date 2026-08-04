@@ -11,6 +11,7 @@ declare module "cloudflare:workers" {
     DB: D1Database;
     MEDIA: R2Bucket;
     OPENAI_API_KEY?: string;
+    NARRATION_SPEECH_MODE?: string;
     TRUST_SITES_AUTH_HEADERS?: string;
     PUBLIC_ORIGIN?: string;
     STRIPE_SECRET_KEY?: string;

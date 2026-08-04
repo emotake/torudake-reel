@@ -12,6 +12,11 @@ const workerContext = {
   passThroughOnException() {},
 };
 
+const narrationCloudflareEnv = {
+  OPENAI_API_KEY: "test-key",
+  USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+};
+
 async function loadWorker(testName) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set(testName, `${process.pid}-${Date.now()}`);
@@ -19,23 +24,123 @@ async function loadWorker(testName) {
   return worker;
 }
 
-test("sends five distinct voice characters at natural fixed speeds", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+class MockRealtimeSocket {
+  constructor(mode = "success") {
+    this.mode = mode;
+    this.readyState = 1;
+    this.closed = false;
+    this.sent = [];
+    this.listeners = new Map();
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  emit(type, event = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
+  accept() {
+    queueMicrotask(() => {
+      if (this.mode === "error") {
+        this.emit("error");
+        return;
+      }
+      this.emit("message", {
+        data: JSON.stringify({ type: "session.created" }),
+      });
+    });
+  }
+
+  send(value) {
+    const event = JSON.parse(value);
+    this.sent.push(event);
+    if (event.type === "session.update") {
+      queueMicrotask(() => {
+        this.emit("message", {
+          data: JSON.stringify({ type: "session.updated" }),
+        });
+      });
+      return;
+    }
+    if (event.type !== "response.create") return;
+
+    queueMicrotask(() => {
+      if (this.mode === "hang") return;
+      if (this.mode === "pre-audio-error") {
+        this.emit("message", {
+          data: JSON.stringify({
+            type: "error",
+            error: {
+              code: "server_error",
+              type: "api_error",
+              message: "generation interrupted before audio",
+            },
+          }),
+        });
+        return;
+      }
+      this.emit("message", {
+        data: JSON.stringify({
+          type: "response.output_audio.delta",
+          delta: Buffer.from([0, 0, 1, 0, 255, 255]).toString("base64"),
+        }),
+      });
+      if (this.mode === "partial-error") {
+        this.emit("message", {
+          data: JSON.stringify({
+            type: "error",
+            error: {
+              code: "server_error",
+              type: "api_error",
+              message: "connection interrupted",
+            },
+          }),
+        });
+        return;
+      }
+      this.emit("message", {
+        data: JSON.stringify({
+          type: "response.done",
+          response: { status: "completed" },
+        }),
+      });
+    });
+  }
+
+  close() {
+    this.readyState = 3;
+    this.closed = true;
+  }
+}
+
+function realtimeUpgrade(socket) {
+  return {
+    status: 101,
+    ok: false,
+    headers: new Headers(),
+    webSocket: socket,
   };
+}
+
+test("generates five distinct realtime voices and wraps PCM output as WAV", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
   const requests = [];
+  const sockets = [];
   globalThis.fetch = async (url, init) => {
-    requests.push({ url, body: JSON.parse(init.body) });
-    return new Response(new Uint8Array([1, 2, 3]), {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" },
-    });
+    const socket = new MockRealtimeSocket();
+    requests.push({ url, init });
+    sockets.push(socket);
+    return realtimeUpgrade(socket);
   };
 
   try {
-    const worker = await loadWorker("narration-voices");
+    const worker = await loadWorker("narration-realtime-voices");
     const styles = ["bright", "calm", "tempo", "refined", "comedy"];
 
     for (const style of styles) {
@@ -52,81 +157,97 @@ test("sends five distinct voice characters at natural fixed speeds", async () =>
         workerContext,
       );
       assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "audio/wav");
+      assert.equal(
+        response.headers.get("x-narration-model"),
+        "gpt-realtime-2.1-mini",
+      );
+      const wav = new Uint8Array(await response.arrayBuffer());
+      assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
+      assert.equal(new TextDecoder().decode(wav.subarray(8, 12)), "WAVE");
+      assert.equal(new DataView(wav.buffer).getUint32(24, true), 24_000);
+      assert.equal(new DataView(wav.buffer).getUint32(40, true), 6);
     }
 
-    assert.deepEqual(
-      requests.map((request) => request.body.voice),
-      ["coral", "cedar", "nova", "onyx", "ash"],
-    );
-    assert.deepEqual(
-      requests.map((request) => request.body.speed),
-      [1, 0.99, 1.06, 0.97, 1.04],
-    );
-    assert.equal(
-      new Set(requests.map((request) => request.body.instructions)).size,
-      5,
-    );
-    assert.ok(
-      requests.every((request) =>
-        request.body.instructions.includes(
-          "台本にない語句、相づち、笑い声、効果音を追加せず",
-        ),
-      ),
-    );
     assert.ok(
       requests.every(
         (request) =>
-          request.url === "https://api.openai.com/v1/audio/speech" &&
-          request.body.model === "gpt-4o-mini-tts" &&
-          request.body.instructions.length >= 70,
+          request.url ===
+            "https://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini" &&
+          request.init.headers.Authorization === "Bearer test-key" &&
+          request.init.headers.Upgrade === "websocket",
       ),
     );
-    assert.match(requests[2].body.instructions, /成人のポップボイス/);
+    const sessions = sockets.map((socket) => socket.sent[0].session);
+    const responses = sockets.map((socket) => socket.sent[1].response);
+    assert.deepEqual(
+      sessions.map((session) => session.audio.output.voice),
+      ["coral", "cedar", "shimmer", "echo", "ash"],
+    );
+    assert.deepEqual(
+      sessions.map((session) => session.audio.output.speed),
+      [1, 0.99, 1.06, 0.97, 1.04],
+    );
+    assert.ok(
+      sessions.every(
+        (session) =>
+          session.type === "realtime" &&
+          session.output_modalities[0] === "audio" &&
+          session.audio.output.format.type === "audio/pcm" &&
+          session.audio.output.format.rate === 24_000,
+      ),
+    );
+    assert.ok(
+      responses.every(
+        (response) =>
+          response.conversation === "none" &&
+          response.output_modalities[0] === "audio" &&
+          response.input[0].type === "message" &&
+          response.input[0].role === "user" &&
+          response.input[0].content[0].type === "input_text" &&
+          response.input[0].content[0].text ===
+            "同じ台本で声の違いを確認します。" &&
+          response.instructions.includes(
+            "台本にない語句、相づち、笑い声、効果音を追加せず",
+          ),
+      ),
+    );
+    assert.equal(
+      new Set(responses.map((response) => response.instructions)).size,
+      5,
+    );
+    assert.match(responses[2].instructions, /成人のポップボイス/);
     assert.match(
-      requests[4].body.instructions,
+      responses[4].instructions,
       /明るくエネルギッシュな成人のオリジナル話者/,
     );
-    assert.match(
-      requests[4].body.instructions,
-      /特定の実在人物の声質、話速、笑い方、口癖、決め台詞、間合いを模倣しない/,
-    );
     assert.doesNotMatch(
-      requests.map((request) => request.body.instructions).join("\n"),
+      responses.map((response) => response.instructions).join("\n"),
       /萌えアニメ|関西ツッコミ|明石家|さんま/,
     );
   } finally {
     globalThis.fetch = originalFetch;
-    delete globalThis.__cloudflareEnv;
   }
 });
 
-test("uses the matching HD fallback voice when the primary model is unavailable", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
-  };
+test("uses the matching HD fallback when realtime cannot connect", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
   const requests = [];
-  globalThis.fetch = async (_url, init) => {
-    const body = JSON.parse(init.body);
-    requests.push(body);
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
     if (requests.length === 1) {
-      return Response.json(
-        {
-          error: {
-            code: "model_not_found",
-            type: "invalid_request_error",
-            message: "model not found",
-          },
-        },
-        { status: 410 },
-      );
+      return realtimeUpgrade(new MockRealtimeSocket("error"));
     }
-    return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { "Content-Type": "audio/mpeg" },
+    });
   };
 
   try {
-    const worker = await loadWorker("narration-fallback");
+    const worker = await loadWorker("narration-realtime-fallback");
     const response = await worker.fetch(
       new Request("http://localhost/api/narration/speech", {
         method: "POST",
@@ -141,12 +262,133 @@ test("uses the matching HD fallback voice when the primary model is unavailable"
     );
 
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "audio/mpeg");
+    assert.equal(response.headers.get("x-narration-model"), "tts-1-hd");
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].model, "tts-1-hd");
-    assert.equal(requests[1].voice, "onyx");
-    assert.equal(requests[1].speed, 0.97);
+    assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+    const fallbackBody = JSON.parse(requests[1].init.body);
+    assert.equal(
+      requests[1].url,
+      "https://api.openai.com/v1/audio/speech",
+    );
+    assert.equal(fallbackBody.model, "tts-1-hd");
+    assert.equal(fallbackBody.voice, "onyx");
+    assert.equal(fallbackBody.speed, 0.97);
   } finally {
     globalThis.fetch = originalFetch;
-    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("does not create a second billable request after realtime generation is requested", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return realtimeUpgrade(new MockRealtimeSocket("pre-audio-error"));
+  };
+
+  try {
+    const worker = await loadWorker("narration-realtime-no-double-charge");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "途中失敗時の課金を確認します。",
+          style: "bright",
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 502);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("closes realtime generation when the browser request is aborted", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  const socket = new MockRealtimeSocket("hang");
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return realtimeUpgrade(socket);
+  };
+
+  try {
+    const worker = await loadWorker("narration-realtime-abort");
+    const controller = new AbortController();
+    const responsePromise = worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "中断時は音声生成を止めます。",
+          style: "calm",
+        }),
+        signal: controller.signal,
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    const response = await responsePromise;
+
+    assert.equal(response.status, 499);
+    assert.equal(requests.length, 1);
+    assert.equal(socket.closed, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("supports an emergency rollback to the legacy TTS model", async () => {
+  narrationCloudflareEnv.NARRATION_SPEECH_MODE = "legacy";
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { "Content-Type": "audio/mpeg" },
+    });
+  };
+
+  try {
+    const worker = await loadWorker("narration-legacy-rollback");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "落ち着いた声で読みます。",
+          style: "calm",
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-narration-model"), "gpt-4o-mini-tts");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://api.openai.com/v1/audio/speech");
+    assert.equal(requests[0].body.model, "gpt-4o-mini-tts");
+    assert.equal(requests[0].body.voice, "cedar");
+    assert.match(requests[0].body.instructions, /飾りすぎない聞き取りやすい男性/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   }
 });

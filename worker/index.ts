@@ -7,6 +7,7 @@ interface Env {
   DB: D1Database;
   MEDIA: R2Bucket;
   OPENAI_API_KEY?: string;
+  NARRATION_SPEECH_MODE?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
