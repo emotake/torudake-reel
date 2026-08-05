@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { buildPublicPageMetadata } from "../../lib/site-metadata";
 
-export const metadata: Metadata = {
+export const metadata = buildPublicPageMetadata({
   title: "プライバシーポリシー｜撮るだけリール",
   description: "撮るだけリールにおける利用者情報の取扱いについて説明します。",
-};
+  path: "/privacy",
+});
 
 const LAST_UPDATED = "2026年8月2日";
 

@@ -40,6 +40,15 @@ export default pagesWorker;
 
 function withSecurityHeaders(response, url) {
   const headers = new Headers(response.headers);
+  const isPrivatePath =
+    url.pathname === "/account" ||
+    url.pathname.startsWith("/account/") ||
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/internal/");
+  const isNonCanonicalHost = url.hostname !== "torudake-reel.pages.dev";
+  if (isPrivatePath || isNonCanonicalHost) {
+    headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  }
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set(

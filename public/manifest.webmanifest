@@ -1,0 +1,17 @@
+{
+  "name": "撮るだけリール｜AIリール動画編集",
+  "short_name": "撮るだけリール",
+  "description": "撮ったスマホ動画を選ぶだけで、無音カット、自動テロップ、AIナレーション、表紙、投稿文まで仕上げるリール動画編集サービスです。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffaf5",
+  "theme_color": "#ff5f46",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

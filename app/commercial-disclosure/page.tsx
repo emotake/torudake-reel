@@ -1,15 +1,16 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import {
   LIGHT_MONTHLY_PRICE_JPY,
   LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
 } from "../../lib/billing-policy";
 
-export const metadata: Metadata = {
+export const metadata = buildPublicPageMetadata({
   title: "特定商取引法に基づく表記｜撮るだけリール",
   description: "撮るだけリールの販売条件と事業者情報の開示方法です。",
-};
+  path: "/commercial-disclosure",
+});
 
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
 const LAST_UPDATED = "2026年8月3日";

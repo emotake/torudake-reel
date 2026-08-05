@@ -13,4 +13,8 @@ test("adds baseline browser security headers at the public Pages entry", async (
   assert.match(source, /frame-ancestors 'none'/);
   assert.match(source, /Strict-Transport-Security/);
   assert.match(source, /Permissions-Policy/);
+  assert.match(source, /X-Robots-Tag/);
+  assert.match(source, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.match(source, /url\.pathname\.startsWith\("\/internal\/"\)/);
+  assert.match(source, /url\.hostname !== "torudake-reel\.pages\.dev"/);
 });

@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import {
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_TERMS_VERSION,
@@ -10,10 +10,11 @@ import {
   ONE_TIME_PRICE_JPY,
 } from "../../lib/billing-policy";
 
-export const metadata: Metadata = {
+export const metadata = buildPublicPageMetadata({
   title: "利用規約｜撮るだけリール",
   description: "撮るだけリールの利用条件です。",
-};
+  path: "/terms",
+});
 
 export default function TermsPage() {
   return (

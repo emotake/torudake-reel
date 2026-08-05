@@ -1,0 +1,80 @@
+import {
+  LIGHT_MONTHLY_PRICE_JPY,
+  LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
+} from "./billing-policy";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OG_IMAGE_PATH,
+  SITE_ORIGIN,
+  siteUrl,
+} from "./site";
+
+export function buildSiteStructuredData() {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_ORIGIN}/#website`,
+        url: `${SITE_ORIGIN}/`,
+        name: SITE_NAME,
+        description: SITE_DESCRIPTION,
+        inLanguage: "ja-JP",
+      },
+      {
+        "@type": "WebApplication",
+        "@id": `${SITE_ORIGIN}/#application`,
+        url: `${SITE_ORIGIN}/`,
+        name: SITE_NAME,
+        description: SITE_DESCRIPTION,
+        image: siteUrl(SITE_OG_IMAGE_PATH),
+        applicationCategory: "MultimediaApplication",
+        applicationSubCategory: "Video editing application",
+        operatingSystem: "iOS, Android, Windows, macOS",
+        browserRequirements:
+          "JavaScript対応の最新Safari、Google Chrome、Microsoft Edge",
+        inLanguage: "ja-JP",
+        isAccessibleForFree: true,
+        featureList: [
+          "動画の自動カット",
+          "日本語音声の自動文字起こし",
+          "自動テロップ",
+          "AIナレーション",
+          "投稿用表紙の生成",
+          "Instagram投稿文の作成",
+        ],
+        offers: [
+          {
+            "@type": "Offer",
+            name: "無料体験",
+            price: 0,
+            priceCurrency: "JPY",
+            availability: "https://schema.org/InStock",
+          },
+          {
+            "@type": "Offer",
+            name: "1動画作成",
+            price: ONE_TIME_PRICE_JPY,
+            priceCurrency: "JPY",
+            availability: "https://schema.org/InStock",
+          },
+          {
+            "@type": "Offer",
+            name: `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プラン`,
+            price: LIGHT_MONTHLY_PRICE_JPY,
+            priceCurrency: "JPY",
+            availability: "https://schema.org/InStock",
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: LIGHT_MONTHLY_PRICE_JPY,
+              priceCurrency: "JPY",
+              billingDuration: "P1M",
+            },
+          },
+        ],
+      },
+    ],
+  };
+}

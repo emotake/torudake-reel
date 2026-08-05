@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-async function render(path = "/") {
+async function render(path = "/", headers = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
     new Request(`http://localhost${path}`, {
-      headers: { accept: "text/html" },
+      headers: { accept: "text/html", ...headers },
     }),
     {
       ASSETS: {
@@ -28,7 +28,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>撮るだけリール｜動画を選ぶだけの自動動画編集<\/title>/);
+  assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
@@ -53,10 +53,40 @@ test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="撮るだけリール｜動画を選ぶだけの自動動画編集"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜リール動画をAIで自動編集・字幕生成"/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/"/,
+  );
+  assert.match(
+    html,
+    /property="og:url" content="https:\/\/torudake-reel\.pages\.dev\/"/,
+  );
   assert.match(html, /property="og:image"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
+  assert.doesNotMatch(html, /nonoimageindex/);
+  assert.match(html, /rel="icon"[^>]+favicon\.svg/);
+  assert.match(html, /rel="manifest"[^>]+manifest\.webmanifest/);
+  assert.match(html, /type="application\/ld\+json"/);
+  assert.match(html, /"@type":"WebApplication"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project|30秒ジャッジ/);
+});
+
+test("keeps canonical metadata on the public host for query and forwarded-host variants", async () => {
+  const response = await render("/?updated=seo&utm_source=test", {
+    "x-forwarded-host": "example.invalid",
+  });
+  const html = await response.text();
+
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/"/,
+  );
+  assert.match(
+    html,
+    /property="og:image" content="https:\/\/torudake-reel\.pages\.dev\/og\.png/,
+  );
+  assert.doesNotMatch(html, /example\.invalid/);
 });
 
 test("keeps the operator enrollment page out of search results", async () => {
@@ -78,6 +108,10 @@ test("loads the passkey account screen without a broken ChatGPT sign-in route", 
   const html = await response.text();
 
   assert.match(html, /利用状況を確認中/);
+  assert.match(
+    html,
+    /name="robots" content="[^"]*noindex[^"]*nofollow[^"]*noarchive/,
+  );
   assert.doesNotMatch(html, /\/signin-with-chatgpt/);
 });
 
@@ -91,6 +125,14 @@ test("publishes a privacy policy for uploaded media and external processors", as
   assert.match(html, /Cloudflare/);
   assert.match(html, /Stripe/);
   assert.match(html, /72時間/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/privacy"/,
+  );
+  assert.match(
+    html,
+    /property="og:url" content="https:\/\/torudake-reel\.pages\.dev\/privacy"/,
+  );
 });
 
 test("publishes the commercial disclosure and contact route before checkout", async () => {
@@ -105,4 +147,8 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /1動画作成/);
   assert.match(html, /Stripe/);
   assert.match(html, /最大500MB/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/commercial-disclosure"/,
+  );
 });

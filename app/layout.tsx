@@ -1,48 +1,59 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
+import { buildSiteStructuredData } from "../lib/seo";
+import {
+  buildPublicPageMetadata,
+  siteMetadataBase,
+} from "../lib/site-metadata";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_TITLE,
+} from "../lib/site";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host =
-    requestHeaders.get("x-forwarded-host") ??
-    requestHeaders.get("host") ??
-    "torudake-reel.pages.dev";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
-  const baseUrl = new URL(`${protocol}://${host}`);
-  const imageUrl = new URL("/og.png?v=20260804-final", baseUrl).toString();
-  const title = "撮るだけリール｜動画を選ぶだけの自動動画編集";
-  const description =
-    "撮った動画を選ぶだけ。自動カット、高精度字幕、AIナレーション、テロップ、表紙、投稿文までまとめて仕上げます。";
-
-  return {
-    metadataBase: baseUrl,
-    title,
-    description,
-    openGraph: {
-      title,
-      description,
-      type: "website",
-      locale: "ja_JP",
-      images: [{ url: imageUrl, width: 1734, height: 907, alt: "撮るだけリール" }],
+export const metadata: Metadata = {
+  metadataBase: siteMetadataBase,
+  ...buildPublicPageMetadata({
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    path: "/",
+  }),
+  applicationName: SITE_NAME,
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
     },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: [imageUrl],
-    },
-  };
-}
+  },
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const structuredData = buildSiteStructuredData();
+
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
