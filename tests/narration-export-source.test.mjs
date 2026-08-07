@@ -119,9 +119,9 @@ test("keeps display text separate from user-specified narration readings", () =>
   assert.match(regenerationFlow, /requestNarrationSpeech\(\s*speechScript/);
   assert.match(regenerationFlow, /splitNarrationScript\(cleanScript\)/);
   assert.match(pageSource, /読み間違いを直す/);
-  assert.match(pageSource, /台本の言葉/);
-  assert.match(pageSource, /正しい読み方/);
-  assert.match(pageSource, /漢字の表示はそのまま/);
+  assert.match(pageSource, /テロップに表示されている言葉/);
+  assert.match(pageSource, /AI音声での読み（ひらがな）/);
+  assert.match(pageSource, /テロップの漢字は変わりません/);
   const matchValidationIndex = regenerationFlow.indexOf(
     "unmatchedPronunciationEntries",
   );
@@ -143,10 +143,13 @@ test("offers a mobile-friendly pronunciation editor without using the API while 
   const editorFlow = pageSource.slice(editorStart, editorEnd);
 
   assert.ok(editorStart >= 0);
-  assert.match(pageSource, /別の読み方を追加/);
-  assert.match(pageSource, /台本内\$\{matchCount\}か所の読みを変更します/);
-  assert.match(pageSource, /入力中はAPIを使いません/);
-  assert.match(pageSource, /読み方を反映してAI音声を作り直す（1回使用）/);
+  assert.match(pageSource, /読み方はそのままでOK/);
+  assert.match(pageSource, /選択した言葉を追加/);
+  assert.match(pageSource, /別の言葉も修正する/);
+  assert.match(pageSource, /テロップ「\$\{row\.surface\.trim\(\)\}」／音声/);
+  assert.match(pageSource, /ここへ入力するだけでは残り回数は減りません/);
+  assert.match(pageSource, /変更内容をAI音声に反映する（1回使用）/);
+  assert.match(editorFlow, /addSelectedNarrationPronunciationTerm/);
   assert.doesNotMatch(editorFlow, /requestNarrationSpeech|regenerateNarration/);
   assert.match(
     globalCssSource,

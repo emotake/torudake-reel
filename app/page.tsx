@@ -3260,6 +3260,7 @@ function ResultWorkspace({
   ) => Promise<number>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const narrationDraftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const narrationSampleAudioRef = useRef<HTMLAudioElement>(null);
   const previewNarrationEngineRef = useRef<{
     url: string;
@@ -3323,6 +3324,8 @@ function ResultWorkspace({
   const [narrationPronunciationRows, setNarrationPronunciationRows] = useState<
     NarrationPronunciationRow[]
   >([{ id: 0, surface: "", reading: "" }]);
+  const [usePronunciationCorrections, setUsePronunciationCorrections] =
+    useState(false);
   const narrationPronunciationGuide = useMemo(
     () =>
       narrationPronunciationRows
@@ -4617,6 +4620,62 @@ function ResultWorkspace({
     setNarrationPronunciationRows((rows) =>
       rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
+  }
+
+  function enableNarrationPronunciationCorrections() {
+    setUsePronunciationCorrections(true);
+  }
+
+  function disableNarrationPronunciationCorrections() {
+    setUsePronunciationCorrections(false);
+    setNarrationPronunciationRows((rows) => [
+      {
+        id: rows[0]?.id ?? 0,
+        surface: "",
+        reading: "",
+      },
+    ]);
+  }
+
+  function addSelectedNarrationPronunciationTerm() {
+    const textarea = narrationDraftTextareaRef.current;
+    if (!textarea) return;
+    const selectedTerm = narrationDraft
+      .slice(textarea.selectionStart, textarea.selectionEnd)
+      .trim();
+    if (!selectedTerm) {
+      notify("上の台本で、読み方を直したい言葉を選択してください");
+      textarea.focus();
+      return;
+    }
+    if (selectedTerm.length > 50) {
+      notify("選択する言葉は50文字以内にしてください");
+      return;
+    }
+    if (
+      narrationPronunciationRows.some(
+        (row) => row.surface.trim() === selectedTerm,
+      )
+    ) {
+      notify(`「${selectedTerm}」はすでに追加されています`);
+      return;
+    }
+    setUsePronunciationCorrections(true);
+    setNarrationPronunciationRows((rows) => {
+      const emptyRowIndex = rows.findIndex(
+        (row) => !row.surface.trim() && !row.reading.trim(),
+      );
+      if (emptyRowIndex >= 0) {
+        return rows.map((row, index) =>
+          index === emptyRowIndex ? { ...row, surface: selectedTerm } : row,
+        );
+      }
+      if (rows.length >= 20) return rows;
+      const id = pronunciationRowSequenceRef.current;
+      pronunciationRowSequenceRef.current += 1;
+      return [...rows, { id, surface: selectedTerm, reading: "" }];
+    });
+    notify(`「${selectedTerm}」を追加しました。正しい読みを入力してください`);
   }
 
   function addNarrationPronunciationRow() {
@@ -5999,6 +6058,7 @@ function ResultWorkspace({
               <label>
                 <span>ナレーション台本</span>
                 <textarea
+                  ref={narrationDraftTextareaRef}
                   value={narrationDraft}
                   rows={6}
                   maxLength={2_000}
@@ -6007,16 +6067,18 @@ function ResultWorkspace({
                 />
               </label>
               <div
-                className={`pronunciationEditor${pronunciationValidation.error ? " hasError" : ""}`}
+                className={`pronunciationEditor${usePronunciationCorrections && pronunciationValidation.error ? " hasError" : ""}`}
               >
                 <div className="pronunciationEditorHeading">
                   <div>
-                    <strong>読み間違いを直す</strong>
-                    <small>AI音声だけを修正</small>
+                    <strong>漢字の読み方</strong>
+                    <small>必要なときだけ設定</small>
                   </div>
                   <span
                     className={
-                      pronunciationValidation.error
+                      !usePronunciationCorrections
+                        ? ""
+                        : pronunciationValidation.error
                         ? "hasError"
                         : hasPendingPronunciationChanges
                           ? "isPending"
@@ -6025,7 +6087,9 @@ function ResultWorkspace({
                             : ""
                     }
                   >
-                    {pronunciationValidation.error
+                    {!usePronunciationCorrections
+                      ? "修正なし"
+                      : pronunciationValidation.error
                       ? "入力を確認"
                       : hasPendingPronunciationChanges
                         ? "音声への反映待ち"
@@ -6035,126 +6099,182 @@ function ResultWorkspace({
                   </span>
                 </div>
                 <p>
-                  読み間違えた言葉と、ひらがなの読み方を2つの欄に入力してください。
+                  AIが漢字を読み間違えた場合だけ使います。テロップの文字は変わりません。
                 </p>
-                <div className="pronunciationRows">
-                  {narrationPronunciationRows.map((row, index) => {
-                    const matchCount =
-                      pronunciationMatchCounts.get(row.id) ?? 0;
-                    const rowIsComplete = Boolean(
-                      row.surface.trim() && row.reading.trim(),
-                    );
-                    const statusId = `pronunciation-status-${row.id}`;
-                    return (
-                      <div
-                        className={`pronunciationRow${row.surface.trim() && matchCount === 0 ? " hasNoMatch" : ""}`}
-                        key={row.id}
-                      >
-                      <label>
-                        <span>台本の言葉</span>
-                        <input
-                          type="text"
-                          value={row.surface}
-                          maxLength={50}
-                          disabled={isMediaBusy}
-                          aria-label={`${index + 1}件目の台本の言葉`}
-                          aria-describedby={statusId}
-                          aria-invalid={Boolean(
-                            row.surface.trim() && matchCount === 0,
-                          )}
-                          placeholder="例：御厨"
-                          onChange={(event) =>
-                            updateNarrationPronunciationRow(
-                              row.id,
-                              "surface",
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </label>
-                      <span className="pronunciationArrow" aria-hidden="true">
-                        →
-                      </span>
-                      <label>
-                        <span>正しい読み方</span>
-                        <input
-                          type="text"
-                          value={row.reading}
-                          maxLength={80}
-                          disabled={isMediaBusy}
-                          aria-label={`${index + 1}件目の正しい読み方`}
-                          aria-describedby={statusId}
-                          aria-invalid={Boolean(
-                            pronunciationValidation.error &&
-                              (row.surface.trim() || row.reading.trim()),
-                          )}
-                          placeholder="例：みくりや"
-                          onChange={(event) =>
-                            updateNarrationPronunciationRow(
-                              row.id,
-                              "reading",
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="pronunciationRemove"
-                        disabled={
-                          isMediaBusy ||
-                          (narrationPronunciationRows.length === 1 &&
-                            !row.surface &&
-                            !row.reading)
-                        }
-                        aria-label={`${index + 1}件目の読み方を削除`}
-                        onClick={() =>
-                          removeNarrationPronunciationRow(row.id)
-                        }
-                      >
-                        削除
-                      </button>
-                      <small
-                        id={statusId}
-                        className={`pronunciationRowStatus${rowIsComplete && matchCount > 0 ? " isMatched" : row.surface.trim() && matchCount === 0 ? " hasError" : ""}`}
-                      >
-                        {rowIsComplete && matchCount > 0
-                          ? `✓ 台本内${matchCount}か所の読みを変更します`
-                          : row.surface.trim() && matchCount === 0
-                            ? "台本に見つかりません"
-                            : row.surface.trim() || row.reading.trim()
-                              ? "2つの欄を入力してください"
-                              : "読み間違いがなければ空欄のままで大丈夫です"}
-                      </small>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="pronunciationActions">
+                <div
+                  className="pronunciationModeChoice"
+                  role="group"
+                  aria-label="漢字の読み方を修正するか選択"
+                >
                   <button
                     type="button"
-                    disabled={isMediaBusy || !canAddPronunciationRow}
-                    onClick={addNarrationPronunciationRow}
+                    className={!usePronunciationCorrections ? "active" : ""}
+                    aria-pressed={!usePronunciationCorrections}
+                    disabled={isMediaBusy}
+                    onClick={disableNarrationPronunciationCorrections}
                   >
-                    ＋ 別の読み方を追加
+                    <strong>読み方はそのままでOK</strong>
+                    <small>設定せず次へ進む</small>
                   </button>
-                  <span>最大20件</span>
+                  <button
+                    type="button"
+                    className={usePronunciationCorrections ? "active" : ""}
+                    aria-pressed={usePronunciationCorrections}
+                    disabled={isMediaBusy}
+                    onClick={enableNarrationPronunciationCorrections}
+                  >
+                    <strong>読み間違いを直す</strong>
+                    <small>AI音声の読みだけ変更</small>
+                  </button>
                 </div>
-                <small
-                  className="pronunciationHelp"
-                  role={pronunciationValidation.error ? "alert" : undefined}
-                >
-                  {pronunciationValidation.error ||
-                    "同じ言葉が台本に複数ある場合は、すべて同じ読み方へ変わります。"}
-                </small>
-                <div className="pronunciationImpact">
-                  <span>テロップ</span>
-                  <strong>漢字の表示はそのまま</strong>
-                  <i>AI音声の読みだけ修正</i>
-                </div>
-                <p className="pronunciationCostNote">
-                  入力中はAPIを使いません。下のボタンからAI音声の生成に成功したときだけ、残り回数を1回使います。
-                </p>
+
+                {usePronunciationCorrections && (
+                  <div className="pronunciationCorrectionFlow">
+                    <div className="pronunciationQuickStart">
+                      <div>
+                        <span>かんたん入力</span>
+                        <strong>上の台本で、読み間違えた言葉を選択</strong>
+                        <small>
+                          選択後にボタンを押すと、下の入力欄へ自動で入ります。直接入力しても大丈夫です。
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isMediaBusy}
+                        onClick={addSelectedNarrationPronunciationTerm}
+                      >
+                        選択した言葉を追加
+                      </button>
+                    </div>
+                    <div className="pronunciationExampleLine">
+                      <span>入力例</span>
+                      <p>
+                        テロップは <strong>御厨</strong> のまま、AI音声では
+                        <strong> みくりや</strong> と読みます。
+                      </p>
+                    </div>
+                    <div className="pronunciationRows">
+                      {narrationPronunciationRows.map((row, index) => {
+                        const matchCount =
+                          pronunciationMatchCounts.get(row.id) ?? 0;
+                        const rowIsComplete = Boolean(
+                          row.surface.trim() && row.reading.trim(),
+                        );
+                        const statusId = `pronunciation-status-${row.id}`;
+                        return (
+                          <div
+                            className={`pronunciationRow${row.surface.trim() && matchCount === 0 ? " hasNoMatch" : ""}`}
+                            key={row.id}
+                          >
+                            <label>
+                              <span>テロップに表示されている言葉</span>
+                              <input
+                                type="text"
+                                value={row.surface}
+                                maxLength={50}
+                                disabled={isMediaBusy}
+                                aria-label={`${index + 1}件目のテロップに表示されている言葉`}
+                                aria-describedby={statusId}
+                                aria-invalid={Boolean(
+                                  row.surface.trim() && matchCount === 0,
+                                )}
+                                placeholder="例：御厨"
+                                onChange={(event) =>
+                                  updateNarrationPronunciationRow(
+                                    row.id,
+                                    "surface",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                            <span
+                              className="pronunciationArrow"
+                              aria-hidden="true"
+                            >
+                              →
+                            </span>
+                            <label>
+                              <span>AI音声での読み（ひらがな）</span>
+                              <input
+                                type="text"
+                                value={row.reading}
+                                maxLength={80}
+                                disabled={isMediaBusy}
+                                aria-label={`${index + 1}件目のAI音声での読み`}
+                                aria-describedby={statusId}
+                                aria-invalid={Boolean(
+                                  pronunciationValidation.error &&
+                                    (row.surface.trim() || row.reading.trim()),
+                                )}
+                                placeholder="例：みくりや"
+                                onChange={(event) =>
+                                  updateNarrationPronunciationRow(
+                                    row.id,
+                                    "reading",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="pronunciationRemove"
+                              disabled={
+                                isMediaBusy ||
+                                (narrationPronunciationRows.length === 1 &&
+                                  !row.surface &&
+                                  !row.reading)
+                              }
+                              aria-label={`${index + 1}件目の読み方を削除`}
+                              onClick={() =>
+                                removeNarrationPronunciationRow(row.id)
+                              }
+                            >
+                              削除
+                            </button>
+                            <small
+                              id={statusId}
+                              className={`pronunciationRowStatus${rowIsComplete && matchCount > 0 ? " isMatched" : row.surface.trim() && matchCount === 0 ? " hasError" : ""}`}
+                            >
+                              {rowIsComplete && matchCount > 0
+                                ? `✓ テロップ「${row.surface.trim()}」／音声「${row.reading.trim()}」（${matchCount}か所）`
+                                : row.surface.trim() && matchCount === 0
+                                  ? "上の台本に見つかりません。台本と同じ文字を入力してください"
+                                  : row.surface.trim() || row.reading.trim()
+                                    ? "2つの欄を入力してください"
+                                    : "まず、読み間違えた言葉を入力してください"}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="pronunciationActions">
+                      <button
+                        type="button"
+                        disabled={isMediaBusy || !canAddPronunciationRow}
+                        onClick={addNarrationPronunciationRow}
+                      >
+                        ＋ 別の言葉も修正する
+                      </button>
+                      <span>最大20件</span>
+                    </div>
+                    <small
+                      className="pronunciationHelp"
+                      role={pronunciationValidation.error ? "alert" : undefined}
+                    >
+                      {pronunciationValidation.error ||
+                        "同じ言葉が台本に複数ある場合は、すべて同じ読み方になります。"}
+                    </small>
+                    <div className="pronunciationResultExplanation">
+                      <strong>テロップの漢字は変わりません</strong>
+                      <small>AI音声で聞こえる読み方だけを変更します。</small>
+                    </div>
+                    <p className="pronunciationCostNote">
+                      ここへ入力するだけでは残り回数は減りません。下の生成ボタンを押し、AI音声が完成したときだけ1回分を使います。
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="voiceStylePicker">
                 {NARRATION_STYLES.map((style) => (
@@ -6215,9 +6335,7 @@ function ResultWorkspace({
                   : narrationGenerationLimitReached
                     ? "AI音声の生成上限に達しました"
                     : hasPendingNarrationChanges
-                      ? hasPendingPronunciationChanges
-                        ? "読み方を反映してAI音声を作り直す（1回使用）"
-                        : "変更内容でAI音声を作り直す（1回使用）"
+                      ? "変更内容をAI音声に反映する（1回使用）"
                       : "変更は反映済み"}
               </button>
               <audio
