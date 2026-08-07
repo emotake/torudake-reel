@@ -32,6 +32,14 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
+  assert.match(html, /スマホであとから試したい方へ/);
+  assert.match(html, /LINEに送る/);
+  assert.match(html, /今は動画を選ばず、LINEに送ってあとで開く/);
+  assert.match(
+    html,
+    /https:\/\/social-plugins\.line\.me\/lineit\/share\?[^\"]*url=/,
+  );
+  assert.match(html, /送信されるのは公開ページのURLと案内文だけです/);
   assert.doesNotMatch(html, /動画を預ける|安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /目的に合わせて自動編集/);

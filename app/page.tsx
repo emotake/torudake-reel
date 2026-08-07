@@ -51,6 +51,7 @@ import {
   LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
 } from "../lib/billing-policy";
+import { LINE_SHARE_URL } from "../lib/line-share";
 import {
   calculateCoverCrop,
   getThumbnailFrameTime,
@@ -2171,6 +2172,25 @@ function Landing({
             <span>✓ 体験版では動画を送信しません</span>
             <span>✓ スマホ動画対応</span>
           </div>
+          <div className="lineSaveCard">
+            <span className="lineSaveMark" aria-hidden="true">
+              LINE
+            </span>
+            <div>
+              <strong>スマホであとから試したい方へ</strong>
+              <p>このページをLINEへ送っておけば、いつでもすぐ開けます。</p>
+              <small>送信されるのは公開ページのURLと案内文だけです。</small>
+            </div>
+            <a
+              href={LINE_SHARE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="撮るだけリールをLINEに送ってあとで開く"
+            >
+              LINEに送る
+              <i aria-hidden="true">→</i>
+            </a>
+          </div>
         </div>
 
         <div className="heroVisual" aria-label="編集前と編集後のイメージ">
@@ -2430,10 +2450,21 @@ function Landing({
             今日の投稿に。
           </h2>
         </div>
-        <button className="mainCta light" onClick={openPicker}>
-          <span>動画を選んで無料で試す</span>
-          <i>→</i>
-        </button>
+        <div className="bottomCtaActions">
+          <button className="mainCta light" onClick={openPicker}>
+            <span>動画を選んで無料で試す</span>
+            <i>→</i>
+          </button>
+          <a
+            className="bottomLineShare"
+            href={LINE_SHARE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="LINEを開き、撮るだけリールのリンクを送る"
+          >
+            今は動画を選ばず、LINEに送ってあとで開く
+          </a>
+        </div>
       </section>
     </>
   );
