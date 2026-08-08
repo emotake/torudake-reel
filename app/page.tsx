@@ -62,6 +62,7 @@ import {
   computePortableVideoDrawRect,
   HIGH_QUALITY_VIDEO_BITRATE,
 } from "../lib/portable-video-export";
+import { explainVideoExportResolution } from "../lib/video-export-quality";
 import {
   applyNarrationPronunciationGuide,
   buildDisclosedPostCaption,
@@ -99,7 +100,12 @@ type TransferStatus = "idle" | "uploading" | "done" | "error";
 
 type CompletedVideoQuality = {
   meetsTargetResolution: boolean | null;
-  userMessage: string | null;
+  userMessage: string;
+};
+
+type VideoDimensions = {
+  width: number;
+  height: number;
 };
 
 type UploadedPart = {
@@ -150,7 +156,8 @@ const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
 
 async function inspectCompletedVideoQuality(
   output: Blob,
-  expectedDimensions: { width: number; height: number },
+  sourceDimensions: VideoDimensions,
+  expectedDimensions: VideoDimensions,
 ): Promise<CompletedVideoQuality> {
   try {
     const {
@@ -165,21 +172,35 @@ async function inspectCompletedVideoQuality(
       expectedDimensions,
     );
 
+    const outputDimensions =
+      inspection.status === "ok" &&
+      inspection.metrics.width !== null &&
+      inspection.metrics.height !== null
+        ? {
+            width: inspection.metrics.width,
+            height: inspection.metrics.height,
+          }
+        : null;
+    const resolution = explainVideoExportResolution({
+      source: sourceDimensions,
+      output: outputDimensions,
+      expected: expectedDimensions,
+    });
+    const resolutionSummary = resolution.outputResolutionLabel
+      ? `元動画：${resolution.sourceResolutionLabel ?? "確認できません"} → 完成動画（実測）：${resolution.outputResolutionLabel}。`
+      : `元動画：${resolution.sourceResolutionLabel ?? "確認できません"}。完成動画の解像度を確認できませんでした。`;
+
     if (inspection.status !== "ok") {
-      return { meetsTargetResolution: null, userMessage: null };
+      return {
+        meetsTargetResolution: null,
+        userMessage: `${resolutionSummary}${resolution.detail} 動画はそのまま保存できます。`,
+      };
     }
 
-    const { width, height } = inspection.metrics;
-    const dimensions =
-      width !== null && height !== null
-        ? `${Math.round(width)}×${Math.round(height)}`
-        : null;
     if (assessment.meetsTargetResolution === false) {
       return {
         meetsTargetResolution: false,
-        userMessage: dimensions
-          ? `${dimensions}で準備しました。フルHDに達していないため、SafariまたはiOSを最新版にして、もう一度書き出すと改善する場合があります`
-          : null,
+        userMessage: `${resolutionSummary}${resolution.detail} SafariまたはiOSを最新版にして、もう一度書き出すと改善する場合があります。`,
       };
     }
 
@@ -191,9 +212,7 @@ async function inspectCompletedVideoQuality(
     if (hasFrameRateWarning) {
       return {
         meetsTargetResolution: assessment.meetsTargetResolution,
-        userMessage: dimensions
-          ? `${dimensions}で準備しました。端末の負荷により動きが滑らかでない可能性があります。画面を開いたまま再度お試しください`
-          : null,
+        userMessage: `${resolutionSummary}${resolution.detail} 端末の負荷により動きが滑らかでない可能性があります。画面を開いたまま再度お試しください。`,
       };
     }
 
@@ -203,20 +222,24 @@ async function inspectCompletedVideoQuality(
     if (hasCompatibilityWarning) {
       return {
         meetsTargetResolution: assessment.meetsTargetResolution,
-        userMessage: dimensions
-          ? `${dimensions}の高画質で準備しました。iPhoneで使う場合はSafariから書き出すと、より互換性の高いMP4になります`
-          : null,
+        userMessage: `${resolutionSummary}${resolution.detail} iPhoneで使う場合はSafariから書き出すと、より互換性の高いMP4になります。`,
       };
     }
 
     return {
       meetsTargetResolution: assessment.meetsTargetResolution,
-      userMessage: dimensions
-        ? `${dimensions}の高画質で準備できました。iPhoneでは共有画面から「ビデオを保存」を選べます`
-        : null,
+      userMessage: `${resolutionSummary}${resolution.detail} iPhoneでは共有画面から「ビデオを保存」を選べます。`,
     };
   } catch {
-    return { meetsTargetResolution: null, userMessage: null };
+    const resolution = explainVideoExportResolution({
+      source: sourceDimensions,
+      output: null,
+      expected: expectedDimensions,
+    });
+    return {
+      meetsTargetResolution: null,
+      userMessage: `元動画：${resolution.sourceResolutionLabel ?? "確認できません"}。完成動画の解像度を確認できませんでした。動画はそのまま保存できます。`,
+    };
   }
 }
 
@@ -3405,6 +3428,8 @@ function ResultWorkspace({
   const captionEditStartTextRef = useRef(new Map<number, string>());
   const [currentTime, setCurrentTime] = useState(0);
   const [sourceDuration, setSourceDuration] = useState(0);
+  const [sourceVideoDimensions, setSourceVideoDimensions] =
+    useState<VideoDimensions | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewTransportState, setPreviewTransportState] =
     useState<PreviewTransportState>("paused");
@@ -3532,7 +3557,9 @@ function ResultWorkspace({
     pendingNarrationGenerationKey !== lastNarrationGenerationKey;
   const narrationGenerationLimitReached =
     narrationGenerationsRemaining <= 0;
-  const isSourceMetadataPending = Boolean(file && sourceDuration <= 0);
+  const isSourceMetadataPending = Boolean(
+    file && (sourceDuration <= 0 || !sourceVideoDimensions),
+  );
   const isMediaBusy =
     isExporting ||
     isGeneratingThumbnail ||
@@ -3656,6 +3683,30 @@ function ResultWorkspace({
       : spokenAutoCutEnabled
         ? "edited"
         : "original";
+  const plannedExportDimensions = useMemo(
+    () =>
+      sourceVideoDimensions
+        ? computePortableVideoDimensions(
+            sourceVideoDimensions.width,
+            sourceVideoDimensions.height,
+          )
+        : null,
+    [sourceVideoDimensions],
+  );
+  const plannedResolutionMessage = useMemo(() => {
+    if (!sourceVideoDimensions || !plannedExportDimensions) {
+      return "元動画の解像度を確認中です。完成後に実測します。";
+    }
+    const explanation = explainVideoExportResolution({
+      source: sourceVideoDimensions,
+      output: plannedExportDimensions,
+      expected: plannedExportDimensions,
+    });
+    const comparison = `元動画：${explanation.sourceResolutionLabel} → 書き出し予定：${explanation.expectedResolutionLabel}。`;
+    return explanation.sourceRequiresUpscaling
+      ? `${comparison}書き出しサイズを整えますが、映像の細かさは元動画の解像度に準じます。`
+      : `${comparison}SNS投稿向けの解像度へ最適化します。`;
+  }, [plannedExportDimensions, sourceVideoDimensions]);
   const exportInputRevision = useMemo(
     () =>
       JSON.stringify({
@@ -5475,9 +5526,18 @@ function ResultWorkspace({
       notify("残す文を1つ以上選んでください");
       return;
     }
+    if (!sourceVideoDimensions) {
+      await preparedAudioContext?.close().catch(() => undefined);
+      notify("元動画の解像度を確認しています。少し待ってからもう一度お試しください。");
+      return;
+    }
+    const sourceExportDimensions = {
+      width: video.videoWidth || sourceVideoDimensions.width,
+      height: video.videoHeight || sourceVideoDimensions.height,
+    };
     const expectedExportDimensions = computePortableVideoDimensions(
-      video.videoWidth || 1080,
-      video.videoHeight || 1920,
+      sourceExportDimensions.width,
+      sourceExportDimensions.height,
     );
 
     const canUseLegacyRecorder =
@@ -5608,6 +5668,7 @@ function ResultWorkspace({
         if (!output.size) throw new Error("書き出した動画が空でした。");
         const portableQuality = await inspectCompletedVideoQuality(
           output,
+          sourceExportDimensions,
           expectedExportDimensions,
         );
         if (portableQuality.meetsTargetResolution === false) {
@@ -5975,6 +6036,7 @@ function ResultWorkspace({
       if (!output.size) throw new Error("書き出した動画が空でした。");
       const fallbackQuality = await inspectCompletedVideoQuality(
         output,
+        sourceExportDimensions,
         expectedExportDimensions,
       );
 
@@ -6700,10 +6762,20 @@ function ResultWorkspace({
                 }}
                 onLoadedMetadata={(event) => {
                   const sourceDuration = event.currentTarget.duration;
+                  const sourceWidth = event.currentTarget.videoWidth;
+                  const sourceHeight = event.currentTarget.videoHeight;
                   setSourceDuration(
                     Number.isFinite(sourceDuration) && sourceDuration > 0
                       ? sourceDuration
                       : 0,
+                  );
+                  setSourceVideoDimensions(
+                    Number.isFinite(sourceWidth) &&
+                      sourceWidth > 0 &&
+                      Number.isFinite(sourceHeight) &&
+                      sourceHeight > 0
+                      ? { width: sourceWidth, height: sourceHeight }
+                      : null,
                   );
                   if (
                     editRanges[0] &&
@@ -7279,17 +7351,24 @@ function ResultWorkspace({
             <strong>
               {readyExportedVideoFile?.name ?? `${exportName}_${exportSuffix}.mp4`}
             </strong>
-            <small>
-              {readyExportedVideoFile
-                ? exportedVideoQualityMessage ??
-                  "動画の準備ができました。iPhoneでは共有画面から「ビデオを保存」を選べます"
-                : isExporting && exportProgress !== null
-                  ? `MP4動画を準備しています（${Math.round(exportProgress)}%）`
-                  : file
-                    ? narrationPlan
-                      ? `AI音声${narrationCaptionsEnabled ? "とテロップ" : ""}を、${narrationAutoCutEnabled ? "自動編集した映像" : "ノーカット映像"}へまとめます`
-                      : `${spokenAutoCutEnabled ? "音声に合わせてつなぎ直した映像" : "ノーカット映像"}${spokenCaptionsEnabled ? "とテロップ" : ""}を、iPhoneで使える動画へまとめます`
-                    : "実際の動画を選ぶと書き出せます"}
+            <small className="exportStatus">
+              <span className="exportResolutionStatus">
+                {readyExportedVideoFile
+                  ? exportedVideoQualityMessage ??
+                    "完成動画の解像度を確認できませんでした。動画はそのまま保存できます。"
+                  : isExporting && exportProgress !== null
+                    ? `MP4動画を書き出しています（${Math.round(exportProgress)}%）。${plannedResolutionMessage}`
+                    : file
+                      ? plannedResolutionMessage
+                      : "実際の動画を選ぶと、元動画と完成動画の解像度を表示します。"}
+              </span>
+              {file && !readyExportedVideoFile && !isExporting && (
+                <span className="exportModeNote">
+                  {narrationPlan
+                    ? `AI音声${narrationCaptionsEnabled ? "とテロップ" : ""}を、${narrationAutoCutEnabled ? "自動編集した映像" : "ノーカット映像"}へまとめます。`
+                    : `${spokenAutoCutEnabled ? "音声に合わせてつなぎ直した映像" : "ノーカット映像"}${spokenCaptionsEnabled ? "とテロップ" : ""}を、iPhoneで使える動画へまとめます。`}
+                </span>
+              )}
             </small>
           </p>
         </div>

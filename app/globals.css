@@ -6425,7 +6425,23 @@ footer > small {
 
 .exportBar small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.exportStatus {
+  display: grid;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.exportResolutionStatus {
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.exportModeNote {
+  color: var(--muted);
 }
 
 .exportActions {

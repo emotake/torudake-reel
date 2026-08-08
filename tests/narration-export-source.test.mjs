@@ -109,10 +109,32 @@ test("inspects the completed file from both export paths before offering it", ()
     exportFlow.match(/inspectCompletedVideoQuality\(/g) ?? [];
 
   assert.equal(qualityChecks.length, 2);
+  assert.match(exportFlow, /sourceExportDimensions/);
   assert.match(exportFlow, /expectedExportDimensions/);
+  assert.match(
+    exportFlow,
+    /inspectCompletedVideoQuality\(\s*output,\s*sourceExportDimensions,\s*expectedExportDimensions/,
+  );
   assert.match(exportFlow, /portableQuality\.meetsTargetResolution === false/);
   assert.match(exportFlow, /setExportedVideoQualityMessage/);
   assert.match(pageSource, /exportedVideoQualityMessage \?\?/);
+});
+
+test("shows source, planned, and measured output resolutions without misattributing quality", () => {
+  const metadataStart = pageSource.indexOf("onLoadedMetadata={(event) => {");
+  const metadataEnd = pageSource.indexOf("onTimeUpdate=", metadataStart);
+  const metadataFlow = pageSource.slice(metadataStart, metadataEnd);
+
+  assert.ok(metadataStart >= 0);
+  assert.match(pageSource, /sourceVideoDimensions/);
+  assert.match(metadataFlow, /event\.currentTarget\.videoWidth/);
+  assert.match(metadataFlow, /event\.currentTarget\.videoHeight/);
+  assert.match(metadataFlow, /setSourceVideoDimensions/);
+  assert.match(pageSource, /元動画：/);
+  assert.match(pageSource, /書き出し予定：/);
+  assert.match(pageSource, /完成動画（実測）：/);
+  assert.match(pageSource, /映像の細かさは元動画の解像度に準じます/);
+  assert.match(globalCssSource, /\.exportResolutionStatus/);
 });
 
 test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", () => {

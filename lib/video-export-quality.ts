@@ -531,3 +531,147 @@ export function assessExportedVideoQuality(
     expectedHeight: expectedDimensions?.height,
   });
 }
+
+export type VideoResolutionDimensions = {
+  width: number | null;
+  height: number | null;
+};
+
+export type VideoExportResolutionCause =
+  | "target-met"
+  | "source-limited"
+  | "export-limited"
+  | "source-and-export-limited"
+  | "unknown";
+
+export type VideoExportResolutionExplanation = {
+  cause: VideoExportResolutionCause;
+  sourceResolutionLabel: string | null;
+  outputResolutionLabel: string | null;
+  expectedResolutionLabel: string | null;
+  sourceRequiresUpscaling: boolean | null;
+  sourceScaleFactor: number | null;
+  outputMeetsExpectedDimensions: boolean | null;
+  headline: string;
+  detail: string;
+};
+
+function normalizeResolutionDimensions(
+  dimensions: VideoResolutionDimensions | null,
+) {
+  if (!dimensions) {
+    return null;
+  }
+
+  const width = finiteOrNull(dimensions.width);
+  const height = finiteOrNull(dimensions.height);
+  return width === null || height === null ? null : { width, height };
+}
+
+function formatResolutionDimensions(
+  dimensions: { width: number; height: number } | null,
+) {
+  return dimensions
+    ? `${Math.round(dimensions.width)}×${Math.round(dimensions.height)}`
+    : null;
+}
+
+/**
+ * Explains whether visible resolution limits come from the source material or
+ * from the device/browser export result. Source sufficiency follows the
+ * current `contain` render mode: landscape or square footage is not labelled
+ * low-resolution merely because it does not share the output aspect ratio.
+ */
+export function explainVideoExportResolution({
+  source,
+  output,
+  expected,
+}: {
+  source: VideoResolutionDimensions | null;
+  output: VideoResolutionDimensions | null;
+  expected: VideoResolutionDimensions;
+}): VideoExportResolutionExplanation {
+  const sourceDimensions = normalizeResolutionDimensions(source);
+  const outputDimensions = normalizeResolutionDimensions(output);
+  const expectedDimensions = normalizeResolutionDimensions(expected);
+  const sourceResolutionLabel = formatResolutionDimensions(sourceDimensions);
+  const outputResolutionLabel = formatResolutionDimensions(outputDimensions);
+  const expectedResolutionLabel = formatResolutionDimensions(expectedDimensions);
+
+  const sourceScaleFactor =
+    sourceDimensions && expectedDimensions
+      ? Math.min(
+          expectedDimensions.width / sourceDimensions.width,
+          expectedDimensions.height / sourceDimensions.height,
+        )
+      : null;
+  const sourceRequiresUpscaling =
+    sourceScaleFactor === null ? null : sourceScaleFactor > 1.001;
+  const outputMeetsExpectedDimensions =
+    outputDimensions && expectedDimensions
+      ? outputDimensions.width >= expectedDimensions.width &&
+        outputDimensions.height >= expectedDimensions.height
+      : null;
+
+  let cause: VideoExportResolutionCause = "unknown";
+  if (
+    sourceRequiresUpscaling !== null &&
+    outputMeetsExpectedDimensions !== null
+  ) {
+    if (sourceRequiresUpscaling && !outputMeetsExpectedDimensions) {
+      cause = "source-and-export-limited";
+    } else if (sourceRequiresUpscaling) {
+      cause = "source-limited";
+    } else if (!outputMeetsExpectedDimensions) {
+      cause = "export-limited";
+    } else {
+      cause = "target-met";
+    }
+  }
+
+  const headline = outputResolutionLabel
+    ? `完成動画：${outputResolutionLabel}`
+    : "完成動画の解像度を確認できませんでした";
+
+  let detail: string;
+  switch (cause) {
+    case "target-met":
+      detail = `SNS投稿向けの${expectedResolutionLabel}へ最適化しました。`;
+      break;
+    case "source-limited":
+      detail = `書き出しサイズを${expectedResolutionLabel}に整えています。映像の細かさは元動画（${sourceResolutionLabel}）の解像度に準じ、元動画にない細部は復元できません。`;
+      break;
+    case "export-limited":
+      detail = `元動画（${sourceResolutionLabel}）には目標解像度に必要な精細さがありますが、この端末での完成動画は${outputResolutionLabel}でした。端末またはブラウザの書き出し制約が影響した可能性があります。`;
+      break;
+    case "source-and-export-limited":
+      detail = `元動画が${sourceResolutionLabel}のため、映像の細かさには元動画由来の限界があります。加えて、完成動画は${outputResolutionLabel}で、目標の${expectedResolutionLabel}にも届いていません。`;
+      break;
+    default:
+      if (!expectedDimensions) {
+        detail = "目標解像度を確認できないため、書き出し結果を判定できませんでした。";
+      } else if (!outputDimensions) {
+        detail = sourceResolutionLabel
+          ? `元動画は${sourceResolutionLabel}です。完成動画の解像度を端末で確認できなかったため、書き出し結果は判定できませんでした。`
+          : "元動画と完成動画の解像度を確認できなかったため、書き出し結果は判定できませんでした。";
+      } else if (!sourceDimensions) {
+        detail = outputMeetsExpectedDimensions
+          ? `完成動画は目標の${expectedResolutionLabel}で書き出されています。元動画の解像度は確認できませんでした。`
+          : `完成動画は${outputResolutionLabel}です。元動画の解像度を確認できないため、低解像度の原因を特定できませんでした。`;
+      } else {
+        detail = "解像度情報を十分に確認できなかったため、書き出し結果は判定できませんでした。";
+      }
+  }
+
+  return {
+    cause,
+    sourceResolutionLabel,
+    outputResolutionLabel,
+    expectedResolutionLabel,
+    sourceRequiresUpscaling,
+    sourceScaleFactor,
+    outputMeetsExpectedDimensions,
+    headline,
+    detail,
+  };
+}

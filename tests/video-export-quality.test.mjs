@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assessExportedVideoQuality,
   assessVideoExportQuality,
+  explainVideoExportResolution,
   inspectExportedVideoQuality,
   inspectVideoExportQuality,
   meetsTarget1080pResolution,
@@ -335,4 +336,99 @@ test("provides app-facing inspection and exact-dimension assessment helpers", as
   assert.equal(inspection.status, "ok");
   assert.equal(assessment.verdict, "fail");
   assert.equal(assessment.meetsTargetResolution, false);
+});
+
+test("reports the actual output resolution when source and export meet the target", () => {
+  const explanation = explainVideoExportResolution({
+    source: { width: 1080, height: 1920 },
+    output: { width: 1080, height: 1920 },
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(explanation.cause, "target-met");
+  assert.equal(explanation.outputResolutionLabel, "1080×1920");
+  assert.equal(explanation.sourceRequiresUpscaling, false);
+  assert.equal(explanation.outputMeetsExpectedDimensions, true);
+  assert.match(explanation.headline, /完成動画：1080×1920/);
+});
+
+test("attributes limited detail to a low-resolution source even after a full-HD export", () => {
+  const explanation = explainVideoExportResolution({
+    source: { width: 404, height: 720 },
+    output: { width: 1080, height: 1920 },
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(explanation.cause, "source-limited");
+  assert.equal(explanation.sourceResolutionLabel, "404×720");
+  assert.equal(explanation.outputResolutionLabel, "1080×1920");
+  assert.equal(explanation.sourceRequiresUpscaling, true);
+  assert.equal(explanation.outputMeetsExpectedDimensions, true);
+  assert.match(explanation.detail, /元動画（404×720）/);
+  assert.match(explanation.detail, /元動画にない細部は.*復元できません/);
+});
+
+test("distinguishes a device export limit when the source has sufficient detail", () => {
+  const explanation = explainVideoExportResolution({
+    source: { width: 1080, height: 1920 },
+    output: { width: 720, height: 1280 },
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(explanation.cause, "export-limited");
+  assert.equal(explanation.sourceRequiresUpscaling, false);
+  assert.equal(explanation.outputMeetsExpectedDimensions, false);
+  assert.match(explanation.detail, /端末またはブラウザの書き出し制約/);
+});
+
+test("reports both limits instead of blaming only the source when export is also undersized", () => {
+  const explanation = explainVideoExportResolution({
+    source: { width: 404, height: 720 },
+    output: { width: 404, height: 720 },
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(explanation.cause, "source-and-export-limited");
+  assert.equal(explanation.sourceRequiresUpscaling, true);
+  assert.equal(explanation.outputMeetsExpectedDimensions, false);
+  assert.match(explanation.detail, /元動画由来の限界/);
+  assert.match(explanation.detail, /目標の1080×1920にも届いていません/);
+});
+
+test("does not mislabel landscape or square footage contained in a portrait canvas", () => {
+  const landscape = explainVideoExportResolution({
+    source: { width: 1920, height: 1080 },
+    output: { width: 1080, height: 1920 },
+    expected: { width: 1080, height: 1920 },
+  });
+  const square = explainVideoExportResolution({
+    source: { width: 1080, height: 1080 },
+    output: { width: 1080, height: 1920 },
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(landscape.cause, "target-met");
+  assert.equal(landscape.sourceRequiresUpscaling, false);
+  assert.equal(square.cause, "target-met");
+  assert.equal(square.sourceRequiresUpscaling, false);
+});
+
+test("keeps the cause unknown when source or output dimensions are unavailable", () => {
+  const missingSource = explainVideoExportResolution({
+    source: { width: null, height: null },
+    output: { width: 720, height: 1280 },
+    expected: { width: 1080, height: 1920 },
+  });
+  const missingOutput = explainVideoExportResolution({
+    source: { width: 404, height: 720 },
+    output: null,
+    expected: { width: 1080, height: 1920 },
+  });
+
+  assert.equal(missingSource.cause, "unknown");
+  assert.equal(missingSource.outputResolutionLabel, "720×1280");
+  assert.match(missingSource.detail, /原因を特定できません/);
+  assert.equal(missingOutput.cause, "unknown");
+  assert.equal(missingOutput.outputResolutionLabel, null);
+  assert.match(missingOutput.detail, /完成動画の解像度を端末で確認できなかった/);
 });
