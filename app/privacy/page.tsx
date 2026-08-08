@@ -7,7 +7,7 @@ export const metadata = buildPublicPageMetadata({
   path: "/privacy",
 });
 
-const LAST_UPDATED = "2026年8月2日";
+const LAST_UPDATED = "2026年8月9日";
 
 export default function PrivacyPage() {
   return (
@@ -33,6 +33,7 @@ export default function PrivacyPage() {
         <ul>
           <li>動画編集、音声認識、字幕・台本・AIナレーションの生成と書き出し</li>
           <li>アカウント、無料体験、利用枠、購入状況の管理</li>
+          <li>アクセス状況の把握、利用傾向の分析、サービス改善</li>
           <li>不正利用の防止、障害調査、安全性と品質の改善</li>
           <li>重要なお知らせ、問い合わせ対応、法令上必要な対応</li>
         </ul>
@@ -41,7 +42,26 @@ export default function PrivacyPage() {
       <article>
         <h2>3. 外部サービスへの送信</h2>
         <p>
-          機能提供に必要な範囲で、動画から抽出した音声、台本その他の入力をOpenAIのAPIへ送信します。また、ホスティングと一時ファイル保管にはCloudflare、決済にはStripeを利用します。各事業者は、当該事業者の契約条件とプライバシーポリシーに基づいて情報を取り扱います。
+          機能提供に必要な範囲で、動画から抽出した音声、台本その他の入力をOpenAIのAPIへ送信します。また、ホスティングと一時ファイル保管にはCloudflare、決済にはStripeを利用します。アクセス状況の把握とサービス改善にはGoogle Analyticsを利用し、閲覧ページ、参照元、端末・ブラウザ情報、アクセス日時、概略の地域などの利用情報がGoogleへ送信される場合があります。各事業者は、当該事業者の契約条件とプライバシーポリシーに基づいて情報を取り扱います。
+        </p>
+        <p>
+          Googleによる情報の取扱いは、
+          <a
+            href="https://policies.google.com/technologies/partner-sites?hl=ja"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Googleの説明ページ
+          </a>
+          で確認できます。Google Analyticsによる計測を無効にしたい場合は、
+          <a
+            href="https://tools.google.com/dlpage/gaoptout?hl=ja"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Google Analytics オプトアウト アドオン
+          </a>
+          も利用できます。
         </p>
       </article>
 
@@ -55,7 +75,7 @@ export default function PrivacyPage() {
       <article>
         <h2>5. Cookieと端末情報</h2>
         <p>
-          ログイン状態、無料体験、運営端末の安全な識別、設定の保持、不正利用防止のためCookieその他の端末内保存を使用します。必須Cookieを無効にすると、一部の機能を利用できない場合があります。
+          ログイン状態、無料体験、運営端末の安全な識別、設定の保持、不正利用防止のためCookieその他の端末内保存を使用します。Google AnalyticsもCookieなどを利用してアクセス状況を計測する場合があります。ブラウザの設定でCookieを制限できますが、必須Cookieを無効にすると一部の機能を利用できない場合があります。
         </p>
       </article>
 

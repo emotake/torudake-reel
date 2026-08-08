@@ -132,6 +132,7 @@ test("publishes a privacy policy for uploaded media and external processors", as
   assert.match(html, /OpenAI/);
   assert.match(html, /Cloudflare/);
   assert.match(html, /Stripe/);
+  assert.match(html, /Google Analytics/);
   assert.match(html, /72時間/);
   assert.match(
     html,

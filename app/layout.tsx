@@ -9,6 +9,7 @@ import {
   SITE_NAME,
   SITE_TITLE,
 } from "../lib/site";
+import GoogleAnalytics from "./google-analytics";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -46,6 +47,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
+        <GoogleAnalytics />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
