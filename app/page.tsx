@@ -58,6 +58,11 @@ import {
   selectThumbnailCandidates,
 } from "../lib/thumbnail";
 import {
+  computePortableVideoDimensions,
+  computePortableVideoDrawRect,
+  HIGH_QUALITY_VIDEO_BITRATE,
+} from "../lib/portable-video-export";
+import {
   applyNarrationPronunciationGuide,
   buildDisclosedPostCaption,
   buildNarrationEditRanges,
@@ -5542,13 +5547,35 @@ function ResultWorkspace({
       await seekExportMedia(video, playableRanges[0].start);
 
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || 1080;
-      canvas.height = video.videoHeight || 1920;
-      const context = canvas.getContext("2d");
+      const sourceWidth = video.videoWidth || 1080;
+      const sourceHeight = video.videoHeight || 1920;
+      const dimensions = computePortableVideoDimensions(
+        sourceWidth,
+        sourceHeight,
+      );
+      const drawRect = computePortableVideoDrawRect(
+        sourceWidth,
+        sourceHeight,
+        dimensions.width,
+        dimensions.height,
+      );
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+      const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("動画の描画を開始できませんでした。");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
 
       const drawFrame = () => {
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.fillStyle = "#000";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(
+          video,
+          drawRect.x,
+          drawRect.y,
+          drawRect.width,
+          drawRect.height,
+        );
         drawCaptionOverlay(context, canvas, video.currentTime);
 
         if (keepDrawing) {
@@ -5658,6 +5685,8 @@ function ResultWorkspace({
       }
 
       const preferredMimeTypes = [
+        "video/mp4;codecs=avc1.640028,mp4a.40.2",
+        "video/mp4;codecs=avc1.640028",
         "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
         "video/mp4;codecs=avc1.42E01E",
         "video/mp4",
@@ -5670,7 +5699,9 @@ function ResultWorkspace({
         "";
       recorder = new MediaRecorder(
         liveOutputStream,
-        mimeType ? { mimeType, videoBitsPerSecond: 6_000_000 } : undefined,
+        mimeType
+          ? { mimeType, videoBitsPerSecond: HIGH_QUALITY_VIDEO_BITRATE }
+          : undefined,
       );
       const activeRecorder = recorder;
       const chunks: BlobPart[] = [];

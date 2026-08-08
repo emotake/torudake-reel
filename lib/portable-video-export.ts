@@ -3,9 +3,12 @@ import { getAudioCodecPriority } from "./transcription-media";
 
 const DEFAULT_FRAME_RATE = 30;
 const MAX_FRAME_RATE = 30;
-const DEFAULT_MAX_WIDTH = 1080;
-const DEFAULT_MAX_HEIGHT = 1920;
-const DEFAULT_VIDEO_BITRATE = 5_000_000;
+const PORTRAIT_OUTPUT_WIDTH = 1080;
+const PORTRAIT_OUTPUT_HEIGHT = 1920;
+const LANDSCAPE_OUTPUT_WIDTH = 1920;
+const LANDSCAPE_OUTPUT_HEIGHT = 1080;
+const SQUARE_OUTPUT_SIZE = 1080;
+export const HIGH_QUALITY_VIDEO_BITRATE = 10_000_000;
 const DEFAULT_AUDIO_BITRATE = 192_000;
 const OUTPUT_SAMPLE_RATE = 48_000;
 const OUTPUT_CHANNELS = 2;
@@ -39,6 +42,13 @@ export type PortableCaptionDrawContext = Readonly<{
   sourceTime: number;
   editedTime: number;
   duration: number;
+}>;
+
+export type PortableVideoDrawRect = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }>;
 
 export type PortableCaptionDrawCallback = (
@@ -193,8 +203,8 @@ export function normalizePortableFrameRate(frameRate = DEFAULT_FRAME_RATE) {
 export function computePortableVideoDimensions(
   sourceWidth: number,
   sourceHeight: number,
-  maxWidth = DEFAULT_MAX_WIDTH,
-  maxHeight = DEFAULT_MAX_HEIGHT,
+  maxWidth?: number,
+  maxHeight?: number,
 ) {
   if (
     !Number.isFinite(sourceWidth) ||
@@ -204,30 +214,57 @@ export function computePortableVideoDimensions(
   ) {
     throw new RangeError("Source dimensions must be finite positive numbers.");
   }
+  const defaultDimensions =
+    sourceWidth > sourceHeight
+      ? { width: LANDSCAPE_OUTPUT_WIDTH, height: LANDSCAPE_OUTPUT_HEIGHT }
+      : sourceHeight > sourceWidth
+        ? { width: PORTRAIT_OUTPUT_WIDTH, height: PORTRAIT_OUTPUT_HEIGHT }
+        : { width: SQUARE_OUTPUT_SIZE, height: SQUARE_OUTPUT_SIZE };
+  const outputWidth = maxWidth ?? defaultDimensions.width;
+  const outputHeight = maxHeight ?? defaultDimensions.height;
   if (
-    !Number.isFinite(maxWidth) ||
-    maxWidth < 2 ||
-    !Number.isFinite(maxHeight) ||
-    maxHeight < 2
+    !Number.isFinite(outputWidth) ||
+    outputWidth < 2 ||
+    !Number.isFinite(outputHeight) ||
+    outputHeight < 2
   ) {
     throw new RangeError("Maximum dimensions must be at least two pixels.");
   }
 
-  const evenMaximumWidth = Math.max(2, Math.floor(maxWidth / 2) * 2);
-  const evenMaximumHeight = Math.max(2, Math.floor(maxHeight / 2) * 2);
-  const scale = Math.min(
-    1,
-    evenMaximumWidth / sourceWidth,
-    evenMaximumHeight / sourceHeight,
-  );
-  const makeEven = (value: number, maximum: number) => {
-    const rounded = Math.max(2, Math.min(maximum, Math.round(value)));
-    return rounded % 2 === 0 ? rounded : rounded - 1;
+  return {
+    width: Math.max(2, Math.floor(outputWidth / 2) * 2),
+    height: Math.max(2, Math.floor(outputHeight / 2) * 2),
   };
+}
+
+export function computePortableVideoDrawRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+): PortableVideoDrawRect {
+  if (
+    !Number.isFinite(sourceWidth) ||
+    sourceWidth <= 0 ||
+    !Number.isFinite(sourceHeight) ||
+    sourceHeight <= 0 ||
+    !Number.isFinite(outputWidth) ||
+    outputWidth <= 0 ||
+    !Number.isFinite(outputHeight) ||
+    outputHeight <= 0
+  ) {
+    throw new RangeError("Video dimensions must be finite positive numbers.");
+  }
+
+  const scale = Math.min(outputWidth / sourceWidth, outputHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
 
   return {
-    width: makeEven(sourceWidth * scale, evenMaximumWidth),
-    height: makeEven(sourceHeight * scale, evenMaximumHeight),
+    x: (outputWidth - width) / 2,
+    y: (outputHeight - height) / 2,
+    width,
+    height,
   };
 }
 
@@ -574,7 +611,7 @@ export async function exportPortableVideoMp4(
   const frameRate = normalizePortableFrameRate(options.frameRate);
   const videoBitrate = normalizePositiveInteger(
     options.videoBitrate,
-    DEFAULT_VIDEO_BITRATE,
+    HIGH_QUALITY_VIDEO_BITRATE,
     "videoBitrate",
   );
   const audioBitrate = normalizePositiveInteger(
@@ -626,11 +663,19 @@ export async function exportPortableVideoMp4(
     }
     const schedule = buildPortableFrameSchedule(ranges, frameRate);
     const editedDuration = getPortableEditedDuration(ranges);
+    const sourceWidth = await videoTrack.getDisplayWidth();
+    const sourceHeight = await videoTrack.getDisplayHeight();
     const dimensions = computePortableVideoDimensions(
-      await videoTrack.getDisplayWidth(),
-      await videoTrack.getDisplayHeight(),
+      sourceWidth,
+      sourceHeight,
       options.maxWidth,
       options.maxHeight,
+    );
+    const drawRect = computePortableVideoDrawRect(
+      sourceWidth,
+      sourceHeight,
+      dimensions.width,
+      dimensions.height,
     );
 
     if (
@@ -675,13 +720,15 @@ export async function exportPortableVideoMp4(
     const canvas = document.createElement("canvas");
     canvas.width = dimensions.width;
     canvas.height = dimensions.height;
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d", { alpha: false });
     if (!context) {
       throw new PortableVideoExportUnsupportedError(
         "browser",
         "動画フレームを描画できません。",
       );
     }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
 
     const target = new media.BufferTarget();
     output = new media.Output({
@@ -724,7 +771,13 @@ export async function exportPortableVideoMp4(
         context.fillStyle = "#000";
         context.fillRect(0, 0, canvas.width, canvas.height);
         try {
-          sample?.draw(context, 0, 0, canvas.width, canvas.height);
+          sample?.draw(
+            context,
+            drawRect.x,
+            drawRect.y,
+            drawRect.width,
+            drawRect.height,
+          );
           await options.drawCaption?.({
             canvas,
             context,

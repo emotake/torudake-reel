@@ -5,13 +5,19 @@ import {
   buildPortableFrameSchedule,
   canUseWholeFileAudioDecode,
   computePortableVideoDimensions,
+  computePortableVideoDrawRect,
   getPortableAudioSlicePlacement,
   getPortableEditedDuration,
+  HIGH_QUALITY_VIDEO_BITRATE,
   mapPortableEditedTimeToSourceTime,
   normalizePortableFrameRate,
   normalizePortableVideoRanges,
   selectPreferredPortableAudioTrack,
 } from "../lib/portable-video-export.ts";
+
+test("uses a high-quality 1080p bitrate without another API request", () => {
+  assert.equal(HIGH_QUALITY_VIDEO_BITRATE, 10_000_000);
+});
 
 test("does not use the memory-heavy whole-file audio fallback for large videos", () => {
   assert.equal(canUseWholeFileAudioDecode(96 * 1024 * 1024), true);
@@ -83,19 +89,37 @@ test("normalizes, clamps, sorts, and merges playable ranges", () => {
   );
 });
 
-test("fits portrait and landscape video into even 1080 by 1920 bounds", () => {
+test("writes standard full-HD frames for every source orientation", () => {
   assert.deepEqual(computePortableVideoDimensions(2160, 3840), {
     width: 1080,
     height: 1920,
   });
   assert.deepEqual(computePortableVideoDimensions(3840, 2160), {
+    width: 1920,
+    height: 1080,
+  });
+  assert.deepEqual(computePortableVideoDimensions(404, 720), {
     width: 1080,
-    height: 608,
+    height: 1920,
   });
-  assert.deepEqual(computePortableVideoDimensions(1079, 1919), {
-    width: 1078,
-    height: 1918,
+  assert.deepEqual(computePortableVideoDimensions(1080, 1080), {
+    width: 1080,
+    height: 1080,
   });
+});
+
+test("centers a source frame without stretching it", () => {
+  assert.deepEqual(computePortableVideoDrawRect(1920, 1080, 1920, 1080), {
+    x: 0,
+    y: 0,
+    width: 1920,
+    height: 1080,
+  });
+
+  const portrait = computePortableVideoDrawRect(404, 720, 1080, 1920);
+  assert.equal(portrait.y, 0);
+  assert.ok(portrait.x > 0 && portrait.x < 2);
+  assert.equal(portrait.height, 1920);
 });
 
 test("caps output at 30fps", () => {

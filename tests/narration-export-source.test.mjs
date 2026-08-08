@@ -78,6 +78,19 @@ test("tries a deterministic MP4 export before the MediaRecorder fallback", () =>
   assert.match(exportFlow, /if \(!canUseLegacyRecorder\) throw portableExportError/);
 });
 
+test("keeps both export paths at the same high-quality bitrate", () => {
+  assert.match(pageSource, /HIGH_QUALITY_VIDEO_BITRATE/);
+  assert.match(
+    pageSource,
+    /videoBitsPerSecond:\s*HIGH_QUALITY_VIDEO_BITRATE/,
+  );
+  assert.match(pageSource, /imageSmoothingQuality\s*=\s*"high"/);
+  assert.match(pageSource, /computePortableVideoDimensions/);
+  assert.match(pageSource, /computePortableVideoDrawRect/);
+  assert.match(pageSource, /getContext\("2d", \{ alpha: false \}\)/);
+  assert.match(pageSource, /avc1\.640028/);
+});
+
 test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", () => {
   assert.match(
     pageSource,
