@@ -79,11 +79,21 @@ test("tries a deterministic MP4 export before the MediaRecorder fallback", () =>
 });
 
 test("keeps both export paths at the same high-quality bitrate", () => {
-  assert.match(pageSource, /HIGH_QUALITY_VIDEO_BITRATE/);
+  const start = pageSource.indexOf("const preferredMimeTypes = [");
+  const end = pageSource.indexOf("const activeRecorder = recorder;", start);
+  const recorderSetup = pageSource.slice(start, end);
+
+  assert.ok(start >= 0);
+  assert.match(recorderSetup, /const recorderOptions: MediaRecorderOptions/);
   assert.match(
-    pageSource,
+    recorderSetup,
     /videoBitsPerSecond:\s*HIGH_QUALITY_VIDEO_BITRATE/,
   );
+  assert.match(
+    recorderSetup,
+    /new MediaRecorder\(liveOutputStream, recorderOptions\)/,
+  );
+  assert.doesNotMatch(recorderSetup, /:\s*undefined/);
   assert.match(pageSource, /imageSmoothingQuality\s*=\s*"high"/);
   assert.match(pageSource, /computePortableVideoDimensions/);
   assert.match(pageSource, /computePortableVideoDrawRect/);
@@ -91,10 +101,39 @@ test("keeps both export paths at the same high-quality bitrate", () => {
   assert.match(pageSource, /avc1\.640028/);
 });
 
+test("inspects the completed file from both export paths before offering it", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const end = pageSource.indexOf("\n  function requestVideoExport()", start);
+  const exportFlow = pageSource.slice(start, end);
+  const qualityChecks =
+    exportFlow.match(/inspectCompletedVideoQuality\(/g) ?? [];
+
+  assert.equal(qualityChecks.length, 2);
+  assert.match(exportFlow, /expectedExportDimensions/);
+  assert.match(exportFlow, /portableQuality\.meetsTargetResolution === false/);
+  assert.match(exportFlow, /setExportedVideoQualityMessage/);
+  assert.match(pageSource, /exportedVideoQualityMessage \?\?/);
+});
+
 test("prefers an iPhone-compatible MP4 and keeps a user-triggered save action", () => {
+  const start = pageSource.indexOf("const preferredMimeTypes = [");
+  const end = pageSource.indexOf("];", start);
+  const mimeCandidates = pageSource.slice(start, end);
+  const explicitMp4Candidates =
+    mimeCandidates.match(/"video\/mp4;codecs=[^"]+"/g) ?? [];
+
   assert.match(
     pageSource,
-    /video\/mp4;codecs=avc1\.42E01E,mp4a\.40\.2/,
+    /video\/mp4;codecs=avc1\.42E028,mp4a\.40\.2/,
+  );
+  assert.match(pageSource, /video\/mp4;codecs=avc1\.4D4028/);
+  assert.match(pageSource, /"video\/mp4"/);
+  assert.match(pageSource, /video\/webm;codecs=vp9,opus/);
+  assert.match(pageSource, /video\/webm;codecs=vp8,opus/);
+  assert.doesNotMatch(pageSource, /avc1\.42E01E/);
+  assert.ok(explicitMp4Candidates.length >= 3);
+  assert.ok(
+    explicitMp4Candidates.every((candidate) => candidate.includes("mp4a.40.2")),
   );
   assert.match(pageSource, /navigator\.share\(shareData\)/);
   assert.match(pageSource, /動画を保存・共有/);

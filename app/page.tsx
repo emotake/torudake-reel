@@ -97,6 +97,11 @@ type PreviewTransportState =
   | "ended";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
 
+type CompletedVideoQuality = {
+  meetsTargetResolution: boolean | null;
+  userMessage: string | null;
+};
+
 type UploadedPart = {
   partNumber: number;
   etag: string;
@@ -142,6 +147,78 @@ const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
 const SUPPORTED_VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm)$/i;
 const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
+
+async function inspectCompletedVideoQuality(
+  output: Blob,
+  expectedDimensions: { width: number; height: number },
+): Promise<CompletedVideoQuality> {
+  try {
+    const {
+      assessExportedVideoQuality,
+      inspectExportedVideoQuality,
+    } = await import("../lib/video-export-quality");
+    const inspection = await inspectExportedVideoQuality(output, {
+      packetSampleCount: 360,
+    });
+    const assessment = assessExportedVideoQuality(
+      inspection,
+      expectedDimensions,
+    );
+
+    if (inspection.status !== "ok") {
+      return { meetsTargetResolution: null, userMessage: null };
+    }
+
+    const { width, height } = inspection.metrics;
+    const dimensions =
+      width !== null && height !== null
+        ? `${Math.round(width)}×${Math.round(height)}`
+        : null;
+    if (assessment.meetsTargetResolution === false) {
+      return {
+        meetsTargetResolution: false,
+        userMessage: dimensions
+          ? `${dimensions}で準備しました。フルHDに達していないため、SafariまたはiOSを最新版にして、もう一度書き出すと改善する場合があります`
+          : null,
+      };
+    }
+
+    const hasFrameRateWarning = assessment.issues.some(
+      (issue) =>
+        issue.code === "frame-rate-critical" ||
+        issue.code === "frame-rate-below-recommended",
+    );
+    if (hasFrameRateWarning) {
+      return {
+        meetsTargetResolution: assessment.meetsTargetResolution,
+        userMessage: dimensions
+          ? `${dimensions}で準備しました。端末の負荷により動きが滑らかでない可能性があります。画面を開いたまま再度お試しください`
+          : null,
+      };
+    }
+
+    const hasCompatibilityWarning = assessment.issues.some(
+      (issue) => issue.code === "codec-compatibility",
+    );
+    if (hasCompatibilityWarning) {
+      return {
+        meetsTargetResolution: assessment.meetsTargetResolution,
+        userMessage: dimensions
+          ? `${dimensions}の高画質で準備しました。iPhoneで使う場合はSafariから書き出すと、より互換性の高いMP4になります`
+          : null,
+      };
+    }
+
+    return {
+      meetsTargetResolution: assessment.meetsTargetResolution,
+      userMessage: dimensions
+        ? `${dimensions}の高画質で準備できました。iPhoneでは共有画面から「ビデオを保存」を選べます`
+        : null,
+    };
+  } catch {
+    return { meetsTargetResolution: null, userMessage: null };
+  }
+}
 
 function isSupportedVideoFile(selectedFile: File) {
   if (UNSUPPORTED_VIDEO_EXTENSION.test(selectedFile.name)) return false;
@@ -3337,6 +3414,8 @@ function ResultWorkspace({
   const [isExporting, setIsExporting] = useState(false);
   const isExportingRef = useRef(false);
   const [exportedVideoFile, setExportedVideoFile] = useState<File | null>(null);
+  const [exportedVideoQualityMessage, setExportedVideoQualityMessage] =
+    useState<string | null>(null);
   const [exportedVideoRevision, setExportedVideoRevision] = useState<
     string | null
   >(null);
@@ -5396,6 +5475,10 @@ function ResultWorkspace({
       notify("残す文を1つ以上選んでください");
       return;
     }
+    const expectedExportDimensions = computePortableVideoDimensions(
+      video.videoWidth || 1080,
+      video.videoHeight || 1920,
+    );
 
     const canUseLegacyRecorder =
       typeof MediaRecorder !== "undefined" &&
@@ -5404,6 +5487,7 @@ function ResultWorkspace({
     isExportingRef.current = true;
     setIsExporting(true);
     setExportedVideoFile(null);
+    setExportedVideoQualityMessage(null);
     setExportedVideoRevision(null);
     setExportProgress(0);
     const previous = {
@@ -5522,6 +5606,15 @@ function ResultWorkspace({
           onProgress: (progress) => setExportProgress(progress * 100),
         });
         if (!output.size) throw new Error("書き出した動画が空でした。");
+        const portableQuality = await inspectCompletedVideoQuality(
+          output,
+          expectedExportDimensions,
+        );
+        if (portableQuality.meetsTargetResolution === false) {
+          throw new Error(
+            "高画質の完成動画を作れなかったため、端末互換の書き出し方法でもう一度試します。",
+          );
+        }
         const completedFile = new File(
           [output],
           `${exportName}_${exportSuffix}.mp4`,
@@ -5529,6 +5622,7 @@ function ResultWorkspace({
         );
         setExportProgress(100);
         setExportedVideoFile(completedFile);
+        setExportedVideoQualityMessage(portableQuality.userMessage);
         setExportedVideoRevision(exportInputRevision);
         notify("動画ができました。下の「動画を保存・共有」を押してください");
         return;
@@ -5686,9 +5780,8 @@ function ResultWorkspace({
 
       const preferredMimeTypes = [
         "video/mp4;codecs=avc1.640028,mp4a.40.2",
-        "video/mp4;codecs=avc1.640028",
-        "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-        "video/mp4;codecs=avc1.42E01E",
+        "video/mp4;codecs=avc1.4D4028,mp4a.40.2",
+        "video/mp4;codecs=avc1.42E028,mp4a.40.2",
         "video/mp4",
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
@@ -5697,12 +5790,11 @@ function ResultWorkspace({
       const mimeType =
         preferredMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) ??
         "";
-      recorder = new MediaRecorder(
-        liveOutputStream,
-        mimeType
-          ? { mimeType, videoBitsPerSecond: HIGH_QUALITY_VIDEO_BITRATE }
-          : undefined,
-      );
+      const recorderOptions: MediaRecorderOptions = {
+        videoBitsPerSecond: HIGH_QUALITY_VIDEO_BITRATE,
+        ...(mimeType ? { mimeType } : {}),
+      };
+      recorder = new MediaRecorder(liveOutputStream, recorderOptions);
       const activeRecorder = recorder;
       const chunks: BlobPart[] = [];
       activeRecorder.addEventListener("dataavailable", (event) => {
@@ -5881,6 +5973,10 @@ function ResultWorkspace({
         type: activeRecorder.mimeType || mimeType || "video/webm",
       });
       if (!output.size) throw new Error("書き出した動画が空でした。");
+      const fallbackQuality = await inspectCompletedVideoQuality(
+        output,
+        expectedExportDimensions,
+      );
 
       const outputType = output.type.toLowerCase();
       const extension = outputType.includes("mp4") ? "mp4" : "webm";
@@ -5891,6 +5987,7 @@ function ResultWorkspace({
       );
       setExportProgress(100);
       setExportedVideoFile(completedFile);
+      setExportedVideoQualityMessage(fallbackQuality.userMessage);
       setExportedVideoRevision(exportInputRevision);
       notify("動画ができました。下の「動画を保存・共有」を押してください");
     } catch (error) {
@@ -7184,7 +7281,8 @@ function ResultWorkspace({
             </strong>
             <small>
               {readyExportedVideoFile
-                ? "動画の準備ができました。iPhoneでは共有画面から「ビデオを保存」を選べます"
+                ? exportedVideoQualityMessage ??
+                  "動画の準備ができました。iPhoneでは共有画面から「ビデオを保存」を選べます"
                 : isExporting && exportProgress !== null
                   ? `MP4動画を準備しています（${Math.round(exportProgress)}%）`
                   : file

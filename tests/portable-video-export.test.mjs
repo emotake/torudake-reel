@@ -6,6 +6,7 @@ import {
   canUseWholeFileAudioDecode,
   computePortableVideoDimensions,
   computePortableVideoDrawRect,
+  createPortableVideoEncodingSettings,
   getPortableAudioSlicePlacement,
   getPortableEditedDuration,
   HIGH_QUALITY_VIDEO_BITRATE,
@@ -17,6 +18,21 @@ import {
 
 test("uses a high-quality 1080p bitrate without another API request", () => {
   assert.equal(HIGH_QUALITY_VIDEO_BITRATE, 10_000_000);
+});
+
+test("preflights the exact frame rate with quality-focused VBR settings", () => {
+  assert.deepEqual(
+    createPortableVideoEncodingSettings(1080, 1920, 10_000_000, 30),
+    {
+      width: 1080,
+      height: 1920,
+      bitrate: 10_000_000,
+      framerate: 30,
+      bitrateMode: "variable",
+      latencyMode: "quality",
+      contentHint: "detail",
+    },
+  );
 });
 
 test("does not use the memory-heavy whole-file audio fallback for large videos", () => {

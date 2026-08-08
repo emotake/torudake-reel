@@ -200,6 +200,30 @@ export function normalizePortableFrameRate(frameRate = DEFAULT_FRAME_RATE) {
   return Math.min(MAX_FRAME_RATE, frameRate);
 }
 
+/**
+ * Builds the shared AVC settings used by both capability detection and the
+ * actual encoder. Mediabunny 1.51 forwards `framerate` to WebCodecs during
+ * canEncodeVideo(), even though that field is not yet exposed by its public
+ * TypeScript options. Keeping it here prevents a device from passing a
+ * generic AVC check and then failing only after the full render has started.
+ */
+export function createPortableVideoEncodingSettings(
+  width: number,
+  height: number,
+  bitrate: number,
+  frameRate: number,
+) {
+  return {
+    width,
+    height,
+    bitrate,
+    framerate: frameRate,
+    bitrateMode: "variable" as const,
+    latencyMode: "quality" as const,
+    contentHint: "detail",
+  };
+}
+
 export function computePortableVideoDimensions(
   sourceWidth: number,
   sourceHeight: number,
@@ -677,12 +701,15 @@ export async function exportPortableVideoMp4(
       dimensions.width,
       dimensions.height,
     );
+    const videoEncodingSettings = createPortableVideoEncodingSettings(
+      dimensions.width,
+      dimensions.height,
+      videoBitrate,
+      frameRate,
+    );
 
     if (
-      !(await media.canEncodeVideo("avc", {
-        ...dimensions,
-        bitrate: videoBitrate,
-      }))
+      !(await media.canEncodeVideo("avc", videoEncodingSettings))
     ) {
       throw new PortableVideoExportUnsupportedError(
         "video-encode",
@@ -738,6 +765,9 @@ export async function exportPortableVideoMp4(
     const videoSource = new media.CanvasSource(canvas, {
       codec: "avc",
       bitrate: videoBitrate,
+      bitrateMode: videoEncodingSettings.bitrateMode,
+      latencyMode: videoEncodingSettings.latencyMode,
+      contentHint: videoEncodingSettings.contentHint,
       keyFrameInterval: 2,
     });
     output.addVideoTrack(videoSource, { frameRate });
