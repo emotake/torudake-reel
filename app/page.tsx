@@ -2204,7 +2204,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260802-release-hardening">
+    <main className="siteShell" data-build="20260809-premium-landing">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -2660,7 +2660,7 @@ function Landing({
           <h1>
             撮った動画を選ぶだけ。
             <br />
-            <em>面倒な編集は、ここで終わり。</em>
+            <em>編集の手間を、もっと軽く。</em>
           </h1>
           <p className="heroLead">
             自動カット、自動テロップ、AIナレーション、表紙、投稿文まで。
@@ -2676,6 +2676,9 @@ function Landing({
               サンプルで体験
             </button>
           </div>
+        </div>
+
+        <div className="heroDetails">
           <div className="heroOffer" aria-label="無料体験と保存料金">
             <span className="heroOfferMark" aria-hidden="true">
               ¥0

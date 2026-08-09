@@ -54,7 +54,9 @@ a {
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 8% 7%, rgba(185, 245, 208, 0.28), transparent 22%),
+    radial-gradient(circle at 7% 5%, rgba(185, 245, 208, 0.32), transparent 23%),
+    radial-gradient(circle at 93% 12%, rgba(255, 90, 60, 0.11), transparent 24%),
+    linear-gradient(180deg, #fffdf8 0%, #fffaf2 42%, #fffdf8 100%),
     var(--paper);
 }
 
@@ -67,9 +69,10 @@ a {
   min-height: 76px;
   align-items: center;
   padding: 0 clamp(20px, 4vw, 64px);
-  border-bottom: 1px solid rgba(16, 24, 40, 0.09);
-  background: rgba(255, 253, 248, 0.88);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(16, 24, 40, 0.06);
+  background: rgba(255, 253, 248, 0.82);
+  box-shadow: 0 10px 34px rgba(16, 24, 40, 0.045);
+  backdrop-filter: blur(22px) saturate(135%);
 }
 
 .brand {
@@ -222,18 +225,31 @@ a {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(460px, 0.94fr) minmax(500px, 1.06fr);
-  gap: clamp(28px, 4vw, 76px);
+  grid-template-columns: minmax(480px, 0.98fr) minmax(500px, 1.02fr);
+  grid-template-rows: auto auto;
+  column-gap: clamp(34px, 4vw, 68px);
+  row-gap: 19px;
   width: min(1320px, calc(100% - 48px));
   min-height: 670px;
-  align-items: center;
+  align-items: start;
   margin: 0 auto;
-  padding: 55px 0 68px;
+  padding: 62px 0 72px;
 }
 
 .heroCopy {
   position: relative;
   z-index: 2;
+  align-self: end;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.heroDetails {
+  position: relative;
+  z-index: 3;
+  align-self: start;
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .eyebrow {
@@ -249,15 +265,23 @@ a {
 }
 
 .eyebrow > span {
-  padding: 4px 7px;
-  border-radius: 5px;
-  background: var(--mint);
+  padding: 5px 8px;
+  border: 1px solid rgba(25, 115, 70, 0.12);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #d8fae4, var(--mint));
   color: var(--mint-dark);
   font-size: 8px;
   letter-spacing: 0.08em;
+  box-shadow: 0 7px 18px rgba(25, 115, 70, 0.08);
 }
 
-.hero h1,
+.hero h1 {
+  margin: 0;
+  font-size: clamp(42px, 3.45vw, 54px);
+  line-height: 1.24;
+  letter-spacing: -0.045em;
+}
+
 .workspace h1,
 .processingPage h1,
 .resultPage h1 {
@@ -278,20 +302,21 @@ a {
 .hero h1 em::after {
   position: absolute;
   right: 0;
-  bottom: -5px;
+  bottom: 0.06em;
   left: 0;
-  height: 5px;
+  z-index: -1;
+  height: 0.24em;
   border-radius: 999px;
-  background: var(--coral);
+  background: linear-gradient(90deg, rgba(255, 90, 60, 0.08), rgba(255, 90, 60, 0.24));
   content: "";
-  transform: rotate(-1deg);
 }
 
 .heroLead {
-  margin: 28px 0 0;
+  max-width: 570px;
+  margin: 26px 0 0;
   color: #566174;
-  font-size: 15px;
-  line-height: 2;
+  font-size: 14px;
+  line-height: 2.05;
 }
 
 .heroActions {
@@ -307,17 +332,15 @@ a {
   grid-template-columns: auto minmax(0, 1fr) minmax(0, 0.82fr) auto;
   gap: 14px;
   align-items: center;
-  margin-top: 16px;
-  padding: 13px 14px;
-  border: 1px solid rgba(16, 24, 40, 0.1);
-  border-radius: 17px;
-  background: linear-gradient(
-    120deg,
-    rgba(185, 245, 208, 0.42),
-    rgba(255, 255, 255, 0.96) 46%,
-    rgba(255, 248, 237, 0.94)
-  );
-  box-shadow: 0 17px 45px rgba(16, 24, 40, 0.08);
+  margin-top: 0;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  border-radius: 19px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 252, 246, 0.9));
+  box-shadow:
+    0 18px 48px rgba(16, 24, 40, 0.09),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  backdrop-filter: blur(18px);
 }
 
 .heroOfferMark {
@@ -326,12 +349,12 @@ a {
   height: 48px;
   place-items: center;
   border-radius: 14px;
-  background: var(--ink);
+  background: linear-gradient(145deg, #26344a, var(--ink));
   color: var(--mint);
   font-family: "DM Sans", sans-serif;
   font-size: 15px;
   font-weight: 900;
-  box-shadow: 4px 4px 0 var(--coral);
+  box-shadow: 0 12px 24px rgba(16, 24, 40, 0.18);
 }
 
 .heroOffer > div {
@@ -404,6 +427,14 @@ a {
   cursor: pointer;
 }
 
+.hero .mainCta {
+  border-radius: 15px;
+  background: linear-gradient(135deg, #ff684c, var(--coral) 58%, #ef492d);
+  box-shadow:
+    0 16px 36px rgba(231, 68, 40, 0.25),
+    0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
 .mainCta:hover {
   background: var(--coral-dark);
   transform: translateY(-1px);
@@ -423,10 +454,14 @@ a {
   min-height: 53px;
   padding: 0 19px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: white;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.78);
   font-size: 12px;
   font-weight: 800;
+  box-shadow:
+    0 12px 28px rgba(16, 24, 40, 0.065),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  backdrop-filter: blur(14px);
   cursor: pointer;
 }
 
@@ -439,10 +474,13 @@ a {
   align-items: center;
   margin-top: 12px;
   padding: 10px 14px 10px 10px;
-  border: 1px solid rgba(16, 24, 40, 0.11);
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.84);
-  box-shadow: 0 10px 30px rgba(16, 24, 40, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 15px 38px rgba(16, 24, 40, 0.075),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
+  backdrop-filter: blur(16px);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
@@ -498,11 +536,18 @@ a {
 .trustRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 20px;
+  gap: 8px;
+  margin-top: 16px;
   color: #6e7889;
   font-size: 9px;
   font-weight: 600;
+}
+
+.trustRow span {
+  padding: 6px 9px;
+  border: 1px solid rgba(16, 24, 40, 0.065);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .lineSaveCard {
@@ -612,18 +657,20 @@ a {
 
 .heroVisual {
   position: relative;
+  align-self: center;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   min-height: 560px;
   overflow: hidden;
-  border: 1px solid rgba(16, 24, 40, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 36px;
   background:
-    linear-gradient(rgba(16, 24, 40, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(16, 24, 40, 0.04) 1px, transparent 1px),
-    var(--cream);
-  background-size: 28px 28px;
+    radial-gradient(circle at 86% 12%, rgba(255, 90, 60, 0.2), transparent 30%),
+    radial-gradient(circle at 12% 88%, rgba(185, 245, 208, 0.15), transparent 32%),
+    linear-gradient(145deg, #111a2a 0%, #1d2a40 58%, #101827 100%);
   box-shadow:
-    0 32px 90px rgba(16, 24, 40, 0.14),
-    0 4px 0 rgba(255, 255, 255, 0.9) inset;
+    0 38px 96px rgba(16, 24, 40, 0.23),
+    0 1px 0 rgba(255, 255, 255, 0.13) inset;
 }
 
 .heroVisual::before {
@@ -633,7 +680,8 @@ a {
   width: 260px;
   height: 260px;
   border-radius: 50%;
-  background: var(--mint);
+  background: rgba(185, 245, 208, 0.18);
+  filter: blur(48px);
   content: "";
 }
 
@@ -644,7 +692,8 @@ a {
   width: 285px;
   height: 285px;
   border-radius: 50%;
-  background: var(--coral);
+  background: rgba(255, 90, 60, 0.2);
+  filter: blur(52px);
   content: "";
 }
 
@@ -655,11 +704,11 @@ a {
   z-index: 3;
   display: grid;
   padding: 11px 15px;
-  border: 2px solid var(--ink);
-  border-radius: 13px;
-  background: white;
-  box-shadow: 4px 4px 0 var(--ink);
-  transform: rotate(-2deg);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 16px 38px rgba(2, 8, 20, 0.28);
+  backdrop-filter: blur(16px);
 }
 
 .visualBadge strong {
@@ -669,6 +718,7 @@ a {
 }
 
 .visualBadge span {
+  color: #536074;
   font-size: 8px;
   font-weight: 800;
 }
@@ -684,16 +734,16 @@ a {
 
 .visualFeaturePills span {
   padding: 7px 9px;
-  border: 1px solid rgba(16, 24, 40, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.9);
   font-family: "DM Sans", sans-serif;
   font-size: 7px;
   font-weight: 850;
   letter-spacing: 0.08em;
-  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.08);
-  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 26px rgba(2, 8, 20, 0.18);
+  backdrop-filter: blur(16px);
 }
 
 .phonePair {
@@ -712,17 +762,23 @@ a {
   width: 214px;
   height: 405px;
   overflow: hidden;
-  border: 8px solid var(--ink);
+  border: 6px solid #26344a;
   border-radius: 32px;
   background: #e3c3ac;
-  box-shadow: 0 20px 45px rgba(16, 24, 40, 0.22);
+  box-shadow:
+    0 28px 64px rgba(2, 8, 20, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.16) inset;
 }
 
 .afterPhone {
   width: 226px;
   height: 440px;
-  border-color: var(--coral);
+  border-color: #fff8f2;
   background: #f0d8c6;
+  box-shadow:
+    0 0 0 2px rgba(255, 90, 60, 0.9),
+    0 32px 70px rgba(2, 8, 20, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.4) inset;
 }
 
 .phoneTop {
@@ -1022,13 +1078,15 @@ a {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 3px solid var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.34);
   border-radius: 50%;
-  background: var(--coral);
+  background: linear-gradient(135deg, #ff765e, var(--coral));
   color: white;
   font-size: 18px;
   font-weight: 900;
-  box-shadow: 3px 3px 0 var(--ink);
+  box-shadow:
+    0 14px 32px rgba(2, 8, 20, 0.32),
+    0 1px 0 rgba(255, 255, 255, 0.34) inset;
 }
 
 .visualResult {
@@ -1041,10 +1099,11 @@ a {
   gap: 10px;
   align-items: center;
   padding: 11px 15px;
-  border: 1px solid #d8d5cd;
-  border-radius: 13px;
-  background: white;
-  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 42px rgba(2, 8, 20, 0.28);
+  backdrop-filter: blur(16px);
 }
 
 .visualResult > span {
@@ -1073,8 +1132,13 @@ a {
 
 .painStrip {
   padding: 31px max(24px, calc((100% - 1220px) / 2));
-  background: var(--ink);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 12% 0, rgba(185, 245, 208, 0.1), transparent 25%),
+    linear-gradient(110deg, #0f1726, #1a263a 58%, #101827);
   color: white;
+  box-shadow: 0 22px 56px rgba(16, 24, 40, 0.14);
 }
 
 .painStrip > span {
@@ -1098,7 +1162,7 @@ a {
   justify-content: center;
   margin: 0;
   padding: 9px 20px;
-  border-right: 1px solid #344055;
+  border-right: 1px solid rgba(255, 255, 255, 0.11);
   color: #d9dee7;
   font-size: 11px;
   font-weight: 700;
@@ -1158,16 +1222,22 @@ a {
   min-height: 280px;
   overflow: hidden;
   padding: 27px;
-  border: 1px solid var(--line);
-  border-radius: 21px;
-  background: white;
-  box-shadow: 0 13px 36px rgba(16, 24, 40, 0.055);
+  border: 1px solid rgba(16, 24, 40, 0.075);
+  border-radius: 25px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(255, 252, 246, 0.9));
+  box-shadow:
+    0 20px 52px rgba(16, 24, 40, 0.075),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
 }
 
 .stepGrid article:nth-child(2) {
-  background: var(--ink);
+  border-color: rgba(255, 255, 255, 0.09);
+  background:
+    radial-gradient(circle at 90% 5%, rgba(255, 90, 60, 0.15), transparent 28%),
+    linear-gradient(145deg, #172237, var(--ink));
   color: white;
-  transform: translateY(-10px);
+  box-shadow: 0 28px 64px rgba(16, 24, 40, 0.2);
+  transform: translateY(-7px);
 }
 
 .stepNo {
@@ -1280,12 +1350,14 @@ a {
 
 .memoryCard {
   position: relative;
-  padding: 24px;
-  border: 8px solid var(--ink);
+  padding: 27px;
+  border: 1px solid rgba(16, 24, 40, 0.1);
   border-radius: 30px;
-  background: white;
-  box-shadow: 12px 12px 0 var(--coral);
-  transform: rotate(1.5deg);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(255, 249, 241, 0.94));
+  box-shadow:
+    0 32px 76px rgba(16, 24, 40, 0.14),
+    0 0 0 6px rgba(255, 255, 255, 0.56),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
 }
 
 .memoryTop {
@@ -1395,13 +1467,15 @@ a {
   width: min(1180px, calc(100% - 48px));
   margin-bottom: 110px;
   padding: 78px 60px 64px;
-  border: 1px solid rgba(16, 24, 40, 0.08);
-  border-radius: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  border-radius: 38px;
   background:
-    radial-gradient(circle at 8% 0, rgba(185, 245, 208, 0.5), transparent 28%),
-    radial-gradient(circle at 100% 100%, rgba(255, 90, 60, 0.13), transparent 30%),
-    #fff;
-  box-shadow: 0 28px 85px rgba(16, 24, 40, 0.09);
+    radial-gradient(circle at 8% 0, rgba(185, 245, 208, 0.38), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(255, 90, 60, 0.12), transparent 31%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.97), rgba(255, 250, 243, 0.92));
+  box-shadow:
+    0 36px 96px rgba(16, 24, 40, 0.11),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
   scroll-margin-top: 92px;
 }
 
@@ -1424,23 +1498,30 @@ a {
   min-height: 390px;
   align-content: start;
   padding: 29px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: white;
-  box-shadow: 0 18px 46px rgba(16, 24, 40, 0.07);
+  border: 1px solid rgba(16, 24, 40, 0.075);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 22px 58px rgba(16, 24, 40, 0.085),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
 }
 
 .priceGrid article.featuredPrice {
   min-height: 410px;
-  border: 2px solid var(--ink);
+  border: 1px solid rgba(255, 90, 60, 0.36);
   box-shadow:
-    9px 9px 0 var(--coral),
-    0 24px 58px rgba(16, 24, 40, 0.12);
+    0 0 0 4px rgba(255, 90, 60, 0.07),
+    0 28px 66px rgba(16, 24, 40, 0.13);
 }
 
 .priceGrid article.subscriptionPrice {
-  border-color: rgba(16, 24, 40, 0.13);
-  background: linear-gradient(145deg, #fff 0%, #f7fff9 100%);
+  border-color: rgba(25, 115, 70, 0.18);
+  background:
+    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.32), transparent 29%),
+    linear-gradient(145deg, #fff 0%, #f7fff9 100%);
+  box-shadow:
+    0 0 0 4px rgba(185, 245, 208, 0.09),
+    0 28px 66px rgba(16, 24, 40, 0.11);
 }
 
 .priceGrid article > p {
@@ -1530,12 +1611,15 @@ a {
   margin: 38px auto 0;
   padding: 18px 20px;
   overflow: hidden;
-  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 23px;
   background:
-    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.2), transparent 32%),
-    var(--ink);
+    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.18), transparent 32%),
+    linear-gradient(135deg, #172237, var(--ink));
   color: white;
-  box-shadow: 0 18px 46px rgba(16, 24, 40, 0.16);
+  box-shadow:
+    0 24px 58px rgba(16, 24, 40, 0.2),
+    0 1px 0 rgba(255, 255, 255, 0.11) inset;
 }
 
 .freePreviewBand > span {
@@ -1571,11 +1655,14 @@ a {
   min-height: 45px;
   padding: 0 18px;
   border: 0;
-  border-radius: 12px;
-  background: var(--coral);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ff684c, var(--coral));
   color: white;
   font-size: 11px;
   font-weight: 900;
+  box-shadow:
+    0 14px 32px rgba(255, 90, 60, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.28) inset;
   cursor: pointer;
 }
 
@@ -1612,11 +1699,16 @@ a {
   margin: 0 auto 90px;
   padding: 50px 58px;
   overflow: hidden;
-  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 34px;
   background:
-    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.2) 0 22%, transparent 22.5%),
-    var(--ink);
+    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.16) 0 22%, transparent 22.5%),
+    radial-gradient(circle at 0 100%, rgba(255, 90, 60, 0.13), transparent 30%),
+    linear-gradient(135deg, #172237, var(--ink));
   color: white;
+  box-shadow:
+    0 34px 84px rgba(16, 24, 40, 0.2),
+    0 1px 0 rgba(255, 255, 255, 0.1) inset;
 }
 
 .bottomCta h2 {
@@ -8546,11 +8638,28 @@ footer > small {
 
   .hero {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 28px;
     padding-top: 45px;
   }
 
   .heroCopy {
     max-width: 700px;
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .heroVisual {
+    width: min(100%, 720px);
+    grid-column: 1;
+    grid-row: 2;
+    margin: 0 auto;
+  }
+
+  .heroDetails {
+    width: min(100%, 700px);
+    grid-column: 1;
+    grid-row: 3;
   }
 
   .heroVisual {
@@ -8701,17 +8810,20 @@ footer > small {
   }
 
   .hero {
-    gap: 35px;
+    gap: 28px;
     min-height: 0;
     padding: 40px 0 50px;
   }
 
   .hero h1 {
-    font-size: 44px;
+    font-size: clamp(34px, 10vw, 44px);
+    line-height: 1.3;
   }
 
   .heroLead {
-    font-size: 12px;
+    margin-top: 21px;
+    font-size: 13px;
+    line-height: 1.9;
   }
 
   .heroLead br {
@@ -8729,6 +8841,10 @@ footer > small {
     padding: 14px;
   }
 
+  .heroDetails {
+    width: 100%;
+  }
+
   .heroOfferPrice {
     grid-column: 1 / -1;
     padding: 12px 0 0;
@@ -8741,6 +8857,18 @@ footer > small {
     grid-column: 1 / -1;
   }
 
+  .heroOffer strong {
+    font-size: 12px;
+  }
+
+  .heroOffer small {
+    font-size: 10px;
+  }
+
+  .photoReelEntry small {
+    font-size: 11px;
+  }
+
   .mainCta,
   .sampleButton {
     width: 100%;
@@ -8749,6 +8877,13 @@ footer > small {
   .trustRow {
     display: grid;
     gap: 7px;
+    grid-template-columns: 1fr;
+    font-size: 10px;
+  }
+
+  .trustRow span {
+    width: max-content;
+    max-width: 100%;
   }
 
   .lineSaveCard {
@@ -8768,37 +8903,59 @@ footer > small {
   }
 
   .heroVisual {
-    min-height: 535px;
-    border-radius: 24px;
+    width: min(100%, 520px);
+    min-height: 510px;
+    border-radius: 28px;
   }
 
   .phonePair {
-    gap: 5px;
-    padding-right: 5px;
-    padding-left: 5px;
+    display: block;
+    min-height: 455px;
+    padding: 0;
   }
 
   .phone {
     width: 150px;
     height: 340px;
-    border-width: 6px;
-    border-radius: 25px;
+    border-width: 5px;
+    border-radius: 27px;
+  }
+
+  .beforePhone {
+    position: absolute;
+    top: 114px;
+    left: max(4px, calc(50% - 170px));
+    z-index: 2;
+    opacity: 0.84;
+    filter: saturate(0.86);
+    transform: rotate(-4deg) scale(0.73);
+    transform-origin: left center;
   }
 
   .afterPhone {
-    width: 160px;
-    height: 375px;
+    position: absolute;
+    top: 72px;
+    left: 55%;
+    z-index: 3;
+    width: 180px;
+    height: 390px;
+    transform: translateX(-50%);
   }
 
   .transformArrow {
-    width: 31px;
-    height: 31px;
+    position: absolute;
+    top: 232px;
+    left: calc(55% - 72px);
+    z-index: 5;
+    width: 34px;
+    height: 34px;
     font-size: 13px;
   }
 
   .visualBadge {
-    top: 14px;
-    left: 14px;
+    top: 16px;
+    left: 16px;
+    z-index: 6;
   }
 
   .visualFeaturePills {
@@ -8810,12 +8967,13 @@ footer > small {
 
   .visualResult {
     right: 12px;
-    bottom: 13px;
+    bottom: 14px;
     left: 12px;
+    z-index: 7;
   }
 
-  .creatorFigure .body {
-    width: 150px;
+  .afterPhone .creatorFigure .body {
+    width: 168px;
   }
 
   .painStrip {
@@ -8824,15 +8982,25 @@ footer > small {
   }
 
   .painStrip > div {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .painStrip p {
+    min-height: 62px;
     justify-content: flex-start;
-    border-right: 0;
-    border-bottom: 1px solid #344055 !important;
+    padding: 10px 9px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    font-size: 10px;
+    line-height: 1.55;
   }
 
+  .painStrip p:nth-child(2),
+  .painStrip p:last-child {
+    border-right: 0;
+  }
+
+  .painStrip p:nth-child(3),
   .painStrip p:last-child {
     border-bottom: 0 !important;
   }
@@ -8864,8 +9032,46 @@ footer > small {
     transform: none;
   }
 
+  .stepGrid article {
+    min-height: 0;
+    padding: 23px 20px 23px 82px;
+  }
+
+  .stepGrid .stepNo {
+    top: 18px;
+    right: 20px;
+  }
+
+  .stepGrid .stepIcon {
+    position: absolute;
+    top: 20px;
+    left: 19px;
+    width: 48px;
+    height: 48px;
+    margin: 0;
+    border-radius: 15px;
+    font-size: 20px;
+  }
+
+  .stepGrid h3 {
+    padding-right: 30px;
+    font-size: 17px;
+  }
+
+  .stepGrid p {
+    font-size: 12px;
+  }
+
+  .stepGrid small {
+    position: static;
+    display: block;
+    margin-top: 9px;
+    font-size: 10px;
+    line-height: 1.6;
+  }
+
   .memoryCard {
-    margin: 10px 8px 0 0;
+    margin: 10px 4px 0;
   }
 
   .priceGrid article,

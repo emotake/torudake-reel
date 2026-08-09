@@ -30,7 +30,7 @@ test("renders the Torudake Reel product experience", async () => {
   const html = await response.text();
   assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
-  assert.match(html, /面倒な編集は、ここで終わり。/);
+  assert.match(html, /編集の手間を、もっと軽く。/);
   assert.match(html, /動画を選んで無料で試す/);
   assert.match(html, /編集・プレビューは無料/);
   assert.match(html, /保存は1動画/);
