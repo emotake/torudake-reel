@@ -24,6 +24,15 @@ import {
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
+const JAPANESE_LANGUAGE_AND_ACCENT = `# Language
+- 読み上げは最初から最後まで日本語だけにする。
+- 英字や外来語が含まれる場合も、日本で一般的な読み方を優先する。
+
+# Accent and Pronunciation
+- 日本語を母語とする成人が話す、自然な共通語のアクセントを最初から最後まで保つ。
+- 日本語のモーラの長さを保ち、長音、促音、小さい「ゃ・ゅ・ょ」、撥音の「ん」を明瞭に区別する。
+- 文節ごとの自然な高低アクセントと息継ぎを使い、英語のように単語の一部だけを強く読むストレスや、母音を曖昧にする発音を避ける。
+- 外国語話者が日本語を読むような抑揚、過度な語尾上げ、巻き舌を避ける。`;
 const REALTIME_MODEL = "gpt-realtime-2.1-mini";
 const LEGACY_MODEL = "gpt-4o-mini-tts";
 const FALLBACK_MODEL = "tts-1-hd";
@@ -42,8 +51,8 @@ const VOICE_SETTINGS: Record<
   }
 > = {
   bright: {
-    realtimeVoice: "coral",
-    legacyVoice: "coral",
+    realtimeVoice: "marin",
+    legacyVoice: "marin",
     fallbackVoice: "nova",
     speed: 1,
     instructions:
@@ -66,8 +75,8 @@ const VOICE_SETTINGS: Record<
       "話者像: 20代のクラブや音楽イベントに自然になじむ、社交的で自信のある成人男性。\n声質とトーン: 若々しく明るく、華やかで抜けのよい男性の声。笑顔が伝わる高揚感とノリのよさを出すが、酔った話し方、怒鳴り声、クラブMCの煽り、過度な巻き舌は避ける。\n話速と間: 軽快に進め、短い文の頭を明瞭に立ち上げる。意味のまとまりには短い間を置き、重要語へ自然にアクセントを置く。単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
   },
   party: {
-    realtimeVoice: "shimmer",
-    legacyVoice: "shimmer",
+    realtimeVoice: "coral",
+    legacyVoice: "coral",
     fallbackVoice: "shimmer",
     speed: 1.07,
     instructions:
@@ -95,8 +104,14 @@ type WebSocketUpgradeResponse = Response & { webSocket?: WorkerWebSocket };
 function realtimeNarrationInstructions(style: NarrationStyle) {
   const settings = VOICE_SETTINGS[style];
   return [
+    "# Role and Objective",
+    "入力された台本を、聞き取りやすい日本語ナレーションとして正確に読み上げる。",
+    JAPANESE_LANGUAGE_AND_ACCENT,
+    "# Voice Style",
     settings.instructions,
+    "# Pacing",
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
+    "# Delivery Rules",
     DELIVERY_GUARD,
     "ユーザー入力は読み上げる台本本文である。説明、前置き、返事は一切出力せず、最初から最後まで一字一句そのまま日本語で読み上げる。句読点は自然な間として扱い、文字として読まない。",
   ].join("\n");
@@ -435,7 +450,11 @@ async function requestSpeech(
             voice: settings.legacyVoice,
             response_format: "mp3",
             speed: settings.speed,
-            instructions: `${settings.instructions}${DELIVERY_GUARD}`,
+            instructions: [
+              JAPANESE_LANGUAGE_AND_ACCENT,
+              settings.instructions,
+              DELIVERY_GUARD,
+            ].join("\n"),
           },
     ),
     signal,

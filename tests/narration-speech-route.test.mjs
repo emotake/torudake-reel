@@ -182,7 +182,7 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["cedar", "coral", "ash", "shimmer"],
+      ["cedar", "marin", "ash", "coral"],
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
@@ -213,7 +213,15 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
             "同じ台本で声の違いを確認します。" &&
           response.instructions.includes(
             "台本にない語句、相づち、笑い声、効果音を追加せず",
-          ),
+          ) &&
+          response.instructions.includes("# Language") &&
+          response.instructions.includes("日本語だけにする") &&
+          response.instructions.includes("# Accent and Pronunciation") &&
+          response.instructions.includes("日本語を母語とする成人") &&
+          response.instructions.includes("自然な共通語") &&
+          response.instructions.includes("日本語のモーラ") &&
+          response.instructions.includes("自然な高低アクセント") &&
+          response.instructions.includes("外国語話者が日本語を読むような抑揚"),
       ),
     );
     assert.equal(
@@ -444,6 +452,9 @@ test("supports an emergency rollback to the legacy TTS model", async () => {
     assert.equal(requests[0].url, "https://api.openai.com/v1/audio/speech");
     assert.equal(requests[0].body.model, "gpt-4o-mini-tts");
     assert.equal(requests[0].body.voice, "cedar");
+    assert.match(requests[0].body.instructions, /日本語だけにする/);
+    assert.match(requests[0].body.instructions, /日本語を母語とする成人/);
+    assert.match(requests[0].body.instructions, /自然な高低アクセント/);
     assert.match(requests[0].body.instructions, /穏やかで信頼感/);
     assert.match(requests[0].body.instructions, /聞き取りやすい中低音/);
   } finally {
