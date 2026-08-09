@@ -904,6 +904,8 @@ async function requestNarrationPlan({
   sourceDuration,
   usageReservationId,
   aiOperationId,
+  initialNarration,
+  narrationBundleToken,
   timingScale,
   previousScript,
   signal,
@@ -916,6 +918,8 @@ async function requestNarrationPlan({
   sourceDuration: number;
   usageReservationId: string | null;
   aiOperationId: string;
+  initialNarration?: boolean;
+  narrationBundleToken?: string;
   timingScale?: number;
   previousScript?: string;
   signal?: AbortSignal;
@@ -932,13 +936,17 @@ async function requestNarrationPlan({
       sourceDuration,
       usageReservationId,
       aiOperationId,
+      initialNarration,
+      narrationBundleToken,
       timingScale,
       previousScript,
     }),
     signal,
   });
   const quota = readAiOperationQuota(response);
-  const plan = await readApiResponse<ApiPayload & NarrationPlan>(
+  const plan = await readApiResponse<
+    ApiPayload & NarrationPlan & { narrationBundleToken?: string }
+  >(
     response,
     "AIナレーションの台本を作成できませんでした。",
   );
@@ -1051,6 +1059,8 @@ async function requestNarrationSpeech(
   targetDurationSeconds: number,
   aiOperationId: string,
   signal?: AbortSignal,
+  initialNarration = false,
+  narrationBundleToken?: string,
 ) {
   const response = await fetch("/api/narration/speech", {
     method: "POST",
@@ -1061,6 +1071,8 @@ async function requestNarrationSpeech(
       usageReservationId,
       targetDurationSeconds,
       aiOperationId,
+      initialNarration,
+      narrationBundleToken,
     }),
     signal,
   });
@@ -1705,8 +1717,7 @@ export default function Home() {
     setProgress(4);
     setStage("processing");
     let newlyReservedUsage: string | null = null;
-    const scriptOperationId = crypto.randomUUID();
-    const speechOperationId = crypto.randomUUID();
+    const initialNarrationOperationId = crypto.randomUUID();
 
     try {
       const reservation = await reserveVideoUsage(file, controller.signal);
@@ -1733,7 +1744,8 @@ export default function Home() {
         style: narrationStyle,
         sourceDuration: extracted.duration,
         usageReservationId: newlyReservedUsage,
-        aiOperationId: scriptOperationId,
+        aiOperationId: initialNarrationOperationId,
+        initialNarration: true,
         signal: controller.signal,
       });
       recordAiOperationResult(nextPlan);
@@ -1745,8 +1757,10 @@ export default function Home() {
         narrationStyle,
         newlyReservedUsage,
         maximumDuration,
-        speechOperationId,
+        initialNarrationOperationId,
         controller.signal,
+        true,
+        nextPlan.narrationBundleToken,
       );
       recordAiOperationResult(speechResult);
       let audio = speechResult.audio;
@@ -1771,7 +1785,9 @@ export default function Home() {
           usageReservationId: newlyReservedUsage,
           timingScale,
           previousScript: nextPlan.script,
-          aiOperationId: scriptOperationId,
+          aiOperationId: initialNarrationOperationId,
+          initialNarration: true,
+          narrationBundleToken: nextPlan.narrationBundleToken,
           signal: controller.signal,
         });
         recordAiOperationResult(nextPlan);
@@ -1780,8 +1796,10 @@ export default function Home() {
           narrationStyle,
           newlyReservedUsage,
           maximumDuration,
-          speechOperationId,
+          initialNarrationOperationId,
           controller.signal,
+          true,
+          nextPlan.narrationBundleToken,
         );
         recordAiOperationResult(speechResult);
         audio = speechResult.audio;
@@ -3606,7 +3624,7 @@ function SetupWorkspace({
             </div>
             <p className="optionCostNote">
               {audioMode === "narration"
-                ? "この編集では、AI台本とAI音声の生成にAI処理を2回使用します。内部の自動調整では追加消費しません。"
+                ? "初回のAI台本とAI音声は、まとめてAI処理を1回使用します。内部の自動調整では追加消費しません。"
                 : "この編集では、文字起こしにAI処理を1回使用します。動画を分割して処理しても追加消費しません。"}
             </p>
             <button className="mainCta" onClick={startEditing}>
@@ -7098,7 +7116,7 @@ function ResultWorkspace({
                     : narrationGenerationLimit === 10
                       ? "月額プランでは、この動画1本につき合計10回まで利用できます。"
                       : `1動画作成では、この動画1本につき合計${narrationGenerationLimit}回まで利用できます。`}
-                  文字起こし、高精度再解析、AI台本、AI音声が完成するたびに1回分を使います。失敗・内部の分割処理・自動尺調整では追加消費しません。
+                  初回のAI台本とAI音声はまとめて1回です。作成後のAI音声の作り直し、文字起こし、高精度再解析は、正常に完了するたびに1回分を使います。失敗・内部の分割処理・自動尺調整では追加消費しません。
                 </small>
                 {narrationGenerationLimitReached && (
                   <p>

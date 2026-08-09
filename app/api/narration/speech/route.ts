@@ -7,6 +7,7 @@ import {
   type AuthorizedMeteredAiOperation,
 } from "../../../../lib/billing-store";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { verifyInitialNarrationToken } from "../../../../lib/narration-initial";
 import {
   normalizeNarrationStyle,
   type NarrationStyle,
@@ -494,6 +495,8 @@ export async function POST(request: Request) {
     usageReservationId?: unknown;
     targetDurationSeconds?: unknown;
     aiOperationId?: unknown;
+    initialNarration?: unknown;
+    narrationBundleToken?: unknown;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -511,6 +514,7 @@ export async function POST(request: Request) {
       ? Math.min(90, requestedTargetDuration)
       : 90;
   const style = normalizeNarrationStyle(payload.style);
+  const initialNarration = payload.initialNarration === true;
   if (!script || script.length > 2_000 || !style) {
     return Response.json(
       { error: "台本は1〜2,000文字で入力してください。" },
@@ -566,11 +570,42 @@ export async function POST(request: Request) {
       typeof payload.aiOperationId === "string"
         ? payload.aiOperationId.trim()
         : "";
+    if (initialNarration && !aiOperationId) {
+      return Response.json(
+        { error: "初回ナレーションの処理情報を確認できませんでした。動画を選び直してください。" },
+        { status: 400 },
+      );
+    }
+    const narrationBundleToken =
+      typeof payload.narrationBundleToken === "string"
+        ? payload.narrationBundleToken.trim()
+        : "";
+    const bundleClaims = initialNarration
+      ? await verifyInitialNarrationToken(apiKey, narrationBundleToken, {
+          reservationId,
+          actionId: aiOperationId,
+          script,
+          style,
+          targetDurationSeconds,
+        })
+      : null;
+    if (initialNarration && !bundleClaims) {
+      return Response.json(
+        { error: "初回ナレーションの台本情報を確認できませんでした。もう一度最初からお試しください。" },
+        { status: 409 },
+      );
+    }
     const authorization = await authorizeMeteredAiOperation(
       currentUser,
       reservationId,
-      "narration_speech",
+      initialNarration ? "narration_initial" : "narration_speech",
       aiOperationId || crypto.randomUUID(),
+      initialNarration
+        ? {
+            allowCreate: false,
+            continueFromAttemptCounts: [bundleClaims?.n ?? -1],
+          }
+        : undefined,
     );
     if (!authorization?.allowed) {
       const hitGenerationLimit =
@@ -581,6 +616,10 @@ export async function POST(request: Request) {
       const alreadyProcessing =
         authorization?.reason === "operation_in_progress" ||
         authorization?.reason === "ai_action_capacity";
+      const invalidInitialSequence =
+        authorization?.reason === "action_not_found" ||
+        authorization?.reason === "action_phase_mismatch" ||
+        authorization?.reason === "initial_action_used";
       const aiOperationLimit =
         "successfulLimit" in authorization &&
         typeof authorization.successfulLimit === "number"
@@ -599,6 +638,8 @@ export async function POST(request: Request) {
               ? "この動画でのAI処理回数が安全上限に達しました。現在の編集内容で仕上げるか、新しい動画として開始してください。"
               : alreadyProcessing
                 ? "別のAI処理が進行中です。完了するまで少しお待ちください。"
+                : invalidInitialSequence
+                  ? "初回ナレーションの処理順を確認できませんでした。もう一度最初からお試しください。"
                 : "利用枠を確認できませんでした。動画を選び直してください。",
         },
         {
@@ -606,6 +647,8 @@ export async function POST(request: Request) {
             ? 429
             : alreadyProcessing
               ? 409
+              : invalidInitialSequence
+                ? 409
               : 402,
           headers:
             "successfulLimit" in authorization &&

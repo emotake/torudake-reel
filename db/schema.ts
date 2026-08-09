@@ -237,6 +237,7 @@ export const operatorUsageOperations = sqliteTable(
       enum: [
         "transfer_upload",
         "transcribe",
+        "narration_initial",
         "narration_script",
         "narration_speech",
         "narration_disclosure",
@@ -301,7 +302,12 @@ export const meteredAiActions = sqliteTable(
     reservationId: text("reservation_id").notNull(),
     actionId: text("action_id").notNull(),
     operation: text("operation", {
-      enum: ["transcribe", "narration_script", "narration_speech"],
+      enum: [
+        "transcribe",
+        "narration_initial",
+        "narration_script",
+        "narration_speech",
+      ],
     }).notNull(),
     status: text("status", {
       enum: ["pending", "succeeded", "failed"],

@@ -301,6 +301,60 @@ test("offers a mobile-friendly pronunciation editor without using the API while 
   );
 });
 
+test("uses one initial narration action while charging each manual voice regeneration once", () => {
+  const initialStart = pageSource.indexOf(
+    "async function startNarrationEditing()",
+  );
+  const initialEnd = pageSource.indexOf(
+    "\n  async function regenerateNarration(",
+    initialStart,
+  );
+  const initialFlow = pageSource.slice(initialStart, initialEnd);
+  const regenerationEnd = pageSource.indexOf(
+    "\n  async function updateNarrationCutMode",
+    initialEnd,
+  );
+  const regenerationFlow = pageSource.slice(initialEnd, regenerationEnd);
+
+  assert.ok(initialStart >= 0);
+  assert.match(
+    initialFlow,
+    /const initialNarrationOperationId = crypto\.randomUUID\(\)/,
+  );
+  assert.doesNotMatch(initialFlow, /scriptOperationId|speechOperationId/);
+  assert.match(
+    initialFlow,
+    /requestNarrationPlan\(\{[\s\S]*?aiOperationId: initialNarrationOperationId,[\s\S]*?initialNarration: true/,
+  );
+  assert.match(
+    initialFlow,
+    /requestNarrationSpeech\([\s\S]*?initialNarrationOperationId,[\s\S]*?true,[\s\S]*?nextPlan\.narrationBundleToken/,
+  );
+  assert.match(
+    initialFlow,
+    /previousScript: nextPlan\.script,[\s\S]*?aiOperationId: initialNarrationOperationId,[\s\S]*?narrationBundleToken: nextPlan\.narrationBundleToken/,
+  );
+
+  assert.match(
+    regenerationFlow,
+    /requestNarrationSpeech\([\s\S]*?crypto\.randomUUID\(\)/,
+  );
+  assert.doesNotMatch(
+    regenerationFlow,
+    /initialNarration:\s*true|narrationBundleToken/,
+  );
+  assert.match(regenerationFlow, /recordAiOperationResult\(speechResult\)/);
+  assert.match(
+    pageSource,
+    /初回のAI台本とAI音声は、まとめてAI処理を1回使用します/,
+  );
+  assert.match(
+    pageSource,
+    /初回のAI台本とAI音声はまとめて1回です。作成後のAI音声の作り直し/,
+  );
+  assert.match(pageSource, /変更内容をAI音声に反映（AI処理1回）/);
+});
+
 test("shows and enforces the shared server-backed AI processing allowance", () => {
   const regenerationStart = pageSource.indexOf(
     "async function regenerateNarration(",

@@ -25,6 +25,7 @@ import {
   consumeOperatorUsageOperation,
   createMeteredAiAction,
   getMeteredAiAction,
+  getMeteredAiActionByOperation,
   getMeteredAiUsageCounts,
   getOperatorUsageOperationCounts,
   isValidMeteredAiActionId,
@@ -954,9 +955,12 @@ export type MeteredAiAuthorizationResult =
         | "observed_duration_exceeded"
         | "operation_in_progress"
         | "action_conflict"
+        | "action_not_found"
+        | "action_phase_mismatch"
         | "action_failed"
         | "action_expired"
         | "action_attempt_limit"
+        | "initial_action_used"
         | "operator_success_limit"
         | "ai_action_capacity"
         | "operator_operation_limit";
@@ -968,11 +972,19 @@ export type MeteredAiAuthorizationResult =
       remaining: number;
     };
 
+export type MeteredAiAuthorizationOptions = {
+  /** Refuse to create a new action; used by later phases of a bundle. */
+  allowCreate?: boolean;
+  /** Existing attempt counts from which this request is allowed to continue. */
+  continueFromAttemptCounts?: readonly number[];
+};
+
 export async function authorizeMeteredAiOperation(
   currentUser: CurrentUser,
   reservationId: string,
   operation: MeteredAiOperation,
   actionId: string,
+  options: MeteredAiAuthorizationOptions = {},
 ): Promise<MeteredAiAuthorizationResult> {
   if (!isValidMeteredAiActionId(actionId)) {
     return {
@@ -1104,6 +1116,22 @@ export async function authorizeMeteredAiOperation(
           remaining: remainingBefore,
         } as const;
       }
+      if (
+        options.continueFromAttemptCounts &&
+        !options.continueFromAttemptCounts.includes(existingAction.attemptCount)
+      ) {
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_phase_mismatch",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
       const continuedAction = await continueMeteredAiAction(
         existingAction,
         lease,
@@ -1131,6 +1159,37 @@ export async function authorizeMeteredAiOperation(
         successfulCount: usageBefore.successfulCount,
         remaining: remainingBefore,
         alreadySucceeded: existingAction.status === "succeeded",
+      } as const;
+    }
+
+    if (options.allowCreate === false) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "action_not_found",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: remainingBefore,
+      } as const;
+    }
+
+    if (
+      operation === "narration_initial" &&
+      (await getMeteredAiActionByOperation(reservation.id, operation))
+    ) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "initial_action_used",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: remainingBefore,
       } as const;
     }
 

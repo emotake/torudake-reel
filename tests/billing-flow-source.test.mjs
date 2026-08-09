@@ -33,5 +33,7 @@ test("rejects Checkout and Portal calls from old deployment hosts", () => {
 test("explains the per-video shared AI processing limits on the account screen", () => {
   assert.match(accountSource, /無料体験3回、1動画作成5回、月額プラン10回/);
   assert.match(accountSource, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
-  assert.match(accountSource, /各処理が正常に完了するごとに1回分を使用/);
+  assert.match(accountSource, /初回ナレーションは台本完成時に1回分/);
+  assert.match(accountSource, /続く初回音声と内部の自動調整では追加回数を使用しません/);
+  assert.match(accountSource, /作成後の再生成などは正常に完了するごとに1回分/);
 });

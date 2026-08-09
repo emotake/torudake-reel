@@ -3,13 +3,17 @@ import { env } from "cloudflare:workers";
 export type OperatorUsageOperation =
   | "transfer_upload"
   | "transcribe"
+  | "narration_initial"
   | "narration_script"
   | "narration_speech"
   | "narration_disclosure";
 
 export type MeteredAiOperation = Extract<
   OperatorUsageOperation,
-  "transcribe" | "narration_script" | "narration_speech"
+  | "transcribe"
+  | "narration_initial"
+  | "narration_script"
+  | "narration_speech"
 >;
 
 export const METERED_AI_LEASE_SCOPE = "metered_ai" as const;
@@ -19,6 +23,7 @@ export type UsageOperationLeaseScope =
 
 const METERED_AI_OPERATIONS = new Set<MeteredAiOperation>([
   "transcribe",
+  "narration_initial",
   "narration_script",
   "narration_speech",
 ]);
@@ -30,6 +35,9 @@ export const METERED_AI_ACTION_ATTEMPT_LIMITS: Record<
   // A one-hour source can require up to 144 browser-generated 25-second
   // chunks. The observed-duration cap still limits total billable audio.
   transcribe: 160,
+  // Initial narration is one logical action: script, speech, and at most one
+  // automatic duration adjustment (script + speech).
+  narration_initial: 4,
   narration_script: 2,
   narration_speech: 2,
 };
@@ -52,6 +60,7 @@ export const OPERATOR_OPERATION_LIMITS: Record<
 > = {
   transfer_upload: 2,
   transcribe: 24,
+  narration_initial: 1,
   narration_script: 16,
   narration_speech: 16,
   narration_disclosure: 4,
@@ -367,6 +376,26 @@ export async function getMeteredAiAction(
   return row ? mapMeteredAiAction(row) : null;
 }
 
+export async function getMeteredAiActionByOperation(
+  reservationId: string,
+  operation: MeteredAiOperation,
+) {
+  await ensureOperatorUsageSchema();
+  const database = env.DB as unknown as D1Database;
+  const row = await database
+    .prepare(`
+      SELECT ${METERED_AI_ACTION_RETURNING_COLUMNS}
+      FROM metered_ai_actions
+      WHERE reservation_id = ?
+        AND operation = ?
+      ORDER BY created_at ASC
+      LIMIT 1
+    `)
+    .bind(reservationId, operation)
+    .first<MeteredAiActionRow>();
+  return row ? mapMeteredAiAction(row) : null;
+}
+
 export async function getMeteredAiUsageCounts(
   reservationId: string,
   nowSeconds = Math.floor(Date.now() / 1_000),
@@ -382,6 +411,7 @@ export async function getMeteredAiUsageCounts(
           WHERE reservation_id = ?
             AND operation IN (
               'transcribe',
+              'narration_initial',
               'narration_script',
               'narration_speech'
             )
@@ -475,6 +505,7 @@ export async function createMeteredAiAction(
             WHERE reservation_id = reservation.id
               AND operation IN (
                 'transcribe',
+                'narration_initial',
                 'narration_script',
                 'narration_speech'
               )
@@ -631,9 +662,10 @@ export async function markMeteredAiActionSucceeded(
               FROM operator_usage_operations
               WHERE reservation_id = ?
                 AND operation IN (
-                  'transcribe',
-                  'narration_script',
-                  'narration_speech'
+                'transcribe',
+                'narration_initial',
+                'narration_script',
+                'narration_speech'
                 )
             ) + (
               SELECT COUNT(*)

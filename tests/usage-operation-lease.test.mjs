@@ -219,3 +219,72 @@ test("narration script and speech share the plan-specific AI allowance", async (
   assert.match(routeSource, /X-AI-Operations-Remaining/);
   assert.match(scriptSource, /X-AI-Operations-Remaining/);
 });
+
+test("locks the discounted initial narration to one four-phase action per reservation", async () => {
+  const [billingSource, operatorSource, scriptSource, speechSource] =
+    await Promise.all([
+      readFile(new URL("../lib/billing-store.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/operator-usage.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/api/narration/script/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/narration/speech/route.ts", import.meta.url),
+        "utf8",
+      ),
+    ]);
+
+  assert.match(operatorSource, /narration_initial:\s*4/);
+  assert.match(
+    operatorSource,
+    /OPERATOR_OPERATION_LIMITS[\s\S]*narration_initial:\s*1/,
+  );
+  assert.match(
+    billingSource,
+    /operation === "narration_initial"[\s\S]*getMeteredAiActionByOperation\(reservation\.id, operation\)/,
+  );
+  assert.match(billingSource, /reason:\s*"initial_action_used"/);
+  assert.match(
+    billingSource,
+    /continueFromAttemptCounts[\s\S]*reason:\s*"action_phase_mismatch"/,
+  );
+
+  const scriptPost = scriptSource.slice(
+    scriptSource.indexOf("export async function POST"),
+  );
+  const speechPost = speechSource.slice(
+    speechSource.indexOf("export async function POST"),
+  );
+  const scriptVerification = scriptPost.indexOf(
+    "verifyInitialNarrationToken(",
+  );
+  const scriptAuthorization = scriptPost.indexOf(
+    "authorizeMeteredAiOperation(",
+  );
+  const speechVerification = speechPost.indexOf(
+    "verifyInitialNarrationToken(",
+  );
+  const speechAuthorization = speechPost.indexOf(
+    "authorizeMeteredAiOperation(",
+  );
+  const speechGeneration = speechPost.indexOf("requestSpeech(", speechAuthorization);
+
+  assert.ok(scriptVerification >= 0);
+  assert.ok(scriptVerification < scriptAuthorization);
+  assert.ok(speechVerification >= 0);
+  assert.ok(speechVerification < speechAuthorization);
+  assert.ok(speechAuthorization < speechGeneration);
+  assert.match(
+    scriptSource,
+    /initialNarration \? "narration_initial" : "narration_script"/,
+  );
+  assert.match(
+    speechSource,
+    /initialNarration \? "narration_initial" : "narration_speech"/,
+  );
+  assert.match(
+    speechSource,
+    /allowCreate:\s*false,[\s\S]*continueFromAttemptCounts:\s*\[bundleClaims\?\.n \?\? -1\]/,
+  );
+});

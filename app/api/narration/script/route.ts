@@ -3,10 +3,15 @@ import {
   abandonMeteredAiOperation,
   authorizeMeteredAiOperation,
   completeMeteredAiOperation,
+  releaseMeteredAiOperation,
   type AuthorizedMeteredAiOperation,
 } from "../../../../lib/billing-store";
 import { getCurrentUser } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import {
+  createInitialNarrationToken,
+  verifyInitialNarrationToken,
+} from "../../../../lib/narration-initial";
 import {
   normalizeNarrationStyle,
   normalizeNarrationPlan,
@@ -142,6 +147,8 @@ export async function POST(request: Request) {
     sourceDuration?: unknown;
     usageReservationId?: unknown;
     aiOperationId?: unknown;
+    initialNarration?: unknown;
+    narrationBundleToken?: unknown;
     timingScale?: unknown;
     previousScript?: unknown;
   };
@@ -170,6 +177,11 @@ export async function POST(request: Request) {
   const previousScript =
     typeof payload.previousScript === "string"
       ? payload.previousScript.replace(/\s+/g, " ").trim().slice(0, 2_000)
+      : "";
+  const initialNarration = payload.initialNarration === true;
+  const suppliedNarrationBundleToken =
+    typeof payload.narrationBundleToken === "string"
+      ? payload.narrationBundleToken.trim()
       : "";
 
   if (
@@ -204,13 +216,59 @@ export async function POST(request: Request) {
       typeof payload.aiOperationId === "string"
         ? payload.aiOperationId.trim()
         : "";
+    if (initialNarration && !aiOperationId) {
+      return Response.json(
+        { error: "初回ナレーションの処理情報を確認できませんでした。動画を選び直してください。" },
+        { status: 400 },
+      );
+    }
+    const bundleTargetDuration = Math.max(
+      1,
+      Math.min(90, length, sourceDuration),
+    );
+    let priorBundleScriptAttempt: 1 | null = null;
+    if (initialNarration && previousScript) {
+      const claims = await verifyInitialNarrationToken(
+        apiKey,
+        suppliedNarrationBundleToken,
+        {
+          reservationId,
+          actionId: aiOperationId,
+          script: previousScript,
+          style,
+          targetDurationSeconds: bundleTargetDuration,
+        },
+      );
+      if (!claims || claims.n !== 1) {
+        return Response.json(
+          { error: "初回ナレーションの自動調整情報を確認できませんでした。もう一度最初からお試しください。" },
+          { status: 409 },
+        );
+      }
+      priorBundleScriptAttempt = 1;
+    } else if (initialNarration && suppliedNarrationBundleToken) {
+      return Response.json(
+        { error: "初回ナレーションの処理順を確認できませんでした。もう一度最初からお試しください。" },
+        { status: 409 },
+      );
+    }
     const authorization =
       currentUser && reservationId
         ? await authorizeMeteredAiOperation(
             currentUser,
             reservationId,
-            "narration_script",
+            initialNarration ? "narration_initial" : "narration_script",
             aiOperationId || crypto.randomUUID(),
+            initialNarration
+              ? previousScript
+                ? {
+                    allowCreate: false,
+                    continueFromAttemptCounts: [
+                      (priorBundleScriptAttempt ?? 1) + 1,
+                    ],
+                  }
+                : { continueFromAttemptCounts: [] }
+              : undefined,
           )
         : null;
     if (!authorization?.allowed) {
@@ -221,6 +279,10 @@ export async function POST(request: Request) {
       const alreadyProcessing =
         authorization?.reason === "operation_in_progress" ||
         authorization?.reason === "ai_action_capacity";
+      const invalidInitialSequence =
+        authorization?.reason === "action_not_found" ||
+        authorization?.reason === "action_phase_mismatch" ||
+        authorization?.reason === "initial_action_used";
       return Response.json(
         {
           error: quotaReached
@@ -229,6 +291,8 @@ export async function POST(request: Request) {
               : "この動画でのAI処理回数が安全上限に達しました。新しい動画としてやり直してください。"
             : alreadyProcessing
               ? "別のAI処理が進行中です。完了してからもう一度お試しください。"
+              : invalidInitialSequence
+                ? "初回ナレーションの処理順を確認できませんでした。もう一度最初からお試しください。"
               : "利用枠を確認できませんでした。動画を選び直してください。",
         },
         {
@@ -236,6 +300,8 @@ export async function POST(request: Request) {
             ? 429
             : alreadyProcessing
               ? 409
+              : invalidInitialSequence
+                ? 409
               : currentUser
                 ? 402
                 : 401,
@@ -393,7 +459,33 @@ export async function POST(request: Request) {
       throw new Error("empty narration plan");
     }
     let quotaHeaders: Record<string, string> = {};
+    let responseNarrationBundleToken: string | undefined;
     if (meteredAuthorization) {
+      if (initialNarration) {
+        const scriptAttempt = meteredAuthorization.action.attemptCount;
+        if (scriptAttempt !== 1 && scriptAttempt !== 3) {
+          await releaseMeteredAiOperation(meteredAuthorization);
+          meteredAuthorizationSettled = true;
+          return Response.json(
+            { error: "初回ナレーションの処理順を確認できませんでした。もう一度最初からお試しください。" },
+            { status: 409, headers: meteredResponseHeaders(meteredAuthorization) },
+          );
+        }
+        responseNarrationBundleToken = await createInitialNarrationToken(
+          apiKey,
+          {
+            reservationId: meteredAuthorization.reservation.id,
+            actionId: meteredAuthorization.action.actionId,
+            script: plan.script,
+            style,
+            targetDurationSeconds: Math.max(
+              1,
+              Math.min(90, length, sourceDuration),
+            ),
+          },
+          scriptAttempt,
+        );
+      }
       const completion = await completeMeteredAiOperation(
         meteredAuthorization,
       );
@@ -412,9 +504,14 @@ export async function POST(request: Request) {
         completion.remaining,
       );
     }
-    return Response.json(plan, {
+    return Response.json(
+      responseNarrationBundleToken
+        ? { ...plan, narrationBundleToken: responseNarrationBundleToken }
+        : plan,
+      {
       headers: { "Cache-Control": "private, no-store", ...quotaHeaders },
-    });
+      },
+    );
   } catch (error) {
     console.error("OpenAI narration response parse failed", error);
     return Response.json(

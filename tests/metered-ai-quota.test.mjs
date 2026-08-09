@@ -10,6 +10,8 @@ import {
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
 } from "../lib/billing-policy.ts";
 
+const runtimeEnv = {};
+
 class D1Statement {
   constructor(database, query, values = []) {
     this.database = database;
@@ -102,7 +104,8 @@ test("counts logical actions once, resumes chunks, and closes release races", as
   addReservation(database, "video-attempt", now);
   addReservation(database, "video-duration", now);
   addReservation(database, "video-legacy", now);
-  globalThis.__cloudflareEnv = { DB: database };
+  runtimeEnv.DB = database;
+  globalThis.__cloudflareEnv = runtimeEnv;
 
   try {
     const moduleUrl = new URL("../lib/operator-usage.ts", import.meta.url);
@@ -407,6 +410,104 @@ test("counts logical actions once, resumes chunks, and closes release races", as
     );
   } finally {
     database.sqlite.close();
-    delete globalThis.__cloudflareEnv;
+    delete runtimeEnv.DB;
+  }
+});
+
+test("counts all four initial narration phases as one successful AI action", async () => {
+  const database = createDatabase();
+  const now = 2_100_000_000;
+  addReservation(database, "video-initial", now);
+  runtimeEnv.DB = database;
+  globalThis.__cloudflareEnv = runtimeEnv;
+
+  try {
+    const moduleUrl = new URL("../lib/operator-usage.ts", import.meta.url);
+    moduleUrl.searchParams.set("initial-bundle", `${process.pid}-${Date.now()}`);
+    const {
+      METERED_AI_LEASE_SCOPE,
+      acquireUsageOperationLease,
+      continueMeteredAiAction,
+      createMeteredAiAction,
+      getMeteredAiAction,
+      getMeteredAiUsageCounts,
+      markMeteredAiActionSucceeded,
+      releaseUsageOperationLease,
+    } = await import(moduleUrl.href);
+
+    let lease = await acquireUsageOperationLease(
+      "video-initial",
+      METERED_AI_LEASE_SCOPE,
+      300,
+      now,
+    );
+    let action = await createMeteredAiAction(
+      "video-initial",
+      "initial_narration_action",
+      "narration_initial",
+      3,
+      lease,
+      now,
+    );
+    assert.ok(action);
+    assert.equal(action.attemptCount, 1, "phase 1 is the initial script");
+    assert.ok(await markMeteredAiActionSucceeded(action, lease, 3, now));
+    await releaseUsageOperationLease(lease);
+    assert.deepEqual(await getMeteredAiUsageCounts("video-initial", now), {
+      successfulCount: 1,
+      pendingCount: 0,
+    });
+
+    for (const phase of [2, 3, 4]) {
+      lease = await acquireUsageOperationLease(
+        "video-initial",
+        METERED_AI_LEASE_SCOPE,
+        300,
+        now + phase,
+      );
+      action = await getMeteredAiAction(
+        "video-initial",
+        "initial_narration_action",
+      );
+      action = await continueMeteredAiAction(action, lease, now + phase);
+      assert.ok(action);
+      assert.equal(action.attemptCount, phase);
+      assert.ok(
+        await markMeteredAiActionSucceeded(action, lease, 3, now + phase),
+      );
+      await releaseUsageOperationLease(lease);
+      assert.equal(
+        (await getMeteredAiUsageCounts("video-initial", now + phase))
+          .successfulCount,
+        1,
+        `phase ${phase} must remain part of the first successful action`,
+      );
+    }
+
+    lease = await acquireUsageOperationLease(
+      "video-initial",
+      METERED_AI_LEASE_SCOPE,
+      300,
+      now + 5,
+    );
+    action = await getMeteredAiAction(
+      "video-initial",
+      "initial_narration_action",
+    );
+    assert.equal(action.attemptCount, 4);
+    assert.equal(
+      await continueMeteredAiAction(action, lease, now + 5),
+      null,
+      "a fifth initial narration phase is refused",
+    );
+    await releaseUsageOperationLease(lease);
+    assert.equal(
+      (await getMeteredAiUsageCounts("video-initial", now + 5))
+        .successfulCount,
+      1,
+    );
+  } finally {
+    database.sqlite.close();
+    delete runtimeEnv.DB;
   }
 });

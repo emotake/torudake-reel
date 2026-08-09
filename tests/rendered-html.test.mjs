@@ -189,6 +189,9 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /写真リールは書き出し成功時点/);
   assert.match(html, /AI処理の利用上限/);
   assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
+  assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
+  assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
+  assert.match(html, /作成後の再生成などは正常に完了するごとに1回分/);
   assert.match(html, /1動画あたり3回/);
   assert.match(html, /1動画あたり5回/);
   assert.match(html, /1動画あたり10回/);
@@ -205,5 +208,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
 
   assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
   assert.match(html, /無料体験3回、1動画作成5回、月額プラン10回/);
-  assert.match(html, /各処理が正常に完了するごとに1回分を使用/);
+  assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
+  assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
+  assert.match(html, /作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分/);
 });
