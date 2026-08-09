@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import {
@@ -48,6 +48,16 @@ type AtomicD1Statement = {
 
 type AtomicD1Database = {
   prepare: (query: string) => AtomicD1Statement;
+};
+
+type QueryD1BoundStatement = AtomicD1BoundStatement & {
+  first: <T>() => Promise<T | null>;
+};
+
+type QueryD1Database = {
+  prepare: (query: string) => {
+    bind: (...values: unknown[]) => QueryD1BoundStatement;
+  };
 };
 
 export class UsageLimitError extends Error {
@@ -184,7 +194,12 @@ export async function getBillingStatusForUser(userId: string) {
   const purchases = await db
     .select()
     .from(billingPurchases)
-    .where(eq(billingPurchases.userId, userId));
+    .where(
+      and(
+        eq(billingPurchases.userId, userId),
+        isNull(billingPurchases.revokedAt),
+      ),
+    );
   const usage = await db
     .select()
     .from(usageReservations)
@@ -394,6 +409,7 @@ async function insertUsageReservationAtomically(
           SELECT COALESCE(SUM(credits), 0)
           FROM billing_purchases
           WHERE user_id = ?
+            AND revoked_at IS NULL
         ) > (
           SELECT COUNT(*)
           FROM usage_reservations
@@ -462,7 +478,52 @@ export async function findOwnedUsageReservation(
   if (reservation.expiresAt < Math.floor(Date.now() / 1000)) {
     return null;
   }
+  if (
+    reservation.bucket === "one_time" &&
+    !(await oneTimeReservationHasActiveCredit(reservation))
+  ) {
+    return null;
+  }
   return reservation;
+}
+
+async function oneTimeReservationHasActiveCredit(reservation: {
+  id: string;
+  userId: string;
+  createdAt: number;
+}) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const result = await database
+    .prepare(`
+      SELECT (
+        SELECT COALESCE(SUM(credits), 0)
+        FROM billing_purchases
+        WHERE user_id = ?
+          AND revoked_at IS NULL
+      ) >= (
+        SELECT COUNT(*)
+        FROM usage_reservations
+        WHERE user_id = ?
+          AND bucket = 'one_time'
+          AND status IN ('reserved', 'completed')
+          AND (
+            created_at < ?
+            OR (created_at = ? AND id <= ?)
+          )
+      ) AS allowed
+    `)
+    .bind(
+      reservation.userId,
+      reservation.userId,
+      reservation.createdAt,
+      reservation.createdAt,
+      reservation.id,
+    )
+    .first<{ allowed: number }>();
+  return result?.allowed === 1;
 }
 
 export async function authorizeUsageOperation(
@@ -730,6 +791,160 @@ export async function recordOneTimePurchase(values: {
       purchasedAt: Math.floor(Date.now() / 1000),
     })
     .onConflictDoNothing();
+}
+
+const PURCHASE_STATE_SYNC_LEASE_SECONDS = 5 * 60;
+
+export type PurchaseStateSyncClaim = {
+  purchaseId: string;
+  userId: string;
+  paymentIntentId: string;
+  leaseStartedAt: number;
+  revokedAt: number | null;
+};
+
+/**
+ * Serializes Stripe reconciliation per PaymentIntent. Stripe can deliver
+ * different events for the same refund concurrently and does not guarantee
+ * their order, so only the current lease owner may publish a state snapshot.
+ */
+export async function beginPurchaseStateSync(
+  paymentIntentId: string,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const db = getDb();
+  const claimed = await db
+    .update(billingPurchases)
+    .set({ stripeStateSyncStartedAt: nowSeconds })
+    .where(
+      and(
+        eq(billingPurchases.stripePaymentIntentId, paymentIntentId),
+        or(
+          isNull(billingPurchases.stripeStateSyncStartedAt),
+          lt(
+            billingPurchases.stripeStateSyncStartedAt,
+            nowSeconds - PURCHASE_STATE_SYNC_LEASE_SECONDS,
+          ),
+        ),
+      ),
+    )
+    .returning({
+      purchaseId: billingPurchases.id,
+      userId: billingPurchases.userId,
+      revokedAt: billingPurchases.revokedAt,
+    });
+  if (claimed[0]) {
+    return {
+      ...claimed[0],
+      paymentIntentId,
+      leaseStartedAt: nowSeconds,
+    } satisfies PurchaseStateSyncClaim;
+  }
+
+  const existing = await db
+    .select({ id: billingPurchases.id })
+    .from(billingPurchases)
+    .where(eq(billingPurchases.stripePaymentIntentId, paymentIntentId))
+    .limit(1);
+  return existing[0] ? ("busy" as const) : ("missing" as const);
+}
+
+export async function finishPurchaseStateSync(
+  claim: PurchaseStateSyncClaim,
+  state: {
+    refundBlockingAmount: number;
+    disputeState: string | null;
+    blocked: boolean;
+  },
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const updated = await getDb()
+    .update(billingPurchases)
+    .set({
+      refundBlockingAmount: state.refundBlockingAmount,
+      disputeState: state.disputeState,
+      revokedAt: state.blocked ? (claim.revokedAt ?? nowSeconds) : null,
+      stripeStateSyncedAt: nowSeconds,
+      stripeStateSyncStartedAt: null,
+    })
+    .where(
+      and(
+        eq(billingPurchases.id, claim.purchaseId),
+        eq(billingPurchases.stripePaymentIntentId, claim.paymentIntentId),
+        eq(
+          billingPurchases.stripeStateSyncStartedAt,
+          claim.leaseStartedAt,
+        ),
+      ),
+    )
+    .returning({ id: billingPurchases.id });
+  if (!updated[0]) {
+    throw new Error("Stripe purchase-state lease was lost.");
+  }
+  if (state.blocked) {
+    await releaseExcessOneTimeReservations(claim.userId);
+  }
+}
+
+export async function abandonPurchaseStateSync(claim: PurchaseStateSyncClaim) {
+  await getDb()
+    .update(billingPurchases)
+    .set({ stripeStateSyncStartedAt: null })
+    .where(
+      and(
+        eq(billingPurchases.id, claim.purchaseId),
+        eq(
+          billingPurchases.stripeStateSyncStartedAt,
+          claim.leaseStartedAt,
+        ),
+      ),
+    );
+}
+
+async function releaseExcessOneTimeReservations(userId: string) {
+  const db = getDb();
+  const [activePurchases, activeUsage] = await Promise.all([
+    db
+      .select({ credits: billingPurchases.credits })
+      .from(billingPurchases)
+      .where(
+        and(
+          eq(billingPurchases.userId, userId),
+          isNull(billingPurchases.revokedAt),
+        ),
+      ),
+    db
+      .select({
+        id: usageReservations.id,
+        status: usageReservations.status,
+      })
+      .from(usageReservations)
+      .where(
+        and(
+          eq(usageReservations.userId, userId),
+          eq(usageReservations.bucket, "one_time"),
+          inArray(usageReservations.status, [...ACTIVE_USAGE_STATUSES]),
+        ),
+      )
+      .orderBy(desc(usageReservations.createdAt)),
+  ]);
+  const activeCredits = activePurchases.reduce(
+    (total, purchase) => total + purchase.credits,
+    0,
+  );
+  let releasesNeeded = Math.max(0, activeUsage.length - activeCredits);
+  if (releasesNeeded === 0) return;
+
+  // Stop the newest in-progress reservations first. Work that already
+  // produced a usable upstream result is completed instead of refunded, and
+  // the per-operation credit check above prevents that overage reservation
+  // from continuing while the Stripe payment remains revoked.
+  for (const reservation of activeUsage) {
+    if (releasesNeeded === 0) break;
+    if (reservation.status !== "reserved") continue;
+    await releaseOrCompleteUsageReservation(reservation.id, userId);
+    releasesNeeded -= 1;
+  }
 }
 
 export async function beginStripeEvent(eventId: string, eventType: string) {

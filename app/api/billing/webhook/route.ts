@@ -16,6 +16,7 @@ import {
   stripePriceForPlan,
   verifyStripeSignature,
 } from "../../../../lib/stripe";
+import { reconcileOneTimePurchase } from "../../../../lib/stripe-purchase-state";
 
 type StripeObject = Record<string, unknown>;
 
@@ -28,6 +29,17 @@ type StripeEvent = {
 };
 
 const MAX_WEBHOOK_BYTES = 1_000_000;
+const PURCHASE_STATE_EVENT_TYPES = new Set([
+  "refund.created",
+  "refund.updated",
+  "refund.failed",
+  "charge.refunded",
+  "charge.dispute.created",
+  "charge.dispute.updated",
+  "charge.dispute.closed",
+  "charge.dispute.funds_withdrawn",
+  "charge.dispute.funds_reinstated",
+]);
 
 export async function POST(request: Request) {
   const { webhookSecret } = getStripeConfig();
@@ -99,6 +111,8 @@ export async function POST(request: Request) {
       event.type === "invoice.payment_failed"
     ) {
       await handleInvoiceChanged(event.data.object);
+    } else if (PURCHASE_STATE_EVENT_TYPES.has(event.type)) {
+      await handlePurchaseStateChanged(event.type, event.data.object);
     }
 
     await finishStripeEvent(event.id);
@@ -173,6 +187,34 @@ async function handleCheckoutCompleted(session: StripeObject) {
     stripePaymentIntentId: paymentIntentId,
     stripePriceId: expectedPriceId,
   });
+  await reconcileOneTimePurchase(paymentIntentId);
+}
+
+async function handlePurchaseStateChanged(
+  eventType: string,
+  object: StripeObject,
+) {
+  let paymentIntentId = objectId(object.payment_intent);
+  if (!paymentIntentId) {
+    let chargeId = objectId(object.charge);
+    if (!chargeId && eventType === "charge.refunded") {
+      chargeId = stringValue(object.id);
+    }
+    if (!chargeId) {
+      throw new Error("Refund or dispute has no payment identifier.");
+    }
+    const charge = await stripeGet<StripeObject>(
+      `/v1/charges/${encodeURIComponent(chargeId)}`,
+    );
+    paymentIntentId = objectId(charge.payment_intent);
+  }
+  if (!paymentIntentId) {
+    throw new Error("Refund or dispute charge has no payment intent.");
+  }
+
+  // Unknown PaymentIntents belong to another product (or a monthly invoice)
+  // in the same Stripe account and are intentionally ignored.
+  await reconcileOneTimePurchase(paymentIntentId);
 }
 
 async function handleInvoiceChanged(invoice: StripeObject) {

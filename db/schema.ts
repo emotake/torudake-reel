@@ -164,6 +164,11 @@ export const billingPurchases = sqliteTable(
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripePriceId: text("stripe_price_id").notNull(),
     credits: integer("credits").notNull().default(1),
+    refundBlockingAmount: integer("refund_blocking_amount").notNull().default(0),
+    disputeState: text("dispute_state"),
+    revokedAt: integer("revoked_at"),
+    stripeStateSyncedAt: integer("stripe_state_synced_at"),
+    stripeStateSyncStartedAt: integer("stripe_state_sync_started_at"),
     purchasedAt: integer("purchased_at").notNull(),
   },
   (table) => [

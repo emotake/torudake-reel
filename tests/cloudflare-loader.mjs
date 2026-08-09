@@ -12,7 +12,11 @@ export async function resolve(specifier, context, nextResolve) {
     try {
       return await nextResolve(`${specifier}.ts`, context);
     } catch {
-      // Fall through to Node's default resolution for directory imports.
+      try {
+        return await nextResolve(`${specifier}/index.ts`, context);
+      } catch {
+        // Fall through to Node's default resolution.
+      }
     }
   }
   return nextResolve(specifier, context);
