@@ -2204,7 +2204,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260809-refined-luxury-lab">
+    <main className="siteShell" data-build="20260809-refined-luxury">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
