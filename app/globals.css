@@ -9681,3 +9681,347 @@ footer > small {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Refined lifestyle-gallery presentation for the premium landing experiment. */
+.siteShell {
+  background:
+    radial-gradient(circle at 8% 4%, rgba(206, 232, 216, 0.24), transparent 24%),
+    radial-gradient(circle at 94% 10%, rgba(194, 112, 79, 0.075), transparent 25%),
+    linear-gradient(180deg, #fffefa 0%, #fbf7f1 43%, #fffdf9 100%),
+    var(--paper);
+}
+
+.brandIcon {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #26344a, #101828 72%);
+  box-shadow:
+    0 10px 24px rgba(16, 24, 40, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.14) inset;
+}
+
+.hero h1 {
+  font-weight: 850;
+  line-height: 1.25;
+  letter-spacing: -0.038em;
+}
+
+.heroLead {
+  color: #626b79;
+}
+
+.heroOffer,
+.photoReelEntry {
+  border-color: rgba(78, 57, 42, 0.11);
+  background: rgba(255, 254, 251, 0.98);
+  box-shadow:
+    0 16px 38px rgba(67, 49, 36, 0.07),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+}
+
+.heroOffer strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.heroOffer small {
+  font-size: 10px;
+}
+
+.trustRow {
+  gap: 0;
+  margin-top: 18px;
+  font-weight: 650;
+}
+
+.trustRow span {
+  padding: 2px 12px;
+  border: 0;
+  background: transparent;
+}
+
+.trustRow span:first-child {
+  padding-left: 0;
+}
+
+.trustRow span + span {
+  border-left: 1px solid rgba(78, 63, 51, 0.14);
+}
+
+.lifestyleHero {
+  min-height: 584px;
+  border-color: rgba(78, 57, 42, 0.11);
+  border-radius: 40px;
+  background:
+    radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.88), transparent 31%),
+    radial-gradient(circle at 86% 86%, rgba(202, 223, 207, 0.34), transparent 34%),
+    linear-gradient(145deg, #eee4d7 0%, #f9f4ec 52%, #e9dfd3 100%);
+  box-shadow:
+    0 32px 82px rgba(70, 51, 37, 0.14),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+
+.lifestyleHero::before {
+  top: -112px;
+  right: -84px;
+  width: 300px;
+  height: 300px;
+  background: rgba(255, 255, 255, 0.44);
+  filter: blur(68px);
+}
+
+.lifestyleHero::after {
+  bottom: -142px;
+  left: -92px;
+  width: 320px;
+  height: 320px;
+  background: rgba(174, 128, 93, 0.09);
+  filter: blur(70px);
+}
+
+.lifestyleGallery {
+  min-height: 536px;
+  grid-template-columns: minmax(105px, 0.74fr) minmax(205px, 1.22fr) minmax(105px, 0.74fr);
+  gap: 18px;
+  padding: 50px 30px 102px;
+}
+
+.lifestyleFrame {
+  height: 338px;
+  border: 3px solid rgba(255, 253, 249, 0.96);
+  border-radius: 21px;
+  box-shadow:
+    0 22px 52px rgba(66, 47, 34, 0.16),
+    0 0 0 1px rgba(74, 52, 37, 0.05),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  animation-duration: 18s;
+}
+
+.lifestyleFrame::before {
+  background: linear-gradient(180deg, rgba(10, 18, 30, 0.02), transparent 55%, rgba(10, 18, 30, 0.2));
+}
+
+.lifestyleFrame:not(.lifestyleFrameMain)::after,
+.lifestyleFrame > span {
+  display: none;
+}
+
+.lifestyleGallery > .lifestyleFrame:first-child {
+  opacity: 0.88;
+  filter: saturate(0.86) contrast(0.97);
+  transform: translateY(22px) rotate(-0.7deg);
+}
+
+.lifestyleGallery > .lifestyleFrame:last-child {
+  opacity: 0.88;
+  filter: saturate(0.86) contrast(0.97);
+  transform: translateY(18px) rotate(0.7deg);
+}
+
+.lifestyleFrameMain {
+  height: 446px;
+  border-width: 4px;
+  border-color: rgba(255, 253, 249, 0.98);
+  border-radius: 24px;
+  box-shadow:
+    0 0 0 1px rgba(73, 51, 37, 0.08),
+    0 32px 72px rgba(58, 42, 31, 0.23),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+}
+
+.lifestyleFrameMain .captionTop {
+  top: 62px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.lifestyleFrameMain .captionTop strong {
+  margin-top: 5px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(20, 26, 34, 0.86);
+  font-size: 14px;
+  transform: none;
+  backdrop-filter: blur(8px);
+}
+
+.lifestyleFrameMain .captionBottom {
+  right: 15px;
+  bottom: 48px;
+  left: 15px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  background: rgba(255, 253, 249, 0.91);
+  box-shadow: 0 10px 26px rgba(16, 24, 40, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.lifestyleFrameMain .captionBottom strong {
+  color: #b84a32;
+}
+
+.lifestyleFrameMain .cutRail {
+  right: 18px;
+  bottom: 25px;
+  left: 18px;
+  display: block;
+  height: 3px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.13);
+}
+
+.lifestyleFrameMain .cutRail i {
+  display: none;
+}
+
+.lifestyleFrameMain .cutRail i:first-child {
+  display: block;
+  width: 58%;
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.lifestyleHero .visualResult {
+  right: auto;
+  bottom: 22px;
+  left: 50%;
+  width: min(410px, calc(100% - 48px));
+  grid-template-columns: 28px 1fr;
+  gap: 11px;
+  padding: 11px 14px;
+  border-color: rgba(78, 57, 42, 0.11);
+  border-radius: 13px;
+  background: rgba(255, 254, 251, 0.97);
+  box-shadow: 0 13px 32px rgba(69, 49, 35, 0.11);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.lifestyleHero .visualResult > span {
+  width: 28px;
+  height: 28px;
+  background: #dcecdf;
+  color: #316948;
+  font-size: 11px;
+}
+
+.lifestyleHero .visualResult p {
+  line-height: 1.55;
+}
+
+.priceSection {
+  border: 1px solid rgba(78, 57, 42, 0.09);
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at 8% 0, rgba(204, 229, 211, 0.28), transparent 30%),
+    radial-gradient(circle at 100% 100%, rgba(180, 103, 75, 0.075), transparent 32%),
+    linear-gradient(145deg, #fffefb, #faf6f0);
+  box-shadow:
+    0 32px 82px rgba(66, 48, 35, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+}
+
+.priceGrid {
+  gap: 24px;
+}
+
+.priceGrid article {
+  border: 1px solid rgba(78, 57, 42, 0.1);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 20px 48px rgba(67, 49, 36, 0.075),
+    0 1px 0 rgba(255, 255, 255, 0.95) inset;
+}
+
+.priceGrid article.featuredPrice {
+  border: 1px solid rgba(184, 74, 50, 0.28);
+  box-shadow:
+    0 28px 62px rgba(74, 49, 34, 0.11),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+}
+
+.priceGrid article.subscriptionPrice {
+  border-color: rgba(46, 105, 72, 0.17);
+  box-shadow:
+    0 28px 62px rgba(55, 75, 60, 0.095),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+}
+
+@keyframes lifestyleDrift {
+  0%,
+  100% {
+    background-position: var(--gallery-x) 48%;
+  }
+
+  50% {
+    background-position: var(--gallery-x) 51%;
+  }
+}
+
+@media (max-width: 700px) {
+  .trustRow span {
+    padding: 2px 0;
+    border-left: 0;
+  }
+
+  .lifestyleHero {
+    min-height: 525px;
+    border-radius: 28px;
+  }
+
+  .lifestyleGallery {
+    min-height: 490px;
+    grid-template-columns:
+      clamp(88px, 20vw, 126px)
+      clamp(180px, 38vw, 230px)
+      clamp(88px, 20vw, 126px);
+    gap: 10px;
+    justify-content: center;
+    padding: 48px 0 92px;
+  }
+
+  .lifestyleFrame {
+    height: 310px;
+    border-width: 3px;
+    border-radius: 18px;
+    animation: none;
+  }
+
+  .lifestyleGallery > .lifestyleFrame:first-child {
+    transform: translateY(38px) rotate(-0.8deg);
+  }
+
+  .lifestyleGallery > .lifestyleFrame:last-child {
+    transform: translateY(29px) rotate(0.8deg);
+  }
+
+  .lifestyleFrameMain {
+    height: 405px;
+    border-width: 4px;
+    border-radius: 21px;
+    transform: none;
+  }
+
+  .lifestyleFrameMain .captionTop {
+    top: 55px;
+  }
+
+  .lifestyleHero .visualResult {
+    right: 12px;
+    bottom: 14px;
+    left: 12px;
+    width: auto;
+    transform: none;
+  }
+
+  .priceSection {
+    border-radius: 26px;
+  }
+}
