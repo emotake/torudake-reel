@@ -140,19 +140,59 @@ test("still joins a short natural gap when no caption was explicitly cut", () =>
   assert.deepEqual(buildEditRanges(edited), [{ start: 0, end: 4 }]);
 });
 
-test("keeps the complete source range when spoken-video reconnection is off", () => {
+test("applies distinct spoken cut ranges for auto, manual, and none", () => {
   const transcript = [
     caption(1, 2, 4, "冒頭の無音後に話します。"),
     caption(2, 8, 11, "途中にも間があります。"),
   ];
 
-  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, false), [
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, "none"), [
+    { start: 0, end: 15.432 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, "manual"), [
     { start: 0, end: 15.432 },
   ]);
   assert.deepEqual(
-    buildSpokenEditRanges(transcript, 15.4321, true),
+    buildSpokenEditRanges(transcript, 15.4321, "auto"),
     buildEditRanges(transcript),
   );
+});
+
+test("manual spoken cuts remove only the sections explicitly chosen", () => {
+  const transcript = [
+    caption(1, 2, 4, "残す前半です。"),
+    { ...caption(2, 8, 11, "手動で切る部分です。"), removed: true },
+    { ...caption(3, 10.5, 12, "重なって切る部分です。"), removed: true },
+    caption(4, 13, 14, "残す後半です。"),
+  ];
+
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, "manual"), [
+    { start: 0, end: 8 },
+    { start: 12, end: 15.432 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, "none"), [
+    { start: 0, end: 15.432 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges(transcript, 15.4321, "auto"), [
+    { start: 2, end: 4 },
+    { start: 13, end: 14 },
+  ]);
+});
+
+test("manual and no-cut modes keep the opening before source metadata is available", () => {
+  const transcript = [caption(1, 2, 4, "冒頭の風景も残します。")];
+
+  assert.deepEqual(buildSpokenEditRanges(transcript, 0, "manual"), [
+    { start: 0, end: 4 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges(transcript, 0, "none"), [
+    { start: 0, end: 4 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges(transcript, 0, "auto"), [
+    { start: 2, end: 4 },
+  ]);
+  assert.deepEqual(buildSpokenEditRanges([], 0, "manual"), []);
+  assert.deepEqual(buildSpokenEditRanges([], 0, "none"), []);
 });
 
 test("sets and restores a caption cut without mutating other captions", () => {

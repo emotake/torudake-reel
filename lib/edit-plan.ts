@@ -2,6 +2,8 @@ import type { CaptionSegment } from "./captions";
 
 export type EditGoal = "follow" | "sales" | "reach";
 
+export type SpokenCutMode = "auto" | "manual" | "none";
+
 export type EditRange = {
   start: number;
   end: number;
@@ -180,14 +182,70 @@ export function buildEditRanges(
 export function buildSpokenEditRanges(
   captions: CaptionSegment[],
   sourceDuration: number,
-  reconnectToSpeech: boolean,
+  cutMode: SpokenCutMode,
 ): EditRange[] {
-  if (
-    !reconnectToSpeech &&
-    Number.isFinite(sourceDuration) &&
-    sourceDuration > 0
-  ) {
-    return [{ start: 0, end: roundSeconds(sourceDuration) }];
+  const measuredSourceDuration =
+    Number.isFinite(sourceDuration) && sourceDuration > 0
+      ? roundSeconds(sourceDuration)
+      : 0;
+  const inferredSourceDuration = roundSeconds(
+    captions.reduce(
+      (duration, caption) =>
+        isTimedCaption(caption) && Number.isFinite(caption.end)
+          ? Math.max(duration, caption.end)
+          : duration,
+      0,
+    ),
+  );
+  const safeSourceDuration =
+    measuredSourceDuration > 0
+      ? measuredSourceDuration
+      : inferredSourceDuration;
+  if (cutMode === "none") {
+    return safeSourceDuration > 0
+      ? [{ start: 0, end: safeSourceDuration }]
+      : [];
+  }
+
+  if (cutMode === "manual") {
+    if (safeSourceDuration <= 0) return [];
+
+    const removedRanges = captions
+      .filter((caption) => caption.removed && isTimedCaption(caption))
+      .map((caption) => ({
+        start: Math.max(0, Math.min(safeSourceDuration, caption.start)),
+        end: Math.max(0, Math.min(safeSourceDuration, caption.end)),
+      }))
+      .filter((range) => range.end > range.start)
+      .sort((left, right) => left.start - right.start);
+    const mergedRemovedRanges: EditRange[] = [];
+    removedRanges.forEach((range) => {
+      const previous = mergedRemovedRanges.at(-1);
+      if (previous && range.start <= previous.end + 0.001) {
+        previous.end = Math.max(previous.end, range.end);
+        return;
+      }
+      mergedRemovedRanges.push({ ...range });
+    });
+
+    const keptRanges: EditRange[] = [];
+    let cursor = 0;
+    mergedRemovedRanges.forEach((range) => {
+      if (range.start > cursor + 0.001) {
+        keptRanges.push({
+          start: roundSeconds(cursor),
+          end: roundSeconds(range.start),
+        });
+      }
+      cursor = Math.max(cursor, range.end);
+    });
+    if (cursor < safeSourceDuration - 0.001) {
+      keptRanges.push({
+        start: roundSeconds(cursor),
+        end: safeSourceDuration,
+      });
+    }
+    return keptRanges;
   }
 
   return buildEditRanges(captions);

@@ -16,7 +16,6 @@ import {
   type CaptionSegment,
 } from "../lib/captions";
 import {
-  buildEditRanges,
   buildSpokenEditRanges,
   createNaturalEdit,
   editedTimeToSourceTime,
@@ -25,6 +24,7 @@ import {
   remapCaptionsToEditedTimeline,
   setCaptionCut,
   sourceTimeToEditedTime,
+  type SpokenCutMode,
 } from "../lib/edit-plan";
 import {
   buildPreviewRanges,
@@ -1226,7 +1226,8 @@ export default function Home() {
   const [length, setLength] = useState(60);
   const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
   const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(true);
-  const [spokenAutoCutEnabled, setSpokenAutoCutEnabled] = useState(true);
+  const [spokenCutMode, setSpokenCutMode] =
+    useState<SpokenCutMode>("auto");
   const [narrationStyle, setNarrationStyle] =
     useState<NarrationStyle>("calm");
   const [narrationOriginalAudio, setNarrationOriginalAudio] =
@@ -1446,7 +1447,7 @@ export default function Home() {
       }
 
       throwIfProcessingAborted(controller.signal);
-      nextTranscript = spokenAutoCutEnabled
+      nextTranscript = spokenCutMode === "auto"
         ? createNaturalEdit(nextTranscript, length, goal)
         : nextTranscript.map((line) => ({ ...line, removed: false }));
       if (progressTimer !== undefined) {
@@ -1802,7 +1803,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
     setSpokenCaptionsEnabled(true);
-    setSpokenAutoCutEnabled(true);
+    setSpokenCutMode("auto");
     setNarrationOriginalAudio(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT);
     setNarrationCaptionsEnabled(true);
     setNarrationAutoCutEnabled(false);
@@ -2021,8 +2022,8 @@ export default function Home() {
             setSpokenCaptionsEnabled(enabled);
             setPreviewMode(enabled ? "after" : "before");
           }}
-          spokenAutoCutEnabled={spokenAutoCutEnabled}
-          setSpokenAutoCutEnabled={setSpokenAutoCutEnabled}
+          spokenCutMode={spokenCutMode}
+          setSpokenCutMode={setSpokenCutMode}
           narrationStyle={narrationStyle}
           setNarrationStyle={setNarrationStyle}
           narrationOriginalAudio={narrationOriginalAudio}
@@ -2050,7 +2051,7 @@ export default function Home() {
           highAccuracy={isHighAccuracyRun}
           narration={audioMode === "narration"}
           spokenCaptionsEnabled={spokenCaptionsEnabled}
-          spokenAutoCutEnabled={spokenAutoCutEnabled}
+          spokenCutMode={spokenCutMode}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
           narrationAutoCutEnabled={narrationAutoCutEnabled}
           cancel={reset}
@@ -2067,7 +2068,7 @@ export default function Home() {
             setSpokenCaptionsEnabled(enabled);
             setPreviewMode(enabled ? "after" : "before");
           }}
-          spokenAutoCutEnabled={spokenAutoCutEnabled}
+          spokenCutMode={spokenCutMode}
           transcript={transcript}
           setTranscript={setTranscript}
           keptLines={keptLines}
@@ -2861,8 +2862,8 @@ function SetupWorkspace({
   setAudioMode,
   spokenCaptionsEnabled,
   setSpokenCaptionsEnabled,
-  spokenAutoCutEnabled,
-  setSpokenAutoCutEnabled,
+  spokenCutMode,
+  setSpokenCutMode,
   narrationStyle,
   setNarrationStyle,
   narrationOriginalAudio,
@@ -2889,8 +2890,8 @@ function SetupWorkspace({
   setAudioMode: (mode: VideoAudioMode) => void;
   spokenCaptionsEnabled: boolean;
   setSpokenCaptionsEnabled: (enabled: boolean) => void;
-  spokenAutoCutEnabled: boolean;
-  setSpokenAutoCutEnabled: (enabled: boolean) => void;
+  spokenCutMode: SpokenCutMode;
+  setSpokenCutMode: (mode: SpokenCutMode) => void;
   narrationStyle: NarrationStyle;
   setNarrationStyle: (style: NarrationStyle) => void;
   narrationOriginalAudio: NarrationOriginalAudioLevel;
@@ -2910,7 +2911,7 @@ function SetupWorkspace({
   const keepsOriginalVideo =
     audioMode === "narration"
       ? !narrationAutoCutEnabled
-      : !spokenAutoCutEnabled;
+      : spokenCutMode === "none";
 
   return (
     <section className="workspace">
@@ -3029,7 +3030,10 @@ function SetupWorkspace({
                     className={length === item ? "selected" : ""}
                     onClick={() => setLength(item)}
                   >
-                    <strong>{item}</strong>秒以内
+                    <strong>{item}</strong>
+                    {audioMode === "spoken" && spokenCutMode === "manual"
+                      ? "秒を目安"
+                      : "秒以内"}
                     <small>
                       {item === 30 ? "短く強く" : item === 60 ? "おすすめ" : "しっかり解説"}
                     </small>
@@ -3042,9 +3046,11 @@ function SetupWorkspace({
                 ? narrationAutoCutEnabled
                   ? "AI音声は自然な1倍速のまま、選んだ長さ以内に映像とテロップをまとめます。"
                   : "映像は元動画の長さのままです。AIナレーションは最大90秒で映像に収まる自然な長さにし、音声が終わった後も映像は最後まで続きます。"
-                : spokenAutoCutEnabled
+                : spokenCutMode === "auto"
                   ? "自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。"
-                  : "映像・順番・動画の長さは変えません。文字起こしはテロップと字幕データのために1度だけ行います。"}
+                  : spokenCutMode === "manual"
+                    ? "話している区間をすべて残した状態から、自分で使わない部分を選べます。選んだ長さは仕上がりの目安です。"
+                    : "映像・順番・動画の長さは変えません。文字起こしはテロップと字幕データのために1度だけ行います。"}
             </p>
           </fieldset>
 
@@ -3081,28 +3087,46 @@ function SetupWorkspace({
                 </div>
                 <div className="narrationOutputOption">
                   <p className="narrationOptionLabel">映像の仕上げ方</p>
-                  <div className="narrationChoiceCards">
+                  <div className="narrationChoiceCards three">
                     <button
                       type="button"
-                      className={spokenAutoCutEnabled ? "selected" : ""}
-                      aria-pressed={spokenAutoCutEnabled}
-                      onClick={() => setSpokenAutoCutEnabled(true)}
+                      className={spokenCutMode === "auto" ? "selected" : ""}
+                      aria-pressed={spokenCutMode === "auto"}
+                      onClick={() => setSpokenCutMode("auto")}
                     >
-                      <strong>音声に合わせてつなぎ直す</strong>
+                      <strong>おまかせ編集</strong>
                       <small>言い淀みや長い間を外し、選んだ長さ以内へ編集</small>
                       <b>おすすめ</b>
                     </button>
                     <button
                       type="button"
-                      className={!spokenAutoCutEnabled ? "selected" : ""}
-                      aria-pressed={!spokenAutoCutEnabled}
-                      onClick={() => setSpokenAutoCutEnabled(false)}
+                      className={spokenCutMode === "manual" ? "selected" : ""}
+                      aria-pressed={spokenCutMode === "manual"}
+                      onClick={() => setSpokenCutMode("manual")}
                     >
-                      <strong>元動画の流れを保つ</strong>
+                      <strong>自分で選んでカット</strong>
+                      <small>文字起こし後、文章ごとに使う区間を選ぶ</small>
+                    </button>
+                    <button
+                      type="button"
+                      className={spokenCutMode === "none" ? "selected" : ""}
+                      aria-pressed={spokenCutMode === "none"}
+                      onClick={() => setSpokenCutMode("none")}
+                    >
+                      <strong>カットしない</strong>
                       <small>映像・順番・元の音声・動画の長さを変えない</small>
                     </button>
                   </div>
-                  {!spokenAutoCutEnabled && (
+                  {spokenCutMode === "manual" && (
+                    <div className="keepOriginalPromise manual" role="status">
+                      <span aria-hidden="true">✂</span>
+                      <p>
+                        <strong>文字起こし後に、残す文章を自分で選べます</strong>
+                        <small>プレビュー・元音声・テロップ・書き出しへ同じ選択を反映します。</small>
+                      </p>
+                    </div>
+                  )}
+                  {spokenCutMode === "none" && (
                     <div className="keepOriginalPromise" role="status">
                       <span aria-hidden="true">✓</span>
                       <p>
@@ -3274,17 +3298,23 @@ function SetupWorkspace({
                 ・
                 {audioMode === "narration"
                   ? `「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」のAI音声・元動画の音${Math.round(narrationOriginalAudio)}%・${narrationCaptionsEnabled ? "テロップあり" : "テロップなし"}・${narrationAutoCutEnabled ? "短く自動編集" : "元動画のまま"}`
-                  : `${spokenCaptionsEnabled ? `${CAPTION_MOODS.find((item) => item.id === captionProfile.mood)?.label ?? "ナチュラル"}テロップ` : "テロップなし"}・${spokenAutoCutEnabled ? "音声に合わせてつなぎ直す" : "元動画の流れを保つ"}`}
-                ・{keepsOriginalVideo ? "元動画の長さ" : `${length}秒以内`}
+                  : `${spokenCaptionsEnabled ? `${CAPTION_MOODS.find((item) => item.id === captionProfile.mood)?.label ?? "ナチュラル"}テロップ` : "テロップなし"}・${spokenCutMode === "auto" ? "おまかせ編集" : spokenCutMode === "manual" ? "自分で区間を選ぶ" : "カットしない"}`}
+                ・{keepsOriginalVideo
+                  ? "元動画の長さ"
+                  : audioMode === "spoken" && spokenCutMode === "manual"
+                    ? `目安${length}秒`
+                    : `${length}秒以内`}
               </p>
             </div>
             <button className="mainCta" onClick={startEditing}>
               <span>
                 {audioMode === "narration"
                   ? "AIナレーション付きで作る"
-                  : spokenAutoCutEnabled
+                  : spokenCutMode === "auto"
                     ? "この設定で自動編集する"
-                    : "元動画の流れを保って仕上げる"}
+                    : spokenCutMode === "manual"
+                      ? "文字起こしして自分で選ぶ"
+                      : "元動画の流れを保って仕上げる"}
               </span>
               <i>✦</i>
             </button>
@@ -3307,7 +3337,7 @@ function Processing({
   highAccuracy,
   narration,
   spokenCaptionsEnabled,
-  spokenAutoCutEnabled,
+  spokenCutMode,
   narrationCaptionsEnabled,
   narrationAutoCutEnabled,
   cancel,
@@ -3317,7 +3347,7 @@ function Processing({
   highAccuracy: boolean;
   narration: boolean;
   spokenCaptionsEnabled: boolean;
-  spokenAutoCutEnabled: boolean;
+  spokenCutMode: SpokenCutMode;
   narrationCaptionsEnabled: boolean;
   narrationAutoCutEnabled: boolean;
   cancel: () => void;
@@ -3350,10 +3380,18 @@ function Processing({
     { threshold: 68, label: "時刻を合わせています", note: "発話の開始と終了を同期" },
     {
       threshold: 88,
-      label: spokenAutoCutEnabled ? "自然に再構成中" : "元動画を確認中",
-      note: spokenAutoCutEnabled
-        ? "文の切れ目で指定時間へ編集"
-        : "映像・順番・長さを変えずに保持",
+      label:
+        spokenCutMode === "auto"
+          ? "自然に再構成中"
+          : spokenCutMode === "manual"
+            ? "手動カットを準備中"
+            : "元動画を確認中",
+      note:
+        spokenCutMode === "auto"
+          ? "文の切れ目で指定時間へ編集"
+          : spokenCutMode === "manual"
+            ? "文章ごとに残す区間を選べる状態へ準備"
+            : "映像・順番・長さを変えずに保持",
     },
     {
       threshold: 100,
@@ -3379,9 +3417,15 @@ function Processing({
           </div>
           <span className="orbit one">✦</span>
           <span className="orbit two">
-            {(narration ? narrationAutoCutEnabled : spokenAutoCutEnabled)
-              ? "CUT"
-              : "KEEP"}
+            {narration
+              ? narrationAutoCutEnabled
+                ? "CUT"
+                : "KEEP"
+              : spokenCutMode === "auto"
+                ? "AUTO"
+                : spokenCutMode === "manual"
+                  ? "SELECT"
+                  : "KEEP"}
           </span>
           <span className="orbit three">
             {(narration
@@ -3399,7 +3443,7 @@ function Processing({
             {file?.name ?? "サンプル動画"}の
             {narration
               ? `場面を読み取り、映像に合う台本とAI音声を作っています。${narrationAutoCutEnabled ? "代表場面を自然につなぎます。" : "元動画はカットしません。"}${narrationCaptionsEnabled ? "テロップも同期します。" : "テロップは付けません。"}`
-              : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}${spokenAutoCutEnabled ? "音声に合わせて映像を自然につなぎ直しています。" : "元動画の映像・順番・長さを保って仕上げています。"}${spokenCaptionsEnabled ? "テロップも準備します。" : "テロップは付けません。"}`}
+              : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}${spokenCutMode === "auto" ? "音声に合わせて映像を自然につなぎ直しています。" : spokenCutMode === "manual" ? "文章ごとに残す区間を選べる状態へ準備しています。" : "元動画の映像・順番・長さを保って仕上げています。"}${spokenCaptionsEnabled ? "テロップも準備します。" : "テロップは付けません。"}`}
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -3442,7 +3486,7 @@ function ResultWorkspace({
   previewMode,
   spokenCaptionsEnabled,
   setSpokenCaptionsEnabled,
-  spokenAutoCutEnabled,
+  spokenCutMode,
   transcript,
   setTranscript,
   keptLines,
@@ -3474,7 +3518,7 @@ function ResultWorkspace({
   previewMode: PreviewMode;
   spokenCaptionsEnabled: boolean;
   setSpokenCaptionsEnabled: (enabled: boolean) => void;
-  spokenAutoCutEnabled: boolean;
+  spokenCutMode: SpokenCutMode;
   transcript: TranscriptLine[];
   setTranscript: (lines: TranscriptLine[]) => void;
   keptLines: TranscriptLine[];
@@ -3703,13 +3747,13 @@ function ResultWorkspace({
         : buildSpokenEditRanges(
             transcript,
             sourceDuration,
-            spokenAutoCutEnabled,
+            spokenCutMode,
           ),
     [
       narrationAutoCutEnabled,
       narrationPlan,
       sourceDuration,
-      spokenAutoCutEnabled,
+      spokenCutMode,
       transcript,
     ],
   );
@@ -3789,12 +3833,16 @@ function ResultWorkspace({
       ? "narrated_captioned"
       : "narrated"
     : spokenCaptionsEnabled
-      ? spokenAutoCutEnabled
-        ? "captioned"
-        : "captioned_full"
-      : spokenAutoCutEnabled
-        ? "edited"
-        : "original";
+      ? spokenCutMode === "none"
+        ? "captioned_full"
+        : spokenCutMode === "manual"
+          ? "captioned_manual"
+          : "captioned"
+      : spokenCutMode === "none"
+        ? "original"
+        : spokenCutMode === "manual"
+          ? "manual_edit"
+          : "edited";
   const plannedExportDimensions = useMemo(
     () =>
       sourceVideoDimensions
@@ -3832,7 +3880,7 @@ function ResultWorkspace({
         narrationCaptionsEnabled,
         narrationAutoCutEnabled,
         spokenCaptionsEnabled,
-        spokenAutoCutEnabled,
+        spokenCutMode,
       }),
     [
       captionProfile,
@@ -3841,7 +3889,7 @@ function ResultWorkspace({
       narrationAutoCutEnabled,
       narrationCaptionsEnabled,
       narrationOriginalAudio,
-      spokenAutoCutEnabled,
+      spokenCutMode,
       spokenCaptionsEnabled,
       transcript,
     ],
@@ -4156,7 +4204,11 @@ function ResultWorkspace({
       return;
     }
 
-    const nextRanges = buildEditRanges(nextTranscript);
+    const nextRanges = buildSpokenEditRanges(
+      nextTranscript,
+      sourceDuration,
+      spokenCutMode,
+    );
     const currentSourceTime = video.currentTime;
     const remainsIncluded = nextRanges.some(
       (range) =>
@@ -4215,7 +4267,11 @@ function ResultWorkspace({
     setTranscript(restored);
     const video = videoRef.current;
     if (video) {
-      const restoredRanges = buildEditRanges(restored);
+      const restoredRanges = buildSpokenEditRanges(
+        restored,
+        sourceDuration,
+        spokenCutMode,
+      );
       const isInsideRestoredRange = restoredRanges.some(
         (range) =>
           video.currentTime >= range.start &&
@@ -4233,7 +4289,11 @@ function ResultWorkspace({
         setCurrentTime(targetTime);
       }
     }
-    notify("カットの選択を最初の自動編集に戻しました");
+    notify(
+      spokenCutMode === "auto"
+        ? "カットの選択を最初の自動編集に戻しました"
+        : "手動カットをすべて元に戻しました",
+    );
   }
 
   function updateLine(id: number, text: string) {
@@ -6304,29 +6364,35 @@ function ResultWorkspace({
               ? "AIナレーション付きで仕上げました"
               : usedHighAccuracy
               ? "高精度の文字起こしで仕上げました"
-              : spokenAutoCutEnabled
+              : spokenCutMode === "auto"
                 ? "音声に合わせた編集が完了しました"
-                : "元動画の流れを保って仕上げました"}
+                : spokenCutMode === "manual"
+                  ? "自分でカットする準備ができました"
+                  : "元動画の流れを保って仕上げました"}
           </p>
           <h1>
             {narrationPlan
               ? narrationCaptionsEnabled
                 ? "映像の流れに合わせて、声とテロップを組み立てました。"
                 : "映像に合わせて、AIナレーションを自然に重ねました。"
-              : spokenAutoCutEnabled
+              : spokenCutMode === "auto"
                 ? spokenCaptionsEnabled
                   ? "元の音声に合わせて、映像とテロップを整えました。"
                   : "元の音声に合わせて、映像を自然につなぎ直しました。"
-                : spokenCaptionsEnabled
-                  ? "元動画の流れを保ち、テロップだけを加えました。"
-                  : "元動画の映像と音声を、そのまま保ちました。"}
+                : spokenCutMode === "manual"
+                  ? "使う文章を選んで、映像を自分らしく整えられます。"
+                  : spokenCaptionsEnabled
+                    ? "元動画の流れを保ち、テロップだけを加えました。"
+                    : "元動画の映像と音声を、そのまま保ちました。"}
           </h1>
           <p>
             {narrationPlan
               ? "台本と声の雰囲気はここで調整できます。公開動画にサービス名や透かしは入りません。"
-              : spokenAutoCutEnabled
+              : spokenCutMode === "auto"
                 ? "元動画全体から、言い淀み・重複・長い間を外し、文の切れ目で再構成しています。"
-                : "映像・順番・元の音声・動画の長さは変更していません。"}
+                : spokenCutMode === "manual"
+                  ? "最初は元動画をすべて残しています。下の文章から、使わない区間だけを選んでください。"
+                  : "映像・順番・元の音声・動画の長さは変更していません。"}
           </p>
         </div>
         <div className="timeSaved">
@@ -6337,9 +6403,11 @@ function ResultWorkspace({
               ? narrationAutoCutEnabled
                 ? `全体から${length}秒以内へ自動構成`
                 : "元動画をカットせず、そのまま使用"
-              : spokenAutoCutEnabled
+              : spokenCutMode === "auto"
                 ? `全体から約${length}秒へ自動構成`
-                : "元動画をカットせず、そのまま使用"}
+                : spokenCutMode === "manual"
+                  ? `自分で選択・目安${length}秒`
+                  : "元動画をカットせず、そのまま使用"}
           </small>
         </div>
       </div>
@@ -6988,9 +7056,11 @@ function ResultWorkspace({
                 ? narrationAutoCutEnabled
                   ? `${length}秒以内版`
                   : "元動画をノーカット"
-                : spokenAutoCutEnabled
+                : spokenCutMode === "auto"
                   ? `約${length}秒版`
-                  : "元動画をノーカット"}
+                  : spokenCutMode === "manual"
+                    ? "手動カット版"
+                    : "元動画をノーカット"}
               ・実尺{formatCaptionClock(editDuration)}
             </span>
           </div>
@@ -7044,7 +7114,7 @@ function ResultWorkspace({
                 step={0.05}
                 value={Math.min(previewDisplayTime, Math.max(editDuration, 0.01))}
                 disabled={isMediaBusy || editDuration <= 0}
-                aria-label="自動編集後の再生位置"
+                aria-label="仕上がり動画の再生位置"
                 aria-valuetext={`${formatCaptionClock(previewDisplayTime)} / ${formatCaptionClock(editDuration)}`}
                 style={
                   {
@@ -7109,7 +7179,7 @@ function ResultWorkspace({
                   ? narrationCaptionsEnabled
                     ? "音声とテロップを確認"
                     : "AIナレーションを確認"
-                  : spokenAutoCutEnabled
+                  : spokenCutMode !== "none"
                     ? "残す区間を選ぶ"
                     : spokenCaptionsEnabled
                       ? "テロップを確認"
@@ -7123,18 +7193,21 @@ function ResultWorkspace({
               ? narrationCaptionsEnabled
                 ? "テロップはAI音声と同期しています。内容を変えるときは、上の台本を編集して「AI音声を作り直す」ボタンを押してください。"
                 : "テロップは付けない設定です。内容を変えるときは、上の台本を編集して「AI音声を作り直す」ボタンを押してください。"
-              : spokenAutoCutEnabled
+              : spokenCutMode !== "none"
                 ? "使わない区間を「カット」にすると、同じ時間の映像・元音声・テロップが仕上がり動画から外れます。元動画は変更されず、いつでも戻せます。"
                 : spokenCaptionsEnabled
                   ? "元動画はカットせず、冒頭から最後まで使います。下の文字はテロップへ反映されます。"
                   : "元動画はカットせず、テロップも重ねません。文字起こしデータは字幕ファイルとして保存できます。"}
           </p>
-          {!narrationPlan && spokenAutoCutEnabled && (
+          {!narrationPlan && spokenCutMode !== "none" && (
             <div className="captionCutToolbar">
               <span aria-live="polite">
                 <strong>{keptLines.length}</strong>区間を残す
                 <i aria-hidden="true">/</i>
                 <strong>{removedCount}</strong>区間をカット
+                <i aria-hidden="true">/</i>
+                仕上がり <strong>{formatCaptionClock(editDuration)}</strong>
+                {spokenCutMode === "manual" && <em>目安 {length}秒</em>}
               </span>
               <button
                 type="button"
@@ -7193,7 +7266,7 @@ function ResultWorkspace({
                       <span className="captionAccentStatus">強調</span>
                     )
                   )}
-                  {!narrationPlan && spokenAutoCutEnabled && (
+                  {!narrationPlan && spokenCutMode !== "none" && (
                     <button
                       type="button"
                       className="captionCutToggle"
@@ -7221,7 +7294,7 @@ function ResultWorkspace({
               <span>
                 {narrationPlan
                   ? "映像カット"
-                  : spokenAutoCutEnabled
+                  : spokenCutMode !== "none"
                     ? "カット"
                     : "映像"}
               </span>
@@ -7230,21 +7303,21 @@ function ResultWorkspace({
                   ? narrationAutoCutEnabled
                     ? "自動"
                     : "なし"
-                  : spokenAutoCutEnabled
+                  : spokenCutMode !== "none"
                     ? `${removedCount}区間`
                     : "元動画のまま"}
               </strong>
             </div>
             <div>
               <span>
-                {narrationPlan || !spokenAutoCutEnabled ? "テロップ" : "残す"}
+                {narrationPlan || spokenCutMode === "none" ? "テロップ" : "残す"}
               </span>
               <strong>
                 {narrationPlan
                   ? narrationCaptionsEnabled
                     ? "あり"
                     : "なし"
-                  : !spokenAutoCutEnabled
+                  : spokenCutMode === "none"
                     ? spokenCaptionsEnabled
                       ? "あり"
                       : "なし"
@@ -7489,7 +7562,7 @@ function ResultWorkspace({
                 <span className="exportModeNote">
                   {narrationPlan
                     ? `AI音声${narrationCaptionsEnabled ? "とテロップ" : ""}を、${narrationAutoCutEnabled ? "自動編集した映像" : "ノーカット映像"}へまとめます。`
-                    : `${spokenAutoCutEnabled ? "音声に合わせてつなぎ直した映像" : "ノーカット映像"}${spokenCaptionsEnabled ? "とテロップ" : ""}を、iPhoneで使える動画へまとめます。`}
+                    : `${spokenCutMode === "auto" ? "音声に合わせてつなぎ直した映像" : spokenCutMode === "manual" ? "自分で選んだ区間の映像" : "ノーカット映像"}${spokenCaptionsEnabled ? "とテロップ" : ""}を、iPhoneで使える動画へまとめます。`}
                 </span>
               )}
             </small>

@@ -4340,6 +4340,18 @@ footer > small {
   gap: 8px;
 }
 
+.narrationChoiceCards.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.narrationChoiceCards.three strong {
+  padding-right: 0;
+}
+
+.narrationChoiceCards.three button:first-child strong {
+  padding-right: 58px;
+}
+
 .narrationChoiceCards button {
   position: relative;
   display: grid;
@@ -4423,6 +4435,15 @@ footer > small {
   color: var(--muted);
   font-size: 7px;
   line-height: 1.5;
+}
+
+.keepOriginalPromise.manual {
+  border-color: #f0d6c8;
+  background: #fff8f3;
+}
+
+.keepOriginalPromise.manual > span {
+  background: var(--coral);
 }
 
 .originalAudioMix {
@@ -6942,6 +6963,10 @@ footer > small {
     grid-template-columns: 1fr;
   }
 
+  .narrationChoiceCards.three {
+    grid-template-columns: 1fr;
+  }
+
   .originalAudioPresets {
     grid-template-columns: 1fr;
   }
@@ -7274,6 +7299,18 @@ footer > small {
   margin: 0 7px;
   color: #b5aea3;
   font-style: normal;
+}
+
+.captionCutToolbar > span em {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #fff0eb;
+  color: #9a4939;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
 }
 
 .captionCutToolbar > button {

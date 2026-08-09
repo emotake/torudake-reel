@@ -259,10 +259,14 @@ test("uses video length language and gives spoken videos independent output choi
   assert.doesNotMatch(pageSource, /AIナレーションの長さ/);
   assert.match(pageSource, />\s*動画の長さ\s*</);
   assert.match(pageSource, /元動画の長さ/);
-  assert.match(pageSource, /音声に合わせてつなぎ直す/);
-  assert.match(pageSource, /元動画の流れを保つ/);
+  assert.match(pageSource, /おまかせ編集/);
+  assert.match(pageSource, /自分で選んでカット/);
+  assert.match(pageSource, /カットしない/);
   assert.match(pageSource, /spokenCaptionsEnabled/);
-  assert.match(pageSource, /spokenAutoCutEnabled/);
+  assert.match(pageSource, /useState<SpokenCutMode>\("auto"\)/);
+  assert.match(pageSource, /setSpokenCutMode\("auto"\)/);
+  assert.match(pageSource, /setSpokenCutMode\("manual"\)/);
+  assert.match(pageSource, /setSpokenCutMode\("none"\)/);
   assert.match(
     pageSource,
     /const narrationPlanLength = narrationAutoCutEnabled \? length : 90/,
@@ -284,10 +288,16 @@ test("keeps spoken caption and cut choices aligned across preview and export", (
   const overlayFlow = pageSource.slice(overlayStart, overlayEnd);
 
   assert.match(editRangesFlow, /buildSpokenEditRanges\(/);
-  assert.match(editRangesFlow, /spokenAutoCutEnabled/);
-  assert.match(pageSource, /spokenAutoCutEnabled\s*\?\s*createNaturalEdit/);
+  assert.match(editRangesFlow, /spokenCutMode/);
+  assert.match(pageSource, /spokenCutMode === "auto"[\s\S]*createNaturalEdit/);
   assert.match(pageSource, /const captionsVisible = narrationPlan[\s\S]*spokenCaptionsEnabled/);
   assert.match(overlayFlow, /if \(!captionsVisible\) return/);
-  assert.match(pageSource, /spokenCaptionsEnabled,[\s\S]*spokenAutoCutEnabled/);
-  assert.match(pageSource, /!narrationPlan && spokenAutoCutEnabled/);
+  assert.match(pageSource, /spokenCaptionsEnabled,[\s\S]*spokenCutMode/);
+  assert.match(pageSource, /!narrationPlan && spokenCutMode !== "none"/);
+  assert.match(pageSource, /spokenCutMode === "manual"[\s\S]*目安 \{length\}秒/);
+  assert.match(
+    pageSource,
+    /audioMode === "spoken" && spokenCutMode === "manual"[\s\S]*`目安\$\{length\}秒`/,
+  );
+  assert.doesNotMatch(pageSource, /spokenAutoCutEnabled/);
 });
