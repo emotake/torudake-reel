@@ -1065,6 +1065,146 @@ const initialTranscript: TranscriptLine[] = [
   },
 ];
 
+const CAPTION_PROFILE_STORAGE_KEY = "torudake-caption-profile";
+const ACCOUNT_AUTHENTICATED_STORAGE_KEY = "torudake-account-authenticated";
+const CAPTION_PROFILE_SAVE_DELAY_MS = 500;
+
+type CaptionProfileSyncStatus =
+  | "checking"
+  | "local-only"
+  | "authenticated"
+  | "unavailable";
+
+function readLocalCaptionProfile() {
+  if (typeof window === "undefined") return DEFAULT_CAPTION_PROFILE;
+  try {
+    const saved = window.localStorage.getItem(CAPTION_PROFILE_STORAGE_KEY);
+    return saved
+      ? normalizeCaptionProfile(JSON.parse(saved))
+      : DEFAULT_CAPTION_PROFILE;
+  } catch {
+    return DEFAULT_CAPTION_PROFILE;
+  }
+}
+
+function profilesMatch(left: CaptionProfile, right: CaptionProfile) {
+  return (
+    left.mood === right.mood &&
+    left.accentColor === right.accentColor &&
+    left.brandName === right.brandName
+  );
+}
+
+function removeAccountAuthenticationHint() {
+  try {
+    window.localStorage.removeItem(ACCOUNT_AUTHENTICATED_STORAGE_KEY);
+  } catch {
+    // Profile editing remains available even when browser storage is blocked.
+  }
+}
+
+function useCaptionProfileSync() {
+  const [captionProfile, setCaptionProfileState] =
+    useState<CaptionProfile>(readLocalCaptionProfile);
+  const [syncStatus, setSyncStatus] =
+    useState<CaptionProfileSyncStatus>("checking");
+  const [hasUserEdited, setHasUserEdited] = useState(false);
+  const hasUserEditedRef = useRef(false);
+  const syncStartedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  function setCaptionProfile(nextProfile: CaptionProfile) {
+    if (profilesMatch(captionProfile, nextProfile)) return;
+    hasUserEditedRef.current = true;
+    setHasUserEdited(true);
+    setCaptionProfileState(nextProfile);
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        CAPTION_PROFILE_STORAGE_KEY,
+        JSON.stringify(captionProfile),
+      );
+    } catch {
+      // Keep the editor usable in private modes that deny localStorage access.
+    }
+  }, [captionProfile]);
+
+  useEffect(() => {
+    if (syncStartedRef.current) return;
+    syncStartedRef.current = true;
+
+    let hasAuthenticationHint = false;
+    try {
+      hasAuthenticationHint =
+        window.localStorage.getItem(ACCOUNT_AUTHENTICATED_STORAGE_KEY) === "1";
+    } catch {
+      // Without a trusted hint, an anonymous visit must stay local-only.
+    }
+    if (!hasAuthenticationHint) {
+      setSyncStatus("local-only");
+      return;
+    }
+
+    void fetch("/api/caption-profile", {
+      cache: "no-store",
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        if (!mountedRef.current) return;
+        if (response.status === 401) {
+          removeAccountAuthenticationHint();
+          setSyncStatus("local-only");
+          return;
+        }
+        if (!response.ok) {
+          setSyncStatus("unavailable");
+          return;
+        }
+        const payload = (await response.json()) as { profile?: unknown };
+        if (!mountedRef.current) return;
+        if (payload.profile && !hasUserEditedRef.current) {
+          setCaptionProfileState(normalizeCaptionProfile(payload.profile));
+        }
+        setSyncStatus("authenticated");
+      })
+      .catch(() => {
+        if (mountedRef.current) setSyncStatus("unavailable");
+      });
+  }, []);
+
+  useEffect(() => {
+    if (syncStatus !== "authenticated" || !hasUserEdited) return;
+    const timeout = window.setTimeout(() => {
+      void fetch("/api/caption-profile", {
+        method: "PUT",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: captionProfile }),
+      })
+        .then((response) => {
+          if (response.status === 401 && mountedRef.current) {
+            removeAccountAuthenticationHint();
+            setSyncStatus("local-only");
+          }
+        })
+        .catch(() => undefined);
+    }, CAPTION_PROFILE_SAVE_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, [captionProfile, hasUserEdited, syncStatus]);
+
+  return [captionProfile, setCaptionProfile] as const;
+}
+
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const transferInputRef = useRef<HTMLInputElement>(null);
@@ -1081,16 +1221,7 @@ export default function Home() {
   );
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
-  const [captionProfile, setCaptionProfile] = useState<CaptionProfile>(() => {
-    if (typeof window === "undefined") return DEFAULT_CAPTION_PROFILE;
-    const saved = window.localStorage.getItem("torudake-caption-profile");
-    if (!saved) return DEFAULT_CAPTION_PROFILE;
-    try {
-      return normalizeCaptionProfile(JSON.parse(saved));
-    } catch {
-      return DEFAULT_CAPTION_PROFILE;
-    }
-  });
+  const [captionProfile, setCaptionProfile] = useCaptionProfileSync();
   const [length, setLength] = useState(60);
   const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
   const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(true);
@@ -1181,35 +1312,6 @@ export default function Home() {
       if (narrationAudioUrl) URL.revokeObjectURL(narrationAudioUrl);
     };
   }, [narrationAudioUrl]);
-
-  useEffect(() => {
-    void fetch("/api/caption-profile")
-      .then(async (response) => {
-        if (!response.ok) return;
-        const payload = (await response.json()) as {
-          profile?: unknown;
-        };
-        if (payload.profile) {
-          setCaptionProfile(normalizeCaptionProfile(payload.profile));
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      "torudake-caption-profile",
-      JSON.stringify(captionProfile),
-    );
-    const timeout = window.setTimeout(() => {
-      void fetch("/api/caption-profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: captionProfile }),
-      }).catch(() => undefined);
-    }, 500);
-    return () => window.clearTimeout(timeout);
-  }, [captionProfile]);
 
   const keptLines = useMemo(
     () => transcript.filter(isIncludedCaption),

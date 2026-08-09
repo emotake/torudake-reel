@@ -46,6 +46,8 @@ type BillingStatus = {
 
 type AuthOptions<T> = { options?: T; error?: string; code?: string };
 
+const ACCOUNT_AUTH_HINT_STORAGE_KEY = "torudake-account-authenticated";
+
 export default function AccountClient() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [error, setError] = useState("");
@@ -63,6 +65,11 @@ export default function AccountClient() {
     const payload = (await response.json()) as BillingStatus;
     if (!response.ok) {
       throw new Error(payload.error || "利用状況を読み込めませんでした。");
+    }
+    if (payload.authenticated) {
+      window.localStorage.setItem(ACCOUNT_AUTH_HINT_STORAGE_KEY, "1");
+    } else {
+      window.localStorage.removeItem(ACCOUNT_AUTH_HINT_STORAGE_KEY);
     }
     setStatus(payload);
     return payload;

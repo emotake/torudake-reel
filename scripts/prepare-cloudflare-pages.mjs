@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 const projectRoot = process.cwd();
@@ -17,3 +17,28 @@ if (
 await rm(pagesDirectory, { force: true, recursive: true });
 await mkdir(pagesDirectory, { recursive: true });
 await cp(clientDirectory, pagesDirectory, { recursive: true });
+
+// Advanced-mode Pages projects otherwise invoke _worker.js for every request.
+// Keep all document and application routes in the Worker, and bypass it only
+// for files that are safe to serve directly from the static asset namespace.
+const routes = {
+  version: 1,
+  include: ["/*"],
+  exclude: [
+    "/assets/*",
+    "/favicon.svg",
+    "/file.svg",
+    "/globe.svg",
+    "/manifest.webmanifest",
+    "/og.png",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/window.svg",
+  ],
+};
+
+await writeFile(
+  resolve(pagesDirectory, "_routes.json"),
+  `${JSON.stringify(routes, null, 2)}\n`,
+  "utf8",
+);
