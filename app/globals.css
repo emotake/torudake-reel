@@ -1130,6 +1130,225 @@ a {
   font-size: 10px;
 }
 
+.lifestyleHero {
+  min-height: 580px;
+  margin: 0;
+  border-color: rgba(117, 82, 55, 0.14);
+  border-radius: 44px 44px 76px 44px;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 255, 255, 0.9), transparent 27%),
+    radial-gradient(circle at 88% 88%, rgba(185, 245, 208, 0.44), transparent 31%),
+    linear-gradient(145deg, #eed4bd 0%, #fff4e6 52%, #e8d4bf 100%);
+  box-shadow:
+    0 34px 88px rgba(105, 75, 52, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+
+.lifestyleHero::before {
+  top: -92px;
+  right: -68px;
+  width: 270px;
+  height: 270px;
+  background: rgba(255, 255, 255, 0.52);
+  filter: blur(56px);
+}
+
+.lifestyleHero::after {
+  bottom: -126px;
+  left: -74px;
+  width: 290px;
+  height: 290px;
+  background: rgba(255, 126, 88, 0.16);
+  filter: blur(58px);
+}
+
+.lifestyleGallery {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 530px;
+  grid-template-columns: minmax(105px, 0.78fr) minmax(195px, 1.16fr) minmax(105px, 0.78fr);
+  gap: 14px;
+  align-items: center;
+  padding: 52px 24px 92px;
+}
+
+.lifestyleFrame {
+  --gallery-x: center;
+
+  position: relative;
+  height: 350px;
+  overflow: hidden;
+  border: 7px solid rgba(255, 253, 248, 0.96);
+  border-radius: 25px;
+  background-image: url("/lifestyle-gallery-lab.jpg");
+  background-position: var(--gallery-x) 48%;
+  background-repeat: no-repeat;
+  background-size: auto 100%;
+  box-shadow:
+    0 24px 54px rgba(92, 61, 40, 0.2),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  animation: lifestyleDrift 10s ease-in-out infinite;
+}
+
+.lifestyleFrame::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(10, 18, 30, 0.03), transparent 55%, rgba(10, 18, 30, 0.24));
+  content: "";
+}
+
+.lifestyleFrame:not(.lifestyleFrameMain)::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 50%;
+  background: rgba(16, 24, 40, 0.46);
+  color: white;
+  content: "▶";
+  font-size: 10px;
+  line-height: 1;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.22);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(10px);
+}
+
+.lifestyleFrame > span {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  z-index: 4;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.46);
+  color: white;
+  font-family: "DM Sans", sans-serif;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  backdrop-filter: blur(10px);
+}
+
+.lifestyleFrameCafe {
+  --gallery-x: left;
+
+  transform: translateY(24px) rotate(-2deg);
+}
+
+.lifestyleFrameCoast {
+  --gallery-x: center;
+}
+
+.lifestyleFrameCity {
+  --gallery-x: right;
+
+  animation-delay: -3.2s;
+  transform: translateY(18px) rotate(2deg);
+}
+
+.lifestyleFrameMain {
+  z-index: 2;
+  height: 440px;
+  border-width: 8px;
+  border-color: #fffdf8;
+  border-radius: 31px;
+  box-shadow:
+    0 0 0 2px rgba(213, 62, 36, 0.68),
+    0 32px 68px rgba(92, 61, 40, 0.24),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+  animation-delay: -1.8s;
+  transform: translateY(-4px);
+}
+
+.lifestyleFrameMain .captionTop {
+  top: 64px;
+  font-size: 12px;
+}
+
+.lifestyleFrameMain .captionBottom {
+  right: 13px;
+  bottom: 49px;
+  left: 13px;
+  z-index: 4;
+  font-size: 9px;
+}
+
+.lifestyleFrameMain .cutRail {
+  bottom: 24px;
+  z-index: 4;
+}
+
+.lifestyleHero .visualResult {
+  right: 24px;
+  bottom: 20px;
+  left: auto;
+  border-color: rgba(117, 82, 55, 0.14);
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 16px 42px rgba(105, 75, 52, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.lifestyleHero .visualResult p {
+  font-size: 9px;
+}
+
+.lifestyleHero .visualResult strong {
+  font-size: 11px;
+}
+
+.hero .mainCta {
+  background: linear-gradient(135deg, #e94d32, #d53e24);
+  box-shadow:
+    0 16px 36px rgba(151, 52, 31, 0.24),
+    0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+.heroOffer,
+.photoReelEntry {
+  border-color: #eadacb;
+  background: #fffdf8;
+  box-shadow:
+    0 16px 42px rgba(105, 75, 52, 0.09),
+    0 1px 0 rgba(255, 255, 255, 0.96) inset;
+  backdrop-filter: none;
+}
+
+.hero .sampleButton,
+.trustRow span {
+  border-color: #eadacb;
+  background: rgba(255, 253, 248, 0.92);
+}
+
+.hero :is(button, a):focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+@keyframes lifestyleDrift {
+  0%,
+  100% {
+    background-position: var(--gallery-x) 47%;
+  }
+
+  50% {
+    background-position: var(--gallery-x) 53%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifestyleFrame {
+    animation: none;
+  }
+}
+
 .painStrip {
   padding: 31px max(24px, calc((100% - 1220px) / 2));
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -8906,6 +9125,54 @@ footer > small {
     width: min(100%, 520px);
     min-height: 510px;
     border-radius: 28px;
+  }
+
+  .lifestyleHero {
+    min-height: 525px;
+    border-radius: 30px 30px 52px 30px;
+  }
+
+  .lifestyleGallery {
+    min-height: 490px;
+    grid-template-columns:
+      clamp(88px, 20vw, 126px)
+      clamp(180px, 38vw, 230px)
+      clamp(88px, 20vw, 126px);
+    gap: 8px;
+    justify-content: center;
+    padding: 48px 0 92px;
+  }
+
+  .lifestyleFrame {
+    height: 310px;
+    border-width: 5px;
+    border-radius: 22px;
+  }
+
+  .lifestyleFrameCafe {
+    transform: translateY(38px) rotate(-3deg);
+  }
+
+  .lifestyleFrameCity {
+    transform: translateY(29px) rotate(3deg);
+  }
+
+  .lifestyleFrameMain {
+    height: 405px;
+    border-width: 6px;
+    border-radius: 27px;
+    transform: none;
+  }
+
+  .lifestyleFrameMain .captionTop {
+    top: 55px;
+    font-size: 11px;
+  }
+
+  .lifestyleHero .visualResult {
+    right: 12px;
+    bottom: 14px;
+    left: 12px;
   }
 
   .phonePair {

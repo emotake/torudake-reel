@@ -2204,7 +2204,7 @@ export default function Home() {
   }
 
   return (
-    <main className="siteShell" data-build="20260809-premium-landing">
+    <main className="siteShell" data-build="20260809-lifestyle-gallery-lab">
       <header className="topbar">
         <button className="brand" onClick={reset} aria-label="トップへ戻る">
           <span className="brandIcon">
@@ -2716,37 +2716,16 @@ function Landing({
           </div>
         </div>
 
-        <div className="heroVisual" aria-label="編集前と編集後のイメージ">
-          <div className="visualBadge">
-            <strong>4工程</strong>
-            <span>ひとつの画面で完結</span>
-          </div>
-          <div className="visualFeaturePills" aria-hidden="true">
-            <span>AUTO CUT</span>
-            <span>CAPTION</span>
-            <span>AI VOICE</span>
-          </div>
-          <div className="phonePair">
-            <div className="phone beforePhone">
-              <div className="phoneTop" />
-              <span className="phoneLabel">BEFORE</span>
-              <CreatorFigure variant="before" />
-              <div className="waveform">
-                {Array.from({ length: 19 }).map((_, index) => (
-                  <i key={index} />
-                ))}
-              </div>
-              <div className="pausePins">
-                <span />
-                <span />
-              </div>
-              <small>3:42・言い直しあり</small>
+        <figure
+          className="heroVisual lifestyleHero"
+          aria-labelledby="lifestyleHeroCaption"
+        >
+          <div className="lifestyleGallery" aria-hidden="true">
+            <div className="lifestyleFrame lifestyleFrameCafe">
+              <span>00:08</span>
             </div>
-            <span className="transformArrow">→</span>
-            <div className="phone afterPhone">
-              <div className="phoneTop" />
-              <span className="phoneLabel">AFTER</span>
-              <CreatorFigure variant="after" />
+            <div className="lifestyleFrame lifestyleFrameCoast lifestyleFrameMain">
+              <span>00:15</span>
               <div className="captionTop">
                 続けられる人が
                 <strong>最初にやること</strong>
@@ -2760,17 +2739,19 @@ function Landing({
                 <i />
                 <i />
               </div>
-              <small>0:58・投稿できる状態</small>
+            </div>
+            <div className="lifestyleFrame lifestyleFrameCity">
+              <span>00:12</span>
             </div>
           </div>
-          <div className="visualResult">
+          <figcaption className="visualResult" id="lifestyleHeroCaption">
             <span>✓</span>
             <p>
               <strong>仕上がりを見てから選べる</strong>
               気になるところだけ直して、必要なら保存
             </p>
-          </div>
-        </div>
+          </figcaption>
+        </figure>
       </section>
 
       <section className="painStrip">
