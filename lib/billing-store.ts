@@ -635,11 +635,29 @@ export async function releaseUsage(
   currentUser: CurrentUser,
   reservationId: string,
 ) {
-  const reservation = await findOwnedUsageReservation(
-    currentUser,
-    reservationId,
-  );
-  if (!reservation || reservation.status !== "reserved") return false;
+  // A release response can be lost after the database update. Treat an
+  // already-released reservation as success so the browser can safely retry
+  // without leaving its editor locked or reusing a dead reservation.
+  const user = await getOrCreateBillingUser(currentUser);
+  const rows = await getDb()
+    .select()
+    .from(usageReservations)
+    .where(
+      and(
+        eq(usageReservations.id, reservationId),
+        eq(usageReservations.userId, user.id),
+      ),
+    )
+    .limit(1);
+  const reservation = rows[0];
+  if (!reservation) return false;
+  if (reservation.status === "released") return true;
+  if (
+    reservation.status !== "reserved" ||
+    reservation.expiresAt < Math.floor(Date.now() / 1000)
+  ) {
+    return false;
+  }
 
   return Boolean(
     await releaseOrCompleteUsageReservation(

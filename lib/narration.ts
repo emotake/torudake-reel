@@ -10,12 +10,7 @@ export const NARRATION_TERMS_VERSION = "2026-07-30";
 export const NARRATION_SPEECH_SUCCESS_LIMIT = 5;
 
 export type VideoAudioMode = "spoken" | "narration";
-export type NarrationStyle =
-  | "bright"
-  | "calm"
-  | "tempo"
-  | "refined"
-  | "comedy";
+export type NarrationStyle = "bright" | "calm" | "comedy";
 export type NarrationOriginalAudioLevel = number;
 
 export type NarrationPronunciationEntry = {
@@ -48,18 +43,12 @@ export const NARRATION_STYLES: Array<{
   label: string;
   note: string;
 }> = [
-  { id: "bright", label: "自然な女性", note: "温かくクリアな声｜日常・説明" },
   { id: "calm", label: "自然な男性", note: "穏やかで信頼感のある声｜商品・解説" },
-  { id: "tempo", label: "ポップボイス", note: "明るく表情豊かな声｜推し・日常" },
-  {
-    id: "refined",
-    label: "エモーショナルストーリー",
-    note: "感情にそっと寄り添う声｜思い出・物語",
-  },
+  { id: "bright", label: "自然な女性", note: "温かくクリアな声｜日常・説明" },
   {
     id: "comedy",
-    label: "リズムコメディ",
-    note: "緩急と間で引き込む声｜日常・オチ",
+    label: "明るい男性",
+    note: "テンポよく軽快な声｜日常・紹介",
   },
 ];
 
@@ -387,4 +376,18 @@ export function getNarrationMixLevels(
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {
   return NARRATION_STYLES.some((style) => style.id === value);
+}
+
+/**
+ * Converts retired voice-template ids used by already-open editors and old
+ * clients into a current template. Unknown input remains invalid so malformed
+ * requests are not silently accepted.
+ */
+export function normalizeNarrationStyle(
+  value: unknown,
+): NarrationStyle | null {
+  if (isNarrationStyle(value)) return value;
+  if (value === "tempo") return "bright";
+  if (value === "refined") return "calm";
+  return null;
 }

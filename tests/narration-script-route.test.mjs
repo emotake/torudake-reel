@@ -79,7 +79,7 @@ test("shortens only an overlong narration while preserving its intent", async ()
   }
 });
 
-test("builds an emotional story without inventing feelings or imitating a speaker", async () => {
+test("maps the retired emotional style to the natural male template", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
     USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
@@ -144,17 +144,9 @@ test("builds an emotional story without inventing feelings or imitating a speake
 
     assert.equal(response.status, 200);
     const prompt = openAiRequest.input[0].content[0].text;
-    assert.match(prompt, /感情に寄り添うストーリートーク/);
-    assert.match(prompt, /状況→小さな気づきや変化→静かな結び/);
-    assert.match(
-      prompt,
-      /映像から確認できない気持ち、関係性、過去、未来、会話を作らず/,
-    );
-    assert.match(
-      prompt,
-      /実在人物、投稿者、声優、既存キャラクターの声質、口癖、固有の感情表現、間合いは模倣しない/,
-    );
-    assert.match(prompt, /台本の文字数: 100〜120字/);
+    assert.match(prompt, /自然な男性の話し言葉/);
+    assert.doesNotMatch(prompt, /エモーショナルストーリー/);
+    assert.match(prompt, /台本の文字数: 107〜129字/);
     assert.doesNotMatch(
       prompt,
       /instagram\.com|低音シネマ|明石家|さんま/,
@@ -165,7 +157,7 @@ test("builds an emotional story without inventing feelings or imitating a speake
   }
 });
 
-test("builds the rhythm comedy style around a safe setup and punchline", async () => {
+test("builds the bright male style without forcing comedy", async () => {
   globalThis.__cloudflareEnv = {
     OPENAI_API_KEY: "test-key",
     USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
@@ -229,14 +221,19 @@ test("builds the rhythm comedy style around a safe setup and punchline", async (
 
     assert.equal(response.status, 200);
     const prompt = openAiRequest.input[0].content[0].text;
-    assert.match(prompt, /リズムのよいオリジナルコメディトーク/);
-    assert.match(prompt, /短い状況説明→一拍→意外な返し／オチ/);
+    assert.match(prompt, /明るくテンポのよい自然な男性/);
+    assert.match(prompt, /短い文と自然な緩急/);
+    assert.match(prompt, /親しみやすく自然な明るさ/);
     assert.match(
       prompt,
-      /実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、笑い方、決め台詞、話速、固有のイントネーション、間合いは模倣しない/,
+      /実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しない/,
     );
-    assert.match(prompt, /人物の容姿・属性・失敗を嘲笑しない/);
-    assert.match(prompt, /台本の文字数: 107〜129字/);
+    assert.match(prompt, /映像にない出来事や感情を作らない/);
+    assert.doesNotMatch(
+      prompt,
+      /リズムコメディ|短い状況説明→一拍|笑いやオチ|ツッコミ/,
+    );
+    assert.match(prompt, /台本の文字数: 112〜134字/);
     assert.doesNotMatch(
       prompt,
       /instagram\.com|萌えアニメ|関西ツッコミ|激しい関西芸人風|明石家|さんま/,

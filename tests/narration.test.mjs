@@ -15,6 +15,7 @@ import {
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
+  normalizeNarrationStyle,
   normalizeNarrationPlan,
   parseNarrationPronunciationGuide,
   splitNarrationScript,
@@ -175,23 +176,26 @@ test("samples the whole source while matching the natural audio duration", () =>
   assert.equal(timeline.at(-1).end, 72);
 });
 
-test("keeps five distinct narration templates with stable ids", () => {
+test("exposes only the three current narration templates", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
-    ["bright", "calm", "tempo", "refined", "comedy"],
+    ["calm", "bright", "comedy"],
   );
-  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 5);
+  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 3);
   assert.ok(NARRATION_STYLES.every((style) => style.note.includes("声")));
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.label),
-    [
-      "自然な女性",
-      "自然な男性",
-      "ポップボイス",
-      "エモーショナルストーリー",
-      "リズムコメディ",
-    ],
+    ["自然な男性", "自然な女性", "明るい男性"],
   );
+  assert.match(NARRATION_STYLES[2].note, /テンポよく軽快/);
+  assert.doesNotMatch(NARRATION_STYLES[2].note, /コメディ|オチ/);
+});
+
+test("maps retired narration templates to safe current voices", () => {
+  assert.equal(normalizeNarrationStyle("tempo"), "bright");
+  assert.equal(normalizeNarrationStyle("refined"), "calm");
+  assert.equal(normalizeNarrationStyle("comedy"), "comedy");
+  assert.equal(normalizeNarrationStyle("unknown"), null);
 });
 
 test("never stretches narration to fill the video duration", () => {

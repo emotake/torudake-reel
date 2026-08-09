@@ -11,7 +11,7 @@ import {
   type UsageOperationLease,
 } from "../../../../lib/operator-usage";
 import {
-  isNarrationStyle,
+  normalizeNarrationStyle,
   NARRATION_SPEECH_SUCCESS_LIMIT,
   type NarrationStyle,
 } from "../../../../lib/narration";
@@ -57,29 +57,13 @@ const VOICE_SETTINGS: Record<
     instructions:
       "話者像: 穏やかで信頼感があり、丁寧に案内する自然な成人男性。\n声質とトーン: 聞き取りやすい中低音。近すぎない落ち着いた距離感を保ち、過度な低音演技、芝居がかったナレーター調、息の多い話し方を避ける。\n話速と間: 少しゆとりを持ち、結論の前後に短い間を置く。一定の一本調子にせず、重要語だけを控えめに立たせる。\n発音: 固有名詞と数字を明瞭にし、語尾まで自然に言い切る。",
   },
-  tempo: {
-    realtimeVoice: "shimmer",
-    legacyVoice: "nova",
-    fallbackVoice: "shimmer",
-    speed: 1.06,
-    instructions:
-      "話者像: 好きなものを楽しそうに紹介する、明るく表情豊かな成人のポップボイス。\n声質とトーン: やや高めで軽やか。ただし甲高い声、幼児の声、過度に甘い作り声にはしない。小さな驚きや喜びを自然に乗せる。\n話速と間: 短い文は小気味よく、見せ場の直前だけ一瞬間を置く。語尾は軽く収め、すべてを同じ強さで読まない。\n発音: 固有名詞を明瞭にし、早口でも音を潰さない。実在する人物、声優、作品、キャラクターは模倣しない。",
-  },
-  refined: {
-    realtimeVoice: "marin",
-    legacyVoice: "marin",
-    fallbackVoice: "echo",
-    speed: 1,
-    instructions:
-      "話者像: 身近な出来事や気づきを、聞き手の感情にそっと寄り添って語る成人のオリジナル話者。\n声質とトーン: 柔らかく透明感があり、近い距離感の安定した自然な声。感情はにじませるが、泣き声、過度な悲壮感、甘い作り声を避ける。\n話速と間: 文中は滑らかにつなぎ、場面転換と大切な言葉の前後だけ少し長めに間を取る。語尾は静かに収め、遅くしすぎたり引き伸ばしたりしない。\n発音: 読み方の指定を最優先し、固有名詞、数字、助詞を明瞭に読む。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有の感情表現を模倣しない。",
-  },
   comedy: {
     realtimeVoice: "ash",
     legacyVoice: "ash",
     fallbackVoice: "fable",
-    speed: 1,
+    speed: 1.04,
     instructions:
-      "話者像: 日常の発見や比較を、短い起伏で楽しく伝える成人のオリジナル話者。\n声質とトーン: 明るく抜けがよく、表情と抑揚は大きめ。ただし叫ばず、甲高い作り声や騒がしさだけで笑いを作る話し方を避ける。\n話速と間: 説明は小気味よくつなぎ、意外な語句やオチの直前で短く一拍置く。オチは明瞭に強調して直後は少し力を抜き、単語や語尾を引き伸ばさない。\n発音: 語頭を明瞭にし、固有名詞、数字、助詞を落とさない。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
+      "話者像: 聞き手へ親しみやすく語りかける、明るく自然な成人男性。\n声質とトーン: 明るく抜けのよい男性の声。表情と抑揚はやや豊かにするが、叫び声、甲高い作り声、芝居がかったキャラクター調は避ける。\n話速と間: やや軽快に進め、意味のまとまりごとに短く自然な間を置く。重要語だけを明瞭に立たせ、単語や語尾を引き伸ばさない。\n発音: 語頭を明瞭にし、固有名詞、数字、助詞を落とさない。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
   },
 };
 
@@ -501,7 +485,8 @@ export async function POST(request: Request) {
     Number.isFinite(requestedTargetDuration) && requestedTargetDuration > 0
       ? Math.min(90, requestedTargetDuration)
       : 90;
-  if (!script || script.length > 2_000 || !isNarrationStyle(payload.style)) {
+  const style = normalizeNarrationStyle(payload.style);
+  if (!script || script.length > 2_000 || !style) {
     return Response.json(
       { error: "台本は1〜2,000文字で入力してください。" },
       { status: 400 },
@@ -598,7 +583,7 @@ export async function POST(request: Request) {
     let response = await requestSpeech(
       apiKey,
       script,
-      payload.style,
+      style,
       false,
       request.signal,
     );
@@ -629,7 +614,7 @@ export async function POST(request: Request) {
         response = await requestSpeech(
           apiKey,
           script,
-          payload.style,
+          style,
           true,
           request.signal,
         );

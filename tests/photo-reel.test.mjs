@@ -3,17 +3,48 @@ import test from "node:test";
 
 import {
   PHOTO_REEL_FRAME_RATE,
+  PHOTO_REEL_MAX_MOTION_SCALE,
   PHOTO_REEL_MAX_PHOTOS,
   PHOTO_REEL_MIN_PHOTOS,
+  PHOTO_REEL_MOTION_SAFE_AREA_RATIO,
   PHOTO_REEL_OUTPUT_HEIGHT,
   PHOTO_REEL_OUTPUT_WIDTH,
   PHOTO_REEL_TEMPLATES,
   buildPhotoReelFrameSchedule,
+  computePhotoReelForegroundRect,
   computePhotoReelImageLayout,
   createPhotoReelPlan,
   getPhotoReelFrameState,
   validatePhotoReelAssets,
 } from "../lib/photo-reel.ts";
+
+function getTransformedBounds(rect, layer) {
+  const centerX = PHOTO_REEL_OUTPUT_WIDTH / 2;
+  const centerY = PHOTO_REEL_OUTPUT_HEIGHT / 2;
+  const translateX = layer.translateX * PHOTO_REEL_OUTPUT_WIDTH;
+  const translateY = layer.translateY * PHOTO_REEL_OUTPUT_HEIGHT;
+  const cosine = Math.cos(layer.rotation);
+  const sine = Math.sin(layer.rotation);
+  const corners = [
+    [rect.x, rect.y],
+    [rect.x + rect.width, rect.y],
+    [rect.x, rect.y + rect.height],
+    [rect.x + rect.width, rect.y + rect.height],
+  ].map(([x, y]) => {
+    const offsetX = (x - centerX) * layer.scale;
+    const offsetY = (y - centerY) * layer.scale;
+    return {
+      x: centerX + translateX + cosine * offsetX - sine * offsetY,
+      y: centerY + translateY + sine * offsetX + cosine * offsetY,
+    };
+  });
+  return {
+    left: Math.min(...corners.map(({ x }) => x)),
+    right: Math.max(...corners.map(({ x }) => x)),
+    top: Math.min(...corners.map(({ y }) => y)),
+    bottom: Math.max(...corners.map(({ y }) => y)),
+  };
+}
 
 function makeAssets(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -169,15 +200,72 @@ test("builds exact 30fps schedules without an extra frame past the duration", ()
   );
 });
 
-test("preserves a landscape photo over a blurred vertical background", () => {
+test("preserves a landscape photo inside a motion-safe blurred background", () => {
   const layout = computePhotoReelImageLayout(4032, 2268);
   assert.equal(layout.mode, "blur-fit");
-  assert.equal(layout.foreground.x, 0);
+  assert.equal(PHOTO_REEL_MOTION_SAFE_AREA_RATIO, 0.86);
+  assert.ok(layout.foreground.x > 0);
   assert.ok(layout.foreground.y > 600);
-  assert.equal(layout.foreground.width, 1080);
+  assert.ok(layout.foreground.width < PHOTO_REEL_OUTPUT_WIDTH);
+  assert.equal(
+    layout.foreground.width,
+    PHOTO_REEL_OUTPUT_WIDTH * PHOTO_REEL_MOTION_SAFE_AREA_RATIO,
+  );
   assert.ok(layout.background.x < 0);
   assert.equal(layout.background.y, 0);
   assert.equal(layout.background.height, 1920);
+});
+
+test("keeps landscape photo edges visible throughout every template motion", () => {
+  const landscapeDimensions = [
+    [1001, 1000],
+    [4032, 3024],
+    [4032, 2268],
+    [12000, 1000],
+  ];
+
+  for (const [width, height] of landscapeDimensions) {
+    const assets = Array.from({ length: 2 }, (_, index) => ({
+      id: `landscape-${width}-${height}-${index}`,
+      name: `landscape-${index}.jpg`,
+      width,
+      height,
+    }));
+    for (const template of PHOTO_REEL_TEMPLATES) {
+      const plan = createPhotoReelPlan(assets, {
+        duration: 15,
+        templateId: template.id,
+      });
+      const firstSlide = plan.slides[0];
+      const foreground = computePhotoReelForegroundRect(
+        width,
+        height,
+        template.id,
+      );
+      for (let step = 0; step <= 100; step += 1) {
+        const time =
+          firstSlide.start +
+          ((firstSlide.duration - 0.0001) * step) / 100;
+        const layer = getPhotoReelFrameState(plan, time).layers[0];
+        const label = `${template.id} ${width}x${height}`;
+        assert.ok(
+          layer.scale <= PHOTO_REEL_MAX_MOTION_SCALE,
+          `${label} exceeded the decode headroom`,
+        );
+        const bounds = getTransformedBounds(foreground, layer);
+        assert.ok(bounds.left >= -0.01, `${label} clipped the left edge`);
+        assert.ok(
+          bounds.right <= PHOTO_REEL_OUTPUT_WIDTH + 0.01,
+          `${label} clipped the right edge`,
+        );
+        assert.ok(bounds.top >= -0.01, `${label} clipped the top edge`);
+        assert.ok(
+          bounds.bottom <= PHOTO_REEL_OUTPUT_HEIGHT + 0.01,
+          `${label} clipped the bottom edge`,
+        );
+      }
+    }
+  }
 });
 
 test("uses edge-to-edge cover only when a photo already matches 9:16", () => {
@@ -189,11 +277,8 @@ test("uses edge-to-edge cover only when a photo already matches 9:16", () => {
   });
   const square = computePhotoReelImageLayout(2000, 2000);
   assert.equal(square.mode, "blur-fit");
-  assert.deepEqual(square.foreground, {
-    x: 0,
-    y: 420,
-    width: 1080,
-    height: 1080,
-  });
+  assert.ok(Math.abs(square.foreground.x - 75.6) < 0.001);
+  assert.ok(Math.abs(square.foreground.y - 495.6) < 0.001);
+  assert.ok(Math.abs(square.foreground.width - 928.8) < 0.001);
+  assert.ok(Math.abs(square.foreground.height - 928.8) < 0.001);
 });
-

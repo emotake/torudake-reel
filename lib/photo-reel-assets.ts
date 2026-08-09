@@ -1,5 +1,6 @@
 import {
   PHOTO_REEL_MAX_PHOTOS,
+  PHOTO_REEL_MAX_MOTION_SCALE,
   PHOTO_REEL_MIN_PHOTOS,
   PHOTO_REEL_OUTPUT_HEIGHT,
   PHOTO_REEL_OUTPUT_WIDTH,
@@ -8,6 +9,7 @@ import {
 } from "./photo-reel";
 
 let photoAssetSequence = 0;
+export const PHOTO_REEL_THUMBNAIL_MAX_EDGE = 192;
 
 export type PhotoReelPrepareProgress = (
   progress: number,
@@ -50,7 +52,6 @@ function getCanvasContext(canvas: HTMLCanvasElement) {
 async function loadImageElement(url: string) {
   const image = new Image();
   image.decoding = "async";
-  image.src = url;
   await new Promise<void>((resolve, reject) => {
     image.addEventListener("load", () => resolve(), { once: true });
     image.addEventListener(
@@ -58,6 +59,7 @@ async function loadImageElement(url: string) {
       () => reject(new Error("The image element could not decode the photo.")),
       { once: true },
     );
+    image.src = url;
   });
   await image.decode().catch(() => undefined);
   return image;
@@ -85,15 +87,68 @@ async function decodePhoto(file: File, previewUrl: string) {
     source: image as CanvasImageSource,
     width: image.naturalWidth,
     height: image.naturalHeight,
-    dispose: () => undefined,
+    dispose: () => image.removeAttribute("src"),
   };
+}
+
+export function computePhotoReelThumbnailDimensions(
+  width: number,
+  height: number,
+  maxEdge = PHOTO_REEL_THUMBNAIL_MAX_EDGE,
+) {
+  if (
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    height <= 0 ||
+    !Number.isFinite(maxEdge) ||
+    maxEdge <= 0
+  ) {
+    throw new RangeError("Photo thumbnail dimensions must be positive.");
+  }
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+async function createThumbnailUrl(source: HTMLCanvasElement) {
+  const dimensions = computePhotoReelThumbnailDimensions(
+    source.width,
+    source.height,
+  );
+  const thumbnail = createCanvas(dimensions.width, dimensions.height);
+  try {
+    const context = getCanvasContext(thumbnail);
+    context.drawImage(source, 0, 0, thumbnail.width, thumbnail.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      thumbnail.toBlob(
+        (result) => {
+          if (result) resolve(result);
+          else reject(new Error("The browser could not create a photo thumbnail."));
+        },
+        "image/jpeg",
+        0.82,
+      );
+    });
+    return URL.createObjectURL(blob);
+  } finally {
+    thumbnail.width = 1;
+    thumbnail.height = 1;
+  }
 }
 
 function getNormalizedPhotoDimensions(width: number, height: number) {
   const layout = computePhotoReelImageLayout(width, height);
   const target =
     layout.mode === "blur-fit" ? layout.foreground : layout.background;
-  const requiredScale = Math.min(target.width / width, target.height / height);
+  const motionScale =
+    layout.mode === "blur-fit" ? PHOTO_REEL_MAX_MOTION_SCALE : 1;
+  const requiredScale = Math.min(
+    (target.width * motionScale) / width,
+    (target.height * motionScale) / height,
+  );
   const scale = Math.min(1, requiredScale);
   return {
     width: Math.max(1, Math.round(width * scale)),
@@ -138,9 +193,12 @@ async function prepareSinglePhoto(
   file: File,
   index: number,
 ): Promise<PreparedPhotoAsset> {
-  const previewUrl = URL.createObjectURL(file);
+  const decodeUrl = URL.createObjectURL(file);
+  let source: HTMLCanvasElement | null = null;
+  let blurredBackground: HTMLCanvasElement | null = null;
+  let previewUrl: string | null = null;
   try {
-    const decoded = await decodePhoto(file, previewUrl);
+    const decoded = await decodePhoto(file, decodeUrl);
     try {
       if (
         !Number.isFinite(decoded.width) ||
@@ -154,11 +212,17 @@ async function prepareSinglePhoto(
         decoded.width,
         decoded.height,
       );
-      const source = createCanvas(normalized.width, normalized.height);
+      source = createCanvas(normalized.width, normalized.height);
       const context = getCanvasContext(source);
       context.fillStyle = "#07101f";
       context.fillRect(0, 0, source.width, source.height);
       context.drawImage(decoded.source, 0, 0, source.width, source.height);
+      blurredBackground = createBlurredBackground(
+        source,
+        decoded.width,
+        decoded.height,
+      );
+      previewUrl = await createThumbnailUrl(source);
       return {
         id: createPhotoAssetId(file, index),
         name: file.name,
@@ -167,18 +231,24 @@ async function prepareSinglePhoto(
         width: decoded.width,
         height: decoded.height,
         source,
-        blurredBackground: createBlurredBackground(
-          source,
-          decoded.width,
-          decoded.height,
-        ),
+        blurredBackground,
       };
     } finally {
       decoded.dispose();
     }
   } catch (error) {
-    URL.revokeObjectURL(previewUrl);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if (source) {
+      source.width = 1;
+      source.height = 1;
+    }
+    if (blurredBackground) {
+      blurredBackground.width = 1;
+      blurredBackground.height = 1;
+    }
     throw new PhotoReelPhotoDecodeError(file.name, { cause: error });
+  } finally {
+    URL.revokeObjectURL(decodeUrl);
   }
 }
 
@@ -194,7 +264,8 @@ function createPhotoAssetId(file: File, index: number) {
 /**
  * Decodes photos sequentially and downsizes each one before moving to the next.
  * This keeps iPhone memory use bounded even when ten high-resolution photos are
- * selected. Returned object URLs remain valid until disposePhotoAssets().
+ * selected. Original decode URLs are revoked immediately; returned thumbnail
+ * URLs remain valid until disposePhotoAssets().
  */
 export async function preparePhotoAssets(
   files: readonly File[],

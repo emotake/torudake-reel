@@ -4,7 +4,7 @@ import { getCurrentUser } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
 import {
-  isNarrationStyle,
+  normalizeNarrationStyle,
   normalizeNarrationPlan,
   type NarrationStyle,
 } from "../../../../lib/narration";
@@ -19,20 +19,14 @@ const LENGTHS = new Set([30, 60, 90]);
 const STYLE_INSTRUCTIONS: Record<NarrationStyle, string> = {
   bright: "自然な女性の話し言葉。飾らず親しく、標準語で分かりやすく伝える",
   calm: "自然な男性の話し言葉。落ち着いた標準語で、要点を素直に伝える",
-  tempo:
-    "明るく弾むポップなキャラクタートーク。愛嬌のあるリアクションと感情の切り替えを短文で表す。実在人物・作品・キャラクターは模倣しない",
-  refined:
-    "感情に寄り添うストーリートーク。映像で確認できる出来事を落ち着いた短文でつなぎ、大切な言葉に余白を残す。事実や感情を作らない",
   comedy:
-    "リズムのよいオリジナルコメディトーク。短い状況説明→一拍→意外な返し、または予想外のオチで小気味よい緩急を作る。自然な標準語で明瞭に伝える",
+    "明るくテンポのよい自然な男性の話し言葉。短い文と自然な緩急で、親しみやすく明瞭に伝える",
 };
 
 const NATURAL_CHARACTERS_PER_SECOND: Record<NarrationStyle, number> = {
   bright: 4.7,
   calm: 4.5,
-  tempo: 4.8,
-  refined: 4.2,
-  comedy: 4.5,
+  comedy: 4.7,
 };
 
 type OpenAIResponse = {
@@ -125,7 +119,7 @@ export async function POST(request: Request) {
   const goal = typeof payload.goal === "string" ? payload.goal : "";
   const length = Number(payload.length);
   const sourceDuration = Number(payload.sourceDuration);
-  const style = payload.style;
+  const style = normalizeNarrationStyle(payload.style);
   const timingScale =
     payload.timingScale === undefined ? 1 : Number(payload.timingScale);
   const previousScript =
@@ -138,7 +132,7 @@ export async function POST(request: Request) {
     frames.length > MAX_FRAME_COUNT ||
     !GOALS.has(goal) ||
     !LENGTHS.has(length) ||
-    !isNarrationStyle(style) ||
+    !style ||
     !Number.isFinite(sourceDuration) ||
     sourceDuration <= 0 ||
     sourceDuration > 60 * 60 ||
@@ -231,18 +225,9 @@ export async function POST(request: Request) {
   const characterRules =
     style === "comedy"
       ? `
-- 「リズムコメディ」では、冒頭3秒以内に最初の意外性を置き、「短い状況説明→一拍→意外な返し／オチ」の落差を必ず作ってください。
-- 実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、笑い方、決め台詞、話速、固有のイントネーション、間合いは模倣しないでください。
-- 誇張は比喩と言い回しだけに使い、商品情報・効果・価格・実績は誇張しないでください。笑いの矛先は状況か語り手自身に限定し、人物の容姿・属性・失敗を嘲笑しないでください。流行語・ダジャレ・同じツッコミを連発しないでください。`
-      : style === "refined"
-        ? `
-- 「エモーショナルストーリー」では、「状況→小さな気づきや変化→静かな結び」の順で、映像にある出来事を自然につないでください。
-- 映像から確認できない気持ち、関係性、過去、未来、会話を作らず、悲しさや感動を無理に煽らないでください。
-- 実在人物、投稿者、声優、既存キャラクターの声質、口癖、固有の感情表現、間合いは模倣しないでください。`
-      : style === "tempo"
-        ? `
-- 「ポップボイス」では、短い驚きや喜び、愛嬌のあるリアクション、感情の切り替えを入れてください。ただし幼児語を多用せず、内容と固有名詞は明瞭にしてください。
-- 実在する人物・作品・声優・キャラクターの決め台詞や話し方は模倣しないでください。`
+- 「明るい男性」では、冒頭3秒以内に要点を置き、短い文と自然な緩急でテンポよく伝えてください。映像の内容に合う、親しみやすく自然な明るさを保ってください。
+- 実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しないでください。
+- 商品情報・効果・価格・実績を誇張せず、映像にない出来事や感情を作らないでください。`
       : "";
   const content: Array<
     | { type: "input_text"; text: string }

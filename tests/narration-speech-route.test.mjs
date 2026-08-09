@@ -126,7 +126,7 @@ function realtimeUpgrade(socket) {
   };
 }
 
-test("generates five distinct realtime voices and wraps PCM output as WAV", async () => {
+test("generates the three current realtime voices and wraps PCM output as WAV", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
@@ -141,7 +141,7 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
 
   try {
     const worker = await loadWorker("narration-realtime-voices");
-    const styles = ["bright", "calm", "tempo", "refined", "comedy"];
+    const styles = ["calm", "bright", "comedy"];
 
     for (const style of styles) {
       const response = await worker.fetch(
@@ -182,15 +182,15 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["coral", "cedar", "shimmer", "marin", "ash"],
+      ["cedar", "coral", "ash"],
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
-      5,
+      3,
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
-      [1, 0.99, 1.06, 1, 1],
+      [0.99, 1, 1.04],
     );
     assert.ok(
       sessions.every(
@@ -218,15 +218,17 @@ test("generates five distinct realtime voices and wraps PCM output as WAV", asyn
     );
     assert.equal(
       new Set(responses.map((response) => response.instructions)).size,
-      5,
+      3,
     );
-    assert.match(responses[0].instructions, /温かくクリア/);
-    assert.match(responses[1].instructions, /聞き取りやすい中低音/);
-    assert.match(responses[2].instructions, /成人のポップボイス/);
-    assert.match(responses[3].instructions, /感情にそっと寄り添って語る/);
+    assert.match(responses[0].instructions, /聞き取りやすい中低音/);
+    assert.match(responses[1].instructions, /温かくクリア/);
     assert.match(
-      responses[4].instructions,
-      /日常の発見や比較を、短い起伏で楽しく伝える/,
+      responses[2].instructions,
+      /明るく自然な成人男性/,
+    );
+    assert.doesNotMatch(
+      responses[2].instructions,
+      /コメディ|オチ|笑いを作る/,
     );
     assert.doesNotMatch(
       responses.map((response) => response.instructions).join("\n"),
@@ -280,7 +282,7 @@ test("uses the matching HD fallback when realtime cannot connect", async () => {
     );
     assert.equal(fallbackBody.model, "tts-1-hd");
     assert.equal(fallbackBody.voice, "echo");
-    assert.equal(fallbackBody.speed, 1);
+    assert.equal(fallbackBody.speed, 0.99);
   } finally {
     globalThis.fetch = originalFetch;
   }

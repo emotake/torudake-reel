@@ -1228,7 +1228,7 @@ export default function Home() {
   const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(true);
   const [spokenAutoCutEnabled, setSpokenAutoCutEnabled] = useState(true);
   const [narrationStyle, setNarrationStyle] =
-    useState<NarrationStyle>("bright");
+    useState<NarrationStyle>("calm");
   const [narrationOriginalAudio, setNarrationOriginalAudio] =
     useState<NarrationOriginalAudioLevel>(
       DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT,
@@ -1950,18 +1950,16 @@ export default function Home() {
               新しく作る
             </button>
           )}
-          <button
-            className="trialButton"
-            onClick={() =>
-              stage === "start"
-                ? inputRef.current?.click()
-                : stage === "transfer"
-                  ? reset()
-                  : notify("保存機能は次の工程で接続します")
-            }
-          >
-            {stage === "transfer" ? "サービスを見る" : "無料で試す"}
-          </button>
+          {(stage === "start" || stage === "transfer") && (
+            <button
+              className="trialButton"
+              onClick={() =>
+                stage === "start" ? inputRef.current?.click() : reset()
+              }
+            >
+              {stage === "transfer" ? "サービスを見る" : "無料で試す"}
+            </button>
+          )}
         </div>
       </header>
 
@@ -3132,6 +3130,7 @@ function SetupWorkspace({
                     key={style.id}
                     data-style={style.id}
                     className={narrationStyle === style.id ? "selected" : ""}
+                    aria-pressed={narrationStyle === style.id}
                     onClick={() => setNarrationStyle(style.id)}
                   >
                     <strong>{style.label}</strong>
@@ -3274,7 +3273,7 @@ function SetupWorkspace({
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
                 ・
                 {audioMode === "narration"
-                  ? `${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}AI音声・元動画の音${Math.round(narrationOriginalAudio)}%・${narrationCaptionsEnabled ? "テロップあり" : "テロップなし"}・${narrationAutoCutEnabled ? "短く自動編集" : "元動画のまま"}`
+                  ? `「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」のAI音声・元動画の音${Math.round(narrationOriginalAudio)}%・${narrationCaptionsEnabled ? "テロップあり" : "テロップなし"}・${narrationAutoCutEnabled ? "短く自動編集" : "元動画のまま"}`
                   : `${spokenCaptionsEnabled ? `${CAPTION_MOODS.find((item) => item.id === captionProfile.mood)?.label ?? "ナチュラル"}テロップ` : "テロップなし"}・${spokenAutoCutEnabled ? "音声に合わせてつなぎ直す" : "元動画の流れを保つ"}`}
                 ・{keepsOriginalVideo ? "元動画の長さ" : `${length}秒以内`}
               </p>
@@ -6619,6 +6618,7 @@ function ResultWorkspace({
                     className={
                       draftNarrationStyle === style.id ? "active" : ""
                     }
+                    aria-pressed={draftNarrationStyle === style.id}
                     onClick={() => setDraftNarrationStyle(style.id)}
                     disabled={isMediaBusy}
                   >
@@ -6672,6 +6672,14 @@ function ResultWorkspace({
                       ? "変更内容をAI音声に反映する（1回使用）"
                       : "変更は反映済み"}
               </button>
+              <p
+                className={`narrationVoicePreviewStatus${hasPendingNarrationChanges ? " isPending" : ""}`}
+                role="status"
+              >
+                {hasPendingNarrationChanges
+                  ? `下の試聴は変更前の「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」です。生成ボタンを押すと選択した声へ変わります。`
+                  : `下の試聴には「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」が反映されています。`}
+              </p>
               <audio
                 ref={narrationSampleAudioRef}
                 className="narrationAudio"
@@ -7364,6 +7372,8 @@ function ResultWorkspace({
           <div className="thumbnailPreviewPanel">
             <div className="thumbnailPreviewFrame">
               {thumbnailPreviewUrl ? (
+                // This is a short-lived local blob URL, which Next Image cannot optimize.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={thumbnailPreviewUrl}
                   alt="生成した9対16の表紙プレビュー"

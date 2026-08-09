@@ -13,18 +13,24 @@ import {
 import {
   disposePhotoAssets,
   drawPhotoReelFrame,
+  computePhotoReelImageLayout,
   preparePhotoAssets,
   type PhotoReelSettings,
   type PhotoReelTemplateId,
   type PreparedPhotoAsset,
 } from "../../lib/photo-reel";
-import { exportPhotoReel } from "../../lib/photo-reel-export";
+import {
+  assertPhotoReelExportSupported,
+  exportPhotoReel,
+  preparePhotoReelAudioContext,
+} from "../../lib/photo-reel-export";
 
 const MAX_PHOTOS = 10;
 const MIN_PHOTOS = 2;
 const MAX_PHOTO_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 250 * 1024 * 1024;
-const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+const MAX_AUDIO_DURATION_SECONDS = 90;
 
 const TEMPLATE_OPTIONS: Array<{
   id: PhotoReelTemplateId;
@@ -71,7 +77,7 @@ type ResultVideo = {
 };
 
 type PendingFinalize = {
-  blob: Blob;
+  result: ResultVideo;
   reservationId: string;
 };
 
@@ -100,6 +106,46 @@ function formatTime(seconds: number) {
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
 }
 
+function readAudioDuration(url: string) {
+  return new Promise<number>((resolve, reject) => {
+    const audio = document.createElement("audio");
+    let settled = false;
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      audio.removeEventListener("loadedmetadata", finish);
+      audio.removeEventListener("error", fail);
+      audio.removeAttribute("src");
+      audio.load();
+    };
+    const succeed = (duration: number) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(duration);
+    };
+    const finish = () => {
+      const duration = audio.duration;
+      if (Number.isFinite(duration) && duration > 0) {
+        succeed(duration);
+      } else {
+        fail();
+      }
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("音源の長さを確認できませんでした。"));
+    };
+    const timeout = window.setTimeout(fail, 10_000);
+    audio.preload = "metadata";
+    audio.addEventListener("loadedmetadata", finish, { once: true });
+    audio.addEventListener("error", fail, { once: true });
+    audio.src = url;
+    audio.load();
+  });
+}
+
 function buildFilename() {
   const now = new Date();
   const stamp = [
@@ -113,6 +159,15 @@ function buildFilename() {
   return `torudake-photo-reel-${stamp}.mp4`;
 }
 
+function prepareResultVideo(blob: Blob): ResultVideo {
+  if (blob.size < 1024) throw new Error("完成動画のデータが空でした。");
+  return {
+    blob,
+    url: URL.createObjectURL(blob),
+    filename: buildFilename(),
+  };
+}
+
 async function readError(response: Response, fallback: string) {
   const payload = (await response.json().catch(() => null)) as {
     error?: string;
@@ -120,10 +175,13 @@ async function readError(response: Response, fallback: string) {
   return payload?.error?.trim() || fallback;
 }
 
-async function reservePhotoUsage(duration: 15 | 30) {
+async function reservePhotoUsage(
+  duration: 15 | 30,
+  idempotencyKey: string,
+) {
   const requestBody = JSON.stringify({
     sourceDurationSeconds: duration,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey,
     creationType: "photo",
   });
   const requestReservation = () =>
@@ -218,11 +276,19 @@ function getFriendlyExportError(error: unknown) {
 export default function PhotoReelClient() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const audioPreviewRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const photosRef = useRef<PreparedPhotoAsset[]>([]);
   const animationRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<ResultVideo | null>(null);
+  const pendingFinalizeRef = useRef<PendingFinalize | null>(null);
+  const audioValidationRef = useRef(0);
+  const audioPreparingRef = useRef(false);
+  const finalizingUsageRef = useRef(false);
+  const previewTimeRef = useRef(0);
+  const reservationAttemptRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
   const [photos, setPhotos] = useState<PreparedPhotoAsset[]>([]);
   const [duration, setDuration] = useState<15 | 30>(15);
@@ -231,6 +297,7 @@ export default function PhotoReelClient() {
   const [title, setTitle] = useState("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
+  const [audioPreparing, setAudioPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [prepareProgress, setPrepareProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -241,9 +308,16 @@ export default function PhotoReelClient() {
   const [result, setResult] = useState<ResultVideo | null>(null);
   const [pendingFinalize, setPendingFinalize] =
     useState<PendingFinalize | null>(null);
+  const [finalizingUsage, setFinalizingUsage] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showPurchase, setShowPurchase] = useState(false);
+  const isEditingLocked =
+    preparing ||
+    exporting ||
+    audioPreparing ||
+    finalizingUsage ||
+    Boolean(pendingFinalize);
 
   const settings = useMemo<PhotoReelSettings>(
     () => ({
@@ -256,11 +330,16 @@ export default function PhotoReelClient() {
 
   const lowResolutionCount = useMemo(
     () =>
-      photos.filter(
-        (photo) =>
-          Math.min(photo.width, photo.height) < 1080 ||
-          Math.max(photo.width, photo.height) < 1920,
-      ).length,
+      photos.filter((photo) => {
+        const foreground = computePhotoReelImageLayout(
+          photo.width,
+          photo.height,
+        ).foreground;
+        return (
+          foreground.width > photo.width + 0.5 ||
+          foreground.height > photo.height + 0.5
+        );
+      }).length,
     [photos],
   );
 
@@ -272,12 +351,24 @@ export default function PhotoReelClient() {
     resultRef.current = result;
   }, [result]);
 
+  useEffect(() => {
+    pendingFinalizeRef.current = pendingFinalize;
+  }, [pendingFinalize]);
+
+  useEffect(() => {
+    previewTimeRef.current = previewTime;
+  }, [previewTime]);
+
   useEffect(
     () => () => {
       if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
     },
     [audioPreviewUrl],
   );
+
+  useEffect(() => {
+    if (!isPlaying) audioPreviewRef.current?.pause();
+  }, [isPlaying]);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -290,26 +381,62 @@ export default function PhotoReelClient() {
     return () => query.removeEventListener?.("change", update);
   }, []);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // React Strict Mode replays effects in development, so reset this on each
+    // mount instead of only relying on the ref's initial value.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      audioValidationRef.current += 1;
+      audioPreparingRef.current = false;
+      finalizingUsageRef.current = false;
       if (animationRef.current !== null) {
         cancelAnimationFrame(animationRef.current);
       }
       abortRef.current?.abort();
       disposePhotoAssets(photosRef.current);
       if (resultRef.current) URL.revokeObjectURL(resultRef.current.url);
-    },
-    [],
-  );
+      const pendingResult = pendingFinalizeRef.current?.result;
+      if (pendingResult && pendingResult.url !== resultRef.current?.url) {
+        URL.revokeObjectURL(pendingResult.url);
+      }
+    };
+  }, []);
 
   const clearResult = useCallback(() => {
     setShowPurchase(false);
-    setPendingFinalize(null);
     setResult((current) => {
       if (current) URL.revokeObjectURL(current.url);
+      resultRef.current = null;
       return null;
     });
   }, []);
+
+  const setPreviewAudioPosition = useCallback((time: number) => {
+    const audio = audioPreviewRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const desired = Math.max(0, time) % audio.duration;
+    if (Math.abs(audio.currentTime - desired) > 0.3) {
+      audio.currentTime = desired;
+    }
+  }, []);
+
+  const togglePreviewPlayback = () => {
+    if (isPlaying) {
+      audioPreviewRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+    setPreviewAudioPosition(previewTime >= duration ? 0 : previewTime);
+    const audioPlayback = audioPreviewRef.current?.play();
+    audioPlayback?.catch(() => {
+      setIsPlaying(false);
+      setError(
+        "BGMを再生できませんでした。音源を選び直すか、端末の消音設定を確認してください。",
+      );
+    });
+    setIsPlaying(true);
+  };
 
   const renderPreviewFrame = useCallback(
     (time: number) => {
@@ -331,7 +458,8 @@ export default function PhotoReelClient() {
     if (!isPlaying || photos.length === 0 || reducedMotion) return;
     let lastFrame = performance.now();
     let lastUiUpdate = lastFrame;
-    let currentTime = previewTime >= duration ? 0 : previewTime;
+    let currentTime =
+      previewTimeRef.current >= duration ? 0 : previewTimeRef.current;
 
     const tick = (now: number) => {
       if (now - lastFrame >= 1000 / 30) {
@@ -340,6 +468,8 @@ export default function PhotoReelClient() {
         if (currentTime >= duration) currentTime %= duration;
         renderPreviewFrame(currentTime);
         if (now - lastUiUpdate >= 100) {
+          setPreviewAudioPosition(currentTime);
+          previewTimeRef.current = currentTime;
           setPreviewTime(currentTime);
           lastUiUpdate = now;
         }
@@ -354,12 +484,19 @@ export default function PhotoReelClient() {
         animationRef.current = null;
       }
     };
-  }, [duration, isPlaying, photos.length, previewTime, reducedMotion, renderPreviewFrame]);
+  }, [
+    duration,
+    isPlaying,
+    photos.length,
+    reducedMotion,
+    renderPreviewFrame,
+    setPreviewAudioPosition,
+  ]);
 
   const addPhotos = async (event: ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (chosen.length === 0 || preparing || exporting) return;
+    if (chosen.length === 0 || preparing || isEditingLocked) return;
 
     setError("");
     setShowPurchase(false);
@@ -404,20 +541,37 @@ export default function PhotoReelClient() {
     const failed: string[] = [];
 
     for (let index = 0; index < accepted.length; index += 1) {
+      if (!mountedRef.current) break;
       const file = accepted[index];
       try {
         const assets = await preparePhotoAssets([file], (fileProgress) => {
-          setPrepareProgress((index + fileProgress) / accepted.length);
+          if (mountedRef.current) {
+            setPrepareProgress((index + fileProgress) / accepted.length);
+          }
         });
+        if (!mountedRef.current) {
+          disposePhotoAssets(assets);
+          break;
+        }
         if (assets[0]) prepared.push(assets[0]);
       } catch {
         failed.push(file.name);
       }
     }
 
+    if (!mountedRef.current) {
+      disposePhotoAssets(prepared);
+      return;
+    }
+
     if (prepared.length > 0) {
-      setPhotos((current) => [...current, ...prepared]);
+      setPhotos((current) => {
+        const next = [...current, ...prepared];
+        photosRef.current = next;
+        return next;
+      });
       setPreviewTime(0);
+      previewTimeRef.current = 0;
       setMessage(
         `${prepared.length}枚を追加しました。順番と仕上がりを確認できます。`,
       );
@@ -433,65 +587,129 @@ export default function PhotoReelClient() {
 
   const movePhoto = (index: number, direction: -1 | 1) => {
     const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= photos.length || exporting) return;
+    if (nextIndex < 0 || nextIndex >= photos.length || isEditingLocked) return;
     setPhotos((current) => {
       const next = [...current];
       [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      photosRef.current = next;
       return next;
     });
     setPreviewTime(0);
+    previewTimeRef.current = 0;
     setIsPlaying(false);
     clearResult();
   };
 
   const removePhoto = (index: number) => {
-    if (exporting) return;
+    if (isEditingLocked) return;
     setPhotos((current) => {
       const target = current[index];
       if (target) disposePhotoAssets([target]);
-      return current.filter((_, itemIndex) => itemIndex !== index);
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      photosRef.current = next;
+      return next;
     });
     setPreviewTime(0);
+    previewTimeRef.current = 0;
     setIsPlaying(false);
     clearResult();
   };
 
-  const handleAudio = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleAudio = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
     event.target.value = "";
-    if (!file) return;
+    if (!file || isEditingLocked) return;
+    const validation = audioValidationRef.current + 1;
+    audioValidationRef.current = validation;
     if (
       (!file.type.startsWith("audio/") &&
         !/\.(mp3|m4a|wav|aac)$/i.test(file.name)) ||
       file.size > MAX_AUDIO_BYTES
     ) {
-      setError("音源は30MB以下のMP3・M4A・WAVなどを選んでください。");
+      audioPreparingRef.current = false;
+      setAudioPreparing(false);
+      setError("音源は12MB以下のMP3・M4A・WAVなどを選んでください。");
       return;
     }
-    setAudioFile(file);
-    setAudioPreviewUrl(URL.createObjectURL(file));
+    audioPreparingRef.current = true;
+    setAudioPreparing(true);
     setError("");
-    setShowPurchase(false);
-    clearResult();
+    const nextPreviewUrl = URL.createObjectURL(file);
+    let ownsPreviewUrl = true;
+    const revokeNextPreview = () => {
+      if (!ownsPreviewUrl) return;
+      ownsPreviewUrl = false;
+      URL.revokeObjectURL(nextPreviewUrl);
+    };
+    try {
+      const audioDuration = await readAudioDuration(nextPreviewUrl);
+      if (
+        !mountedRef.current ||
+        audioValidationRef.current !== validation ||
+        pendingFinalizeRef.current
+      ) {
+        revokeNextPreview();
+        return;
+      }
+      if (audioDuration > MAX_AUDIO_DURATION_SECONDS) {
+        revokeNextPreview();
+        setError(
+          "音源は90秒以内にしてください。長い音源は端末のメモリ不足を防ぐため読み込めません。",
+        );
+        return;
+      }
+      setIsPlaying(false);
+      audioPreviewRef.current?.pause();
+      setAudioFile(file);
+      setAudioPreviewUrl(nextPreviewUrl);
+      ownsPreviewUrl = false;
+      setShowPurchase(false);
+      clearResult();
+    } catch (caught) {
+      revokeNextPreview();
+      if (
+        mountedRef.current &&
+        audioValidationRef.current === validation
+      ) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "音源を読み込めませんでした。",
+        );
+      }
+    } finally {
+      if (audioValidationRef.current === validation) {
+        audioPreparingRef.current = false;
+        if (mountedRef.current) setAudioPreparing(false);
+      }
+    }
   };
 
-  const finalizeResult = useCallback((blob: Blob) => {
-    if (blob.size < 1024) throw new Error("完成動画のデータが空でした。");
-    const nextResult = {
-      blob,
-      url: URL.createObjectURL(blob),
-      filename: buildFilename(),
-    };
+  const finalizeResult = useCallback((nextResult: ResultVideo) => {
     setResult((current) => {
       if (current) URL.revokeObjectURL(current.url);
+      resultRef.current = nextResult;
       return nextResult;
     });
+    pendingFinalizeRef.current = null;
     setPendingFinalize(null);
     setMessage("1080×1920のMP4動画が完成しました。保存または共有できます。");
   }, []);
 
   const startExport = async () => {
-    if (photos.length < MIN_PHOTOS || preparing || exporting) return;
+    if (
+      photos.length < MIN_PHOTOS ||
+      preparing ||
+      audioPreparingRef.current ||
+      abortRef.current ||
+      isEditingLocked
+    ) {
+      return;
+    }
+    audioValidationRef.current += 1;
+    const preparedAudioContext = audioFile
+      ? preparePhotoReelAudioContext()
+      : null;
     clearResult();
     setError("");
     setMessage("");
@@ -499,65 +717,127 @@ export default function PhotoReelClient() {
     setExporting(true);
     setExportProgress(0);
     setIsPlaying(false);
+    audioPreviewRef.current?.pause();
     const controller = new AbortController();
     abortRef.current = controller;
     let reservationId: string | null = null;
-    let videoCreated = false;
+    let preparedResult: ResultVideo | null = null;
 
     try {
-      reservationId = await reservePhotoUsage(duration);
+      await assertPhotoReelExportSupported(Boolean(audioFile));
+      const reservationAttempt =
+        reservationAttemptRef.current ?? crypto.randomUUID();
+      reservationAttemptRef.current = reservationAttempt;
+      reservationId = await reservePhotoUsage(duration, reservationAttempt);
+      if (!reservationId) reservationAttemptRef.current = null;
       const blob = await exportPhotoReel(photos, settings, {
         audioFile: audioFile ?? undefined,
         audioFit: "loop",
+        preparedAudioContext,
         signal: controller.signal,
         onProgress: (value) => setExportProgress(value),
       });
-      videoCreated = true;
+      preparedResult = prepareResultVideo(blob);
       if (reservationId) {
         try {
           await updatePhotoUsage("complete", reservationId);
         } catch {
-          setPendingFinalize({ blob, reservationId });
+          const pending = { result: preparedResult, reservationId };
+          pendingFinalizeRef.current = pending;
+          setPendingFinalize(pending);
           setError(
             "動画は完成しましたが、利用記録を確認できませんでした。通信を確認して再試行してください。",
           );
           return;
         }
       }
-      finalizeResult(blob);
+      reservationAttemptRef.current = null;
+      finalizeResult(preparedResult);
       setExportProgress(1);
     } catch (caught) {
+      if (preparedResult) URL.revokeObjectURL(preparedResult.url);
       setShowPurchase(
         caught instanceof PhotoReelRequestError && caught.status === 402,
       );
-      if (reservationId && !videoCreated) {
+      if (reservationId) {
         try {
           await updatePhotoUsage("release", reservationId);
+          reservationAttemptRef.current = null;
         } catch {
           setError(
             `${getFriendlyExportError(caught)} 利用枠の戻し処理も通信できませんでした。しばらく待ってから再度お試しください。`,
           );
           return;
         }
+      } else if (
+        caught instanceof PhotoReelRequestError &&
+        caught.status < 500
+      ) {
+        reservationAttemptRef.current = null;
       }
       setError(getFriendlyExportError(caught));
     } finally {
       abortRef.current = null;
+      await preparedAudioContext?.close().catch(() => undefined);
       setExporting(false);
     }
   };
 
   const retryFinalize = async () => {
-    if (!pendingFinalize || exporting) return;
-    setExporting(true);
+    if (
+      !pendingFinalize ||
+      exporting ||
+      finalizingUsage ||
+      finalizingUsageRef.current
+    ) {
+      return;
+    }
+    finalizingUsageRef.current = true;
+    setFinalizingUsage(true);
     setError("");
     try {
       await updatePhotoUsage("complete", pendingFinalize.reservationId);
-      finalizeResult(pendingFinalize.blob);
+      reservationAttemptRef.current = null;
+      finalizeResult(pendingFinalize.result);
     } catch (caught) {
       setError(getFriendlyExportError(caught));
     } finally {
-      setExporting(false);
+      finalizingUsageRef.current = false;
+      setFinalizingUsage(false);
+    }
+  };
+
+  const discardPendingFinalize = async () => {
+    if (
+      !pendingFinalize ||
+      exporting ||
+      finalizingUsage ||
+      finalizingUsageRef.current
+    ) {
+      return;
+    }
+    finalizingUsageRef.current = true;
+    setFinalizingUsage(true);
+    let releaseFailed = false;
+    try {
+      await updatePhotoUsage("release", pendingFinalize.reservationId);
+    } catch {
+      releaseFailed = true;
+    } finally {
+      URL.revokeObjectURL(pendingFinalize.result.url);
+      reservationAttemptRef.current = null;
+      pendingFinalizeRef.current = null;
+      setPendingFinalize(null);
+      finalizingUsageRef.current = false;
+      setFinalizingUsage(false);
+      if (releaseFailed) {
+        setError(
+          "完成データを破棄しました。利用枠の解放を確認できないため、しばらく待ってから書き出してください。",
+        );
+      } else {
+        setError("");
+        setMessage("完成データを破棄し、編集へ戻りました。");
+      }
     }
   };
 
@@ -591,17 +871,19 @@ export default function PhotoReelClient() {
   };
 
   const updateDuration = (next: 15 | 30) => {
-    if (exporting) return;
+    if (isEditingLocked) return;
     setDuration(next);
     setPreviewTime(0);
+    previewTimeRef.current = 0;
     setIsPlaying(false);
     clearResult();
   };
 
   const updateTemplate = (next: PhotoReelTemplateId) => {
-    if (exporting) return;
+    if (isEditingLocked) return;
     setTemplateId(next);
     setPreviewTime(0);
+    previewTimeRef.current = 0;
     setIsPlaying(false);
     clearResult();
   };
@@ -669,7 +951,7 @@ export default function PhotoReelClient() {
           <div className="photoReelPlayback">
             <button
               type="button"
-              onClick={() => setIsPlaying((current) => !current)}
+              onClick={togglePreviewPlayback}
               disabled={photos.length === 0 || reducedMotion}
               aria-label={isPlaying ? "プレビューを一時停止" : "プレビューを再生"}
             >
@@ -684,8 +966,12 @@ export default function PhotoReelClient() {
               disabled={photos.length === 0}
               aria-label="プレビューの再生位置"
               onChange={(event) => {
+                audioPreviewRef.current?.pause();
                 setIsPlaying(false);
-                setPreviewTime(Number(event.target.value));
+                const nextTime = Number(event.target.value);
+                previewTimeRef.current = nextTime;
+                setPreviewTime(nextTime);
+                setPreviewAudioPosition(nextTime);
               }}
             />
             <span>
@@ -730,13 +1016,14 @@ export default function PhotoReelClient() {
               type="file"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
               multiple
+              disabled={isEditingLocked}
               onChange={addPhotos}
             />
             <button
               className="photoReelAddButton"
               type="button"
               onClick={() => photoInputRef.current?.click()}
-              disabled={preparing || exporting || photos.length >= MAX_PHOTOS}
+              disabled={preparing || isEditingLocked || photos.length >= MAX_PHOTOS}
             >
               <span aria-hidden="true">＋</span>
               <span>
@@ -775,7 +1062,7 @@ export default function PhotoReelClient() {
                       <button
                         type="button"
                         onClick={() => movePhoto(index, -1)}
-                        disabled={index === 0 || exporting}
+                        disabled={index === 0 || isEditingLocked}
                         aria-label={`${photo.name}を1つ前へ`}
                       >
                         ↑
@@ -783,7 +1070,7 @@ export default function PhotoReelClient() {
                       <button
                         type="button"
                         onClick={() => movePhoto(index, 1)}
-                        disabled={index === photos.length - 1 || exporting}
+                        disabled={index === photos.length - 1 || isEditingLocked}
                         aria-label={`${photo.name}を1つ後ろへ`}
                       >
                         ↓
@@ -792,7 +1079,7 @@ export default function PhotoReelClient() {
                         type="button"
                         className="photoReelDelete"
                         onClick={() => removePhoto(index)}
-                        disabled={exporting}
+                        disabled={isEditingLocked}
                         aria-label={`${photo.name}を削除`}
                       >
                         ×
@@ -820,7 +1107,7 @@ export default function PhotoReelClient() {
                   role="radio"
                   aria-checked={duration === seconds}
                   className={duration === seconds ? "isActive" : ""}
-                  disabled={exporting}
+                  disabled={isEditingLocked}
                   onClick={() => updateDuration(seconds)}
                 >
                   <strong>{seconds}秒</strong>
@@ -847,7 +1134,7 @@ export default function PhotoReelClient() {
                   aria-checked={templateId === option.id}
                   data-template={option.id}
                   className={templateId === option.id ? "isActive" : ""}
-                  disabled={exporting}
+                  disabled={isEditingLocked}
                   onClick={() => updateTemplate(option.id)}
                 >
                   <span className="photoReelTemplateVisual" aria-hidden="true">
@@ -884,9 +1171,10 @@ export default function PhotoReelClient() {
                 value={title}
                 maxLength={42}
                 placeholder="例：週末の小さな旅"
-                disabled={exporting}
+                disabled={isEditingLocked}
                 onChange={(event) => {
                   setTitle(event.target.value);
+                  previewTimeRef.current = 0;
                   setPreviewTime(0);
                   clearResult();
                 }}
@@ -897,6 +1185,7 @@ export default function PhotoReelClient() {
               className="visuallyHidden"
               type="file"
               accept="audio/*,.mp3,.m4a,.wav,.aac"
+              disabled={isEditingLocked}
               onChange={handleAudio}
             />
             <div className="photoReelAudioRow">
@@ -905,37 +1194,46 @@ export default function PhotoReelClient() {
                 <p>
                   {audioFile ? audioFile.name : "音なし（初期設定）"}
                 </p>
-                <small>権利を持つ音源だけをご利用ください。</small>
+                <small>90秒・12MB以内。権利を持つ音源だけをご利用ください。</small>
               </div>
               <button
                 type="button"
                 onClick={() => audioInputRef.current?.click()}
-                disabled={exporting}
+                disabled={isEditingLocked}
               >
-                {audioFile ? "変更" : "音源を選ぶ"}
+                {audioPreparing
+                  ? "音源を確認中…"
+                  : audioFile
+                    ? "変更"
+                    : "音源を選ぶ"}
               </button>
               {audioFile ? (
                 <button
                   type="button"
                   className="photoReelAudioRemove"
                   onClick={() => {
+                    audioValidationRef.current += 1;
                     setAudioFile(null);
                     setAudioPreviewUrl("");
+                    audioPreviewRef.current?.pause();
+                    setIsPlaying(false);
                     clearResult();
                   }}
-                  disabled={exporting}
+                  disabled={isEditingLocked}
                 >
                   音なしに戻す
                 </button>
               ) : null}
               {audioPreviewUrl ? (
-                <audio
-                  className="photoReelAudioPreview"
-                  src={audioPreviewUrl}
-                  controls
-                  preload="metadata"
-                  aria-label="選択したBGMを試聴"
-                />
+                <div className="photoReelAudioSyncNote">
+                  <audio
+                    ref={audioPreviewRef}
+                    src={audioPreviewUrl}
+                    preload="metadata"
+                    loop
+                  />
+                  <small>左のプレビュー再生ボタンで、映像とBGMを一緒に確認できます。</small>
+                </div>
               ) : null}
             </div>
           </section>
@@ -957,9 +1255,20 @@ export default function PhotoReelClient() {
               className="photoReelExportButton"
               type="button"
               onClick={startExport}
-              disabled={photos.length < MIN_PHOTOS || preparing || exporting || Boolean(pendingFinalize)}
+              disabled={
+                photos.length < MIN_PHOTOS ||
+                preparing ||
+                audioPreparing ||
+                exporting ||
+                finalizingUsage ||
+                Boolean(pendingFinalize)
+              }
             >
-              {exporting ? `動画を作成中… ${Math.round(exportProgress * 100)}%` : "写真リールを書き出す"}
+              {audioPreparing
+                ? "音源を確認中…"
+                : exporting
+                  ? `動画を作成中… ${Math.round(exportProgress * 100)}%`
+                  : "写真リールを書き出す"}
               <span aria-hidden="true">↓</span>
             </button>
             {photos.length === 1 ? (
@@ -980,14 +1289,26 @@ export default function PhotoReelClient() {
               </button>
             ) : null}
             {pendingFinalize ? (
-              <button
-                className="photoReelRetryButton"
-                type="button"
-                onClick={retryFinalize}
-                disabled={exporting}
-              >
-                利用確認を再試行して保存へ進む
-              </button>
+              <div className="photoReelFinalizeActions">
+                <button
+                  className="photoReelRetryButton"
+                  type="button"
+                  onClick={retryFinalize}
+                  disabled={exporting || finalizingUsage}
+                >
+                  {finalizingUsage
+                    ? "利用確認中…"
+                    : "利用確認を再試行して保存へ進む"}
+                </button>
+                <button
+                  className="photoReelDiscardButton"
+                  type="button"
+                  onClick={discardPendingFinalize}
+                  disabled={exporting || finalizingUsage}
+                >
+                  完成データを破棄して編集へ戻る
+                </button>
+              </div>
             ) : null}
           </section>
 

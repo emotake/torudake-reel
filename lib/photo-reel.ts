@@ -3,6 +3,10 @@ export const PHOTO_REEL_MAX_PHOTOS = 10;
 export const PHOTO_REEL_OUTPUT_WIDTH = 1080;
 export const PHOTO_REEL_OUTPUT_HEIGHT = 1920;
 export const PHOTO_REEL_FRAME_RATE = 30;
+export const PHOTO_REEL_MAX_MOTION_SCALE = 1.1;
+// Leaves enough room for the largest template zoom, pan, and rotation so a
+// blur-fit photo stays fully inside the exported frame during its main shot.
+export const PHOTO_REEL_MOTION_SAFE_AREA_RATIO = 0.86;
 
 export type PhotoReelDuration = 15 | 30;
 export type PhotoReelTemplateId =
@@ -166,6 +170,8 @@ export type PhotoReelImageLayout = Readonly<{
     height: number;
   }>;
 }>;
+
+export type PhotoReelImageRect = PhotoReelImageLayout["foreground"];
 
 const TIME_EPSILON = 1e-7;
 
@@ -544,16 +550,24 @@ export function computePhotoReelImageLayout(
   const outputAspect = outputWidth / outputHeight;
   const aspectDifference = Math.abs(Math.log(sourceAspect / outputAspect));
   const mode = aspectDifference > 0.09 ? "blur-fit" : "cover";
+  const safeWidth = outputWidth * PHOTO_REEL_MOTION_SAFE_AREA_RATIO;
+  const safeHeight = outputHeight * PHOTO_REEL_MOTION_SAFE_AREA_RATIO;
+  const safeForeground = computeContainRect(
+    sourceWidth,
+    sourceHeight,
+    safeWidth,
+    safeHeight,
+  );
   return {
     mode,
     foreground:
       mode === "blur-fit"
-        ? computeContainRect(
-            sourceWidth,
-            sourceHeight,
-            outputWidth,
-            outputHeight,
-          )
+        ? {
+            x: (outputWidth - safeWidth) / 2 + safeForeground.x,
+            y: (outputHeight - safeHeight) / 2 + safeForeground.y,
+            width: safeForeground.width,
+            height: safeForeground.height,
+          }
         : computeCoverRect(
             sourceWidth,
             sourceHeight,
@@ -566,6 +580,37 @@ export function computePhotoReelImageLayout(
       outputWidth,
       outputHeight,
     ),
+  };
+}
+
+export function computePhotoReelForegroundRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  templateId: PhotoReelTemplateId,
+  outputWidth = PHOTO_REEL_OUTPUT_WIDTH,
+  outputHeight = PHOTO_REEL_OUTPUT_HEIGHT,
+): PhotoReelImageRect {
+  const layout = computePhotoReelImageLayout(
+    sourceWidth,
+    sourceHeight,
+    outputWidth,
+    outputHeight,
+  );
+  if (templateId !== "gallery") return layout.foreground;
+
+  const horizontalPadding = outputWidth * 0.05;
+  const verticalPadding = outputHeight * (125 / PHOTO_REEL_OUTPUT_HEIGHT);
+  const galleryRect = computeContainRect(
+    sourceWidth,
+    sourceHeight,
+    outputWidth - horizontalPadding * 2,
+    outputHeight - verticalPadding * 2,
+  );
+  return {
+    x: horizontalPadding + galleryRect.x,
+    y: verticalPadding + galleryRect.y,
+    width: galleryRect.width,
+    height: galleryRect.height,
   };
 }
 
@@ -663,17 +708,14 @@ function drawPhotoAsset(
   context.save();
   context.filter = getTemplateImageFilter(templateId);
   if (gallery) {
-    const padding = 54;
-    const maxWidth = context.canvas.width - padding * 2;
-    const maxHeight = context.canvas.height - 250;
-    const galleryRect = computeContainRect(
+    const galleryRect = computePhotoReelForegroundRect(
       asset.width,
       asset.height,
-      maxWidth,
-      maxHeight,
+      templateId,
+      context.canvas.width,
+      context.canvas.height,
     );
-    const x = padding + galleryRect.x;
-    const y = 125 + galleryRect.y;
+    const { x, y } = galleryRect;
     context.save();
     context.shadowColor = "rgba(0, 0, 0, 0.34)";
     context.shadowBlur = 42;
@@ -788,7 +830,7 @@ function wrapTitle(context: CanvasRenderingContext2D, title: string) {
     }
   }
   if (line) lines.push(line);
-  return lines.slice(0, 3);
+  return lines;
 }
 
 function drawTitle(
@@ -805,14 +847,21 @@ function drawTitle(
   context.shadowOffsetY = 4;
   const isEditorial = plan.template.id === "editorial";
   const isUpbeat = plan.template.id === "upbeat";
-  context.font = `${isUpbeat ? 800 : 700} ${isUpbeat ? 76 : 68}px ${
-    isEditorial
-      ? '"Yu Mincho", "Hiragino Mincho ProN", serif'
-      : '"Hiragino Sans", "Yu Gothic", sans-serif'
-  }`;
+  const fontWeight = isUpbeat ? 800 : 700;
+  const fontFamily = isEditorial
+    ? '"Yu Mincho", "Hiragino Mincho ProN", serif'
+    : '"Hiragino Sans", "Yu Gothic", sans-serif';
+  const preferredFontSize = isUpbeat ? 76 : 68;
+  let fontSize = preferredFontSize;
+  let lines: string[] = [];
+  while (fontSize >= 48) {
+    context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    lines = wrapTitle(context, plan.title);
+    if (lines.length <= 3 || fontSize === 48) break;
+    fontSize -= 2;
+  }
   context.fillStyle = isEditorial ? "#fffaf0" : "#ffffff";
-  const lines = wrapTitle(context, plan.title);
-  const lineHeight = isUpbeat ? 96 : 88;
+  const lineHeight = fontSize * (isUpbeat ? 1.26 : 1.29);
   const anchorY = isEditorial ? 250 : 1500;
   const startY = anchorY - ((lines.length - 1) * lineHeight) / 2;
   for (const [index, line] of lines.entries()) {
