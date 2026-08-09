@@ -2724,8 +2724,8 @@ function Landing({
             <div className="lifestyleFrame lifestyleFrameCafe">
               <span>00:08</span>
             </div>
-            <div className="lifestyleFrame lifestyleFrameCoast lifestyleFrameMain">
-              <span>00:15</span>
+            <div className="lifestyleFrame lifestyleFrameCity lifestyleFrameMain">
+              <span>00:12</span>
               <div className="captionTop">
                 続けられる人が
                 <strong>最初にやること</strong>
@@ -2740,8 +2740,8 @@ function Landing({
                 <i />
               </div>
             </div>
-            <div className="lifestyleFrame lifestyleFrameCity">
-              <span>00:12</span>
+            <div className="lifestyleFrame lifestyleFrameCoast">
+              <span>00:15</span>
             </div>
           </div>
           <figcaption className="visualResult" id="lifestyleHeroCaption">

@@ -1239,8 +1239,6 @@ a {
 
 .lifestyleFrameCafe {
   --gallery-x: left;
-
-  transform: translateY(24px) rotate(-2deg);
 }
 
 .lifestyleFrameCoast {
@@ -1249,7 +1247,13 @@ a {
 
 .lifestyleFrameCity {
   --gallery-x: right;
+}
 
+.lifestyleGallery > .lifestyleFrame:first-child {
+  transform: translateY(24px) rotate(-2deg);
+}
+
+.lifestyleGallery > .lifestyleFrame:last-child {
   animation-delay: -3.2s;
   transform: translateY(18px) rotate(2deg);
 }
@@ -9149,11 +9153,11 @@ footer > small {
     border-radius: 22px;
   }
 
-  .lifestyleFrameCafe {
+  .lifestyleGallery > .lifestyleFrame:first-child {
     transform: translateY(38px) rotate(-3deg);
   }
 
-  .lifestyleFrameCity {
+  .lifestyleGallery > .lifestyleFrame:last-child {
     transform: translateY(29px) rotate(3deg);
   }
 

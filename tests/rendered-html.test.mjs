@@ -32,6 +32,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集の手間を、もっと軽く。/);
   assert.match(html, /lifestyleGallery/);
+  assert.match(html, /lifestyleFrameCity lifestyleFrameMain/);
+  assert.doesNotMatch(html, /lifestyleFrameCoast lifestyleFrameMain/);
   assert.match(html, /aria-labelledby="lifestyleHeroCaption"/);
   assert.match(html, /<figcaption[^>]+id="lifestyleHeroCaption"/);
   assert.doesNotMatch(html, /4工程|AUTO CUT|AI VOICE/);
