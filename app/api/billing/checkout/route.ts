@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     sessionParams.set("metadata[plan]", payload.plan);
     sessionParams.set(
       "success_url",
-      `${origin}/account?checkout=success&plan=${payload.plan}&credits_before=${billingStatus.oneTimeCreditsRemaining}`,
+      `${origin}/account?checkout=success&plan=${payload.plan}&credits_before=${billingStatus.oneTimeCreditsRemaining}&session_id={CHECKOUT_SESSION_ID}`,
     );
     sessionParams.set("cancel_url", `${origin}/account?checkout=cancelled`);
 

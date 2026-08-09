@@ -2155,6 +2155,11 @@ export default function Home() {
         )}
 
         <div className="topActions">
+          {stage === "start" && (
+            <a className="mobilePriceLink" href="#price">
+              料金
+            </a>
+          )}
           <a className="accountButton" href="/account">
             アカウント
           </a>
@@ -2577,23 +2582,43 @@ function Landing({
             素材動画から、投稿できる1本へ
           </p>
           <h1>
-            動画を選ぶだけ。
+            撮った動画を選ぶだけ。
             <br />
-            <em>編集は、もうしない。</em>
+            <em>面倒な編集は、ここで終わり。</em>
           </h1>
           <p className="heroLead">
-            無音カット、高精度字幕、AIナレーション、テロップ、表紙まで。
+            自動カット、自動テロップ、AIナレーション、表紙、投稿文まで。
             <br />
-            撮りっぱなしの動画を、投稿できるリールに仕上げます。
+            仕上がりを見て、気になるところだけ直せます。
           </p>
           <div className="heroActions">
             <button className="mainCta" onClick={openPicker}>
-              <span>動画を選んで無料で試す</span>
+              <span>無料で仕上がりを見る</span>
               <i>→</i>
             </button>
             <button className="sampleButton" onClick={useSample}>
               サンプルで体験
             </button>
+          </div>
+          <div className="heroOffer" aria-label="無料体験と保存料金">
+            <span className="heroOfferMark" aria-hidden="true">
+              ¥0
+            </span>
+            <div>
+              <strong>編集・プレビューは無料</strong>
+              <small>完成動画を保存するまでは料金がかかりません</small>
+            </div>
+            <div className="heroOfferPrice">
+              <strong>保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+              <small>
+                または月{LIGHT_MONTHLY_VIDEO_LIMIT}本 ¥
+                {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              </small>
+            </div>
+            <a href="#price">
+              料金を見る
+              <i aria-hidden="true">→</i>
+            </a>
           </div>
           <Link className="photoReelEntry" href="/photo-reel">
             <span className="photoReelEntryMark" aria-hidden="true">
@@ -2607,34 +2632,20 @@ function Landing({
           </Link>
           <div className="trustRow">
             <span>✓ サンプル体験は登録不要</span>
-            <span>✓ 体験版では動画を送信しません</span>
-            <span>✓ スマホ動画対応</span>
-          </div>
-          <div className="lineSaveCard">
-            <span className="lineSaveMark" aria-hidden="true">
-              LINE
-            </span>
-            <div>
-              <strong>スマホであとから試したい方へ</strong>
-              <p>このページをLINEへ送っておけば、いつでもすぐ開けます。</p>
-              <small>送信されるのは公開ページのURLと案内文だけです。</small>
-            </div>
-            <a
-              href={LINE_SHARE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="撮るだけリールをLINEに送ってあとで開く"
-            >
-              LINEに送る
-              <i aria-hidden="true">→</i>
-            </a>
+            <span>✓ 最大1080p・透かしなし</span>
+            <span>✓ スマホ動画をそのまま選択</span>
           </div>
         </div>
 
         <div className="heroVisual" aria-label="編集前と編集後のイメージ">
           <div className="visualBadge">
-            <strong>38分</strong>
-            <span>かかっていた編集が</span>
+            <strong>4工程</strong>
+            <span>ひとつの画面で完結</span>
+          </div>
+          <div className="visualFeaturePills" aria-hidden="true">
+            <span>AUTO CUT</span>
+            <span>CAPTION</span>
+            <span>AI VOICE</span>
           </div>
           <div className="phonePair">
             <div className="phone beforePhone">
@@ -2676,8 +2687,8 @@ function Landing({
           <div className="visualResult">
             <span>✓</span>
             <p>
-              <strong>確認は3分だけ</strong>
-              テロップを読んで、気になる所だけ直す
+              <strong>仕上がりを見てから選べる</strong>
+              気になるところだけ直して、必要なら保存
             </p>
           </div>
         </div>
@@ -2750,7 +2761,7 @@ function Landing({
           </h2>
           <p>
             高機能なタイムラインを覚える必要はありません。
-            あなたのテロップ、色、テンポを記憶して、2本目からもっと早く仕上げます。
+            テロップの雰囲気、色、ブランド名を保存して、次回も同じ設定から始められます。
           </p>
           <ul>
             <li>
@@ -2763,7 +2774,7 @@ function Landing({
             </li>
             <li>
               <span>✓</span>
-              専門用語と固有名詞をアカウントごとに記憶する
+              漢字の読み方をAI音声の生成前に修正できる
             </li>
           </ul>
         </div>
@@ -2779,50 +2790,70 @@ function Landing({
           </div>
           <dl>
             <div>
-              <dt>カットの速さ</dt>
+              <dt>テロップ設定</dt>
               <dd>
-                <i style={{ width: "66%" }} />
+                <i style={{ width: "88%" }} />
               </dd>
             </div>
             <div>
-              <dt>テロップの量</dt>
+              <dt>強調カラー</dt>
               <dd>
                 <i style={{ width: "82%" }} />
               </dd>
             </div>
             <div>
-              <dt>ズームの頻度</dt>
+              <dt>ブランド名</dt>
               <dd>
-                <i style={{ width: "38%" }} />
+                <i style={{ width: "72%" }} />
               </dd>
             </div>
           </dl>
-          <p>2本目からは、設定なしでいつもの仕上がり。</p>
+          <p>保存した設定を、次の動画でもすぐ呼び出せます。</p>
         </div>
       </section>
 
       <section className="priceSection" id="price">
         <div className="sectionHeading compact">
           <p className="eyebrow">SIMPLE PRICE</p>
-          <h2>まず1本、完成を見てから。</h2>
-          <p>体験後に、必要な分だけ選べます。</p>
+          <h2>保存方法は、2つだけ。</h2>
+          <p>まず無料で仕上がりを確認。気に入った動画だけ保存できます。</p>
         </div>
+        <div className="freePreviewBand">
+          <span aria-hidden="true">¥0</span>
+          <div>
+            <strong>まずは無料で、編集後の動画を確認</strong>
+            <small>
+              合計3分または2動画まで。編集・プレビューまで無料、完成動画の保存は有料です。
+            </small>
+          </div>
+          <button onClick={openPicker}>無料で試す</button>
+        </div>
+        <p className="paidChoiceLabel">仕上がりが気に入ったら、保存方法を選択</p>
         <div className="priceGrid">
-          <article>
-            <p>FREE PREVIEW</p>
-            <h3>無料体験</h3>
-            <strong>¥0</strong>
-            <span>合計3分または2動画まで</span>
-            <ul>
-              <li>✓ 自動カット・自動テロップ</li>
-              <li>✓ 1動画90秒まで</li>
-              <li>✓ 編集・プレビューまで</li>
-              <li>完成動画の保存は有料</li>
-            </ul>
-            <button onClick={openPicker}>無料で動画を試す</button>
-          </article>
           <article className="featuredPrice">
-            <span className="popular">おすすめ</span>
+            <span className="popular">初めての方</span>
+            <p>ONE TIME</p>
+            <h3>1動画作成</h3>
+            <strong>
+              ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+            </strong>
+            <span>買い切り・サブスクなし</span>
+            <ul>
+              <li>✓ 90秒まで</li>
+              <li>✓ 最大1080p・透かしなし</li>
+              <li>✓ 表紙と投稿文つき</li>
+            </ul>
+            <button
+              onClick={() => startCheckout("one_time")}
+              disabled={billingBusyPlan !== null}
+            >
+              {billingBusyPlan === "one_time"
+                ? "決済画面を準備中…"
+                : "この動画を保存する"}
+            </button>
+          </article>
+          <article className="subscriptionPrice">
+            <span className="popular">継続する方</span>
             <p>LIGHT</p>
             <h3>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h3>
             <strong>
@@ -2836,7 +2867,7 @@ function Landing({
             </span>
             <ul>
               <li>✓ 90秒まで</li>
-              <li>✓ 1080p・透かしなし</li>
+              <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 編集スタイルを記憶</li>
             </ul>
             <button
@@ -2846,27 +2877,6 @@ function Landing({
               {billingBusyPlan === "light"
                 ? "決済画面を準備中…"
                 : `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランを始める`}
-            </button>
-          </article>
-          <article>
-            <p>ONE TIME</p>
-            <h3>1動画作成</h3>
-            <strong>
-              ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
-            </strong>
-            <span>サブスクなし</span>
-            <ul>
-              <li>✓ 90秒まで</li>
-              <li>✓ 1080p・透かしなし</li>
-              <li>✓ 表紙と投稿文つき</li>
-            </ul>
-            <button
-              onClick={() => startCheckout("one_time")}
-              disabled={billingBusyPlan !== null}
-            >
-              {billingBusyPlan === "one_time"
-                ? "決済画面を準備中…"
-                : "1動画作成を購入する"}
             </button>
           </article>
         </div>
@@ -2904,8 +2914,11 @@ function Landing({
             rel="noopener noreferrer"
             aria-label="LINEを開き、撮るだけリールのリンクを送る"
           >
-            今は動画を選ばず、LINEに送ってあとで開く
+            LINEに送る（スマホであとから開く）
           </a>
+          <small className="bottomLineNote">
+            スマホであとから試したい方へ。送信されるのは公開ページのURLと案内文だけです。
+          </small>
         </div>
       </section>
     </>

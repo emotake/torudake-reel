@@ -30,13 +30,16 @@ test("renders the Torudake Reel product experience", async () => {
   const html = await response.text();
   assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
-  assert.match(html, /編集は、もうしない。/);
+  assert.match(html, /面倒な編集は、ここで終わり。/);
   assert.match(html, /動画を選んで無料で試す/);
+  assert.match(html, /編集・プレビューは無料/);
+  assert.match(html, /保存は1動画/);
+  assert.match(html, /料金を見る/);
   assert.match(html, /写真からリールを作る/);
   assert.match(html, /最大10枚・自動編集5パターン/);
   assert.match(html, /スマホであとから試したい方へ/);
   assert.match(html, /LINEに送る/);
-  assert.match(html, /今は動画を選ばず、LINEに送ってあとで開く/);
+  assert.match(html, /LINEに送る（スマホであとから開く）/);
   assert.match(
     html,
     /https:\/\/social-plugins\.line\.me\/lineit\/share\?[^\"]*url=/,
@@ -46,7 +49,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /目的に合わせて自動編集/);
   assert.doesNotMatch(html, /AIが全部整える/);
-  assert.match(html, /まず1本、完成を見てから。/);
+  assert.match(html, /保存方法は、2つだけ。/);
   assert.match(html, /最大500MB/);
   assert.match(html, /合計3分または2動画まで/);
   assert.match(html, /編集・プレビューまで/);

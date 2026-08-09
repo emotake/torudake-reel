@@ -59,7 +59,8 @@ a {
 }
 
 .topbar {
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 20;
   display: grid;
   grid-template-columns: minmax(235px, 1fr) auto minmax(235px, 1fr);
@@ -149,6 +150,16 @@ a {
   justify-content: flex-end;
   gap: 9px;
   align-items: center;
+}
+
+.mobilePriceLink {
+  display: none;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .trialButton,
@@ -288,6 +299,92 @@ a {
   gap: 10px;
   align-items: center;
   margin-top: 31px;
+}
+
+.heroOffer {
+  display: grid;
+  width: min(100%, 560px);
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 0.82fr) auto;
+  gap: 14px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid rgba(16, 24, 40, 0.1);
+  border-radius: 17px;
+  background: linear-gradient(
+    120deg,
+    rgba(185, 245, 208, 0.42),
+    rgba(255, 255, 255, 0.96) 46%,
+    rgba(255, 248, 237, 0.94)
+  );
+  box-shadow: 0 17px 45px rgba(16, 24, 40, 0.08);
+}
+
+.heroOfferMark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--ink);
+  color: var(--mint);
+  font-family: "DM Sans", sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow: 4px 4px 0 var(--coral);
+}
+
+.heroOffer > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.heroOffer strong {
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.heroOffer small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.heroOfferPrice {
+  padding-left: 14px;
+  border-left: 1px solid rgba(16, 24, 40, 0.1);
+}
+
+.heroOfferPrice strong {
+  color: var(--coral-dark);
+}
+
+.heroOffer > a {
+  display: inline-flex;
+  min-height: 36px;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px;
+  border-radius: 10px;
+  background: rgba(16, 24, 40, 0.07);
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.heroOffer > a:hover {
+  background: var(--ink);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.heroOffer > a i {
+  font-style: normal;
 }
 
 .mainCta {
@@ -524,7 +621,9 @@ a {
     linear-gradient(90deg, rgba(16, 24, 40, 0.04) 1px, transparent 1px),
     var(--cream);
   background-size: 28px 28px;
-  box-shadow: var(--shadow);
+  box-shadow:
+    0 32px 90px rgba(16, 24, 40, 0.14),
+    0 4px 0 rgba(255, 255, 255, 0.9) inset;
 }
 
 .heroVisual::before {
@@ -572,6 +671,29 @@ a {
 .visualBadge span {
   font-size: 8px;
   font-weight: 800;
+}
+
+.visualFeaturePills {
+  position: absolute;
+  top: 34px;
+  right: 28px;
+  z-index: 4;
+  display: flex;
+  gap: 6px;
+}
+
+.visualFeaturePills span {
+  padding: 7px 9px;
+  border: 1px solid rgba(16, 24, 40, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink-2);
+  font-family: "DM Sans", sans-serif;
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.08);
+  backdrop-filter: blur(12px);
 }
 
 .phonePair {
@@ -1270,8 +1392,17 @@ a {
 }
 
 .priceSection {
-  width: min(1060px, calc(100% - 48px));
-  padding-top: 65px;
+  width: min(1180px, calc(100% - 48px));
+  margin-bottom: 110px;
+  padding: 78px 60px 64px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 36px;
+  background:
+    radial-gradient(circle at 8% 0, rgba(185, 245, 208, 0.5), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(255, 90, 60, 0.13), transparent 30%),
+    #fff;
+  box-shadow: 0 28px 85px rgba(16, 24, 40, 0.09);
+  scroll-margin-top: 92px;
 }
 
 .sectionHeading.compact h2 {
@@ -1280,27 +1411,36 @@ a {
 
 .priceGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-  align-items: center;
-  margin-top: 48px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: stretch;
+  width: min(820px, 100%);
+  margin: 20px auto 0;
 }
 
 .priceGrid article {
   position: relative;
   display: grid;
-  min-height: 410px;
+  min-height: 390px;
   align-content: start;
   padding: 29px;
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: 24px;
   background: white;
+  box-shadow: 0 18px 46px rgba(16, 24, 40, 0.07);
 }
 
 .priceGrid article.featuredPrice {
-  min-height: 450px;
-  border: 3px solid var(--ink);
-  box-shadow: 9px 9px 0 var(--coral);
+  min-height: 410px;
+  border: 2px solid var(--ink);
+  box-shadow:
+    9px 9px 0 var(--coral),
+    0 24px 58px rgba(16, 24, 40, 0.12);
+}
+
+.priceGrid article.subscriptionPrice {
+  border-color: rgba(16, 24, 40, 0.13);
+  background: linear-gradient(145deg, #fff 0%, #f7fff9 100%);
 }
 
 .priceGrid article > p {
@@ -1331,7 +1471,7 @@ a {
 .priceGrid article > span:not(.popular) {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .priceGrid ul {
@@ -1344,12 +1484,12 @@ a {
 }
 
 .priceGrid li {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .priceGrid article > button {
-  min-height: 43px;
+  min-height: 49px;
   margin-top: auto;
   border: 1px solid var(--ink);
   border-radius: 10px;
@@ -1372,8 +1512,95 @@ a {
   border-radius: 999px;
   background: var(--coral);
   color: white;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 900;
+}
+
+.subscriptionPrice .popular {
+  background: var(--mint);
+  color: var(--mint-dark);
+}
+
+.freePreviewBand {
+  display: grid;
+  width: min(930px, 100%);
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: center;
+  margin: 38px auto 0;
+  padding: 18px 20px;
+  overflow: hidden;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.2), transparent 32%),
+    var(--ink);
+  color: white;
+  box-shadow: 0 18px 46px rgba(16, 24, 40, 0.16);
+}
+
+.freePreviewBand > span {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 17px;
+  background: var(--mint);
+  color: var(--mint-dark);
+  font-family: "DM Sans", sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.freePreviewBand > div {
+  display: grid;
+  gap: 5px;
+}
+
+.freePreviewBand strong {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.freePreviewBand small {
+  color: #bdc6d3;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.freePreviewBand > button {
+  min-height: 45px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--coral);
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.freePreviewBand > button:hover {
+  background: var(--coral-dark);
+  transform: translateY(-1px);
+}
+
+.paidChoiceLabel {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  margin: 34px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.paidChoiceLabel::before,
+.paidChoiceLabel::after {
+  width: 54px;
+  height: 1px;
+  background: var(--line);
+  content: "";
 }
 
 .bottomCta {
@@ -1433,6 +1660,14 @@ a {
   border-radius: 8px;
   outline: 3px solid rgba(185, 245, 208, 0.34);
   outline-offset: 2px;
+}
+
+.bottomLineNote {
+  max-width: 330px;
+  color: #9ea9b8;
+  font-size: 8px;
+  line-height: 1.65;
+  text-align: center;
 }
 
 footer {
@@ -4924,7 +5159,7 @@ footer > small {
   background: var(--ink);
   color: white;
   box-shadow: 4px 4px 0 var(--coral);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .photoReelBrandIcon i {
@@ -8240,6 +8475,10 @@ footer > small {
     display: none;
   }
 
+  .mobilePriceLink {
+    display: inline-flex;
+  }
+
   .hero {
     grid-template-columns: 1fr;
     padding-top: 45px;
@@ -8419,6 +8658,24 @@ footer > small {
     flex-direction: column;
   }
 
+  .heroOffer {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .heroOfferPrice {
+    grid-column: 1 / -1;
+    padding: 12px 0 0;
+    border-top: 1px solid rgba(16, 24, 40, 0.1);
+    border-left: 0;
+  }
+
+  .heroOffer > a {
+    min-height: 42px;
+    grid-column: 1 / -1;
+  }
+
   .mainCta,
   .sampleButton {
     width: 100%;
@@ -8479,6 +8736,13 @@ footer > small {
     left: 14px;
   }
 
+  .visualFeaturePills {
+    top: 70px;
+    right: 10px;
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
   .visualResult {
     right: 12px;
     bottom: 13px;
@@ -8514,6 +8778,12 @@ footer > small {
     padding: 78px 0;
   }
 
+  .priceSection {
+    margin-bottom: 64px;
+    padding: 64px 18px 42px;
+    border-radius: 26px;
+  }
+
   .sectionHeading h2,
   .differenceCopy h2 {
     font-size: 34px;
@@ -8536,6 +8806,16 @@ footer > small {
   .priceGrid article,
   .priceGrid article.featuredPrice {
     min-height: 370px;
+  }
+
+  .freePreviewBand {
+    grid-template-columns: auto 1fr;
+    padding: 15px;
+  }
+
+  .freePreviewBand > button {
+    min-height: 46px;
+    grid-column: 1 / -1;
   }
 
   .bottomCta {
