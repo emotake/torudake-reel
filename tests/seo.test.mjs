@@ -45,6 +45,7 @@ test("lists only canonical public pages in the sitemap", () => {
     .filter((url) => !url.endsWith("/og.png"));
   assert.deepEqual(urls, [
     `${SITE_ORIGIN}/`,
+    `${SITE_ORIGIN}/photo-reel`,
     `${SITE_ORIGIN}/privacy`,
     `${SITE_ORIGIN}/terms`,
     `${SITE_ORIGIN}/commercial-disclosure`,
@@ -81,6 +82,9 @@ test("describes the real web application without invented ratings", () => {
   assert.equal(application.applicationCategory, "MultimediaApplication");
   assert.ok(application.featureList.includes("自動テロップ"));
   assert.ok(application.featureList.includes("AIナレーション"));
+  assert.ok(
+    application.featureList.includes("最大10枚の写真から縦型リールを自動作成"),
+  );
   assert.equal("aggregateRating" in application, false);
   assert.equal("review" in application, false);
   assert.deepEqual(

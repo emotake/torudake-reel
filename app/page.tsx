@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -2374,6 +2375,16 @@ function Landing({
               サンプルで体験
             </button>
           </div>
+          <Link className="photoReelEntry" href="/photo-reel">
+            <span className="photoReelEntryMark" aria-hidden="true">
+              PHOTO
+            </span>
+            <span>
+              <strong>写真からリールを作る</strong>
+              <small>最大10枚・自動編集5パターン</small>
+            </span>
+            <i aria-hidden="true">→</i>
+          </Link>
           <div className="trustRow">
             <span>✓ サンプル体験は登録不要</span>
             <span>✓ 体験版では動画を送信しません</span>

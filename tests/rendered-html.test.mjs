@@ -32,6 +32,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集は、もうしない。/);
   assert.match(html, /動画を選んで無料で試す/);
+  assert.match(html, /写真からリールを作る/);
+  assert.match(html, /最大10枚・自動編集5パターン/);
   assert.match(html, /スマホであとから試したい方へ/);
   assert.match(html, /LINEに送る/);
   assert.match(html, /今は動画を選ばず、LINEに送ってあとで開く/);
@@ -54,6 +56,27 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
+  );
+});
+
+test("renders the five-pattern photo reel editor as a separate public route", async () => {
+  const response = await render("/photo-reel");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /写真を選ぶだけ。/);
+  assert.match(html, /動きのある1本に。/);
+  assert.match(html, /自動編集を選ぶ/);
+  assert.match(html, /シネマ/);
+  assert.match(html, /リズム/);
+  assert.match(html, /エディトリアル/);
+  assert.match(html, /ダイアリー/);
+  assert.match(html, /クリーン/);
+  assert.match(html, /追加API料金 0円/);
+  assert.match(html, /1080×1920/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/photo-reel"/,
   );
 });
 
