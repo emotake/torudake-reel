@@ -138,7 +138,7 @@ test("serializes one transcription per reservation and safely replaces stale lea
   }
 });
 
-test("the transcribe route leases before charging and always releases in finally", async () => {
+test("the transcribe route uses the shared AI lease before upstream work and settles it", async () => {
   const routeSource = await readFile(
     new URL("../app/api/transcribe/route.ts", import.meta.url),
     "utf8",
@@ -150,28 +150,31 @@ test("the transcribe route leases before charging and always releases in finally
   const postSource = routeSource.slice(
     routeSource.indexOf("export async function POST"),
   );
-  const leasedAuthorizationSource = billingSource.slice(
-    billingSource.indexOf("export async function authorizeLeasedUsageOperation"),
+  const meteredAuthorizationSource = billingSource.slice(
+    billingSource.indexOf("export async function authorizeMeteredAiOperation"),
+    billingSource.indexOf("export type AuthorizedMeteredAiOperation"),
   );
 
   assert.ok(
-    postSource.indexOf("authorizeLeasedUsageOperation(") <
+    postSource.indexOf("authorizeMeteredAiOperation(") <
       postSource.indexOf("requestTimedTranscription(apiKey, file)"),
     "the upstream request must follow leased authorization",
   );
   assert.match(routeSource, /reason === "operation_in_progress"[\s\S]*409/);
   assert.match(
     routeSource,
-    /finally\s*\{[\s\S]*releaseUsageOperationLease\(transcriptionLease\)/,
+    /finally\s*\{[\s\S]*abandonMeteredAiOperation\(meteredAuthorization\)/,
   );
   assert.ok(
-    leasedAuthorizationSource.indexOf("acquireUsageOperationLease(") <
-      leasedAuthorizationSource.indexOf("consumeOperatorUsageOperation("),
+    meteredAuthorizationSource.indexOf("acquireUsageOperationLease(") <
+      meteredAuthorizationSource.indexOf("consumeOperatorUsageOperation("),
     "a busy request must be rejected before its operation count is charged",
   );
+  assert.match(postSource, /recordMeteredAiTranscriptionDuration\(/);
+  assert.match(postSource, /completeMeteredAiOperation\(/);
 });
 
-test("the narration speech route leases, caps successful output, and releases safely", async () => {
+test("narration script and speech share the plan-specific AI allowance", async () => {
   const routeSource = await readFile(
     new URL("../app/api/narration/speech/route.ts", import.meta.url),
     "utf8",
@@ -180,29 +183,25 @@ test("the narration speech route leases, caps successful output, and releases sa
     new URL("../app/api/usage/reserve/route.ts", import.meta.url),
     "utf8",
   );
-  const billingSource = await readFile(
-    new URL("../lib/billing-store.ts", import.meta.url),
+  const scriptSource = await readFile(
+    new URL("../app/api/narration/script/route.ts", import.meta.url),
     "utf8",
   );
   const postSource = routeSource.slice(
     routeSource.indexOf("export async function POST"),
   );
-  const leasedAuthorizationSource = billingSource.slice(
-    billingSource.indexOf("export async function authorizeLeasedUsageOperation"),
-  );
 
   assert.ok(
-    postSource.indexOf("authorizeLeasedUsageOperation(") <
+    postSource.indexOf("authorizeMeteredAiOperation(") <
       postSource.indexOf("requestSpeech("),
   );
-  assert.match(
-    postSource,
-    /getNarrationSpeechSuccessLimit\(\s*reservation\.bucket,?\s*\)/,
+  assert.ok(
+    scriptSource.indexOf("authorizeMeteredAiOperation(") <
+      scriptSource.indexOf('fetch("https://api.openai.com/v1/responses"'),
   );
-  assert.match(postSource, /successfulLimit:\s*narrationGenerationLimit/);
   assert.match(
     reserveSource,
-    /narrationGenerationLimit:\s*getNarrationSpeechSuccessLimit\(/,
+    /aiOperationLimit:\s*getAiOperationSuccessLimit\(reservation\.bucket\)/,
   );
   assert.match(postSource, /reason === "operator_success_limit"/);
   assert.match(postSource, /reason === "operation_in_progress"[\s\S]*409/);
@@ -213,14 +212,10 @@ test("the narration speech route leases, caps successful output, and releases sa
   assert.match(postSource, /if \(!audio\.byteLength\)/);
   assert.match(
     postSource,
-    /finally\s*\{[\s\S]*releaseUsageOperationLease\(narrationLease\)/,
+    /finally\s*\{[\s\S]*abandonMeteredAiOperation\(meteredAuthorization\)/,
   );
-  assert.ok(
-    leasedAuthorizationSource.indexOf("acquireUsageOperationLease(") <
-      leasedAuthorizationSource.indexOf("getOperatorUsageOperationCounts("),
-  );
-  assert.ok(
-    leasedAuthorizationSource.indexOf("getOperatorUsageOperationCounts(") <
-      leasedAuthorizationSource.indexOf("consumeOperatorUsageOperation("),
-  );
+  assert.match(postSource, /completeMeteredAiOperation\(/);
+  assert.match(scriptSource, /completeMeteredAiOperation\(/);
+  assert.match(routeSource, /X-AI-Operations-Remaining/);
+  assert.match(scriptSource, /X-AI-Operations-Remaining/);
 });

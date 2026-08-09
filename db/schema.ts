@@ -276,6 +276,7 @@ export const usageOperationLeases = sqliteTable(
     reservationId: text("reservation_id").notNull(),
     operation: text("operation", {
       enum: [
+        "metered_ai",
         "transfer_upload",
         "transcribe",
         "narration_script",
@@ -290,6 +291,43 @@ export const usageOperationLeases = sqliteTable(
   },
   (table) => [
     index("usage_operation_leases_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
+export const meteredAiActions = sqliteTable(
+  "metered_ai_actions",
+  {
+    id: text("id").primaryKey(),
+    reservationId: text("reservation_id").notNull(),
+    actionId: text("action_id").notNull(),
+    operation: text("operation", {
+      enum: ["transcribe", "narration_script", "narration_speech"],
+    }).notNull(),
+    status: text("status", {
+      enum: ["pending", "succeeded", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    observedMilliseconds: integer("observed_milliseconds")
+      .notNull()
+      .default(0),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    succeededAt: integer("succeeded_at"),
+    failedAt: integer("failed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("metered_ai_actions_reservation_action_unique").on(
+      table.reservationId,
+      table.actionId,
+    ),
+    index("metered_ai_actions_reservation_status_idx").on(
+      table.reservationId,
+      table.status,
+    ),
+    index("metered_ai_actions_expires_at_idx").on(table.expiresAt),
   ],
 );
 

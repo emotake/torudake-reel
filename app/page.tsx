@@ -80,7 +80,6 @@ import {
   getNarrationPlaybackRate,
   MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
   NARRATION_DISCLOSURE_TEXT,
-  NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
@@ -136,16 +135,23 @@ type ApiPayload = {
 };
 
 type TranscriptionResult = {
+  aiOperationLimit: number | null;
+  aiOperationsRemaining: number | null;
   refined: boolean;
   segments: TranscriptLine[];
+};
+
+type AiOperationQuotaResult = {
+  aiOperationLimit: number | null;
+  aiOperationsRemaining: number | null;
 };
 
 class ApiRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    readonly narrationGenerationsRemaining: number | null = null,
-    readonly narrationGenerationLimit: number | null = null,
+    readonly aiOperationsRemaining: number | null = null,
+    readonly aiOperationLimit: number | null = null,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -153,11 +159,33 @@ class ApiRequestError extends Error {
 }
 
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+const MAX_AI_OPERATION_LIMIT = 10;
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
 const SUPPORTED_VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm)$/i;
 const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
+
+function readAiOperationQuota(response: Response): AiOperationQuotaResult {
+  const parsedLimit = Number(
+    response.headers.get("X-AI-Operation-Limit") ??
+      response.headers.get("X-Narration-Generation-Limit"),
+  );
+  const aiOperationLimit =
+    Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(MAX_AI_OPERATION_LIMIT, parsedLimit)
+      : null;
+  const parsedRemaining = Number(
+    response.headers.get("X-AI-Operations-Remaining") ??
+      response.headers.get("X-Narration-Generations-Remaining"),
+  );
+  const aiOperationsRemaining =
+    Number.isInteger(parsedRemaining) && parsedRemaining >= 0
+      ? Math.min(aiOperationLimit ?? MAX_AI_OPERATION_LIMIT, parsedRemaining)
+      : null;
+
+  return { aiOperationLimit, aiOperationsRemaining };
+}
 
 async function inspectCompletedVideoQuality(
   output: Blob,
@@ -339,6 +367,7 @@ async function readApiResponse<T extends ApiPayload>(
   response: Response,
   fallbackMessage: string,
 ) {
+  const quota = readAiOperationQuota(response);
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     const responseText = (await response.text()).trim();
@@ -347,6 +376,8 @@ async function readApiResponse<T extends ApiPayload>(
         ? "動画の送信サイズが上限を超えました。動画を短くするか圧縮してお試しください。"
         : responseText || fallbackMessage,
       response.status,
+      quota.aiOperationsRemaining,
+      quota.aiOperationLimit,
     );
   }
 
@@ -361,6 +392,8 @@ async function readApiResponse<T extends ApiPayload>(
     throw new ApiRequestError(
       payload.error || fallbackMessage,
       response.status,
+      quota.aiOperationsRemaining,
+      quota.aiOperationLimit,
     );
   }
   return payload;
@@ -497,6 +530,7 @@ async function transcribeMediaFile(
   mediaFile: File,
   highAccuracy = false,
   usageReservationId: string | null = null,
+  aiOperationId = crypto.randomUUID(),
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
@@ -504,6 +538,7 @@ async function transcribeMediaFile(
   if (usageReservationId) {
     formData.set("usageReservationId", usageReservationId);
   }
+  formData.set("aiOperationId", aiOperationId);
   if (highAccuracy) {
     formData.set("quality", "high");
   }
@@ -512,6 +547,7 @@ async function transcribeMediaFile(
     body: formData,
     signal,
   });
+  const quota = readAiOperationQuota(response);
   const payload = await readApiResponse<
     ApiPayload & {
       refined?: boolean;
@@ -521,12 +557,13 @@ async function transcribeMediaFile(
   >(response, "字幕を生成できませんでした。もう一度お試しください。");
 
   if (payload.silent) {
-    return { segments: [], refined: Boolean(payload.refined) };
+    return { ...quota, segments: [], refined: Boolean(payload.refined) };
   }
   if (!payload.segments?.length) {
     throw new Error("字幕を生成できませんでした。もう一度お試しください。");
   }
   return {
+    ...quota,
     segments: payload.segments,
     refined: Boolean(payload.refined),
   };
@@ -537,6 +574,7 @@ async function transcribeLargeVideo(
   onProgress: (progress: number) => void,
   highAccuracy = false,
   usageReservationId: string | null = null,
+  aiOperationId = crypto.randomUUID(),
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   let extractionDetail = "";
@@ -555,6 +593,10 @@ async function transcribeLargeVideo(
         const mergedSegments: TranscriptLine[] = [];
         let completedChunks = 0;
         let refined = false;
+        let latestQuota: AiOperationQuotaResult = {
+          aiOperationLimit: null,
+          aiOperationsRemaining: null,
+        };
 
         for await (const chunk of extractTranscriptionAudioChunks(
           selectedFile,
@@ -566,8 +608,10 @@ async function transcribeLargeVideo(
             chunk.file,
             highAccuracy,
             usageReservationId,
+            aiOperationId,
             signal,
           );
+          latestQuota = chunkResult;
           refined ||= chunkResult.refined;
 
           for (const segment of chunkResult.segments) {
@@ -587,7 +631,7 @@ async function transcribeLargeVideo(
         }
 
         if (mergedSegments.length > 0) {
-          return { segments: mergedSegments, refined };
+          return { ...latestQuota, segments: mergedSegments, refined };
         }
         break;
       } catch (error) {
@@ -680,6 +724,10 @@ async function transcribeLargeVideo(
   );
   const mergedSegments: TranscriptLine[] = [];
   let refined = false;
+  let latestQuota: AiOperationQuotaResult = {
+    aiOperationLimit: null,
+    aiOperationsRemaining: null,
+  };
   const baseName =
     selectedFile.name.replace(/\.[^.]+$/, "").replace(/[^\p{L}\p{N}_-]+/gu, "_") ||
     "video";
@@ -707,8 +755,10 @@ async function transcribeLargeVideo(
       audioFile,
       highAccuracy,
       usageReservationId,
+      aiOperationId,
       signal,
     );
+    latestQuota = chunkResult;
     refined ||= chunkResult.refined;
 
     for (const segment of chunkResult.segments) {
@@ -727,7 +777,7 @@ async function transcribeLargeVideo(
       "音声を字幕にできませんでした。声が聞こえる区間がある動画でお試しください。",
     );
   }
-  return { segments: mergedSegments, refined };
+  return { ...latestQuota, segments: mergedSegments, refined };
 }
 
 async function getVideoDurationSeconds(selectedFile: File) {
@@ -853,6 +903,7 @@ async function requestNarrationPlan({
   style,
   sourceDuration,
   usageReservationId,
+  aiOperationId,
   timingScale,
   previousScript,
   signal,
@@ -864,6 +915,7 @@ async function requestNarrationPlan({
   style: NarrationStyle;
   sourceDuration: number;
   usageReservationId: string | null;
+  aiOperationId: string;
   timingScale?: number;
   previousScript?: string;
   signal?: AbortSignal;
@@ -879,15 +931,18 @@ async function requestNarrationPlan({
       style,
       sourceDuration,
       usageReservationId,
+      aiOperationId,
       timingScale,
       previousScript,
     }),
     signal,
   });
-  return readApiResponse<ApiPayload & NarrationPlan>(
+  const quota = readAiOperationQuota(response);
+  const plan = await readApiResponse<ApiPayload & NarrationPlan>(
     response,
     "AIナレーションの台本を作成できませんでした。",
   );
+  return { ...plan, ...quota };
 }
 
 async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
@@ -927,17 +982,16 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
       bucket?: unknown;
       required?: boolean;
       reservationId?: string;
+      aiOperationLimit?: number;
       narrationGenerationLimit?: number;
     }
   >(response, "利用枠を確認できませんでした。");
-  const narrationGenerationLimit =
-    Number.isInteger(payload.narrationGenerationLimit) &&
-    Number(payload.narrationGenerationLimit) > 0
-      ? Math.min(
-          NARRATION_SPEECH_SUCCESS_LIMIT,
-          Number(payload.narrationGenerationLimit),
-        )
-      : NARRATION_SPEECH_SUCCESS_LIMIT;
+  const rawAiOperationLimit =
+    payload.aiOperationLimit ?? payload.narrationGenerationLimit;
+  const aiOperationLimit =
+    Number.isInteger(rawAiOperationLimit) && Number(rawAiOperationLimit) > 0
+      ? Math.min(MAX_AI_OPERATION_LIMIT, Number(rawAiOperationLimit))
+      : MAX_AI_OPERATION_LIMIT;
   const bucket = payload.required
     ? isBillingBucket(payload.bucket)
       ? payload.bucket
@@ -949,7 +1003,7 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
   return {
     reservationId: payload.required ? (payload.reservationId ?? null) : null,
     bucket,
-    narrationGenerationLimit,
+    aiOperationLimit,
   };
 }
 
@@ -995,6 +1049,7 @@ async function requestNarrationSpeech(
   style: NarrationStyle,
   usageReservationId: string | null,
   targetDurationSeconds: number,
+  aiOperationId: string,
   signal?: AbortSignal,
 ) {
   const response = await fetch("/api/narration/speech", {
@@ -1005,26 +1060,11 @@ async function requestNarrationSpeech(
       style,
       usageReservationId,
       targetDurationSeconds,
+      aiOperationId,
     }),
     signal,
   });
-  const limitHeader = Number(
-    response.headers.get("X-Narration-Generation-Limit"),
-  );
-  const narrationGenerationLimit =
-    Number.isInteger(limitHeader) && limitHeader > 0
-      ? Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, limitHeader)
-      : null;
-  const remainingHeader = Number(
-    response.headers.get("X-Narration-Generations-Remaining"),
-  );
-  const narrationGenerationsRemaining =
-    Number.isInteger(remainingHeader) && remainingHeader >= 0
-      ? Math.min(
-          narrationGenerationLimit ?? NARRATION_SPEECH_SUCCESS_LIMIT,
-          remainingHeader,
-        )
-      : null;
+  const quota = readAiOperationQuota(response);
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";
     const payload = contentType.includes("application/json")
@@ -1033,16 +1073,15 @@ async function requestNarrationSpeech(
     throw new ApiRequestError(
       payload.error || "AI音声を生成できませんでした。もう一度お試しください。",
       response.status,
-      narrationGenerationsRemaining,
-      narrationGenerationLimit,
+      quota.aiOperationsRemaining,
+      quota.aiOperationLimit,
     );
   }
   const audio = await response.blob();
   if (!audio.size) throw new Error("AI音声を生成できませんでした。");
   return {
     audio,
-    narrationGenerationsRemaining,
-    narrationGenerationLimit,
+    ...quota,
   };
 }
 
@@ -1282,12 +1321,8 @@ export default function Home() {
   const usageReservationRef = useRef<string | null>(null);
   const usageReservationPendingExportRef = useRef(false);
   const narrationRegenerationAbortRef = useRef<AbortController | null>(null);
-  const narrationGenerationsRemainingRef = useRef(
-    NARRATION_SPEECH_SUCCESS_LIMIT,
-  );
-  const narrationGenerationLimitRef = useRef(
-    NARRATION_SPEECH_SUCCESS_LIMIT,
-  );
+  const aiOperationsRemainingRef = useRef(MAX_AI_OPERATION_LIMIT);
+  const aiOperationLimitRef = useRef(MAX_AI_OPERATION_LIMIT);
   const [usageReservationId, setUsageReservationId] = useState<string | null>(
     null,
   );
@@ -1319,10 +1354,11 @@ export default function Home() {
     null,
   );
   const [narrationAudioUrl, setNarrationAudioUrl] = useState("");
-  const [narrationGenerationsRemaining, setNarrationGenerationsRemaining] =
-    useState(NARRATION_SPEECH_SUCCESS_LIMIT);
-  const [narrationGenerationLimit, setNarrationGenerationLimit] = useState(
-    NARRATION_SPEECH_SUCCESS_LIMIT,
+  const [aiOperationsRemaining, setAiOperationsRemaining] = useState(
+    MAX_AI_OPERATION_LIMIT,
+  );
+  const [aiOperationLimit, setAiOperationLimit] = useState(
+    MAX_AI_OPERATION_LIMIT,
   );
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
@@ -1368,44 +1404,40 @@ export default function Home() {
     }
   }
 
-  function rememberNarrationGenerationsRemaining(nextRemaining: number) {
+  function rememberAiOperationsRemaining(nextRemaining: number) {
     const normalized = Math.max(
       0,
-      Math.min(narrationGenerationLimitRef.current, Math.floor(nextRemaining)),
+      Math.min(aiOperationLimitRef.current, Math.floor(nextRemaining)),
     );
-    narrationGenerationsRemainingRef.current = normalized;
-    setNarrationGenerationsRemaining(normalized);
+    aiOperationsRemainingRef.current = normalized;
+    setAiOperationsRemaining(normalized);
     return normalized;
   }
 
-  function rememberNarrationGenerationLimit(nextLimit: number) {
+  function rememberAiOperationLimit(nextLimit: number) {
     const normalized = Math.max(
       1,
-      Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, Math.floor(nextLimit)),
+      Math.min(MAX_AI_OPERATION_LIMIT, Math.floor(nextLimit)),
     );
-    narrationGenerationLimitRef.current = normalized;
-    setNarrationGenerationLimit(normalized);
-    if (narrationGenerationsRemainingRef.current > normalized) {
-      rememberNarrationGenerationsRemaining(normalized);
+    aiOperationLimitRef.current = normalized;
+    setAiOperationLimit(normalized);
+    if (aiOperationsRemainingRef.current > normalized) {
+      rememberAiOperationsRemaining(normalized);
     }
     return normalized;
   }
 
-  function resetNarrationGenerationQuota() {
-    rememberNarrationGenerationLimit(NARRATION_SPEECH_SUCCESS_LIMIT);
-    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
+  function resetAiOperationQuota() {
+    rememberAiOperationLimit(MAX_AI_OPERATION_LIMIT);
+    rememberAiOperationsRemaining(MAX_AI_OPERATION_LIMIT);
   }
 
-  function recordNarrationSpeechResult(result: {
-    narrationGenerationsRemaining: number | null;
-    narrationGenerationLimit: number | null;
-  }) {
-    if (result.narrationGenerationLimit !== null) {
-      rememberNarrationGenerationLimit(result.narrationGenerationLimit);
+  function recordAiOperationResult(result: AiOperationQuotaResult) {
+    if (result.aiOperationLimit !== null) {
+      rememberAiOperationLimit(result.aiOperationLimit);
     }
-    return rememberNarrationGenerationsRemaining(
-      result.narrationGenerationsRemaining ??
-        narrationGenerationsRemainingRef.current - 1,
+    return rememberAiOperationsRemaining(
+      result.aiOperationsRemaining ?? aiOperationsRemainingRef.current - 1,
     );
   }
 
@@ -1483,7 +1515,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    resetNarrationGenerationQuota();
+    resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1502,7 +1534,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    resetNarrationGenerationQuota();
+    resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1534,6 +1566,7 @@ export default function Home() {
 
     let progressTimer: number | undefined;
     let newlyReservedUsage: string | null = null;
+    const transcriptionOperationId = crypto.randomUUID();
 
     try {
       let nextTranscript = initialTranscript;
@@ -1543,6 +1576,8 @@ export default function Home() {
         newlyReservedUsage = reservation.reservationId;
         throwIfProcessingAborted(controller.signal);
         rememberUsageReservation(newlyReservedUsage, reservation.bucket);
+        rememberAiOperationLimit(reservation.aiOperationLimit);
+        rememberAiOperationsRemaining(reservation.aiOperationLimit);
       }
       const usageReservationId = usageReservationRef.current;
 
@@ -1553,10 +1588,12 @@ export default function Home() {
             updateProgress,
             highAccuracy,
             usageReservationId,
+            transcriptionOperationId,
             controller.signal,
           );
           nextTranscript = transcriptionResult.segments;
           refined = transcriptionResult.refined;
+          recordAiOperationResult(transcriptionResult);
         } else {
           progressTimer = window.setInterval(() => {
             if (isCurrent()) {
@@ -1567,10 +1604,12 @@ export default function Home() {
             file,
             highAccuracy,
             usageReservationId,
+            transcriptionOperationId,
             controller.signal,
           );
           nextTranscript = transcriptionResult.segments;
           refined = transcriptionResult.refined;
+          recordAiOperationResult(transcriptionResult);
         }
       } else {
         progressTimer = window.setInterval(() => {
@@ -1622,6 +1661,14 @@ export default function Home() {
         }
       }
       if (!isCurrent()) return;
+      if (error instanceof ApiRequestError) {
+        if (error.aiOperationLimit !== null) {
+          rememberAiOperationLimit(error.aiOperationLimit);
+        }
+        if (error.aiOperationsRemaining !== null) {
+          rememberAiOperationsRemaining(error.aiOperationsRemaining);
+        }
+      }
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -1658,18 +1705,16 @@ export default function Home() {
     setProgress(4);
     setStage("processing");
     let newlyReservedUsage: string | null = null;
+    const scriptOperationId = crypto.randomUUID();
+    const speechOperationId = crypto.randomUUID();
 
     try {
       const reservation = await reserveVideoUsage(file, controller.signal);
       newlyReservedUsage = reservation.reservationId;
       throwIfProcessingAborted(controller.signal);
       rememberUsageReservation(newlyReservedUsage, reservation.bucket);
-      rememberNarrationGenerationLimit(
-        reservation.narrationGenerationLimit,
-      );
-      rememberNarrationGenerationsRemaining(
-        reservation.narrationGenerationLimit,
-      );
+      rememberAiOperationLimit(reservation.aiOperationLimit);
+      rememberAiOperationsRemaining(reservation.aiOperationLimit);
       updateProgress(14);
       const extracted = await extractNarrationFrames(file, 6, controller.signal);
       throwIfProcessingAborted(controller.signal);
@@ -1688,8 +1733,10 @@ export default function Home() {
         style: narrationStyle,
         sourceDuration: extracted.duration,
         usageReservationId: newlyReservedUsage,
+        aiOperationId: scriptOperationId,
         signal: controller.signal,
       });
+      recordAiOperationResult(nextPlan);
       throwIfProcessingAborted(controller.signal);
       updateProgress(68);
       const maximumDuration = narrationTargetDuration;
@@ -1698,9 +1745,10 @@ export default function Home() {
         narrationStyle,
         newlyReservedUsage,
         maximumDuration,
+        speechOperationId,
         controller.signal,
       );
-      recordNarrationSpeechResult(speechResult);
+      recordAiOperationResult(speechResult);
       let audio = speechResult.audio;
       let audioDuration = await getNarrationAudioDuration(audio);
 
@@ -1723,16 +1771,19 @@ export default function Home() {
           usageReservationId: newlyReservedUsage,
           timingScale,
           previousScript: nextPlan.script,
+          aiOperationId: scriptOperationId,
           signal: controller.signal,
         });
+        recordAiOperationResult(nextPlan);
         speechResult = await requestNarrationSpeech(
           nextPlan.script,
           narrationStyle,
           newlyReservedUsage,
           maximumDuration,
+          speechOperationId,
           controller.signal,
         );
-        recordNarrationSpeechResult(speechResult);
+        recordAiOperationResult(speechResult);
         audio = speechResult.audio;
         audioDuration = await getNarrationAudioDuration(audio);
       }
@@ -1790,6 +1841,14 @@ export default function Home() {
         }
       }
       if (!isCurrent()) return;
+      if (error instanceof ApiRequestError) {
+        if (error.aiOperationLimit !== null) {
+          rememberAiOperationLimit(error.aiOperationLimit);
+        }
+        if (error.aiOperationsRemaining !== null) {
+          rememberAiOperationsRemaining(error.aiOperationsRemaining);
+        }
+      }
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -1813,9 +1872,9 @@ export default function Home() {
     if (narrationRegenerationAbortRef.current) {
       throw new Error("AI音声を生成中です。完了まで少しお待ちください。");
     }
-    if (narrationGenerationsRemainingRef.current <= 0) {
+    if (aiOperationsRemainingRef.current <= 0) {
       throw new Error(
-        `この動画で作成できるAI音声の上限（${narrationGenerationLimitRef.current}回）に達しました。`,
+        `この動画で利用できるAI処理の上限（${aiOperationLimitRef.current}回）に達しました。現在の編集内容はそのままプレビュー・書き出しできます。`,
       );
     }
     const cleanScript = script.replace(/\s+/g, " ").trim();
@@ -1861,13 +1920,14 @@ export default function Home() {
         style,
         usageReservationRef.current,
         maximumDuration,
+        crypto.randomUUID(),
         controller.signal,
       );
       throwIfProcessingAborted(controller.signal);
       if (editGenerationRef.current !== generation) {
         throw new DOMException("処理を中止しました。", "AbortError");
       }
-      const remaining = recordNarrationSpeechResult(speechResult);
+      const remaining = recordAiOperationResult(speechResult);
       const audio = speechResult.audio;
       const audioDuration = await getNarrationAudioDuration(audio);
       if (
@@ -1904,13 +1964,11 @@ export default function Home() {
       return remaining;
     } catch (error) {
       if (error instanceof ApiRequestError) {
-        if (error.narrationGenerationLimit !== null) {
-          rememberNarrationGenerationLimit(error.narrationGenerationLimit);
+        if (error.aiOperationLimit !== null) {
+          rememberAiOperationLimit(error.aiOperationLimit);
         }
-        if (error.narrationGenerationsRemaining !== null) {
-          rememberNarrationGenerationsRemaining(
-            error.narrationGenerationsRemaining,
-          );
+        if (error.aiOperationsRemaining !== null) {
+          rememberAiOperationsRemaining(error.aiOperationsRemaining);
         }
       }
       throw error;
@@ -1976,7 +2034,7 @@ export default function Home() {
     setNarrationAutoCutEnabled(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    resetNarrationGenerationQuota();
+    resetAiOperationQuota();
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -2302,8 +2360,8 @@ export default function Home() {
           setNarrationPlan={setNarrationPlan}
           narrationAudioUrl={narrationAudioUrl}
           narrationStyle={narrationStyle}
-          narrationGenerationsRemaining={narrationGenerationsRemaining}
-          narrationGenerationLimit={narrationGenerationLimit}
+          narrationGenerationsRemaining={aiOperationsRemaining}
+          narrationGenerationLimit={aiOperationLimit}
           narrationOriginalAudio={narrationOriginalAudio}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
           setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
@@ -2823,7 +2881,7 @@ function Landing({
           <div>
             <strong>まずは無料で、編集後の動画を確認</strong>
             <small>
-              合計3分または2動画まで。編集・プレビューまで無料、完成動画の保存は有料です。
+              合計3分または2動画まで。AI処理は1動画につき3回。編集・プレビューまで無料、完成動画の保存は有料です。
             </small>
           </div>
           <button onClick={openPicker}>無料で試す</button>
@@ -2840,6 +2898,7 @@ function Landing({
             <span>買い切り・サブスクなし</span>
             <ul>
               <li>✓ 90秒まで</li>
+              <li>✓ AI処理は1動画につき5回</li>
               <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 表紙と投稿文つき</li>
             </ul>
@@ -2867,6 +2926,7 @@ function Landing({
             </span>
             <ul>
               <li>✓ 90秒まで</li>
+              <li>✓ AI処理は1動画につき10回</li>
               <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 編集スタイルを記憶</li>
             </ul>
@@ -3544,6 +3604,11 @@ function SetupWorkspace({
                     : `${length}秒以内`}
               </p>
             </div>
+            <p className="optionCostNote">
+              {audioMode === "narration"
+                ? "この編集では、AI台本とAI音声の生成にAI処理を2回使用します。内部の自動調整では追加消費しません。"
+                : "この編集では、文字起こしにAI処理を1回使用します。動画を分割して処理しても追加消費しません。"}
+            </p>
             <button className="mainCta" onClick={startEditing}>
               <span>
                 {audioMode === "narration"
@@ -5323,10 +5388,10 @@ function ResultWorkspace({
       );
       notify(
         pronunciationEntryCount
-          ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました（残り${remaining}回）`
+          ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました（AI処理 残り${remaining}回）`
           : narrationCaptionsEnabled
-            ? `AI音声とテロップを更新しました（残り${remaining}回）`
-            : `AI音声を更新しました（残り${remaining}回）`,
+            ? `AI音声とテロップを更新しました（AI処理 残り${remaining}回）`
+            : `AI音声を更新しました（AI処理 残り${remaining}回）`,
       );
     } catch (error) {
       notify(
@@ -6744,7 +6809,7 @@ function ResultWorkspace({
                   ? "AI音声に合わせて短く編集"
                   : "元動画にAI音声だけ追加"}
               </strong>
-              <small>ここで変更しても、AI音声の追加生成や料金は発生しません。</small>
+              <small>ここで変更しても、AI処理の残り回数は減らず、追加料金も発生しません。</small>
             </div>
             <div className="resultNarrationCutActions">
               <button
@@ -6987,7 +7052,7 @@ function ResultWorkspace({
                       <small>AI音声で聞こえる読み方だけを変更します。</small>
                     </div>
                     <p className="pronunciationCostNote">
-                      ここへ入力するだけでは残り回数は減りません。下の生成ボタンを押し、AI音声が完成したときだけ1回分を使います。
+                      ここへ入力するだけではAI処理の残り回数は減りません。下の生成ボタンを押し、AI音声が完成したときだけ1回分を使います。
                     </p>
                   </div>
                 )}
@@ -7022,20 +7087,22 @@ function ResultWorkspace({
                 aria-live="polite"
               >
                 <div>
-                  <strong>AI音声の生成</strong>
+                  <strong>AI処理の利用回数</strong>
                   <span>
                     残り <b>{narrationGenerationsRemaining}</b> / {narrationGenerationLimit}回
                   </span>
                 </div>
                 <small>
-                  {narrationGenerationLimit === 2
-                    ? "無料利用では1動画につき合計2回までです。"
-                    : `1動画につき合計${narrationGenerationLimit}回までです。`}
-                  初回生成と自動的な尺調整も含みます。下のボタンからAI音声の生成が完了すると残り回数を1回使いますが、1動画作成の利用枠やお支払いは増えません。
+                  {narrationGenerationLimit === 3
+                    ? "無料利用では、この動画1本につき合計3回まで利用できます。"
+                    : narrationGenerationLimit === 10
+                      ? "月額プランでは、この動画1本につき合計10回まで利用できます。"
+                      : `1動画作成では、この動画1本につき合計${narrationGenerationLimit}回まで利用できます。`}
+                  文字起こし、高精度再解析、AI台本、AI音声が完成するたびに1回分を使います。失敗・内部の分割処理・自動尺調整では追加消費しません。
                 </small>
                 {narrationGenerationLimitReached && (
                   <p>
-                    現在のAI音声はそのままプレビュー・書き出しできます。新たに作る場合は「別の動画を作る」から開始してください。
+                    現在の編集内容はそのままプレビュー・書き出しできます。新たに作る場合は「別の動画を作る」から開始してください。
                   </p>
                 )}
               </div>
@@ -7053,9 +7120,9 @@ function ResultWorkspace({
                 {isRegeneratingNarration
                   ? "AI音声を再生成中…"
                   : narrationGenerationLimitReached
-                    ? "AI音声の生成上限に達しました"
+                    ? "AI処理の上限に達しました"
                     : hasPendingNarrationChanges
-                      ? "変更内容をAI音声に反映する（1回使用）"
+                      ? "変更内容をAI音声に反映（AI処理1回）"
                       : "変更は反映済み"}
               </button>
               <p
@@ -7858,6 +7925,33 @@ function ResultWorkspace({
         </div>
       )}
 
+      {file && !narrationPlan && (
+        <div
+          className={`narrationGenerationQuota${narrationGenerationsRemaining <= 1 ? " isLow" : ""}${narrationGenerationLimitReached ? " isExhausted" : ""}`}
+          aria-live="polite"
+        >
+          <div>
+            <strong>AI処理の利用回数</strong>
+            <span>
+              残り <b>{narrationGenerationsRemaining}</b> / {narrationGenerationLimit}回
+            </span>
+          </div>
+          <small>
+            {narrationGenerationLimit === 3
+              ? "無料利用では、この動画1本につき合計3回まで利用できます。"
+              : narrationGenerationLimit === 10
+                ? "月額プランでは、この動画1本につき合計10回まで利用できます。"
+                : `1動画作成では、この動画1本につき合計${narrationGenerationLimit}回まで利用できます。`}
+            文字起こしと高精度再解析が完成するたびに1回分を使います。テロップ・カット・音量・表紙の変更、プレビュー、書き出しでは減りません。
+          </small>
+          {narrationGenerationLimitReached && (
+            <p>
+              現在の編集内容はそのままプレビュー・書き出しできます。
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="exportBar">
         <div>
           <span className="exportIcon">▶</span>
@@ -7900,9 +7994,11 @@ function ResultWorkspace({
             <button
               className="quietButton highAccuracyButton"
               onClick={() => void regenerateHighAccuracy()}
-              disabled={isMediaBusy}
+              disabled={isMediaBusy || narrationGenerationLimitReached}
             >
-              高精度で再生成
+              {narrationGenerationLimitReached
+                ? "AI処理の上限に達しました"
+                : "高精度で再生成（AI処理1回）"}
             </button>
           )}
           {file && !completedVideoSaveAllowed ? (

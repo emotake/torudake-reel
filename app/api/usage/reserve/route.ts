@@ -3,8 +3,8 @@ import {
   reserveUsage,
   UsageLimitError,
 } from "../../../../lib/billing-store";
+import { getAiOperationSuccessLimit } from "../../../../lib/billing-policy";
 import { authenticationRequired } from "../../../../lib/current-user";
-import { getNarrationSpeechSuccessLimit } from "../../../../lib/narration";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
@@ -49,9 +49,9 @@ export async function POST(request: Request) {
       required: true,
       reservationId: reservation.id,
       bucket: reservation.bucket,
-      narrationGenerationLimit: getNarrationSpeechSuccessLimit(
-        reservation.bucket,
-      ),
+      aiOperationLimit: getAiOperationSuccessLimit(reservation.bucket),
+      // Compatibility for an editor tab opened before this deployment.
+      narrationGenerationLimit: getAiOperationSuccessLimit(reservation.bucket),
     });
   } catch (error) {
     if (error instanceof OperatorUsageLimitError) {

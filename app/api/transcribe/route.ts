@@ -17,12 +17,14 @@ import {
   removeTransfer,
   safeFileName,
 } from "../../../lib/transfers";
-import { authorizeLeasedUsageOperation } from "../../../lib/billing-store";
 import {
-  markOperatorUsageOperationSucceeded,
-  recordObservedTranscriptionDuration,
-  releaseUsageOperationLease,
-  type UsageOperationLease,
+  abandonMeteredAiOperation,
+  authorizeMeteredAiOperation,
+  completeMeteredAiOperation,
+  type AuthorizedMeteredAiOperation,
+} from "../../../lib/billing-store";
+import {
+  recordMeteredAiTranscriptionDuration,
 } from "../../../lib/operator-usage";
 import { getUsagePrincipal } from "../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
@@ -30,6 +32,42 @@ import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 45_000;
 const TRANSCRIPTION_RETRY_DELAY_MS = 350;
+
+function aiOperationQuotaHeaders(limit: number, remaining: number) {
+  const normalizedRemaining = Math.max(0, Math.min(limit, remaining));
+  return {
+    "X-AI-Operation-Limit": String(limit),
+    "X-AI-Operations-Remaining": String(normalizedRemaining),
+    // Keep these during the transition so an already-open editor can still
+    // display the shared allowance after the server is deployed.
+    "X-Narration-Generation-Limit": String(limit),
+    "X-Narration-Generations-Remaining": String(normalizedRemaining),
+  };
+}
+
+function meteredJsonError(
+  message: string,
+  status: number,
+  authorization:
+    | Awaited<ReturnType<typeof authorizeMeteredAiOperation>>
+    | null,
+) {
+  return Response.json(
+    { error: message },
+    {
+      status,
+      headers: {
+        "Cache-Control": "no-store",
+        ...(authorization?.successfulLimit
+          ? aiOperationQuotaHeaders(
+              authorization.successfulLimit,
+              authorization.remaining ?? authorization.successfulLimit,
+            )
+          : {}),
+      },
+    },
+  );
+}
 
 type TranscriptionResponse = {
   duration?: number;
@@ -265,7 +303,8 @@ export async function POST(request: Request) {
   let temporaryTransfer:
     | Awaited<ReturnType<typeof findTransfer>>
     | undefined = undefined;
-  let transcriptionLease: UsageOperationLease | null = null;
+  let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
+  let meteredAuthorizationSettled = false;
 
   try {
     const apiKey = (
@@ -284,7 +323,7 @@ export async function POST(request: Request) {
     let file: File | null = null;
     let requestHighAccuracy = false;
     let usageReservationId = "";
-    let enforcedReservationId: string | null = null;
+    let aiOperationId = "";
     const requestContentType =
       request.headers.get("content-type")?.toLowerCase() ?? "";
 
@@ -294,9 +333,11 @@ export async function POST(request: Request) {
         code?: string;
         quality?: string;
         usageReservationId?: string;
+        aiOperationId?: string;
       };
       requestHighAccuracy = payload.quality === "high";
       usageReservationId = payload.usageReservationId?.trim() ?? "";
+      aiOperationId = payload.aiOperationId?.trim() ?? "";
       const id = payload.id?.trim() ?? "";
       const code = payload.code?.trim() ?? "";
       if (!id || !code) {
@@ -358,6 +399,7 @@ export async function POST(request: Request) {
       usageReservationId = String(
         requestData.get("usageReservationId") ?? "",
       ).trim();
+      aiOperationId = String(requestData.get("aiOperationId") ?? "").trim();
       if (uploadedFile instanceof File) {
         file = uploadedFile;
       }
@@ -384,31 +426,54 @@ export async function POST(request: Request) {
         return jsonError("続けるにはアカウントへのログインが必要です。", 401);
       }
       const authorization = usageReservationId
-        ? await authorizeLeasedUsageOperation(
+        ? await authorizeMeteredAiOperation(
             currentUser,
             usageReservationId,
             "transcribe",
+            aiOperationId || crypto.randomUUID(),
           )
         : null;
       if (!authorization?.allowed) {
         if (authorization?.reason === "operation_in_progress") {
-          return jsonError(
+          return meteredJsonError(
             "この動画の音声認識はすでに処理中です。完了するまで少しお待ちください。",
             409,
+            authorization,
           );
         }
-        return authorization?.reason === "operator_operation_limit"
-          ? jsonError(
-              "この動画での音声認識回数が安全上限に達しました。新しい動画としてやり直してください。",
-              429,
-            )
-          : jsonError(
-              "利用枠を確認できませんでした。動画を選び直してください。",
-              402,
-            );
+        const quotaReached =
+          authorization?.reason === "operator_success_limit" ||
+          authorization?.reason === "operator_operation_limit" ||
+          authorization?.reason === "action_attempt_limit";
+        if (quotaReached) {
+          return meteredJsonError(
+            authorization?.reason === "operator_success_limit"
+              ? `この動画で利用できるAI処理の上限（${authorization.successfulLimit}回）に達しました。現在の編集内容はそのまま利用できます。`
+              : "この動画でのAI処理回数が安全上限に達しました。新しい動画としてやり直してください。",
+            429,
+            authorization,
+          );
+        }
+        if (
+          authorization?.reason === "action_conflict" ||
+          authorization?.reason === "action_failed" ||
+          authorization?.reason === "action_expired"
+        ) {
+          return meteredJsonError(
+            "このAI処理を再開できませんでした。もう一度操作してください。",
+            409,
+            authorization,
+          );
+        }
+        return meteredJsonError(
+          authorization?.reason === "ai_action_capacity"
+            ? "別のAI処理が進行中です。完了してからもう一度お試しください。"
+            : "利用枠を確認できませんでした。動画を選び直してください。",
+          authorization?.reason === "ai_action_capacity" ? 409 : 402,
+          authorization,
+        );
       }
-      enforcedReservationId = authorization.reservation.id;
-      transcriptionLease = authorization.lease;
+      meteredAuthorization = authorization;
     }
 
     const timedResult = await requestTimedTranscription(apiKey, file);
@@ -430,23 +495,25 @@ export async function POST(request: Request) {
     let transcriptionText = transcription.text?.trim() ?? "";
     const transcriptionDuration = Number(transcription.duration);
     let rawSegments = getRawSegments(transcription);
-    if (enforcedReservationId) {
+    if (meteredAuthorization) {
       const observedDuration = Math.max(
         Number.isFinite(transcriptionDuration) && transcriptionDuration > 0
           ? transcriptionDuration
           : 0,
         ...rawSegments.map((segment) => segment.end),
       );
-      const observedUsage = await recordObservedTranscriptionDuration(
-        enforcedReservationId,
+      const observedUsage = await recordMeteredAiTranscriptionDuration(
+        meteredAuthorization.action,
+        meteredAuthorization.lease,
         observedDuration,
       );
       if (!observedUsage.allowed) {
-        return jsonError(
+        return meteredJsonError(
           observedUsage.reason === "duration_exceeded"
             ? "動画の実際の長さが確保した利用枠を超えています。動画を選び直して、もう一度お試しください。"
             : "音声の長さを安全に確認できませんでした。動画を選び直して、もう一度お試しください。",
           observedUsage.reason === "duration_exceeded" ? 402 : 502,
+          meteredAuthorization,
         );
       }
     }
@@ -486,17 +553,23 @@ export async function POST(request: Request) {
 
     const segments = buildCaptionSegments(rawSegments, 14);
 
-    if (enforcedReservationId) {
-      const recorded = await markOperatorUsageOperationSucceeded(
-        enforcedReservationId,
-        "transcribe",
+    let completedQuotaHeaders: Record<string, string> = {};
+    if (meteredAuthorization) {
+      const completion = await completeMeteredAiOperation(
+        meteredAuthorization,
       );
-      if (!recorded) {
-        return jsonError(
+      meteredAuthorizationSettled = true;
+      if (!completion.completed) {
+        return meteredJsonError(
           "利用記録を確定できませんでした。もう一度お試しください。",
           500,
+          meteredAuthorization,
         );
       }
+      completedQuotaHeaders = aiOperationQuotaHeaders(
+        meteredAuthorization.successfulLimit,
+        completion.remaining,
+      );
     }
 
     if (segments.length === 0) {
@@ -516,6 +589,7 @@ export async function POST(request: Request) {
         {
           headers: {
             "Cache-Control": "private, no-store",
+            ...completedQuotaHeaders,
           },
         },
       );
@@ -538,6 +612,7 @@ export async function POST(request: Request) {
       {
         headers: {
           "Cache-Control": "private, no-store",
+          ...completedQuotaHeaders,
         },
       },
     );
@@ -548,10 +623,10 @@ export async function POST(request: Request) {
       500,
     );
   } finally {
-    if (transcriptionLease) {
-      await releaseUsageOperationLease(transcriptionLease).catch(
+    if (meteredAuthorization && !meteredAuthorizationSettled) {
+      await abandonMeteredAiOperation(meteredAuthorization).catch(
         (cleanupError) => {
-          console.error("transcription usage lease cleanup failed", cleanupError);
+          console.error("transcription usage cleanup failed", cleanupError);
         },
       );
     }

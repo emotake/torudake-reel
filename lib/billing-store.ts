@@ -13,6 +13,7 @@ import {
   chooseBillingBucket,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
+  getAiOperationSuccessLimit,
   LIGHT_MONTHLY_VIDEO_LIMIT,
   OPERATOR_DAILY_VIDEO_LIMIT,
   startOfTokyoDaySeconds,
@@ -20,14 +21,25 @@ import {
 import type { CurrentUser } from "./current-user";
 import {
   acquireUsageOperationLease,
+  continueMeteredAiAction,
   consumeOperatorUsageOperation,
+  createMeteredAiAction,
+  getMeteredAiAction,
+  getMeteredAiUsageCounts,
   getOperatorUsageOperationCounts,
+  isValidMeteredAiActionId,
   isObservedDurationBlocked,
+  markMeteredAiActionFailed,
+  markMeteredAiActionSucceeded,
+  METERED_AI_LEASE_SCOPE,
   releaseUsageOperationLease,
   releaseOrCompleteUsageReservation,
   settleExpiredUsageReservations,
   TRANSCRIPTION_LEASE_TTL_SECONDS,
+  type MeteredAiAction,
+  type MeteredAiOperation,
   type OperatorUsageOperation,
+  type UsageOperationLease,
 } from "./operator-usage";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
@@ -909,6 +921,371 @@ export async function finishPurchaseStateSync(
     await stopOneTimeReservationsForPurchase(
       claim.userId,
       claim.purchaseId,
+    );
+  }
+}
+
+/**
+ * Authorizes one logical billable AI action. All metered operation types use
+ * the same reservation-scoped lease, so a client cannot race transcription,
+ * script, and speech requests past the shared successful-action limit.
+ */
+type OwnedUsageReservation = NonNullable<
+  Awaited<ReturnType<typeof findOwnedUsageReservation>>
+>;
+
+export type MeteredAiAuthorizationResult =
+  | {
+      allowed: true;
+      reason: null;
+      reservation: OwnedUsageReservation;
+      lease: UsageOperationLease;
+      action: MeteredAiAction;
+      successfulLimit: number;
+      successfulCount: number;
+      remaining: number;
+      alreadySucceeded: boolean;
+    }
+  | {
+      allowed: false;
+      reason:
+        | "invalid_action_id"
+        | "reservation_not_found"
+        | "observed_duration_exceeded"
+        | "operation_in_progress"
+        | "action_conflict"
+        | "action_failed"
+        | "action_expired"
+        | "action_attempt_limit"
+        | "operator_success_limit"
+        | "ai_action_capacity"
+        | "operator_operation_limit";
+      reservation: OwnedUsageReservation | null;
+      lease: null;
+      action: MeteredAiAction | null;
+      successfulLimit: number;
+      successfulCount: number;
+      remaining: number;
+    };
+
+export async function authorizeMeteredAiOperation(
+  currentUser: CurrentUser,
+  reservationId: string,
+  operation: MeteredAiOperation,
+  actionId: string,
+): Promise<MeteredAiAuthorizationResult> {
+  if (!isValidMeteredAiActionId(actionId)) {
+    return {
+      allowed: false,
+      reason: "invalid_action_id",
+      reservation: null,
+      lease: null,
+      action: null,
+      successfulLimit: 0,
+      successfulCount: 0,
+      remaining: 0,
+    } as const;
+  }
+
+  const reservation = await findOwnedUsageReservation(
+    currentUser,
+    reservationId,
+  );
+  if (!reservation) {
+    return {
+      allowed: false,
+      reason: "reservation_not_found",
+      reservation: null,
+      lease: null,
+      action: null,
+      successfulLimit: 0,
+      successfulCount: 0,
+      remaining: 0,
+    } as const;
+  }
+  const successfulLimit = getAiOperationSuccessLimit(reservation.bucket);
+  if (await isObservedDurationBlocked(reservation.id)) {
+    const usage = await getMeteredAiUsageCounts(reservation.id);
+    return {
+      allowed: false,
+      reason: "observed_duration_exceeded",
+      reservation,
+      lease: null,
+      action: null,
+      successfulLimit,
+      successfulCount: usage.successfulCount,
+      remaining: Math.max(0, successfulLimit - usage.successfulCount),
+    } as const;
+  }
+
+  const lease = await acquireUsageOperationLease(
+    reservation.id,
+    METERED_AI_LEASE_SCOPE,
+    TRANSCRIPTION_LEASE_TTL_SECONDS,
+  );
+  if (!lease) {
+    const usage = await getMeteredAiUsageCounts(reservation.id);
+    return {
+      allowed: false,
+      reason: "operation_in_progress",
+      reservation,
+      lease: null,
+      action: null,
+      successfulLimit,
+      successfulCount: usage.successfulCount,
+      remaining: Math.max(0, successfulLimit - usage.successfulCount),
+    } as const;
+  }
+
+  try {
+    if (await isObservedDurationBlocked(reservation.id)) {
+      const usage = await getMeteredAiUsageCounts(reservation.id);
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "observed_duration_exceeded",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usage.successfulCount,
+        remaining: Math.max(0, successfulLimit - usage.successfulCount),
+      } as const;
+    }
+
+    const existingAction = await getMeteredAiAction(
+      reservation.id,
+      actionId,
+    );
+    const usageBefore = await getMeteredAiUsageCounts(reservation.id);
+    const remainingBefore = Math.max(
+      0,
+      successfulLimit - usageBefore.successfulCount,
+    );
+
+    if (existingAction) {
+      if (existingAction.operation !== operation) {
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_conflict",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
+      if (existingAction.status === "failed") {
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_failed",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
+      if (existingAction.expiresAt <= Math.floor(Date.now() / 1_000)) {
+        await markMeteredAiActionFailed(existingAction, lease);
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_expired",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
+      const continuedAction = await continueMeteredAiAction(
+        existingAction,
+        lease,
+      );
+      if (!continuedAction) {
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_attempt_limit",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
+      return {
+        allowed: true,
+        reason: null,
+        reservation,
+        lease,
+        action: continuedAction,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: remainingBefore,
+        alreadySucceeded: existingAction.status === "succeeded",
+      } as const;
+    }
+
+    if (usageBefore.successfulCount >= successfulLimit) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "operator_success_limit",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: 0,
+      } as const;
+    }
+    if (
+      usageBefore.successfulCount + usageBefore.pendingCount >=
+      successfulLimit
+    ) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "ai_action_capacity",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: remainingBefore,
+      } as const;
+    }
+
+    // The legacy per-operation count remains a second, deliberately stricter
+    // abuse ceiling. It is consumed once per logical action, never per chunk.
+    if (!(await consumeOperatorUsageOperation(reservation.id, operation))) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "operator_operation_limit",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: remainingBefore,
+      } as const;
+    }
+
+    const action = await createMeteredAiAction(
+      reservation.id,
+      actionId,
+      operation,
+      successfulLimit,
+      lease,
+    );
+    if (!action) {
+      const usageAfter = await getMeteredAiUsageCounts(reservation.id);
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason:
+          usageAfter.successfulCount >= successfulLimit
+            ? "operator_success_limit"
+            : "ai_action_capacity",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageAfter.successfulCount,
+        remaining: Math.max(
+          0,
+          successfulLimit - usageAfter.successfulCount,
+        ),
+      } as const;
+    }
+
+    return {
+      allowed: true,
+      reason: null,
+      reservation,
+      lease,
+      action,
+      successfulLimit,
+      successfulCount: usageBefore.successfulCount,
+      remaining: remainingBefore,
+      alreadySucceeded: false,
+    } as const;
+  } catch (error) {
+    await releaseUsageOperationLease(lease).catch(() => undefined);
+    throw error;
+  }
+}
+
+export type AuthorizedMeteredAiOperation = Extract<
+  Awaited<ReturnType<typeof authorizeMeteredAiOperation>>,
+  { allowed: true }
+>;
+
+/** Marks one logical action successful and always releases its shared lease. */
+export async function completeMeteredAiOperation(
+  authorization: AuthorizedMeteredAiOperation,
+) {
+  try {
+    const action = await markMeteredAiActionSucceeded(
+      authorization.action,
+      authorization.lease,
+      authorization.successfulLimit,
+    );
+    if (!action) {
+      return {
+        completed: false,
+        successfulCount: authorization.successfulCount,
+        remaining: authorization.remaining,
+      } as const;
+    }
+    const usage = await getMeteredAiUsageCounts(
+      authorization.reservation.id,
+    );
+    return {
+      completed: true,
+      successfulCount: usage.successfulCount,
+      remaining: Math.max(
+        0,
+        authorization.successfulLimit - usage.successfulCount,
+      ),
+    } as const;
+  } finally {
+    await releaseUsageOperationLease(authorization.lease).catch(
+      () => undefined,
+    );
+  }
+}
+
+/** Releases a chunk lease while preserving its pending logical action. */
+export async function releaseMeteredAiOperation(
+  authorization: AuthorizedMeteredAiOperation,
+) {
+  return releaseUsageOperationLease(authorization.lease);
+}
+
+/** Records a terminal failure without consuming successful-action quota. */
+export async function abandonMeteredAiOperation(
+  authorization: AuthorizedMeteredAiOperation,
+) {
+  try {
+    return Boolean(
+      await markMeteredAiActionFailed(
+        authorization.action,
+        authorization.lease,
+      ),
+    );
+  } finally {
+    await releaseUsageOperationLease(authorization.lease).catch(
+      () => undefined,
     );
   }
 }

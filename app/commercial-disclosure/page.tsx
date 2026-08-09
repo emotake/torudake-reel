@@ -67,6 +67,30 @@ export default function CommercialDisclosurePage() {
       </article>
 
       <article>
+        <h2>AI処理の利用上限</h2>
+        <p>
+          AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれ、各処理が正常に完了するごとに1回分を使用します。
+        </p>
+        <dl className="legalDetails">
+          <div>
+            <dt>無料体験</dt>
+            <dd>1動画あたり3回</dd>
+          </div>
+          <div>
+            <dt>1動画作成</dt>
+            <dd>1動画あたり5回</dd>
+          </div>
+          <div>
+            <dt>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</dt>
+            <dd>1動画あたり10回</dd>
+          </div>
+        </dl>
+        <p>
+          処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
+        </p>
+      </article>
+
+      <article>
         <h2>商品代金以外に必要な費用</h2>
         <p>
           本サービスが別途請求する手数料はありません。インターネット接続料金、通信料金その他の利用環境にかかる費用はお客様の負担となります。

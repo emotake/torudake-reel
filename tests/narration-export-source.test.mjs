@@ -93,7 +93,7 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   const confirmationFlow = pageSource.slice(confirmationStart, confirmationEnd);
 
   assert.match(pageSource, /isBillingBucket\(payload\.bucket\)/);
-  assert.match(pageSource, /reservationId:[\s\S]*?bucket,[\s\S]*?narrationGenerationLimit/);
+  assert.match(pageSource, /reservationId:[\s\S]*?bucket,[\s\S]*?aiOperationLimit/);
   assert.match(pageSource, /rememberUsageReservation\(newlyReservedUsage, reservation\.bucket\)/);
   assert.match(pageSource, /canSaveCompletedVideo\(usageBucket\)/);
   assert.match(exportFlow, /if \(!completedVideoSaveAllowed\)/);
@@ -287,8 +287,8 @@ test("offers a mobile-friendly pronunciation editor without using the API while 
   assert.match(pageSource, /選択した言葉を追加/);
   assert.match(pageSource, /別の言葉も修正する/);
   assert.match(pageSource, /テロップ「\$\{row\.surface\.trim\(\)\}」／音声/);
-  assert.match(pageSource, /ここへ入力するだけでは残り回数は減りません/);
-  assert.match(pageSource, /変更内容をAI音声に反映する（1回使用）/);
+  assert.match(pageSource, /ここへ入力するだけではAI処理の残り回数は減りません/);
+  assert.match(pageSource, /変更内容をAI音声に反映（AI処理1回）/);
   assert.match(editorFlow, /addSelectedNarrationPronunciationTerm/);
   assert.doesNotMatch(editorFlow, /requestNarrationSpeech|regenerateNarration/);
   assert.match(
@@ -301,7 +301,7 @@ test("offers a mobile-friendly pronunciation editor without using the API while 
   );
 });
 
-test("shows and enforces the server-backed narration generation allowance", () => {
+test("shows and enforces the shared server-backed AI processing allowance", () => {
   const regenerationStart = pageSource.indexOf(
     "async function regenerateNarration(",
   );
@@ -311,22 +311,19 @@ test("shows and enforces the server-backed narration generation allowance", () =
   );
   const regenerationFlow = pageSource.slice(regenerationStart, regenerationEnd);
 
-  assert.match(pageSource, /X-Narration-Generation-Limit/);
-  assert.match(pageSource, /X-Narration-Generations-Remaining/);
-  assert.match(pageSource, /narrationGenerationLimitRef/);
-  assert.match(pageSource, /narrationGenerationLimit=\{narrationGenerationLimit\}/);
-  assert.match(pageSource, /無料利用では1動画につき合計2回までです/);
-  assert.doesNotMatch(
-    pageSource,
-    /残り\s*<b>\{narrationGenerationsRemaining\}<\/b>\s*\/\s*\{NARRATION_SPEECH_SUCCESS_LIMIT\}回/,
-  );
-  assert.match(pageSource, /AI音声の生成/);
-  assert.match(pageSource, /初回生成と自動的な尺調整も含みます/);
-  assert.match(pageSource, /1動画作成の利用枠やお支払いは増えません/);
+  assert.match(pageSource, /X-AI-Operation-Limit/);
+  assert.match(pageSource, /X-AI-Operations-Remaining/);
+  assert.match(pageSource, /aiOperationLimitRef/);
+  assert.match(pageSource, /narrationGenerationLimit=\{aiOperationLimit\}/);
+  assert.match(pageSource, /無料利用では、この動画1本につき合計3回まで利用できます/);
+  assert.match(pageSource, /月額プランでは、この動画1本につき合計10回まで利用できます/);
+  assert.match(pageSource, /AI処理の利用回数/);
+  assert.match(pageSource, /失敗・内部の分割処理・自動尺調整では追加消費しません/);
+  assert.match(pageSource, /高精度で再生成（AI処理1回）/);
   assert.match(pageSource, /変更は反映済み/);
   assert.match(regenerationFlow, /narrationRegenerationAbortRef\.current/);
   assert.match(regenerationFlow, /controller\.signal/);
-  assert.match(regenerationFlow, /recordNarrationSpeechResult\(speechResult\)/);
+  assert.match(regenerationFlow, /recordAiOperationResult\(speechResult\)/);
 });
 
 test("uses video length language and gives spoken videos independent output choices", () => {

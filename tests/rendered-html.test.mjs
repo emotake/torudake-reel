@@ -187,8 +187,23 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /最大500MB/);
   assert.match(html, /無料体験は編集とプレビューまで/);
   assert.match(html, /写真リールは書き出し成功時点/);
+  assert.match(html, /AI処理の利用上限/);
+  assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
+  assert.match(html, /1動画あたり3回/);
+  assert.match(html, /1動画あたり5回/);
+  assert.match(html, /1動画あたり10回/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/commercial-disclosure"/,
   );
+});
+
+test("publishes the shared AI processing limits in the terms", async () => {
+  const response = await render("/terms");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
+  assert.match(html, /無料体験3回、1動画作成5回、月額プラン10回/);
+  assert.match(html, /各処理が正常に完了するごとに1回分を使用/);
 });

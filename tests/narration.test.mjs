@@ -12,10 +12,7 @@ import {
   getNarrationMixLevels,
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
-  getNarrationSpeechSuccessLimit,
-  FREE_NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_DISCLOSURE_TEXT,
-  NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
   normalizeNarrationStyle,
   normalizeNarrationPlan,
@@ -24,17 +21,26 @@ import {
   validateNarrationPronunciationGuide,
 } from "../lib/narration.ts";
 import {
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
+  getAiOperationSuccessLimit,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
+  OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
+} from "../lib/billing-policy.ts";
+import {
   buildEditRanges,
   getEditedDuration,
 } from "../lib/edit-plan.ts";
 
-test("caps free AI voice outputs at two while keeping paid access at five", () => {
-  assert.equal(FREE_NARRATION_SPEECH_SUCCESS_LIMIT, 2);
-  assert.equal(NARRATION_SPEECH_SUCCESS_LIMIT, 5);
-  assert.equal(getNarrationSpeechSuccessLimit("free"), 2);
-  assert.equal(getNarrationSpeechSuccessLimit("subscription"), 5);
-  assert.equal(getNarrationSpeechSuccessLimit("one_time"), 5);
-  assert.equal(getNarrationSpeechSuccessLimit("operator"), 5);
+test("sets the shared per-video AI processing allowance by plan", () => {
+  assert.equal(FREE_AI_OPERATION_SUCCESS_LIMIT, 3);
+  assert.equal(SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT, 10);
+  assert.equal(ONE_TIME_AI_OPERATION_SUCCESS_LIMIT, 5);
+  assert.equal(OPERATOR_AI_OPERATION_SUCCESS_LIMIT, 10);
+  assert.equal(getAiOperationSuccessLimit("free"), 3);
+  assert.equal(getAiOperationSuccessLimit("subscription"), 10);
+  assert.equal(getAiOperationSuccessLimit("one_time"), 5);
+  assert.equal(getAiOperationSuccessLimit("operator"), 10);
 });
 
 test("normalizes a structured narration plan", () => {

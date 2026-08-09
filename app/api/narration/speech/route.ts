@@ -1,19 +1,14 @@
 import { env } from "cloudflare:workers";
 import {
-  authorizeLeasedUsageOperation,
+  abandonMeteredAiOperation,
+  authorizeMeteredAiOperation,
+  completeMeteredAiOperation,
   findOwnedUsageReservation,
+  type AuthorizedMeteredAiOperation,
 } from "../../../../lib/billing-store";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import {
-  consumeOperatorUsageOperation,
-  markOperatorUsageOperationSucceeded,
-  releaseUsageOperationLease,
-  type UsageOperationLease,
-} from "../../../../lib/operator-usage";
-import {
-  getNarrationSpeechSuccessLimit,
   normalizeNarrationStyle,
-  NARRATION_SPEECH_SUCCESS_LIMIT,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
@@ -473,12 +468,13 @@ function speechError(status: number, payload: OpenAIError) {
   return "AI音声を生成できませんでした。もう一度お試しください。";
 }
 
-function generationQuotaHeaders(limit: number, remaining: number) {
+function aiOperationQuotaHeaders(limit: number, remaining: number) {
+  const normalizedRemaining = Math.max(0, Math.min(limit, remaining));
   return {
+    "X-AI-Operation-Limit": String(limit),
+    "X-AI-Operations-Remaining": String(normalizedRemaining),
     "X-Narration-Generation-Limit": String(limit),
-    "X-Narration-Generations-Remaining": String(
-      Math.max(0, Math.min(limit, remaining)),
-    ),
+    "X-Narration-Generations-Remaining": String(normalizedRemaining),
   };
 }
 
@@ -497,6 +493,7 @@ export async function POST(request: Request) {
     style?: unknown;
     usageReservationId?: unknown;
     targetDurationSeconds?: unknown;
+    aiOperationId?: unknown;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -521,10 +518,8 @@ export async function POST(request: Request) {
     );
   }
 
-  let authorizedReservationId: string | null = null;
-  let narrationLease: UsageOperationLease | null = null;
-  let narrationGenerationLimit = NARRATION_SPEECH_SUCCESS_LIMIT;
-  let successfulGenerationsBefore = 0;
+  let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
+  let meteredAuthorizationSettled = false;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
       allowTrial: true,
@@ -553,9 +548,6 @@ export async function POST(request: Request) {
         { status: 402 },
       );
     }
-    narrationGenerationLimit = getNarrationSpeechSuccessLimit(
-      reservation.bucket,
-    );
     if (
       script.length >
       narrationScriptCharacterLimit(
@@ -570,27 +562,43 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const authorization = await authorizeLeasedUsageOperation(
+    const aiOperationId =
+      typeof payload.aiOperationId === "string"
+        ? payload.aiOperationId.trim()
+        : "";
+    const authorization = await authorizeMeteredAiOperation(
       currentUser,
       reservationId,
       "narration_speech",
-      { successfulLimit: narrationGenerationLimit },
+      aiOperationId || crypto.randomUUID(),
     );
     if (!authorization?.allowed) {
       const hitGenerationLimit =
         authorization?.reason === "operator_success_limit";
       const hitAttemptLimit =
-        authorization?.reason === "operator_operation_limit";
+        authorization?.reason === "operator_operation_limit" ||
+        authorization?.reason === "action_attempt_limit";
       const alreadyProcessing =
-        authorization?.reason === "operation_in_progress";
+        authorization?.reason === "operation_in_progress" ||
+        authorization?.reason === "ai_action_capacity";
+      const aiOperationLimit =
+        "successfulLimit" in authorization &&
+        typeof authorization.successfulLimit === "number"
+          ? authorization.successfulLimit
+          : 10;
+      const remaining =
+        "remaining" in authorization &&
+        typeof authorization.remaining === "number"
+          ? authorization.remaining
+          : aiOperationLimit;
       return Response.json(
         {
           error: hitGenerationLimit
-            ? `この動画で作成できるAI音声の上限（${narrationGenerationLimit}回）に達しました。現在の音声で仕上げるか、新しい動画として開始してください。`
+            ? `この動画で利用できるAI処理の上限（${aiOperationLimit}回）に達しました。現在の編集内容はそのままプレビュー・書き出しできます。`
             : hitAttemptLimit
-              ? "この動画でのAI音声生成回数が安全上限に達しました。現在の音声で仕上げるか、新しい動画として開始してください。"
+              ? "この動画でのAI処理回数が安全上限に達しました。現在の編集内容で仕上げるか、新しい動画として開始してください。"
               : alreadyProcessing
-                ? "この動画のAI音声はすでに生成中です。完了するまで少しお待ちください。"
+                ? "別のAI処理が進行中です。完了するまで少しお待ちください。"
                 : "利用枠を確認できませんでした。動画を選び直してください。",
         },
         {
@@ -600,15 +608,14 @@ export async function POST(request: Request) {
               ? 409
               : 402,
           headers:
-            hitGenerationLimit || hitAttemptLimit
-              ? generationQuotaHeaders(narrationGenerationLimit, 0)
+            "successfulLimit" in authorization &&
+            typeof authorization.successfulLimit === "number"
+              ? aiOperationQuotaHeaders(aiOperationLimit, remaining)
               : undefined,
         },
       );
     }
-    authorizedReservationId = authorization.reservation.id;
-    narrationLease = authorization.lease;
-    successfulGenerationsBefore = authorization.successfulCount;
+    meteredAuthorization = authorization;
   }
 
   try {
@@ -625,24 +632,6 @@ export async function POST(request: Request) {
       const safeRealtimeFallback =
         response.headers.get(FALLBACK_ALLOWED_HEADER) === "1";
       if (safeRealtimeFallback) {
-        if (
-          authorizedReservationId &&
-          !(await consumeOperatorUsageOperation(
-            authorizedReservationId,
-            "narration_speech",
-          ))
-        ) {
-          return Response.json(
-            {
-              error:
-                "この動画でのAI音声生成回数が安全上限に達しました。現在の音声で仕上げるか、新しい動画として開始してください。",
-            },
-            {
-              status: 429,
-              headers: generationQuotaHeaders(narrationGenerationLimit, 0),
-            },
-          );
-        }
         response = await requestSpeech(
           apiKey,
           script,
@@ -669,10 +658,10 @@ export async function POST(request: Request) {
         { error: speechError(response.status, errorPayload) },
         {
           status: response.status,
-          headers: authorizedReservationId
-            ? generationQuotaHeaders(
-                narrationGenerationLimit,
-                narrationGenerationLimit - successfulGenerationsBefore,
+          headers: meteredAuthorization
+            ? aiOperationQuotaHeaders(
+                meteredAuthorization.successfulLimit,
+                meteredAuthorization.remaining,
               )
             : undefined,
         },
@@ -685,25 +674,36 @@ export async function POST(request: Request) {
         { error: "AI音声を生成できませんでした。もう一度お試しください。" },
         {
           status: 502,
-          headers: authorizedReservationId
-            ? generationQuotaHeaders(
-                narrationGenerationLimit,
-                narrationGenerationLimit - successfulGenerationsBefore,
+          headers: meteredAuthorization
+            ? aiOperationQuotaHeaders(
+                meteredAuthorization.successfulLimit,
+                meteredAuthorization.remaining,
               )
             : undefined,
         },
       );
     }
-    if (
-      authorizedReservationId &&
-      !(await markOperatorUsageOperationSucceeded(
-        authorizedReservationId,
-        "narration_speech",
-      ))
-    ) {
-      return Response.json(
-        { error: "利用記録を確定できませんでした。もう一度お試しください。" },
-        { status: 500 },
+    let completedQuotaHeaders: Record<string, string> = {};
+    if (meteredAuthorization) {
+      const completion = await completeMeteredAiOperation(
+        meteredAuthorization,
+      );
+      meteredAuthorizationSettled = true;
+      if (!completion.completed) {
+        return Response.json(
+          { error: "利用記録を確定できませんでした。もう一度お試しください。" },
+          {
+            status: 500,
+            headers: aiOperationQuotaHeaders(
+              meteredAuthorization.successfulLimit,
+              meteredAuthorization.remaining,
+            ),
+          },
+        );
+      }
+      completedQuotaHeaders = aiOperationQuotaHeaders(
+        meteredAuthorization.successfulLimit,
+        completion.remaining,
       );
     }
     return new Response(audio, {
@@ -712,19 +712,14 @@ export async function POST(request: Request) {
           response.headers.get("content-type")?.split(";")[0] || "audio/wav",
         "Cache-Control": "private, no-store",
         "X-Narration-Model": selectedModel,
-        ...(authorizedReservationId
-          ? generationQuotaHeaders(
-              narrationGenerationLimit,
-              narrationGenerationLimit -
-                successfulGenerationsBefore -
-                1,
-            )
-          : {}),
+        ...completedQuotaHeaders,
       },
     });
   } finally {
-    if (narrationLease) {
-      await releaseUsageOperationLease(narrationLease).catch(() => undefined);
+    if (meteredAuthorization && !meteredAuthorizationSettled) {
+      await abandonMeteredAiOperation(meteredAuthorization).catch(
+        () => undefined,
+      );
     }
   }
 }

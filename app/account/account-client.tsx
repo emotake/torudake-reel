@@ -403,8 +403,8 @@ export default function AccountClient() {
               <strong>{status.monthly?.active ? `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プラン` : "無料体験"}</strong>
               <span>
                 {status.monthly?.active
-                  ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用`
-                  : `残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒`}
+                  ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり10回`
+                  : `残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒・AI処理は1動画あたり3回`}
               </span>
             </article>
             <article>
@@ -428,6 +428,7 @@ export default function AccountClient() {
               <p>LIGHT</p>
               <h2>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h2>
               <strong>¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 月</strong>
+              <div>文字起こし・AI台本・AI音声などのAI処理：1動画あたり10回</div>
               <button
                 disabled={busy !== null || !status.configured || status.monthly?.active}
                 onClick={() => startCheckout("light")}
@@ -439,6 +440,7 @@ export default function AccountClient() {
               <p>ONE TIME</p>
               <h2>1動画作成</h2>
               <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+              <div>文字起こし・AI台本・AI音声などのAI処理：この動画で5回</div>
               <button
                 disabled={busy !== null || !status.configured}
                 onClick={() => startCheckout("one_time")}
@@ -462,6 +464,9 @@ export default function AccountClient() {
       </p>
       <p className="accountSecurity">
         動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
+      </p>
+      <p className="accountSecurity">
+        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。各処理が正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、1動画作成5回、月額プラン10回です。
       </p>
       <div className="accountLegalLinks">
         <Link href="/terms">利用規約</Link>

@@ -1,8 +1,12 @@
 import { env } from "cloudflare:workers";
-import { authorizeUsageOperation } from "../../../../lib/billing-store";
+import {
+  abandonMeteredAiOperation,
+  authorizeMeteredAiOperation,
+  completeMeteredAiOperation,
+  type AuthorizedMeteredAiOperation,
+} from "../../../../lib/billing-store";
 import { getCurrentUser } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
-import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
 import {
   normalizeNarrationStyle,
   normalizeNarrationPlan,
@@ -15,6 +19,38 @@ const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
 const GOALS = new Set(["follow", "sales", "reach"]);
 const LENGTHS = new Set([30, 60, 90]);
+
+function aiOperationQuotaHeaders(limit: number, remaining: number) {
+  const normalizedRemaining = Math.max(0, Math.min(limit, remaining));
+  return {
+    "X-AI-Operation-Limit": String(limit),
+    "X-AI-Operations-Remaining": String(normalizedRemaining),
+    "X-Narration-Generation-Limit": String(limit),
+    "X-Narration-Generations-Remaining": String(normalizedRemaining),
+  };
+}
+
+function meteredResponseHeaders(
+  authorization:
+    | Awaited<ReturnType<typeof authorizeMeteredAiOperation>>
+    | null,
+) {
+  const limit =
+    authorization &&
+    "successfulLimit" in authorization &&
+    typeof authorization.successfulLimit === "number"
+      ? authorization.successfulLimit
+      : null;
+  if (limit === null) return {};
+  return aiOperationQuotaHeaders(
+    limit,
+    authorization &&
+    "remaining" in authorization &&
+    typeof authorization.remaining === "number"
+      ? authorization.remaining
+      : limit,
+  );
+}
 
 const STYLE_INSTRUCTIONS: Record<NarrationStyle, string> = {
   bright: "自然な女性の話し言葉。飾らず親しく、標準語で分かりやすく伝える",
@@ -92,6 +128,11 @@ export async function POST(request: Request) {
     );
   }
 
+  let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
+  let meteredAuthorizationSettled = false;
+
+  try {
+
   let payload: {
     frames?: unknown;
     brief?: unknown;
@@ -100,6 +141,7 @@ export async function POST(request: Request) {
     style?: unknown;
     sourceDuration?: unknown;
     usageReservationId?: unknown;
+    aiOperationId?: unknown;
     timingScale?: unknown;
     previousScript?: unknown;
   };
@@ -150,7 +192,6 @@ export async function POST(request: Request) {
   }
 
   let authorizedReservationDuration: number | null = null;
-  let authorizedReservationId: string | null = null;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
       allowTrial: true,
@@ -159,35 +200,52 @@ export async function POST(request: Request) {
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId
         : "";
+    const aiOperationId =
+      typeof payload.aiOperationId === "string"
+        ? payload.aiOperationId.trim()
+        : "";
     const authorization =
       currentUser && reservationId
-        ? await authorizeUsageOperation(
+        ? await authorizeMeteredAiOperation(
             currentUser,
             reservationId,
             "narration_script",
+            aiOperationId || crypto.randomUUID(),
           )
         : null;
     if (!authorization?.allowed) {
+      const quotaReached =
+        authorization?.reason === "operator_success_limit" ||
+        authorization?.reason === "operator_operation_limit" ||
+        authorization?.reason === "action_attempt_limit";
+      const alreadyProcessing =
+        authorization?.reason === "operation_in_progress" ||
+        authorization?.reason === "ai_action_capacity";
       return Response.json(
         {
-          error:
-            authorization?.reason === "operator_operation_limit"
-              ? "この動画での台本生成回数が安全上限に達しました。新しい動画としてやり直してください。"
+          error: quotaReached
+            ? authorization?.reason === "operator_success_limit"
+              ? `この動画で利用できるAI処理の上限（${authorization.successfulLimit}回）に達しました。現在の編集内容はそのまま利用できます。`
+              : "この動画でのAI処理回数が安全上限に達しました。新しい動画としてやり直してください。"
+            : alreadyProcessing
+              ? "別のAI処理が進行中です。完了してからもう一度お試しください。"
               : "利用枠を確認できませんでした。動画を選び直してください。",
         },
         {
-          status:
-            authorization?.reason === "operator_operation_limit"
-              ? 429
+          status: quotaReached
+            ? 429
+            : alreadyProcessing
+              ? 409
               : currentUser
                 ? 402
                 : 401,
+          headers: meteredResponseHeaders(authorization),
         },
       );
     }
     authorizedReservationDuration =
       authorization.reservation.sourceDurationSeconds;
-    authorizedReservationId = authorization.reservation.id;
+    meteredAuthorization = authorization;
     if (
       !isDurationWithinReservation(
         sourceDuration,
@@ -334,20 +392,28 @@ export async function POST(request: Request) {
     if (!plan.script || !plan.segments.length) {
       throw new Error("empty narration plan");
     }
-    if (
-      authorizedReservationId &&
-      !(await markOperatorUsageOperationSucceeded(
-        authorizedReservationId,
-        "narration_script",
-      ))
-    ) {
-      return Response.json(
-        { error: "利用記録を確定できませんでした。もう一度お試しください。" },
-        { status: 500 },
+    let quotaHeaders: Record<string, string> = {};
+    if (meteredAuthorization) {
+      const completion = await completeMeteredAiOperation(
+        meteredAuthorization,
+      );
+      meteredAuthorizationSettled = true;
+      if (!completion.completed) {
+        return Response.json(
+          { error: "利用記録を確定できませんでした。もう一度お試しください。" },
+          {
+            status: 500,
+            headers: meteredResponseHeaders(meteredAuthorization),
+          },
+        );
+      }
+      quotaHeaders = aiOperationQuotaHeaders(
+        meteredAuthorization.successfulLimit,
+        completion.remaining,
       );
     }
     return Response.json(plan, {
-      headers: { "Cache-Control": "private, no-store" },
+      headers: { "Cache-Control": "private, no-store", ...quotaHeaders },
     });
   } catch (error) {
     console.error("OpenAI narration response parse failed", error);
@@ -355,5 +421,14 @@ export async function POST(request: Request) {
       { error: "ナレーション台本を整えられませんでした。もう一度お試しください。" },
       { status: 502 },
     );
+  }
+  } finally {
+    if (meteredAuthorization && !meteredAuthorizationSettled) {
+      await abandonMeteredAiOperation(meteredAuthorization).catch(
+        (cleanupError) => {
+          console.error("narration script usage cleanup failed", cleanupError);
+        },
+      );
+    }
   }
 }

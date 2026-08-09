@@ -4,6 +4,10 @@ export const LIGHT_MONTHLY_VIDEO_LIMIT = 8;
 export const LIGHT_MONTHLY_PRICE_JPY = 1480;
 export const ONE_TIME_PRICE_JPY = 200;
 export const OPERATOR_DAILY_VIDEO_LIMIT = 20;
+export const FREE_AI_OPERATION_SUCCESS_LIMIT = 3;
+export const SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT = 10;
+export const ONE_TIME_AI_OPERATION_SUCCESS_LIMIT = 5;
+export const OPERATOR_AI_OPERATION_SUCCESS_LIMIT = 10;
 
 export type BillingUsageSnapshot = {
   freeVideosUsed: number;
@@ -20,6 +24,19 @@ export type BillingBucket =
   | "subscription"
   | "one_time"
   | "operator";
+
+export function getAiOperationSuccessLimit(bucket: BillingBucket) {
+  switch (bucket) {
+    case "free":
+      return FREE_AI_OPERATION_SUCCESS_LIMIT;
+    case "subscription":
+      return SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT;
+    case "one_time":
+      return ONE_TIME_AI_OPERATION_SUCCESS_LIMIT;
+    case "operator":
+      return OPERATOR_AI_OPERATION_SUCCESS_LIMIT;
+  }
+}
 
 export function isBillingBucket(value: unknown): value is BillingBucket {
   return (
