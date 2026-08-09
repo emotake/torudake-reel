@@ -12,6 +12,8 @@ import {
   getNarrationMixLevels,
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
+  getNarrationSpeechSuccessLimit,
+  FREE_NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_SPEECH_SUCCESS_LIMIT,
   NARRATION_STYLES,
@@ -26,8 +28,13 @@ import {
   getEditedDuration,
 } from "../lib/edit-plan.ts";
 
-test("caps successful AI voice outputs for one video", () => {
+test("caps free AI voice outputs at two while keeping paid access at five", () => {
+  assert.equal(FREE_NARRATION_SPEECH_SUCCESS_LIMIT, 2);
   assert.equal(NARRATION_SPEECH_SUCCESS_LIMIT, 5);
+  assert.equal(getNarrationSpeechSuccessLimit("free"), 2);
+  assert.equal(getNarrationSpeechSuccessLimit("subscription"), 5);
+  assert.equal(getNarrationSpeechSuccessLimit("one_time"), 5);
+  assert.equal(getNarrationSpeechSuccessLimit("operator"), 5);
 });
 
 test("normalizes a structured narration plan", () => {

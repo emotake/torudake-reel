@@ -245,7 +245,15 @@ test("shows and enforces the server-backed narration generation allowance", () =
   );
   const regenerationFlow = pageSource.slice(regenerationStart, regenerationEnd);
 
+  assert.match(pageSource, /X-Narration-Generation-Limit/);
   assert.match(pageSource, /X-Narration-Generations-Remaining/);
+  assert.match(pageSource, /narrationGenerationLimitRef/);
+  assert.match(pageSource, /narrationGenerationLimit=\{narrationGenerationLimit\}/);
+  assert.match(pageSource, /無料利用では1動画につき合計2回までです/);
+  assert.doesNotMatch(
+    pageSource,
+    /残り\s*<b>\{narrationGenerationsRemaining\}<\/b>\s*\/\s*\{NARRATION_SPEECH_SUCCESS_LIMIT\}回/,
+  );
   assert.match(pageSource, /AI音声の生成/);
   assert.match(pageSource, /初回生成と自動的な尺調整も含みます/);
   assert.match(pageSource, /1動画作成の利用枠やお支払いは増えません/);

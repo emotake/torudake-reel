@@ -142,6 +142,7 @@ class ApiRequestError extends Error {
     message: string,
     readonly status: number,
     readonly narrationGenerationsRemaining: number | null = null,
+    readonly narrationGenerationLimit: number | null = null,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -922,9 +923,21 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
     ApiPayload & {
       required?: boolean;
       reservationId?: string;
+      narrationGenerationLimit?: number;
     }
   >(response, "利用枠を確認できませんでした。");
-  return payload.required ? (payload.reservationId ?? null) : null;
+  const narrationGenerationLimit =
+    Number.isInteger(payload.narrationGenerationLimit) &&
+    Number(payload.narrationGenerationLimit) > 0
+      ? Math.min(
+          NARRATION_SPEECH_SUCCESS_LIMIT,
+          Number(payload.narrationGenerationLimit),
+        )
+      : NARRATION_SPEECH_SUCCESS_LIMIT;
+  return {
+    reservationId: payload.required ? (payload.reservationId ?? null) : null,
+    narrationGenerationLimit,
+  };
 }
 
 async function updateVideoUsage(
@@ -956,12 +969,22 @@ async function requestNarrationSpeech(
     }),
     signal,
   });
+  const limitHeader = Number(
+    response.headers.get("X-Narration-Generation-Limit"),
+  );
+  const narrationGenerationLimit =
+    Number.isInteger(limitHeader) && limitHeader > 0
+      ? Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, limitHeader)
+      : null;
   const remainingHeader = Number(
     response.headers.get("X-Narration-Generations-Remaining"),
   );
   const narrationGenerationsRemaining =
     Number.isInteger(remainingHeader) && remainingHeader >= 0
-      ? Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, remainingHeader)
+      ? Math.min(
+          narrationGenerationLimit ?? NARRATION_SPEECH_SUCCESS_LIMIT,
+          remainingHeader,
+        )
       : null;
   if (!response.ok) {
     const contentType = response.headers.get("content-type") ?? "";
@@ -972,11 +995,16 @@ async function requestNarrationSpeech(
       payload.error || "AI音声を生成できませんでした。もう一度お試しください。",
       response.status,
       narrationGenerationsRemaining,
+      narrationGenerationLimit,
     );
   }
   const audio = await response.blob();
   if (!audio.size) throw new Error("AI音声を生成できませんでした。");
-  return { audio, narrationGenerationsRemaining };
+  return {
+    audio,
+    narrationGenerationsRemaining,
+    narrationGenerationLimit,
+  };
 }
 
 function narrationGenerationKey(
@@ -1217,6 +1245,9 @@ export default function Home() {
   const narrationGenerationsRemainingRef = useRef(
     NARRATION_SPEECH_SUCCESS_LIMIT,
   );
+  const narrationGenerationLimitRef = useRef(
+    NARRATION_SPEECH_SUCCESS_LIMIT,
+  );
   const [usageReservationId, setUsageReservationId] = useState<string | null>(
     null,
   );
@@ -1245,6 +1276,9 @@ export default function Home() {
   const [narrationAudioUrl, setNarrationAudioUrl] = useState("");
   const [narrationGenerationsRemaining, setNarrationGenerationsRemaining] =
     useState(NARRATION_SPEECH_SUCCESS_LIMIT);
+  const [narrationGenerationLimit, setNarrationGenerationLimit] = useState(
+    NARRATION_SPEECH_SUCCESS_LIMIT,
+  );
   const [file, setFile] = useState<File | null>(null);
   const videoUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : ""),
@@ -1278,16 +1312,38 @@ export default function Home() {
   function rememberNarrationGenerationsRemaining(nextRemaining: number) {
     const normalized = Math.max(
       0,
-      Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, Math.floor(nextRemaining)),
+      Math.min(narrationGenerationLimitRef.current, Math.floor(nextRemaining)),
     );
     narrationGenerationsRemainingRef.current = normalized;
     setNarrationGenerationsRemaining(normalized);
     return normalized;
   }
 
+  function rememberNarrationGenerationLimit(nextLimit: number) {
+    const normalized = Math.max(
+      1,
+      Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, Math.floor(nextLimit)),
+    );
+    narrationGenerationLimitRef.current = normalized;
+    setNarrationGenerationLimit(normalized);
+    if (narrationGenerationsRemainingRef.current > normalized) {
+      rememberNarrationGenerationsRemaining(normalized);
+    }
+    return normalized;
+  }
+
+  function resetNarrationGenerationQuota() {
+    rememberNarrationGenerationLimit(NARRATION_SPEECH_SUCCESS_LIMIT);
+    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
+  }
+
   function recordNarrationSpeechResult(result: {
     narrationGenerationsRemaining: number | null;
+    narrationGenerationLimit: number | null;
   }) {
+    if (result.narrationGenerationLimit !== null) {
+      rememberNarrationGenerationLimit(result.narrationGenerationLimit);
+    }
     return rememberNarrationGenerationsRemaining(
       result.narrationGenerationsRemaining ??
         narrationGenerationsRemainingRef.current - 1,
@@ -1350,7 +1406,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
+    resetNarrationGenerationQuota();
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1368,7 +1424,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
+    resetNarrationGenerationQuota();
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1405,7 +1461,8 @@ export default function Home() {
       let nextTranscript = initialTranscript;
       let refined = false;
       if (file && !highAccuracy) {
-        newlyReservedUsage = await reserveVideoUsage(file, controller.signal);
+        const reservation = await reserveVideoUsage(file, controller.signal);
+        newlyReservedUsage = reservation.reservationId;
         throwIfProcessingAborted(controller.signal);
         rememberUsageReservation(newlyReservedUsage);
       }
@@ -1514,9 +1571,16 @@ export default function Home() {
     let newlyReservedUsage: string | null = null;
 
     try {
-      newlyReservedUsage = await reserveVideoUsage(file, controller.signal);
+      const reservation = await reserveVideoUsage(file, controller.signal);
+      newlyReservedUsage = reservation.reservationId;
       throwIfProcessingAborted(controller.signal);
       rememberUsageReservation(newlyReservedUsage);
+      rememberNarrationGenerationLimit(
+        reservation.narrationGenerationLimit,
+      );
+      rememberNarrationGenerationsRemaining(
+        reservation.narrationGenerationLimit,
+      );
       updateProgress(14);
       const extracted = await extractNarrationFrames(file, 6, controller.signal);
       throwIfProcessingAborted(controller.signal);
@@ -1651,7 +1715,7 @@ export default function Home() {
     }
     if (narrationGenerationsRemainingRef.current <= 0) {
       throw new Error(
-        `この動画で作成できるAI音声の上限（${NARRATION_SPEECH_SUCCESS_LIMIT}回）に達しました。`,
+        `この動画で作成できるAI音声の上限（${narrationGenerationLimitRef.current}回）に達しました。`,
       );
     }
     const cleanScript = script.replace(/\s+/g, " ").trim();
@@ -1739,13 +1803,15 @@ export default function Home() {
       setNarrationAudioUrl(URL.createObjectURL(audio));
       return remaining;
     } catch (error) {
-      if (
-        error instanceof ApiRequestError &&
-        error.narrationGenerationsRemaining !== null
-      ) {
-        rememberNarrationGenerationsRemaining(
-          error.narrationGenerationsRemaining,
-        );
+      if (error instanceof ApiRequestError) {
+        if (error.narrationGenerationLimit !== null) {
+          rememberNarrationGenerationLimit(error.narrationGenerationLimit);
+        }
+        if (error.narrationGenerationsRemaining !== null) {
+          rememberNarrationGenerationsRemaining(
+            error.narrationGenerationsRemaining,
+          );
+        }
       }
       throw error;
     } finally {
@@ -1809,7 +1875,7 @@ export default function Home() {
     setNarrationAutoCutEnabled(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
-    rememberNarrationGenerationsRemaining(NARRATION_SPEECH_SUCCESS_LIMIT);
+    resetNarrationGenerationQuota();
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -2086,6 +2152,7 @@ export default function Home() {
           narrationAudioUrl={narrationAudioUrl}
           narrationStyle={narrationStyle}
           narrationGenerationsRemaining={narrationGenerationsRemaining}
+          narrationGenerationLimit={narrationGenerationLimit}
           narrationOriginalAudio={narrationOriginalAudio}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
           setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
@@ -3504,6 +3571,7 @@ function ResultWorkspace({
   narrationAudioUrl,
   narrationStyle,
   narrationGenerationsRemaining,
+  narrationGenerationLimit,
   narrationOriginalAudio,
   narrationCaptionsEnabled,
   setNarrationCaptionsEnabled,
@@ -3536,6 +3604,7 @@ function ResultWorkspace({
   narrationAudioUrl: string;
   narrationStyle: NarrationStyle;
   narrationGenerationsRemaining: number;
+  narrationGenerationLimit: number;
   narrationOriginalAudio: NarrationOriginalAudioLevel;
   narrationCaptionsEnabled: boolean;
   setNarrationCaptionsEnabled: (enabled: boolean) => void;
@@ -6709,11 +6778,14 @@ function ResultWorkspace({
                 <div>
                   <strong>AI音声の生成</strong>
                   <span>
-                    残り <b>{narrationGenerationsRemaining}</b> / {NARRATION_SPEECH_SUCCESS_LIMIT}回
+                    残り <b>{narrationGenerationsRemaining}</b> / {narrationGenerationLimit}回
                   </span>
                 </div>
                 <small>
-                  1動画につき合計{NARRATION_SPEECH_SUCCESS_LIMIT}回までです。初回生成と自動的な尺調整も含みます。下のボタンからAI音声の生成が完了すると残り回数を1回使いますが、1動画作成の利用枠やお支払いは増えません。
+                  {narrationGenerationLimit === 2
+                    ? "無料利用では1動画につき合計2回までです。"
+                    : `1動画につき合計${narrationGenerationLimit}回までです。`}
+                  初回生成と自動的な尺調整も含みます。下のボタンからAI音声の生成が完了すると残り回数を1回使いますが、1動画作成の利用枠やお支払いは増えません。
                 </small>
                 {narrationGenerationLimitReached && (
                   <p>

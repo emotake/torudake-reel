@@ -11,6 +11,7 @@ import {
   type UsageOperationLease,
 } from "../../../../lib/operator-usage";
 import {
+  getNarrationSpeechSuccessLimit,
   normalizeNarrationStyle,
   NARRATION_SPEECH_SUCCESS_LIMIT,
   type NarrationStyle,
@@ -472,11 +473,11 @@ function speechError(status: number, payload: OpenAIError) {
   return "AI音声を生成できませんでした。もう一度お試しください。";
 }
 
-function generationQuotaHeaders(remaining: number) {
+function generationQuotaHeaders(limit: number, remaining: number) {
   return {
-    "X-Narration-Generation-Limit": String(NARRATION_SPEECH_SUCCESS_LIMIT),
+    "X-Narration-Generation-Limit": String(limit),
     "X-Narration-Generations-Remaining": String(
-      Math.max(0, Math.min(NARRATION_SPEECH_SUCCESS_LIMIT, remaining)),
+      Math.max(0, Math.min(limit, remaining)),
     ),
   };
 }
@@ -522,6 +523,7 @@ export async function POST(request: Request) {
 
   let authorizedReservationId: string | null = null;
   let narrationLease: UsageOperationLease | null = null;
+  let narrationGenerationLimit = NARRATION_SPEECH_SUCCESS_LIMIT;
   let successfulGenerationsBefore = 0;
   if (isUsageEnforcementEnabled()) {
     const { currentUser } = await getUsagePrincipal(request, {
@@ -551,6 +553,9 @@ export async function POST(request: Request) {
         { status: 402 },
       );
     }
+    narrationGenerationLimit = getNarrationSpeechSuccessLimit(
+      reservation.bucket,
+    );
     if (
       script.length >
       narrationScriptCharacterLimit(
@@ -569,7 +574,7 @@ export async function POST(request: Request) {
       currentUser,
       reservationId,
       "narration_speech",
-      { successfulLimit: NARRATION_SPEECH_SUCCESS_LIMIT },
+      { successfulLimit: narrationGenerationLimit },
     );
     if (!authorization?.allowed) {
       const hitGenerationLimit =
@@ -581,7 +586,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error: hitGenerationLimit
-            ? `この動画で作成できるAI音声の上限（${NARRATION_SPEECH_SUCCESS_LIMIT}回）に達しました。現在の音声で仕上げるか、新しい動画として開始してください。`
+            ? `この動画で作成できるAI音声の上限（${narrationGenerationLimit}回）に達しました。現在の音声で仕上げるか、新しい動画として開始してください。`
             : hitAttemptLimit
               ? "この動画でのAI音声生成回数が安全上限に達しました。現在の音声で仕上げるか、新しい動画として開始してください。"
               : alreadyProcessing
@@ -596,7 +601,7 @@ export async function POST(request: Request) {
               : 402,
           headers:
             hitGenerationLimit || hitAttemptLimit
-              ? generationQuotaHeaders(0)
+              ? generationQuotaHeaders(narrationGenerationLimit, 0)
               : undefined,
         },
       );
@@ -634,7 +639,7 @@ export async function POST(request: Request) {
             },
             {
               status: 429,
-              headers: generationQuotaHeaders(0),
+              headers: generationQuotaHeaders(narrationGenerationLimit, 0),
             },
           );
         }
@@ -666,7 +671,8 @@ export async function POST(request: Request) {
           status: response.status,
           headers: authorizedReservationId
             ? generationQuotaHeaders(
-                NARRATION_SPEECH_SUCCESS_LIMIT - successfulGenerationsBefore,
+                narrationGenerationLimit,
+                narrationGenerationLimit - successfulGenerationsBefore,
               )
             : undefined,
         },
@@ -681,7 +687,8 @@ export async function POST(request: Request) {
           status: 502,
           headers: authorizedReservationId
             ? generationQuotaHeaders(
-                NARRATION_SPEECH_SUCCESS_LIMIT - successfulGenerationsBefore,
+                narrationGenerationLimit,
+                narrationGenerationLimit - successfulGenerationsBefore,
               )
             : undefined,
         },
@@ -707,7 +714,8 @@ export async function POST(request: Request) {
         "X-Narration-Model": selectedModel,
         ...(authorizedReservationId
           ? generationQuotaHeaders(
-              NARRATION_SPEECH_SUCCESS_LIMIT -
+              narrationGenerationLimit,
+              narrationGenerationLimit -
                 successfulGenerationsBefore -
                 1,
             )

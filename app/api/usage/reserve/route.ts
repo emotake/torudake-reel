@@ -4,6 +4,7 @@ import {
   UsageLimitError,
 } from "../../../../lib/billing-store";
 import { authenticationRequired } from "../../../../lib/current-user";
+import { getNarrationSpeechSuccessLimit } from "../../../../lib/narration";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
       required: true,
       reservationId: reservation.id,
       bucket: reservation.bucket,
+      narrationGenerationLimit: getNarrationSpeechSuccessLimit(
+        reservation.bucket,
+      ),
     });
   } catch (error) {
     if (error instanceof OperatorUsageLimitError) {

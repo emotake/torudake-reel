@@ -176,6 +176,10 @@ test("the narration speech route leases, caps successful output, and releases sa
     new URL("../app/api/narration/speech/route.ts", import.meta.url),
     "utf8",
   );
+  const reserveSource = await readFile(
+    new URL("../app/api/usage/reserve/route.ts", import.meta.url),
+    "utf8",
+  );
   const billingSource = await readFile(
     new URL("../lib/billing-store.ts", import.meta.url),
     "utf8",
@@ -191,7 +195,15 @@ test("the narration speech route leases, caps successful output, and releases sa
     postSource.indexOf("authorizeLeasedUsageOperation(") <
       postSource.indexOf("requestSpeech("),
   );
-  assert.match(postSource, /successfulLimit:\s*NARRATION_SPEECH_SUCCESS_LIMIT/);
+  assert.match(
+    postSource,
+    /getNarrationSpeechSuccessLimit\(\s*reservation\.bucket,?\s*\)/,
+  );
+  assert.match(postSource, /successfulLimit:\s*narrationGenerationLimit/);
+  assert.match(
+    reserveSource,
+    /narrationGenerationLimit:\s*getNarrationSpeechSuccessLimit\(/,
+  );
   assert.match(postSource, /reason === "operator_success_limit"/);
   assert.match(postSource, /reason === "operation_in_progress"[\s\S]*409/);
   assert.match(
