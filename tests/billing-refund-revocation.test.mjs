@@ -8,7 +8,12 @@ const { summarizeStripePurchaseState } = await import(
   "../lib/stripe-purchase-state.ts"
 );
 
-const [webhookSource, billingStoreSource, migrationSource] = await Promise.all([
+const [
+  webhookSource,
+  billingStoreSource,
+  migrationSource,
+  assignmentMigrationSource,
+] = await Promise.all([
   readFile(
     new URL("../app/api/billing/webhook/route.ts", import.meta.url),
     "utf8",
@@ -16,6 +21,10 @@ const [webhookSource, billingStoreSource, migrationSource] = await Promise.all([
   readFile(new URL("../lib/billing-store.ts", import.meta.url), "utf8"),
   readFile(
     new URL("../drizzle/0011_refund_credit_revocation.sql", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../drizzle/0012_one_time_purchase_assignment.sql", import.meta.url),
     "utf8",
   ),
 ]);
@@ -115,7 +124,7 @@ test("subscribes the webhook handler to refund and dispute state changes", () =>
 test("excludes revoked purchases in the atomic one-time reservation decision", () => {
   assert.match(
     billingStoreSource,
-    /SELECT COALESCE\(SUM\(credits\), 0\)[\s\S]{0,300}FROM billing_purchases[\s\S]{0,300}user_id = \?[\s\S]{0,200}revoked_at IS NULL/,
+    /FROM billing_purchases AS purchase[\s\S]{0,300}purchase\.user_id = \?[\s\S]{0,200}purchase\.revoked_at IS NULL/,
   );
 });
 
@@ -126,11 +135,30 @@ test("stops an in-flight refunded credit without erasing completed work", () => 
   );
   assert.match(
     billingStoreSource,
-    /releaseExcessOneTimeReservations[\s\S]*releaseOrCompleteUsageReservation\(reservation\.id, userId\)/,
+    /stopOneTimeReservationsForPurchase[\s\S]*releaseOrCompleteUsageReservation\(reservation\.id, userId\)/,
   );
   assert.match(
     billingStoreSource,
     /oneTimeReservationHasActiveCredit[\s\S]{0,1200}revoked_at IS NULL/,
+  );
+});
+
+test("assigns each one-time use to its exact purchase", () => {
+  assert.match(
+    assignmentMigrationSource,
+    /ADD `billing_purchase_id` text/,
+  );
+  assert.match(
+    assignmentMigrationSource,
+    /usage_reservations_billing_purchase_id_idx/,
+  );
+  assert.match(
+    billingStoreSource,
+    /billing_purchase_id[\s\S]{0,800}FROM billing_purchases AS purchase[\s\S]{0,800}billing_purchase_id = purchase\.id/,
+  );
+  assert.match(
+    billingStoreSource,
+    /activePurchaseIds[\s\S]{0,400}item\.billingPurchaseId/,
   );
 });
 

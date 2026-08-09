@@ -211,7 +211,12 @@ export async function getBillingStatusForUser(userId: string) {
     );
 
   const freeUsage = usage.filter((item) => item.bucket === "free");
-  const oneTimeUsage = usage.filter((item) => item.bucket === "one_time");
+  const activePurchaseIds = new Set(purchases.map((purchase) => purchase.id));
+  const oneTimeUsage = usage.filter(
+    (item) =>
+      item.bucket === "one_time" &&
+      (!item.billingPurchaseId || activePurchaseIds.has(item.billingPurchaseId)),
+  );
   const operatorDayStart = startOfTokyoDaySeconds(now);
   const operatorVideosUsedToday = usage.filter(
     (item) =>
@@ -402,24 +407,24 @@ async function insertUsageReservationAtomically(
       .prepare(`
         INSERT INTO usage_reservations (
           id, user_id, idempotency_key, source_duration_seconds,
-          bucket, status, created_at, expires_at, completed_at
+          bucket, status, created_at, expires_at, completed_at,
+          billing_purchase_id
         )
-        SELECT ?, ?, ?, ?, 'one_time', 'reserved', ?, ?, NULL
-        WHERE (
-          SELECT COALESCE(SUM(credits), 0)
-          FROM billing_purchases
-          WHERE user_id = ?
-            AND revoked_at IS NULL
-        ) > (
-          SELECT COUNT(*)
-          FROM usage_reservations
-          WHERE user_id = ?
-            AND bucket = 'one_time'
-            AND status IN ('reserved', 'completed')
-        )
+        SELECT ?, ?, ?, ?, 'one_time', 'reserved', ?, ?, NULL, purchase.id
+        FROM billing_purchases AS purchase
+        WHERE purchase.user_id = ?
+          AND purchase.revoked_at IS NULL
+          AND (
+            SELECT COUNT(*)
+            FROM usage_reservations
+            WHERE billing_purchase_id = purchase.id
+              AND status IN ('reserved', 'completed')
+          ) < purchase.credits
+        ORDER BY purchase.purchased_at, purchase.id
+        LIMIT 1
         ON CONFLICT(idempotency_key) DO NOTHING
       `)
-      .bind(...values, reservation.userId, reservation.userId);
+      .bind(...values, reservation.userId);
   } else {
     statement = database
       .prepare(`
@@ -491,11 +496,30 @@ async function oneTimeReservationHasActiveCredit(reservation: {
   id: string;
   userId: string;
   createdAt: number;
+  billingPurchaseId: string | null;
 }) {
   const database = env.DB as unknown as QueryD1Database | undefined;
   if (!database?.prepare) {
     throw new Error("Usage database binding is unavailable.");
   }
+  if (reservation.billingPurchaseId) {
+    const result = await database
+      .prepare(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM billing_purchases
+          WHERE id = ?
+            AND user_id = ?
+            AND revoked_at IS NULL
+        ) AS allowed
+      `)
+      .bind(reservation.billingPurchaseId, reservation.userId)
+      .first<{ allowed: number }>();
+    return result?.allowed === 1;
+  }
+
+  // Compatibility path for reservations created before purchase assignment
+  // was introduced. New reservations always use the exact purchase check.
   const result = await database
     .prepare(`
       SELECT (
@@ -882,7 +906,10 @@ export async function finishPurchaseStateSync(
     throw new Error("Stripe purchase-state lease was lost.");
   }
   if (state.blocked) {
-    await releaseExcessOneTimeReservations(claim.userId);
+    await stopOneTimeReservationsForPurchase(
+      claim.userId,
+      claim.purchaseId,
+    );
   }
 }
 
@@ -901,49 +928,33 @@ export async function abandonPurchaseStateSync(claim: PurchaseStateSyncClaim) {
     );
 }
 
-async function releaseExcessOneTimeReservations(userId: string) {
+async function stopOneTimeReservationsForPurchase(
+  userId: string,
+  purchaseId: string,
+) {
   const db = getDb();
-  const [activePurchases, activeUsage] = await Promise.all([
-    db
-      .select({ credits: billingPurchases.credits })
-      .from(billingPurchases)
-      .where(
-        and(
-          eq(billingPurchases.userId, userId),
-          isNull(billingPurchases.revokedAt),
-        ),
+  const activeUsage = await db
+    .select({
+      id: usageReservations.id,
+      status: usageReservations.status,
+    })
+    .from(usageReservations)
+    .where(
+      and(
+        eq(usageReservations.userId, userId),
+        eq(usageReservations.billingPurchaseId, purchaseId),
+        eq(usageReservations.bucket, "one_time"),
+        eq(usageReservations.status, "reserved"),
       ),
-    db
-      .select({
-        id: usageReservations.id,
-        status: usageReservations.status,
-      })
-      .from(usageReservations)
-      .where(
-        and(
-          eq(usageReservations.userId, userId),
-          eq(usageReservations.bucket, "one_time"),
-          inArray(usageReservations.status, [...ACTIVE_USAGE_STATUSES]),
-        ),
-      )
-      .orderBy(desc(usageReservations.createdAt)),
-  ]);
-  const activeCredits = activePurchases.reduce(
-    (total, purchase) => total + purchase.credits,
-    0,
-  );
-  let releasesNeeded = Math.max(0, activeUsage.length - activeCredits);
-  if (releasesNeeded === 0) return;
+    )
+    .orderBy(desc(usageReservations.createdAt));
 
-  // Stop the newest in-progress reservations first. Work that already
+  // Stop only work assigned to the refunded purchase. Work that already
   // produced a usable upstream result is completed instead of refunded, and
-  // the per-operation credit check above prevents that overage reservation
+  // the per-operation purchase check above prevents that reservation
   // from continuing while the Stripe payment remains revoked.
   for (const reservation of activeUsage) {
-    if (releasesNeeded === 0) break;
-    if (reservation.status !== "reserved") continue;
     await releaseOrCompleteUsageReservation(reservation.id, userId);
-    releasesNeeded -= 1;
   }
 }
 

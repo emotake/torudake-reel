@@ -197,6 +197,7 @@ export const usageReservations = sqliteTable(
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     completedAt: integer("completed_at"),
+    billingPurchaseId: text("billing_purchase_id"),
   },
   (table) => [
     uniqueIndex("usage_reservations_idempotency_unique").on(
@@ -204,6 +205,9 @@ export const usageReservations = sqliteTable(
     ),
     index("usage_reservations_user_id_idx").on(table.userId),
     index("usage_reservations_status_idx").on(table.status),
+    index("usage_reservations_billing_purchase_id_idx").on(
+      table.billingPurchaseId,
+    ),
   ],
 );
 
