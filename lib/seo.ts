@@ -50,7 +50,7 @@ export function buildSiteStructuredData() {
         offers: [
           {
             "@type": "Offer",
-            name: "無料体験",
+            name: "無料体験（編集・プレビュー）",
             price: 0,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",

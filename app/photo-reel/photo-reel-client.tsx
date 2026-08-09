@@ -24,6 +24,14 @@ import {
   exportPhotoReel,
   preparePhotoReelAudioContext,
 } from "../../lib/photo-reel-export";
+import {
+  canSaveCompletedVideo,
+  isBillingBucket,
+  LIGHT_MONTHLY_PRICE_JPY,
+  LIGHT_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PRICE_JPY,
+  type BillingBucket,
+} from "../../lib/billing-policy";
 
 const MAX_PHOTOS = 10;
 const MIN_PHOTOS = 2;
@@ -74,6 +82,7 @@ type ResultVideo = {
   blob: Blob;
   url: string;
   filename: string;
+  billingBucket: BillingBucket | null;
 };
 
 type PendingFinalize = {
@@ -159,12 +168,16 @@ function buildFilename() {
   return `torudake-photo-reel-${stamp}.mp4`;
 }
 
-function prepareResultVideo(blob: Blob): ResultVideo {
+function prepareResultVideo(
+  blob: Blob,
+  billingBucket: BillingBucket | null,
+): ResultVideo {
   if (blob.size < 1024) throw new Error("完成動画のデータが空でした。");
   return {
     blob,
     url: URL.createObjectURL(blob),
     filename: buildFilename(),
+    billingBucket,
   };
 }
 
@@ -214,13 +227,25 @@ async function reservePhotoUsage(
   }
 
   const payload = (await response.json()) as {
+    bucket?: unknown;
     required?: boolean;
     reservationId?: string;
   };
   if (payload.required && !payload.reservationId) {
     throw new PhotoReelRequestError("利用枠を確認できませんでした。", 500);
   }
-  return payload.required ? payload.reservationId ?? null : null;
+  const bucket = payload.required
+    ? isBillingBucket(payload.bucket)
+      ? payload.bucket
+      : null
+    : null;
+  if (payload.required && !bucket) {
+    throw new PhotoReelRequestError("利用枠を確認できませんでした。", 500);
+  }
+  return {
+    reservationId: payload.required ? payload.reservationId ?? null : null,
+    bucket,
+  };
 }
 
 async function updatePhotoUsage(
@@ -728,8 +753,27 @@ export default function PhotoReelClient() {
       const reservationAttempt =
         reservationAttemptRef.current ?? crypto.randomUUID();
       reservationAttemptRef.current = reservationAttempt;
-      reservationId = await reservePhotoUsage(duration, reservationAttempt);
+      const reservation = await reservePhotoUsage(duration, reservationAttempt);
+      reservationId = reservation.reservationId;
       if (!reservationId) reservationAttemptRef.current = null;
+      if (!canSaveCompletedVideo(reservation.bucket)) {
+        if (reservationId) {
+          try {
+            await updatePhotoUsage("release", reservationId);
+            reservationAttemptRef.current = null;
+          } catch {
+            setError(
+              "無料体験の利用確認を終了できませんでしたが、編集内容はそのまま残っています。",
+            );
+          }
+          reservationId = null;
+        }
+        setShowPurchase(true);
+        setMessage(
+          "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください。",
+        );
+        return;
+      }
       const blob = await exportPhotoReel(photos, settings, {
         audioFile: audioFile ?? undefined,
         audioFit: "loop",
@@ -737,7 +781,7 @@ export default function PhotoReelClient() {
         signal: controller.signal,
         onProgress: (value) => setExportProgress(value),
       });
-      preparedResult = prepareResultVideo(blob);
+      preparedResult = prepareResultVideo(blob, reservation.bucket);
       if (reservationId) {
         try {
           await updatePhotoUsage("complete", reservationId);
@@ -843,6 +887,13 @@ export default function PhotoReelClient() {
 
   const saveResult = async () => {
     if (!result) return;
+    if (!canSaveCompletedVideo(result.billingBucket)) {
+      setShowPurchase(true);
+      setMessage(
+        "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください。",
+      );
+      return;
+    }
     setError("");
     const file = new File([result.blob], result.filename, { type: "video/mp4" });
     const shareData: ShareData = {
@@ -1248,7 +1299,8 @@ export default function PhotoReelClient() {
             </div>
             <ul>
               <li>写真と音源は端末外へ送信しません</li>
-              <li>書き出し成功時だけ利用枠を1本分使用します</li>
+              <li>無料体験は編集・プレビューまで利用できます</li>
+              <li>有料枠は書き出し成功時だけ1本分使用します</li>
               <li>OpenAI API料金は発生しません</li>
             </ul>
             <button
@@ -1268,7 +1320,9 @@ export default function PhotoReelClient() {
                 ? "音源を確認中…"
                 : exporting
                   ? `動画を作成中… ${Math.round(exportProgress * 100)}%`
-                  : "写真リールを書き出す"}
+                  : showPurchase
+                    ? "購入を確認して写真リールを書き出す"
+                    : "写真リールを書き出す"}
               <span aria-hidden="true">↓</span>
             </button>
             {photos.length === 1 ? (
@@ -1315,9 +1369,30 @@ export default function PhotoReelClient() {
           <div className="photoReelStatus" aria-live="polite">
             {error ? <p className="photoReelError">{error}</p> : null}
             {showPurchase ? (
-              <Link className="photoReelPurchaseLink" href="/account?checkout=one_time">
-                1動画作成（200円）を確認する →
-              </Link>
+              <div className="photoReelPurchaseOptions">
+                <strong>完成動画を保存するにはプランを選択</strong>
+                <small>
+                  決済は別タブで開きます。購入後、この編集画面へ戻って上の「購入を確認して写真リールを書き出す」を押してください。
+                </small>
+                <div>
+                  <Link
+                    className="photoReelPurchaseLink"
+                    href="/account?checkout=light"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    月{LIGHT_MONTHLY_VIDEO_LIMIT}本・¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} →
+                  </Link>
+                  <Link
+                    className="photoReelPurchaseLink secondary"
+                    href="/account?checkout=one_time"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    1動画作成・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")} →
+                  </Link>
+                </div>
+              </div>
             ) : null}
             {message ? <p className="photoReelMessage">{message}</p> : null}
           </div>

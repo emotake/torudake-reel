@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { SITE_ORIGIN } from "./site";
 import {
   LIGHT_MONTHLY_PRICE_JPY,
   ONE_TIME_PRICE_JPY,
@@ -265,7 +266,16 @@ export function publicOrigin(request: Request) {
       // Fall back to the request's canonical origin.
     }
   }
-  return requestUrl.origin;
+  if (isLocalDevelopmentHost(requestUrl.hostname)) return requestUrl.origin;
+  return new URL(SITE_ORIGIN).origin;
+}
+
+export function isCanonicalBillingRequest(request: Request) {
+  const requestUrl = new URL(request.url);
+  return (
+    isLocalDevelopmentHost(requestUrl.hostname) ||
+    requestUrl.origin === publicOrigin(request)
+  );
 }
 
 function isLocalDevelopmentHost(hostname: string) {

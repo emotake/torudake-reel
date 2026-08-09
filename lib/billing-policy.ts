@@ -21,6 +21,21 @@ export type BillingBucket =
   | "one_time"
   | "operator";
 
+export function isBillingBucket(value: unknown): value is BillingBucket {
+  return (
+    value === "free" ||
+    value === "subscription" ||
+    value === "one_time" ||
+    value === "operator"
+  );
+}
+
+export function canSaveCompletedVideo(
+  bucket: BillingBucket | null,
+): boolean {
+  return bucket !== null && bucket !== "free";
+}
+
 export function chooseBillingBucket(
   usage: BillingUsageSnapshot,
   sourceDurationSeconds: number,

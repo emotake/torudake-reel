@@ -47,6 +47,23 @@ type BillingStatus = {
 type AuthOptions<T> = { options?: T; error?: string; code?: string };
 
 const ACCOUNT_AUTH_HINT_STORAGE_KEY = "torudake-account-authenticated";
+const CHECKOUT_STATUS_POLL_ATTEMPTS = 8;
+const CHECKOUT_STATUS_POLL_INTERVAL_MS = 1_500;
+
+function checkoutReflected(
+  status: BillingStatus,
+  plan: "light" | "one_time" | null,
+  oneTimeCreditsBefore: number | null,
+) {
+  if (plan === "light") return status.monthly?.active === true;
+  if (plan === "one_time") {
+    return (
+      (status.oneTimeCredits ?? 0) >
+      (oneTimeCreditsBefore ?? 0)
+    );
+  }
+  return false;
+}
 
 export default function AccountClient() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
@@ -198,24 +215,74 @@ export default function AccountClient() {
   }
 
   useEffect(() => {
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      void loadStatus().catch((loadError) => {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "利用状況を読み込めませんでした。",
-          );
-      });
       const query = new URLSearchParams(window.location.search);
-      if (query.get("checkout") === "success") {
-        setNotice("お支払いを受け付けました。利用枠への反映に数秒かかる場合があります。");
+      const checkout = query.get("checkout");
+      const rawPlan = query.get("plan");
+      const checkoutPlan =
+        rawPlan === "light" || rawPlan === "one_time" ? rawPlan : null;
+      const rawCreditsBefore = query.get("credits_before");
+      const parsedCreditsBefore = Number(rawCreditsBefore);
+      const oneTimeCreditsBefore =
+        rawCreditsBefore !== null &&
+        Number.isInteger(parsedCreditsBefore) &&
+        parsedCreditsBefore >= 0
+          ? parsedCreditsBefore
+          : null;
+      if (checkout === "success") {
+        setNotice("お支払いを受け付けました。利用枠への反映を確認しています…");
         window.history.replaceState({}, "", "/account");
-      } else if (query.get("checkout") === "cancelled") {
+      } else if (checkout === "cancelled") {
         setNotice("お支払いはキャンセルされました。料金は発生していません。");
         window.history.replaceState({}, "", "/account");
       }
+
+      void (async () => {
+        try {
+          if (checkout !== "success") {
+            await loadStatus();
+            return;
+          }
+          let reflected = false;
+          for (
+            let attempt = 0;
+            attempt < CHECKOUT_STATUS_POLL_ATTEMPTS;
+            attempt += 1
+          ) {
+            const latest = await loadStatus();
+            reflected = checkoutReflected(
+              latest,
+              checkoutPlan,
+              oneTimeCreditsBefore,
+            );
+            if ((attempt >= 1 && reflected) || cancelled) break;
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, CHECKOUT_STATUS_POLL_INTERVAL_MS),
+            );
+          }
+          if (!cancelled) {
+            setNotice(
+              reflected
+                ? "お支払いが利用枠へ反映されました。"
+                : "お支払いを受け付けました。反映に時間がかかっている場合は、少し待って再読み込みしてください。",
+            );
+          }
+        } catch (loadError) {
+          if (!cancelled) {
+            setError(
+              loadError instanceof Error
+                ? loadError.message
+                : "利用状況を読み込めませんでした。",
+            );
+          }
+        }
+      })();
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -271,6 +338,15 @@ export default function AccountClient() {
           <small>
             パスキーの秘密情報は端末から送信されません。カード情報はStripeが管理します。
           </small>
+          <p className="accountRecoveryHelp">
+            有料プランをご利用中で、端末変更・紛失によりログインできない場合は、
+            <a
+              href={`mailto:torudake.reel@gmail.com?subject=${encodeURIComponent("撮るだけリール アカウント復旧・解約の相談")}`}
+            >
+              運営へ復旧・解約を相談
+            </a>
+            してください。
+          </p>
           <div className="accountLegalLinks">
             <Link href="/terms">利用規約</Link>
             <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
@@ -383,6 +459,9 @@ export default function AccountClient() {
       {error && <p className="accountError" role="alert">{error}</p>}
       <p className="accountSecurity">
         カード番号はStripeが安全に管理し、撮るだけリールのデータベースには保存しません。
+      </p>
+      <p className="accountSecurity">
+        動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
       </p>
       <div className="accountLegalLinks">
         <Link href="/terms">利用規約</Link>

@@ -13,7 +13,7 @@ export const metadata = buildPublicPageMetadata({
 });
 
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
-const LAST_UPDATED = "2026年8月3日";
+const LAST_UPDATED = "2026年8月9日";
 
 export default function CommercialDisclosurePage() {
   return (
@@ -88,6 +88,9 @@ export default function CommercialDisclosurePage() {
         <h2>サービスの提供時期</h2>
         <p>
           Stripeでの決済完了を確認後、通常は直ちに利用枠へ反映します。通信状況などにより反映に時間がかかる場合があります。
+        </p>
+        <p>
+          無料体験は編集とプレビューまで利用でき、完成動画の保存には有料の利用枠が必要です。動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
         </p>
       </article>
 

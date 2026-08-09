@@ -100,12 +100,12 @@ test("validates the completed MP4 before charging and aborts a backgrounded iPho
   assert.match(exportSource, /throwIfAborted\(callbacks\.signal\);\s*callbacks\.onProgress\?\.\(1\)/);
 
   assert.ok(
-    clientSource.indexOf("preparedResult = prepareResultVideo(blob)") >
+    clientSource.indexOf("preparedResult = prepareResultVideo(blob, reservation.bucket)") >
       clientSource.indexOf("const blob = await exportPhotoReel"),
   );
   assert.ok(
     clientSource.indexOf('await updatePhotoUsage("complete", reservationId)') >
-      clientSource.indexOf("preparedResult = prepareResultVideo(blob)"),
+      clientSource.indexOf("preparedResult = prepareResultVideo(blob, reservation.bucket)"),
   );
 });
 
@@ -127,10 +127,10 @@ test("protects iPhone memory, pending usage, and synchronized BGM preview", asyn
   );
   assert.ok(
     client.indexOf("assertPhotoReelExportSupported(Boolean(audioFile))") <
-      client.indexOf("reservationId = await reservePhotoUsage(duration, reservationAttempt)"),
+      client.indexOf("const reservation = await reservePhotoUsage(duration, reservationAttempt)"),
   );
   assert.ok(
-    client.indexOf("preparedResult = prepareResultVideo(blob)") <
+    client.indexOf("preparedResult = prepareResultVideo(blob, reservation.bucket)") <
       client.indexOf('await updatePhotoUsage("complete", reservationId)'),
   );
   assert.doesNotMatch(clearResult, /setPendingFinalize\(null\)/);
@@ -140,6 +140,37 @@ test("protects iPhone memory, pending usage, and synchronized BGM preview", asyn
   assert.match(client, /ref=\{audioPreviewRef\}/);
   assert.match(client, /onClick=\{togglePreviewPlayback\}/);
   assert.match(client, /setPreviewAudioPosition\(nextTime\)/);
+});
+
+test("does not create or expose a completed photo reel for the free bucket", async () => {
+  const client = await readFile(
+    new URL("../app/photo-reel/photo-reel-client.tsx", import.meta.url),
+    "utf8",
+  );
+  const reservationIndex = client.indexOf(
+    "const reservation = await reservePhotoUsage(duration, reservationAttempt)",
+  );
+  const freeGateIndex = client.indexOf(
+    "if (!canSaveCompletedVideo(reservation.bucket))",
+    reservationIndex,
+  );
+  const exportIndex = client.indexOf(
+    "const blob = await exportPhotoReel",
+    reservationIndex,
+  );
+  const saveStart = client.indexOf("const saveResult = async () =>");
+  const saveEnd = client.indexOf("\n  const updateDuration", saveStart);
+  const saveFlow = client.slice(saveStart, saveEnd);
+
+  assert.ok(reservationIndex >= 0);
+  assert.ok(freeGateIndex > reservationIndex);
+  assert.ok(freeGateIndex < exportIndex);
+  assert.match(saveFlow, /canSaveCompletedVideo\(result\.billingBucket\)/);
+  assert.match(client, /無料体験では編集とプレビューまで利用できます/);
+  assert.match(client, /月\{LIGHT_MONTHLY_VIDEO_LIMIT\}本/);
+  assert.match(client, /1動画作成・¥/);
+  assert.match(client, /target="_blank"/);
+  assert.match(client, /購入を確認して写真リールを書き出す/);
 });
 
 test("fits the complete optional title instead of silently removing its end", async () => {

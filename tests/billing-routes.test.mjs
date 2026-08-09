@@ -82,6 +82,28 @@ test("does not create a checkout session without trusted authentication", async 
   assert.equal(payload.code, "authentication_temporarily_unavailable");
 });
 
+test("rejects billing mutations from a non-canonical deployment host", async () => {
+  const worker = await loadWorker("billing-old-host");
+  const response = await worker.fetch(
+    new Request("https://old-deployment.torudake-reel.pages.dev/api/billing/checkout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://old-deployment.torudake-reel.pages.dev",
+      },
+      body: JSON.stringify({
+        plan: "one_time",
+        requestId: "old-host-request",
+      }),
+    }),
+    workerEnv,
+    workerContext,
+  );
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "non_canonical_billing_origin");
+});
+
 test("spoofed identity headers cannot activate billing on public hosting", async () => {
   const worker = await loadWorker("billing-spoofed", {
     STRIPE_SECRET_KEY: "sk_test_placeholder",

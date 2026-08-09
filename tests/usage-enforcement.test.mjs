@@ -10,8 +10,8 @@ const {
   "../lib/usage-enforcement.ts"
 );
 
-test("enforces usage whenever a paid OpenAI key is live", () => {
-  assert.equal(isUsageEnforcementEnabled(), false);
+test("keeps billing enforcement independent from the OpenAI key", () => {
+  assert.equal(isUsageEnforcementEnabled(), true);
   assert.equal(isManagedUploadEnforcementEnabled(), true);
 
   runtimeEnv.OPENAI_API_KEY = "test-key";

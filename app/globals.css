@@ -4147,6 +4147,21 @@ footer > small {
   line-height: 1.7;
 }
 
+.accountSignInCard .accountRecoveryHelp {
+  margin: 16px 0 0;
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: #fff7e8;
+  color: #6f5a37;
+  font-size: 11px;
+  line-height: 1.75;
+}
+
+.accountRecoveryHelp a {
+  color: #17243a;
+  font-weight: 900;
+}
+
 .accountLegalLinks {
   display: flex;
   width: min(1080px, 100%);
@@ -5921,6 +5936,42 @@ footer > small {
   color: white;
   font-size: 10px;
   font-weight: 900;
+}
+
+.photoReelPurchaseOptions {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #ffd1c8;
+  border-radius: 14px;
+  background: #fff6f2;
+}
+
+.photoReelPurchaseOptions > strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.photoReelPurchaseOptions > small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.photoReelPurchaseOptions > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.photoReelPurchaseOptions .photoReelPurchaseLink {
+  margin-top: 0;
+}
+
+.photoReelPurchaseOptions .photoReelPurchaseLink.secondary {
+  border: 1px solid var(--ink);
+  background: white;
+  color: var(--ink);
 }
 
 .photoReelError,
@@ -8028,6 +8079,78 @@ footer > small {
   opacity: 0.62;
 }
 
+.freeExportGate {
+  display: grid;
+  min-width: min(430px, 48vw);
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid #ffd1c8;
+  border-radius: 15px;
+  background: #fff6f2;
+}
+
+.freeExportGate > p {
+  display: grid;
+  gap: 4px;
+}
+
+.freeExportGate > p strong {
+  max-width: none;
+  color: var(--ink);
+  font-size: 12px;
+  white-space: normal;
+}
+
+.freeExportGate > p small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.freeExportGate > div {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 8px;
+}
+
+.freeExportGate button {
+  min-height: 44px;
+}
+
+.freeExportGate a {
+  text-align: center;
+  text-decoration: none;
+}
+
+.freeExportGate .quietButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.freeExportReturnNote {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.freeExportRefreshButton {
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  border-radius: 11px;
+  background: white;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.freeExportRefreshButton:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .highAccuracyButton {
   border-color: #b9dfc8;
   background: #effcf4;
@@ -8705,6 +8828,14 @@ footer > small {
 
   .exportActions {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .freeExportGate {
+    min-width: 0;
+  }
+
+  .freeExportGate > div {
     grid-template-columns: 1fr;
   }
 

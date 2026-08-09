@@ -40,5 +40,8 @@ test("binds disclosure writes to a same-origin owned usage reservation", () => {
     pageSource,
     /usageReservationId=\{usageReservationId\}/,
   );
-  assert.match(pageSource, /rememberUsageReservation\(newlyReservedUsage\)/);
+  assert.match(
+    pageSource,
+    /rememberUsageReservation\(newlyReservedUsage, reservation\.bucket\)/,
+  );
 });

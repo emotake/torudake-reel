@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canSaveCompletedVideo,
   chooseBillingBucket,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
@@ -28,6 +29,14 @@ test("keeps the simple launch pricing in one policy", () => {
     Math.floor(LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT),
     185,
   );
+});
+
+test("allows completed-video saving only for paid and operator buckets", () => {
+  assert.equal(canSaveCompletedVideo("free"), false);
+  assert.equal(canSaveCompletedVideo("subscription"), true);
+  assert.equal(canSaveCompletedVideo("one_time"), true);
+  assert.equal(canSaveCompletedVideo("operator"), true);
+  assert.equal(canSaveCompletedVideo(null), false);
 });
 
 test("stops the free trial at either two videos or three minutes", () => {

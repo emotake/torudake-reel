@@ -8,6 +8,7 @@ import {
 import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
 import {
   isBillingConfigured,
+  isCanonicalBillingRequest,
   publicOrigin,
   stripeRequest,
 } from "../../../../lib/stripe";
@@ -18,6 +19,15 @@ type StripePortalSession = {
 };
 
 export async function POST(request: Request) {
+  if (!isCanonicalBillingRequest(request)) {
+    return Response.json(
+      {
+        error: "最新の公開ページから決済管理を開いてください。",
+        code: "non_canonical_billing_origin",
+      },
+      { status: 403 },
+    );
+  }
   if (
     !isSitesAuthenticationTrusted() &&
     !isPasskeyAuthenticationConfigured()

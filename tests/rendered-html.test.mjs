@@ -49,10 +49,13 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /まず1本、完成を見てから。/);
   assert.match(html, /最大500MB/);
   assert.match(html, /合計3分または2動画まで/);
+  assert.match(html, /編集・プレビューまで/);
+  assert.match(html, /完成動画の保存は有料/);
   assert.match(html, /月8本プランを始める/);
   assert.match(html, /1本あたり185円/);
   assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
+  assert.match(html, /編集結果が完成した時点/);
   assert.doesNotMatch(
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
@@ -179,6 +182,8 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /1動画作成/);
   assert.match(html, /Stripe/);
   assert.match(html, /最大500MB/);
+  assert.match(html, /無料体験は編集とプレビューまで/);
+  assert.match(html, /写真リールは書き出し成功時点/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/commercial-disclosure"/,

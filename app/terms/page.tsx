@@ -77,6 +77,9 @@ export default function TermsPage() {
         <h2>5. 有料プランとお支払い</h2>
         <ul>
           <li>
+            無料体験は編集とプレビューまで利用でき、完成動画の保存には有料の利用枠が必要です。
+          </li>
+          <li>
             月{LIGHT_MONTHLY_VIDEO_LIMIT}本プランは月額
             {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
           </li>
@@ -85,6 +88,9 @@ export default function TermsPage() {
           </li>
           <li>
             支払いと解約はStripeの決済画面およびアカウント画面から行います。月額プランを解約した場合、支払済み期間の終了時に月額利用枠が終了します。
+          </li>
+          <li>
+            動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
           </li>
           <li>
             デジタルサービスの性質上、利用済みの利用枠は、法令上必要な場合または本サービス側の不具合が認められる場合を除き返金対象外です。

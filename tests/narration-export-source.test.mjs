@@ -78,6 +78,72 @@ test("tries a deterministic MP4 export before the MediaRecorder fallback", () =>
   assert.match(exportFlow, /if \(!canUseLegacyRecorder\) throw portableExportError/);
 });
 
+test("keeps free users in editing and preview while paid buckets can export", () => {
+  const exportStart = pageSource.indexOf("async function exportCaptionedVideo(");
+  const exportEnd = pageSource.indexOf("\n  function requestVideoExport()", exportStart);
+  const exportFlow = pageSource.slice(exportStart, exportEnd);
+  const saveStart = pageSource.indexOf("async function saveExportedVideo()");
+  const saveEnd = pageSource.indexOf("\n  function requestVideoExport()", saveStart);
+  const saveFlow = pageSource.slice(saveStart, saveEnd);
+  const requestStart = pageSource.indexOf("function requestVideoExport()");
+  const requestEnd = pageSource.indexOf("\n  async function confirmNarrationExport()", requestStart);
+  const requestFlow = pageSource.slice(requestStart, requestEnd);
+  const confirmationStart = pageSource.indexOf("async function confirmNarrationExport()");
+  const confirmationEnd = pageSource.indexOf("\n  return (", confirmationStart);
+  const confirmationFlow = pageSource.slice(confirmationStart, confirmationEnd);
+
+  assert.match(pageSource, /isBillingBucket\(payload\.bucket\)/);
+  assert.match(pageSource, /reservationId:[\s\S]*?bucket,[\s\S]*?narrationGenerationLimit/);
+  assert.match(pageSource, /rememberUsageReservation\(newlyReservedUsage, reservation\.bucket\)/);
+  assert.match(pageSource, /canSaveCompletedVideo\(usageBucket\)/);
+  assert.match(exportFlow, /if \(!completedVideoSaveAllowed\)/);
+  assert.match(saveFlow, /if \(!completedVideoSaveAllowed\)/);
+  assert.match(requestFlow, /if \(!completedVideoSaveAllowed\)/);
+  assert.match(confirmationFlow, /if \(!completedVideoSaveAllowed\)/);
+  assert.match(pageSource, /完成動画を保存するにはプランを選択/);
+  assert.match(pageSource, /月\$\{LIGHT_MONTHLY_VIDEO_LIMIT\}本・¥/);
+  assert.match(pageSource, /1動画作成・¥/);
+  assert.match(pageSource, /編集・プレビューまで/);
+  assert.match(pageSource, /完成動画の保存は有料/);
+  assert.match(pageSource, /target="_blank"/);
+  assert.match(pageSource, /購入済みの方：保存を有効にする/);
+  assert.match(pageSource, /usageReservationPendingExport/);
+  assert.match(pageSource, /completePendingExportReservation\(\)/);
+});
+
+test("requires confirmed usage before paid export and releases abandoned unlocks", () => {
+  const confirmedCompletions =
+    pageSource.match(
+      /const usageCompleted = await updateVideoUsage\(\s*"complete",\s*newlyReservedUsage,\s*\)/g,
+    ) ?? [];
+  const guardedPendingStates =
+    pageSource.match(
+      /!usageCompleted &&\s*isCurrent\(\) &&\s*usageReservationRef\.current === newlyReservedUsage/g,
+    ) ?? [];
+
+  assert.equal(confirmedCompletions.length, 2);
+  assert.equal(guardedPendingStates.length, 2);
+  assert.match(pageSource, /if \(!usageReservationPendingExport\) return/);
+  assert.match(pageSource, /await updateVideoUsage\("complete", usageReservationId\)/);
+  assert.match(pageSource, /window\.addEventListener\("pagehide"/);
+  assert.match(pageSource, /if \(event\.persisted\) return/);
+  assert.match(pageSource, /navigator\.sendBeacon\(/);
+});
+
+test("discards a paid export reservation if the edited video changes", () => {
+  const start = pageSource.indexOf("async function checkPaidExportAccess()");
+  const end = pageSource.indexOf("\n  async function startCheckout", start);
+  const accessFlow = pageSource.slice(start, end);
+
+  assert.match(accessFlow, /const accessGeneration = editGenerationRef\.current/);
+  assert.match(accessFlow, /const accessFile = file/);
+  assert.match(accessFlow, /reserveVideoUsage\(accessFile\)/);
+  assert.match(
+    accessFlow,
+    /editGenerationRef\.current !== accessGeneration[\s\S]*releaseVideoUsageBestEffort\(reservation\.reservationId\)/,
+  );
+});
+
 test("keeps both export paths at the same high-quality bitrate", () => {
   const start = pageSource.indexOf("const preferredMimeTypes = [");
   const end = pageSource.indexOf("const activeRecorder = recorder;", start);

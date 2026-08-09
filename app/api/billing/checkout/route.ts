@@ -12,6 +12,7 @@ import {
 import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
 import {
   isBillingConfigured,
+  isCanonicalBillingRequest,
   getStripeReadiness,
   publicOrigin,
   stripePriceForPlan,
@@ -35,6 +36,15 @@ function isStripePlan(value: unknown): value is StripePlan {
 }
 
 export async function POST(request: Request) {
+  if (!isCanonicalBillingRequest(request)) {
+    return Response.json(
+      {
+        error: "最新の公開ページから料金プランを選び直してください。",
+        code: "non_canonical_billing_origin",
+      },
+      { status: 403 },
+    );
+  }
   if (
     !isSitesAuthenticationTrusted() &&
     !isPasskeyAuthenticationConfigured()
@@ -90,8 +100,8 @@ export async function POST(request: Request) {
       );
     }
     const user = await getOrCreateBillingUser(currentUser);
+    const billingStatus = await getBillingStatusForUser(user.id);
     if (payload.plan === "light") {
-      const billingStatus = await getBillingStatusForUser(user.id);
       if (billingStatus.monthlyPlanActive) {
         return Response.json(
           {
@@ -135,7 +145,7 @@ export async function POST(request: Request) {
     sessionParams.set("metadata[plan]", payload.plan);
     sessionParams.set(
       "success_url",
-      `${origin}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      `${origin}/account?checkout=success&plan=${payload.plan}&credits_before=${billingStatus.oneTimeCreditsRemaining}`,
     );
     sessionParams.set("cancel_url", `${origin}/account?checkout=cancelled`);
 

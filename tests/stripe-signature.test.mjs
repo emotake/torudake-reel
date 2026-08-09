@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { publicOrigin, verifyStripeSignature } from "../lib/stripe.ts";
+import {
+  isCanonicalBillingRequest,
+  publicOrigin,
+  verifyStripeSignature,
+} from "../lib/stripe.ts";
 
 async function signatureFor(payload, timestamp, secret) {
   const key = await crypto.subtle.importKey(
@@ -99,4 +103,25 @@ test("does not build Stripe return URLs from client-supplied proxy headers", () 
   });
 
   assert.equal(publicOrigin(request), "https://torudake-reel.pages.dev");
+});
+
+test("allows billing only from the canonical public host or local development", () => {
+  assert.equal(
+    isCanonicalBillingRequest(
+      new Request("https://torudake-reel.pages.dev/api/billing/checkout"),
+    ),
+    true,
+  );
+  assert.equal(
+    isCanonicalBillingRequest(
+      new Request("https://old-deployment.torudake-reel.pages.dev/api/billing/checkout"),
+    ),
+    false,
+  );
+  assert.equal(
+    isCanonicalBillingRequest(
+      new Request("http://localhost:3000/api/billing/checkout"),
+    ),
+    true,
+  );
 });

@@ -48,9 +48,12 @@ import {
   type CaptionProfile,
 } from "../lib/caption-design";
 import {
+  canSaveCompletedVideo,
+  isBillingBucket,
   LIGHT_MONTHLY_PRICE_JPY,
   LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  type BillingBucket,
 } from "../lib/billing-policy";
 import { LINE_SHARE_URL } from "../lib/line-share";
 import {
@@ -921,6 +924,7 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
   }
   const payload = await readApiResponse<
     ApiPayload & {
+      bucket?: unknown;
       required?: boolean;
       reservationId?: string;
       narrationGenerationLimit?: number;
@@ -934,8 +938,17 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
           Number(payload.narrationGenerationLimit),
         )
       : NARRATION_SPEECH_SUCCESS_LIMIT;
+  const bucket = payload.required
+    ? isBillingBucket(payload.bucket)
+      ? payload.bucket
+      : null
+    : null;
+  if (payload.required && !bucket) {
+    throw new ApiRequestError("利用枠を確認できませんでした。", 500);
+  }
   return {
     reservationId: payload.required ? (payload.reservationId ?? null) : null,
+    bucket,
     narrationGenerationLimit,
   };
 }
@@ -944,11 +957,37 @@ async function updateVideoUsage(
   action: "complete" | "release",
   reservationId: string,
 ) {
-  await fetch(`/api/usage/${action}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reservationId }),
-  }).catch(() => undefined);
+  try {
+    const response = await fetch(`/api/usage/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservationId }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function sendVideoUsageReleaseBeacon(reservationId: string) {
+  const body = JSON.stringify({ reservationId });
+  try {
+    return Boolean(
+      typeof navigator !== "undefined" &&
+        typeof navigator.sendBeacon === "function" &&
+        navigator.sendBeacon(
+          "/api/usage/release",
+          new Blob([body], { type: "application/json" }),
+        ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function releaseVideoUsageBestEffort(reservationId: string) {
+  if (await updateVideoUsage("release", reservationId)) return;
+  sendVideoUsageReleaseBeacon(reservationId);
 }
 
 async function requestNarrationSpeech(
@@ -1241,6 +1280,7 @@ export default function Home() {
   const editAbortRef = useRef<AbortController | null>(null);
   const editGenerationRef = useRef(0);
   const usageReservationRef = useRef<string | null>(null);
+  const usageReservationPendingExportRef = useRef(false);
   const narrationRegenerationAbortRef = useRef<AbortController | null>(null);
   const narrationGenerationsRemainingRef = useRef(
     NARRATION_SPEECH_SUCCESS_LIMIT,
@@ -1251,6 +1291,11 @@ export default function Home() {
   const [usageReservationId, setUsageReservationId] = useState<string | null>(
     null,
   );
+  const [usageBucket, setUsageBucket] = useState<BillingBucket | null>(null);
+  const [usageReservationPendingExport, setUsageReservationPendingExport] =
+    useState(false);
+  const [isCheckingPaidExportAccess, setIsCheckingPaidExportAccess] =
+    useState(false);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
   const [captionProfile, setCaptionProfile] = useCaptionProfileSync();
@@ -1304,9 +1349,23 @@ export default function Home() {
   >(null);
   const [billingError, setBillingError] = useState("");
 
-  function rememberUsageReservation(nextReservationId: string | null) {
+  function rememberUsageReservation(
+    nextReservationId: string | null,
+    nextBucket: BillingBucket | null = null,
+    pendingExport = false,
+  ) {
     usageReservationRef.current = nextReservationId;
+    usageReservationPendingExportRef.current = pendingExport;
     setUsageReservationId(nextReservationId);
+    setUsageBucket(nextBucket);
+    setUsageReservationPendingExport(pendingExport);
+  }
+
+  function releasePendingExportReservation() {
+    const reservationId = usageReservationRef.current;
+    if (usageReservationPendingExportRef.current && reservationId) {
+      void releaseVideoUsageBestEffort(reservationId);
+    }
   }
 
   function rememberNarrationGenerationsRemaining(nextRemaining: number) {
@@ -1366,6 +1425,23 @@ export default function Home() {
   );
 
   useEffect(() => {
+    const releaseUnusedPaidExportReservation = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      const reservationId = usageReservationRef.current;
+      if (usageReservationPendingExportRef.current && reservationId) {
+        if (!sendVideoUsageReleaseBeacon(reservationId)) {
+          void updateVideoUsage("release", reservationId);
+        }
+        usageReservationPendingExportRef.current = false;
+      }
+    };
+    window.addEventListener("pagehide", releaseUnusedPaidExportReservation);
+    return () => {
+      window.removeEventListener("pagehide", releaseUnusedPaidExportReservation);
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (narrationAudioUrl) URL.revokeObjectURL(narrationAudioUrl);
     };
@@ -1400,6 +1476,7 @@ export default function Home() {
     narrationRegenerationAbortRef.current = null;
     editAbortRef.current = null;
     editGenerationRef.current += 1;
+    releasePendingExportReservation();
     setFile(selected);
     setEditError("");
     setUsedHighAccuracy(false);
@@ -1418,6 +1495,7 @@ export default function Home() {
     narrationRegenerationAbortRef.current = null;
     editAbortRef.current = null;
     editGenerationRef.current += 1;
+    releasePendingExportReservation();
     setFile(null);
     setEditError("");
     setUsedHighAccuracy(false);
@@ -1464,7 +1542,7 @@ export default function Home() {
         const reservation = await reserveVideoUsage(file, controller.signal);
         newlyReservedUsage = reservation.reservationId;
         throwIfProcessingAborted(controller.signal);
-        rememberUsageReservation(newlyReservedUsage);
+        rememberUsageReservation(newlyReservedUsage, reservation.bucket);
       }
       const usageReservationId = usageReservationRef.current;
 
@@ -1513,7 +1591,18 @@ export default function Home() {
       setTranscript(nextTranscript);
       setUsedHighAccuracy(refined);
       if (newlyReservedUsage) {
-        await updateVideoUsage("complete", newlyReservedUsage);
+        const usageCompleted = await updateVideoUsage(
+          "complete",
+          newlyReservedUsage,
+        );
+        if (
+          !usageCompleted &&
+          isCurrent() &&
+          usageReservationRef.current === newlyReservedUsage
+        ) {
+          usageReservationPendingExportRef.current = true;
+          setUsageReservationPendingExport(true);
+        }
       }
       if (!isCurrent()) return;
       setProgress(100);
@@ -1574,7 +1663,7 @@ export default function Home() {
       const reservation = await reserveVideoUsage(file, controller.signal);
       newlyReservedUsage = reservation.reservationId;
       throwIfProcessingAborted(controller.signal);
-      rememberUsageReservation(newlyReservedUsage);
+      rememberUsageReservation(newlyReservedUsage, reservation.bucket);
       rememberNarrationGenerationLimit(
         reservation.narrationGenerationLimit,
       );
@@ -1673,7 +1762,18 @@ export default function Home() {
       setNarrationAudioUrl(URL.createObjectURL(audio));
       setUsedHighAccuracy(true);
       if (newlyReservedUsage) {
-        await updateVideoUsage("complete", newlyReservedUsage);
+        const usageCompleted = await updateVideoUsage(
+          "complete",
+          newlyReservedUsage,
+        );
+        if (
+          !usageCompleted &&
+          isCurrent() &&
+          usageReservationRef.current === newlyReservedUsage
+        ) {
+          usageReservationPendingExportRef.current = true;
+          setUsageReservationPendingExport(true);
+        }
       }
       if (!isCurrent()) return;
       setProgress(100);
@@ -1859,6 +1959,7 @@ export default function Home() {
     narrationRegenerationAbortRef.current?.abort();
     narrationRegenerationAbortRef.current = null;
     editGenerationRef.current += 1;
+    releasePendingExportReservation();
     setFile(null);
     setStage("start");
     setProgress(0);
@@ -1878,6 +1979,50 @@ export default function Home() {
     resetNarrationGenerationQuota();
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function checkPaidExportAccess() {
+    if (!file || isCheckingPaidExportAccess) return;
+    const accessGeneration = editGenerationRef.current;
+    const accessFile = file;
+    setIsCheckingPaidExportAccess(true);
+    try {
+      const reservation = await reserveVideoUsage(accessFile);
+      if (editGenerationRef.current !== accessGeneration) {
+        if (reservation.reservationId) {
+          await releaseVideoUsageBestEffort(reservation.reservationId);
+        }
+        return;
+      }
+      if (
+        !reservation.reservationId ||
+        !canSaveCompletedVideo(reservation.bucket)
+      ) {
+        if (reservation.reservationId) {
+          await updateVideoUsage("release", reservation.reservationId);
+        }
+        throw new Error(
+          "購入済みの利用枠をまだ確認できませんでした。決済完了後、少し待ってからもう一度お試しください。",
+        );
+      }
+      rememberUsageReservation(
+        reservation.reservationId,
+        reservation.bucket,
+        true,
+      );
+      notify("購入済みの利用枠を確認しました。完成動画を保存できます");
+    } catch (error) {
+      if (editGenerationRef.current !== accessGeneration) return;
+      notify(
+        error instanceof ApiRequestError && error.status === 402
+          ? "購入済みの利用枠をまだ確認できませんでした。決済完了後、少し待ってからもう一度お試しください。"
+          : error instanceof Error
+            ? error.message
+            : "購入状況を確認できませんでした。",
+      );
+    } finally {
+      setIsCheckingPaidExportAccess(false);
+    }
   }
 
   async function startCheckout(plan: "light" | "one_time") {
@@ -1905,11 +2050,12 @@ export default function Home() {
       if (!payload.url) throw new Error("決済画面を開けませんでした。");
       window.location.href = payload.url;
     } catch (error) {
-      setBillingError(
+      const message =
         error instanceof Error
           ? error.message
-          : "決済画面を開けませんでした。",
-      );
+          : "決済画面を開けませんでした。";
+      setBillingError(message);
+      notify(message);
       setBillingBusyPlan(null);
     }
   }
@@ -2159,8 +2305,16 @@ export default function Home() {
           narrationAutoCutEnabled={narrationAutoCutEnabled}
           setNarrationAutoCutEnabled={updateNarrationCutMode}
           usageReservationId={usageReservationId}
+          usageBucket={usageBucket}
+          usageReservationPendingExport={usageReservationPendingExport}
           setNarrationOriginalAudio={setNarrationOriginalAudio}
           regenerateNarration={regenerateNarration}
+          checkPaidExportAccess={checkPaidExportAccess}
+          isCheckingPaidExportAccess={isCheckingPaidExportAccess}
+          markExportReservationCompleted={() => {
+            usageReservationPendingExportRef.current = false;
+            setUsageReservationPendingExport(false);
+          }}
         />
       )}
 
@@ -2662,7 +2816,8 @@ function Landing({
             <ul>
               <li>✓ 自動カット・自動テロップ</li>
               <li>✓ 1動画90秒まで</li>
-              <li>✓ 標準画質・透かしなし</li>
+              <li>✓ 編集・プレビューまで</li>
+              <li>完成動画の保存は有料</li>
             </ul>
             <button onClick={openPicker}>無料で動画を試す</button>
           </article>
@@ -2722,6 +2877,9 @@ function Landing({
         )}
         <p className="billingFootnote">
           決済はStripeの安全な画面で行います。カード情報は撮るだけリールに保存されません。
+        </p>
+        <p className="billingFootnote">
+          動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
         </p>
       </section>
 
@@ -3578,8 +3736,13 @@ function ResultWorkspace({
   narrationAutoCutEnabled,
   setNarrationAutoCutEnabled,
   usageReservationId,
+  usageBucket,
+  usageReservationPendingExport,
   setNarrationOriginalAudio,
   regenerateNarration,
+  checkPaidExportAccess,
+  isCheckingPaidExportAccess,
+  markExportReservationCompleted,
 }: {
   file: File | null;
   videoUrl: string;
@@ -3611,6 +3774,8 @@ function ResultWorkspace({
   narrationAutoCutEnabled: boolean;
   setNarrationAutoCutEnabled: (enabled: boolean) => Promise<void>;
   usageReservationId: string | null;
+  usageBucket: BillingBucket | null;
+  usageReservationPendingExport: boolean;
   setNarrationOriginalAudio: (
     percent: NarrationOriginalAudioLevel,
   ) => void;
@@ -3619,6 +3784,9 @@ function ResultWorkspace({
     style: NarrationStyle,
     pronunciationGuide: string,
   ) => Promise<number>;
+  checkPaidExportAccess: () => Promise<void>;
+  isCheckingPaidExportAccess: boolean;
+  markExportReservationCompleted: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const narrationDraftTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3967,6 +4135,20 @@ function ResultWorkspace({
     exportedVideoRevision === exportInputRevision
       ? exportedVideoFile
       : null;
+  const completedVideoSaveAllowed = canSaveCompletedVideo(usageBucket);
+
+  async function completePendingExportReservation() {
+    if (!usageReservationPendingExport) return;
+    if (
+      !usageReservationId ||
+      !(await updateVideoUsage("complete", usageReservationId))
+    ) {
+      throw new Error(
+        "完成動画は作成できましたが、購入済みの利用枠を確認できませんでした。通信を確認して、もう一度書き出してください。",
+      );
+    }
+    markExportReservationCompleted();
+  }
   const thumbnailInputRevision = JSON.stringify({
     file: file ? [file.name, file.size, file.lastModified, file.type] : null,
     candidateId: selectedThumbnailCandidate?.id ?? null,
@@ -5742,6 +5924,13 @@ function ResultWorkspace({
   async function exportCaptionedVideo(
     preparedAudioContext: AudioContext | null = null,
   ) {
+    if (!completedVideoSaveAllowed) {
+      await preparedAudioContext?.close().catch(() => undefined);
+      notify(
+        "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください",
+      );
+      return;
+    }
     const video = videoRef.current;
     if (
       !video ||
@@ -5922,6 +6111,7 @@ function ResultWorkspace({
           `${exportName}_${exportSuffix}.mp4`,
           { type: "video/mp4" },
         );
+        await completePendingExportReservation();
         setExportProgress(100);
         setExportedVideoFile(completedFile);
         setExportedVideoQualityMessage(portableQuality.userMessage);
@@ -6288,6 +6478,7 @@ function ResultWorkspace({
         `${exportName}_${exportSuffix}.${extension}`,
         { type: output.type || `video/${extension}` },
       );
+      await completePendingExportReservation();
       setExportProgress(100);
       setExportedVideoFile(completedFile);
       setExportedVideoQualityMessage(fallbackQuality.userMessage);
@@ -6361,6 +6552,12 @@ function ResultWorkspace({
   }
 
   async function saveExportedVideo() {
+    if (!completedVideoSaveAllowed) {
+      notify(
+        "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください",
+      );
+      return;
+    }
     if (!readyExportedVideoFile) return;
 
     const shareData = {
@@ -6393,6 +6590,12 @@ function ResultWorkspace({
 
   function requestVideoExport() {
     if (isMediaBusy || isExportingRef.current) return;
+    if (!completedVideoSaveAllowed) {
+      notify(
+        "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください",
+      );
+      return;
+    }
     if (narrationPlan) {
       setDisclosureConfirmed(false);
       setShowDisclosureConfirm(true);
@@ -6402,6 +6605,13 @@ function ResultWorkspace({
   }
 
   async function confirmNarrationExport() {
+    if (!completedVideoSaveAllowed) {
+      setShowDisclosureConfirm(false);
+      notify(
+        "無料体験では編集とプレビューまで利用できます。完成動画の保存にはプランを選んでください",
+      );
+      return;
+    }
     if (!disclosureConfirmed || isRecordingDisclosure) return;
     setIsRecordingDisclosure(true);
     let preparedAudioContext: AudioContext | null = null;
@@ -7621,7 +7831,9 @@ function ResultWorkspace({
             </strong>
             <small className="exportStatus">
               <span className="exportResolutionStatus">
-                {readyExportedVideoFile
+                {!completedVideoSaveAllowed
+                  ? "無料体験では編集・プレビューまで利用できます。"
+                  : readyExportedVideoFile
                   ? exportedVideoQualityMessage ??
                     "完成動画の解像度を確認できませんでした。動画はそのまま保存できます。"
                   : isExporting && exportProgress !== null
@@ -7657,7 +7869,50 @@ function ResultWorkspace({
               高精度で再生成
             </button>
           )}
-          {file ? (
+          {file && !completedVideoSaveAllowed ? (
+            <div className="freeExportGate" id="free-export-plans">
+              <p>
+                <strong>完成動画を保存するにはプランを選択</strong>
+                <small>
+                  編集内容はプレビューで確認できます。保存は月8本プラン、または1動画作成から利用できます。
+                </small>
+              </p>
+              <div>
+                <Link
+                  className="mainCta"
+                  href="/account?checkout=light"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span>
+                    {`月${LIGHT_MONTHLY_VIDEO_LIMIT}本・¥${LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
+                  </span>
+                  <i>→</i>
+                </Link>
+                <Link
+                  className="quietButton"
+                  href="/account?checkout=one_time"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {`1動画作成・¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}`}
+                </Link>
+              </div>
+              <small className="freeExportReturnNote">
+                決済は別タブで開きます。購入後、この編集画面へ戻ってください。
+              </small>
+              <button
+                className="freeExportRefreshButton"
+                type="button"
+                onClick={() => void checkPaidExportAccess()}
+                disabled={isCheckingPaidExportAccess}
+              >
+                {isCheckingPaidExportAccess
+                  ? "購入状況を確認中…"
+                  : "購入済みの方：保存を有効にする"}
+              </button>
+            </div>
+          ) : file ? (
             <button
               className="mainCta reviewCta"
               onClick={
