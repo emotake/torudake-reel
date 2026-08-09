@@ -221,9 +221,10 @@ test("builds the bright male style without forcing comedy", async () => {
 
     assert.equal(response.status, 200);
     const prompt = openAiRequest.input[0].content[0].text;
-    assert.match(prompt, /明るくテンポのよい自然な男性/);
+    assert.match(prompt, /20代らしい活気と華やかさのある男性/);
+    assert.match(prompt, /クラブや音楽イベントの高揚感/);
+    assert.match(prompt, /社交的で自信のある語り口/);
     assert.match(prompt, /短い文と自然な緩急/);
-    assert.match(prompt, /親しみやすく自然な明るさ/);
     assert.match(
       prompt,
       /実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しない/,
@@ -233,11 +234,88 @@ test("builds the bright male style without forcing comedy", async () => {
       prompt,
       /リズムコメディ|短い状況説明→一拍|笑いやオチ|ツッコミ/,
     );
-    assert.match(prompt, /台本の文字数: 112〜134字/);
+    assert.match(prompt, /台本の文字数: 116〜139字/);
     assert.doesNotMatch(
       prompt,
       /instagram\.com|萌えアニメ|関西ツッコミ|激しい関西芸人風|明石家|さんま/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("builds a lively young-adult female style without sacrificing clarity", async () => {
+  globalThis.__cloudflareEnv = {
+    OPENAI_API_KEY: "test-key",
+    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+  };
+  const originalFetch = globalThis.fetch;
+  let openAiRequest;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/responses") {
+      openAiRequest = JSON.parse(init.body);
+      return Response.json({
+        output_text: JSON.stringify({
+          title: "今夜のベストシーン",
+          script: "この瞬間、空気まで一気に変わる。今日いちばんの景色を、みんなで楽しもう。",
+          socialCaption: "今日いちばんの瞬間を残そう。",
+          segments: [
+            { text: "この瞬間、空気まで一気に変わる。", emphasis: true },
+            { text: "今日いちばんの景色を、みんなで楽しもう。", emphasis: false },
+          ],
+        }),
+      });
+    }
+
+    return originalFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set(
+      "narration-party-style",
+      `${process.pid}-${Date.now()}`,
+    );
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: ["data:image/jpeg;base64,AA=="],
+          brief: "友人と音楽イベントへ出かけた夜",
+          goal: "reach",
+          length: 30,
+          style: "party",
+          sourceDuration: 45,
+        }),
+      }),
+      {
+        ASSETS: {
+          fetch: async () => new Response("Not found", { status: 404 }),
+        },
+      },
+      {
+        waitUntil() {},
+        passThroughOnException() {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const prompt = openAiRequest.input[0].content[0].text;
+    assert.match(prompt, /20代らしい活気と華やかさのある女性/);
+    assert.match(prompt, /クラブや音楽イベントの高揚感/);
+    assert.match(prompt, /ギャル系ファッションやクラブカルチャー/);
+    assert.match(prompt, /華やかで自信と親しみやすさのある語り口/);
+    assert.match(prompt, /無理な若者言葉、ギャル語、内輪ノリ、煽り文句を連発せず/);
+    assert.match(prompt, /台本の文字数: 116〜139字/);
+    assert.doesNotMatch(prompt, /実在人物の声を模倣|幼いアニメ声/);
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__cloudflareEnv;

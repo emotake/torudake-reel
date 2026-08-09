@@ -20,13 +20,16 @@ const STYLE_INSTRUCTIONS: Record<NarrationStyle, string> = {
   bright: "自然な女性の話し言葉。飾らず親しく、標準語で分かりやすく伝える",
   calm: "自然な男性の話し言葉。落ち着いた標準語で、要点を素直に伝える",
   comedy:
-    "明るくテンポのよい自然な男性の話し言葉。短い文と自然な緩急で、親しみやすく明瞭に伝える",
+    "20代らしい活気と華やかさのある男性の話し言葉。クラブや音楽イベントの高揚感を感じる軽快なテンポで、フレンドリーかつ明瞭に伝える",
+  party:
+    "20代らしい活気と華やかさのある女性の話し言葉。クラブや音楽イベントの高揚感を感じる軽快なテンポで、親しみやすく自信をもって伝える",
 };
 
 const NATURAL_CHARACTERS_PER_SECOND: Record<NarrationStyle, number> = {
   bright: 4.7,
   calm: 4.5,
-  comedy: 4.7,
+  comedy: 4.9,
+  party: 4.9,
 };
 
 type OpenAIResponse = {
@@ -222,13 +225,20 @@ export async function POST(request: Request) {
   const timingCorrection = previousScript
     ? `\n再調整する元台本: ${previousScript}\n元台本の意味・事実・冒頭の引き・結びを保ち、重複や補足を削って指定文字数へ短くしてください。`
     : "";
-  const characterRules =
+  const livelyStyleRule =
     style === "comedy"
-      ? `
-- 「明るい男性」では、冒頭3秒以内に要点を置き、短い文と自然な緩急でテンポよく伝えてください。映像の内容に合う、親しみやすく自然な明るさを保ってください。
+      ? "「明るい男性」は、20代のクラブカルチャーや音楽イベントを思わせる、社交的で自信のある語り口にしてください。"
+      : style === "party"
+        ? "「明るい女性」は、20代のギャル系ファッションやクラブカルチャーを思わせる、華やかで自信と親しみやすさのある語り口にしてください。"
+        : "";
+  const characterRules = livelyStyleRule
+    ? `
+- ${livelyStyleRule}
+- 冒頭3秒以内に要点を置き、短い文と自然な緩急でテンポよく伝えてください。自然な口語と弾みのある言い回しを使い、映像に合う軽いノリを取り入れてください。
+- 無理な若者言葉、ギャル語、内輪ノリ、煽り文句を連発せず、初めて見る人にも意味が伝わる台本にしてください。
 - 実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しないでください。
 - 商品情報・効果・価格・実績を誇張せず、映像にない出来事や感情を作らないでください。`
-      : "";
+    : "";
   const content: Array<
     | { type: "input_text"; text: string }
     | { type: "input_image"; image_url: string; detail: "low" }

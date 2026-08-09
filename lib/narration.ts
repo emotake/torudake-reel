@@ -10,7 +10,7 @@ export const NARRATION_TERMS_VERSION = "2026-07-30";
 export const NARRATION_SPEECH_SUCCESS_LIMIT = 5;
 
 export type VideoAudioMode = "spoken" | "narration";
-export type NarrationStyle = "bright" | "calm" | "comedy";
+export type NarrationStyle = "bright" | "calm" | "comedy" | "party";
 export type NarrationOriginalAudioLevel = number;
 
 export type NarrationPronunciationEntry = {
@@ -48,7 +48,12 @@ export const NARRATION_STYLES: Array<{
   {
     id: "comedy",
     label: "明るい男性",
-    note: "テンポよく軽快な声｜日常・紹介",
+    note: "華やかで勢いのある声｜イベント・SNS",
+  },
+  {
+    id: "party",
+    label: "明るい女性",
+    note: "華やかでノリのよい声｜イベント・SNS",
   },
 ];
 
@@ -387,7 +392,7 @@ export function normalizeNarrationStyle(
   value: unknown,
 ): NarrationStyle | null {
   if (isNarrationStyle(value)) return value;
-  if (value === "tempo") return "bright";
+  if (value === "tempo") return "party";
   if (value === "refined") return "calm";
   return null;
 }

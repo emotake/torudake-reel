@@ -176,23 +176,27 @@ test("samples the whole source while matching the natural audio duration", () =>
   assert.equal(timeline.at(-1).end, 72);
 });
 
-test("exposes only the three current narration templates", () => {
+test("exposes only the four current narration templates", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
-    ["calm", "bright", "comedy"],
+    ["calm", "bright", "comedy", "party"],
   );
-  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 3);
+  assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 4);
   assert.ok(NARRATION_STYLES.every((style) => style.note.includes("声")));
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.label),
-    ["自然な男性", "自然な女性", "明るい男性"],
+    ["自然な男性", "自然な女性", "明るい男性", "明るい女性"],
   );
-  assert.match(NARRATION_STYLES[2].note, /テンポよく軽快/);
-  assert.doesNotMatch(NARRATION_STYLES[2].note, /コメディ|オチ/);
+  assert.match(NARRATION_STYLES[2].note, /華やかで勢い/);
+  assert.match(NARRATION_STYLES[3].note, /華やかでノリ/);
+  assert.doesNotMatch(
+    NARRATION_STYLES.slice(2).map((style) => style.note).join("\n"),
+    /コメディ|オチ/,
+  );
 });
 
 test("maps retired narration templates to safe current voices", () => {
-  assert.equal(normalizeNarrationStyle("tempo"), "bright");
+  assert.equal(normalizeNarrationStyle("tempo"), "party");
   assert.equal(normalizeNarrationStyle("refined"), "calm");
   assert.equal(normalizeNarrationStyle("comedy"), "comedy");
   assert.equal(normalizeNarrationStyle("unknown"), null);

@@ -126,7 +126,7 @@ function realtimeUpgrade(socket) {
   };
 }
 
-test("generates the three current realtime voices and wraps PCM output as WAV", async () => {
+test("generates the four current realtime voices and wraps PCM output as WAV", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
@@ -141,7 +141,7 @@ test("generates the three current realtime voices and wraps PCM output as WAV", 
 
   try {
     const worker = await loadWorker("narration-realtime-voices");
-    const styles = ["calm", "bright", "comedy"];
+    const styles = ["calm", "bright", "comedy", "party"];
 
     for (const style of styles) {
       const response = await worker.fetch(
@@ -182,15 +182,15 @@ test("generates the three current realtime voices and wraps PCM output as WAV", 
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["cedar", "coral", "ash"],
+      ["cedar", "coral", "ash", "shimmer"],
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
-      3,
+      4,
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
-      [0.99, 1, 1.04],
+      [0.99, 1, 1.07, 1.07],
     );
     assert.ok(
       sessions.every(
@@ -218,16 +218,22 @@ test("generates the three current realtime voices and wraps PCM output as WAV", 
     );
     assert.equal(
       new Set(responses.map((response) => response.instructions)).size,
-      3,
+      4,
     );
     assert.match(responses[0].instructions, /聞き取りやすい中低音/);
     assert.match(responses[1].instructions, /温かくクリア/);
     assert.match(
       responses[2].instructions,
-      /明るく自然な成人男性/,
+      /20代のクラブや音楽イベント.*成人男性/,
     );
+    assert.match(responses[2].instructions, /華やかで抜けのよい男性/);
+    assert.match(
+      responses[3].instructions,
+      /20代のクラブや音楽イベント.*成人女性/,
+    );
+    assert.match(responses[3].instructions, /ギャル系の親しみやすさ/);
     assert.doesNotMatch(
-      responses[2].instructions,
+      responses.slice(2).map((response) => response.instructions).join("\n"),
       /コメディ|オチ|笑いを作る/,
     );
     assert.doesNotMatch(
@@ -283,6 +289,49 @@ test("uses the matching HD fallback when realtime cannot connect", async () => {
     assert.equal(fallbackBody.model, "tts-1-hd");
     assert.equal(fallbackBody.voice, "echo");
     assert.equal(fallbackBody.speed, 0.99);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("maps the retired pop voice to the bright female HD fallback", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    if (requests.length === 1) {
+      return realtimeUpgrade(new MockRealtimeSocket("error"));
+    }
+    return new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { "Content-Type": "audio/mpeg" },
+    });
+  };
+
+  try {
+    const worker = await loadWorker("narration-party-fallback");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "華やかな声でテンポよく読みます。",
+          style: "tempo",
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-narration-model"), "tts-1-hd");
+    assert.equal(requests.length, 2);
+    const fallbackBody = JSON.parse(requests[1].init.body);
+    assert.equal(fallbackBody.model, "tts-1-hd");
+    assert.equal(fallbackBody.voice, "shimmer");
+    assert.equal(fallbackBody.speed, 1.07);
   } finally {
     globalThis.fetch = originalFetch;
   }

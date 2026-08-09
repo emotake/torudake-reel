@@ -4292,6 +4292,16 @@ footer > small {
   box-shadow: 0 0 0 2px rgba(230, 72, 46, 0.12);
 }
 
+.narrationStyleCards button[data-style="party"] {
+  border-color: #d973b4;
+  background: linear-gradient(145deg, #fff4fb, #f3e5ff);
+}
+
+.narrationStyleCards button[data-style="party"].selected {
+  border-color: #a93082;
+  box-shadow: 0 0 0 2px rgba(169, 48, 130, 0.12);
+}
+
 .narrationStyleCards strong {
   font-size: 8px;
 }
@@ -6593,6 +6603,16 @@ footer > small {
 .voiceStylePicker button[data-style="comedy"].active {
   border-color: #e6482e;
   background: #d83a24;
+}
+
+.voiceStylePicker button[data-style="party"] {
+  border-color: #d973b4;
+  background: #fff0fa;
+}
+
+.voiceStylePicker button[data-style="party"].active {
+  border-color: #a93082;
+  background: #9c2c78;
 }
 
 .narrationVoicePreviewStatus {
