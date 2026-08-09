@@ -35,8 +35,8 @@ test("normalizes customer caption profiles safely", () => {
   assert.deepEqual(normalizeCaptionProfile(null), DEFAULT_CAPTION_PROFILE);
 });
 
-test("offers two framed and three text-only caption styles without another API call", () => {
-  assert.equal(CAPTION_MOODS.length, 5);
+test("offers two framed and four text-only caption styles without another API call", () => {
+  assert.equal(CAPTION_MOODS.length, 6);
   assert.deepEqual(
     CAPTION_MOODS.map(({ id, tone }) => [id, tone]),
     [
@@ -44,6 +44,7 @@ test("offers two framed and three text-only caption styles without another API c
       ["bold", "mono"],
       ["soft", "cinema"],
       ["pop", "pop"],
+      ["vlog", "vlog"],
       ["refined", "signature"],
     ],
   );
@@ -70,7 +71,7 @@ test("offers two framed and three text-only caption styles without another API c
       ({ frame, palette }) =>
         frame.borderPlacement === "none" && palette.background === "",
     ).length,
-    3,
+    4,
   );
 });
 
@@ -88,7 +89,7 @@ test("exposes the rendering frame used by preview and video export", () => {
     "block",
   );
 
-  for (const mood of ["soft", "pop", "refined"]) {
+  for (const mood of ["soft", "pop", "vlog", "refined"]) {
     const design = resolveCaptionDesign(
       { ...DEFAULT_CAPTION_PROFILE, mood },
       "follow",
@@ -105,6 +106,12 @@ test("exposes the rendering frame used by preview and video export", () => {
     ).frame.fontFamily,
     /Mincho/u,
   );
+  const vlog = resolveCaptionDesign(
+    { ...DEFAULT_CAPTION_PROFILE, mood: "vlog", accentColor: "#e45f4d" },
+    "follow",
+  );
+  assert.equal(vlog.palette.fontWeight, 500);
+  assert.equal(vlog.palette.highlight, "#ffffff");
 });
 
 test("uses the customer accent color in the resolved palette", () => {

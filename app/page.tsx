@@ -3039,8 +3039,8 @@ function CaptionStylePicker({
       aria-label="テロップの雰囲気"
     >
       <div className="captionStylePickerHeading">
-        <strong>5種類から選ぶ</strong>
-        <span>枠付き2種類・文字のみ3種類をプレビューと書き出しへ反映</span>
+        <strong>6種類から選ぶ</strong>
+        <span>枠付き2種類・文字のみ4種類をプレビューと書き出しへ反映</span>
       </div>
       <div className="captionStyleChoices">
         {CAPTION_MOODS.map((item) => {
@@ -5729,8 +5729,14 @@ function ResultWorkspace({
           ? 1.08
           : 1;
     const fontSize =
-      Math.max(26, Math.min(64, canvas.width * 0.052)) *
+      (tone === "vlog"
+        ? Math.max(22, Math.min(52, canvas.width * 0.041))
+        : Math.max(26, Math.min(64, canvas.width * 0.052))) *
       presentationScale;
+    const captionFontWeight =
+      tone === "vlog" && presentation === "hook"
+        ? 700
+        : palette.fontWeight;
     const horizontalPadding =
       fontSize * (frame.borderPlacement === "none" ? 0.32 : 0.72);
     const verticalPadding =
@@ -5745,7 +5751,7 @@ function ResultWorkspace({
       presentation === "hook" && Boolean(captionProfile.brandName);
     const brandHeight = showBrand ? fontSize * 0.52 : 0;
 
-    context.font = `${palette.fontWeight} ${fontSize}px ${frame.fontFamily}`;
+    context.font = `${captionFontWeight} ${fontSize}px ${frame.fontFamily}`;
     context.textAlign = "center";
     context.textBaseline = "middle";
     const widestLine = Math.max(
@@ -5759,12 +5765,18 @@ function ResultWorkspace({
     const boxHeight =
       lines.length * lineHeight + verticalPadding * 2 + brandHeight;
     const boxX = (canvas.width - boxWidth) / 2;
-    const boxY = canvas.height - boxHeight - canvas.height * 0.08;
+    const boxY =
+      tone === "vlog"
+        ? canvas.height * 0.43
+        : canvas.height - boxHeight - canvas.height * 0.08;
     const boxRadius = Math.max(0, fontSize * frame.cornerRadius);
     const entrance = getCaptionEntranceProgress(sourceTime, caption.start);
     context.save();
     context.globalAlpha = 0.35 + entrance * 0.65;
-    context.translate(0, (1 - entrance) * fontSize * 0.18);
+    context.translate(
+      0,
+      (1 - entrance) * fontSize * (tone === "vlog" ? 0.04 : 0.18),
+    );
     if (palette.background) {
       context.save();
       context.shadowColor =
@@ -5845,19 +5857,30 @@ function ResultWorkspace({
       );
     }
     const highlight = caption.highlight?.trim() ?? "";
-    context.font = `${palette.fontWeight} ${fontSize}px ${frame.fontFamily}`;
+    context.font = `${captionFontWeight} ${fontSize}px ${frame.fontFamily}`;
     context.textAlign = "left";
     if (!palette.background && frame.borderPlacement === "none") {
       context.shadowColor =
         tone === "pop"
           ? palette.highlight
+          : tone === "vlog"
+            ? "rgba(0,0,0,.82)"
           : tone === "signature"
             ? "rgba(20,14,10,.78)"
             : "rgba(0,0,0,.68)";
-      context.shadowBlur = tone === "pop" ? 0 : fontSize * 0.18;
+      context.shadowBlur =
+        tone === "pop"
+          ? 0
+          : tone === "vlog"
+            ? fontSize * 0.07
+            : fontSize * 0.18;
       context.shadowOffsetX = tone === "pop" ? fontSize * 0.055 : 0;
       context.shadowOffsetY =
-        tone === "pop" ? fontSize * 0.07 : fontSize * 0.08;
+        tone === "pop"
+          ? fontSize * 0.07
+          : tone === "vlog"
+            ? fontSize * 0.045
+            : fontSize * 0.08;
     }
     lines.forEach((line, index) => {
       const lineY =

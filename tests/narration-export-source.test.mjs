@@ -375,3 +375,17 @@ test("keeps spoken caption and cut choices aligned across preview and export", (
   );
   assert.doesNotMatch(pageSource, /spokenAutoCutEnabled/);
 });
+
+test("renders the Vlog simple caption consistently in preview and video export", () => {
+  const overlayStart = pageSource.indexOf("function drawCaptionOverlay(");
+  const overlayEnd = pageSource.indexOf(
+    "async function exportCaptionedVideo(",
+    overlayStart,
+  );
+  const overlayFlow = pageSource.slice(overlayStart, overlayEnd);
+
+  assert.match(overlayFlow, /tone === "vlog"/);
+  assert.match(overlayFlow, /canvas\.height \* 0\.43/);
+  assert.match(globalCssSource, /\.resultCaption\.vlog\s*\{/);
+  assert.match(globalCssSource, /\.captionStyleSample\.vlog\s*\{/);
+});

@@ -7,9 +7,16 @@ export type CaptionTone =
   | "glass"
   | "mono"
   | "pop"
+  | "vlog"
   | "signature";
 
-export type CaptionMood = "auto" | "soft" | "refined" | "bold" | "pop";
+export type CaptionMood =
+  | "auto"
+  | "soft"
+  | "refined"
+  | "bold"
+  | "pop"
+  | "vlog";
 
 export type CaptionProfile = {
   mood: CaptionMood;
@@ -82,6 +89,12 @@ export const CAPTION_MOODS: {
     tone: "pop",
   },
   {
+    id: "vlog",
+    label: "Vlogシンプル",
+    note: "文字のみ｜細い白文字で映像を主役に",
+    tone: "vlog",
+  },
+  {
     id: "refined",
     label: "シネマ",
     note: "文字のみ｜静かで上質に見せる",
@@ -105,6 +118,7 @@ const MOODS = new Set<CaptionMood>([
   "refined",
   "bold",
   "pop",
+  "vlog",
 ]);
 
 export function normalizeCaptionProfile(value: unknown): CaptionProfile {
@@ -175,6 +189,13 @@ const TONE_PALETTES: Record<
     label: "#ffffff",
     fontWeight: 900,
   },
+  vlog: {
+    background: "",
+    text: "#ffffff",
+    stroke: "",
+    label: "#ffffff",
+    fontWeight: 500,
+  },
   signature: {
     background: "",
     text: "#fffaf0",
@@ -228,6 +249,13 @@ const TONE_FRAMES: Record<CaptionTone, CaptionFrameStyle> = {
     highlight: "text",
     cornerRadius: 0,
   },
+  vlog: {
+    fontFamily: '"Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif',
+    borderPlacement: "none",
+    shadow: "soft",
+    highlight: "text",
+    cornerRadius: 0,
+  },
   signature: {
     fontFamily: '"Yu Mincho", "Hiragino Mincho ProN", Georgia, serif',
     borderPlacement: "none",
@@ -255,7 +283,7 @@ export function resolveCaptionDesign(
     palette: {
       ...base,
       border: normalized.accentColor,
-      highlight: normalized.accentColor,
+      highlight: tone === "vlog" ? base.text : normalized.accentColor,
     },
   };
 }

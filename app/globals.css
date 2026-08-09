@@ -3372,7 +3372,7 @@ footer > small {
 
 .captionStyleChoices {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -3568,6 +3568,29 @@ footer > small {
     1px 0 0 var(--caption-highlight-stroke, #211915),
     0 2px 4px #000c,
     0 6px 14px #0009;
+}
+
+.captionStyleSample.vlog {
+  padding-inline: 3px;
+  border: 0;
+  border-left: 0;
+  border-radius: 6px;
+  background: linear-gradient(155deg, #73b7d0 0%, #2f7187 54%, #153e48 100%);
+  box-shadow: none;
+  color: #fff;
+  font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  font-size: 7px;
+  font-weight: 500;
+  letter-spacing: .055em;
+  text-shadow:
+    0 1px 2px #000d,
+    0 3px 8px #0008;
+}
+
+.captionStyleSample.vlog em {
+  background: transparent;
+  color: inherit;
+  font-style: normal;
 }
 
 .captionStylePicker.compact .captionStyleSample {
@@ -4068,6 +4091,37 @@ footer > small {
     1px 1px 0 var(--caption-highlight-stroke, rgba(18,16,15,.82)),
     0 3px 5px #000c,
     0 9px 24px #0009;
+}
+
+.resultCaption.vlog {
+  top: 43%;
+  bottom: auto;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  color: #fff;
+  font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  letter-spacing: .055em;
+  text-shadow:
+    0 1px 2px #000e,
+    0 4px 11px #000b;
+  animation: captionVlogFade .22s ease-out;
+}
+
+.resultCaption.vlog.hook {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.resultCaption.vlog strong {
+  padding: 0;
+  background: transparent;
+  color: inherit;
 }
 
 @keyframes captionPop {
@@ -6403,6 +6457,17 @@ footer > small {
   .photoReelPhotoActions {
     grid-column: 2 / -1;
     justify-content: flex-end;
+  }
+}
+
+@keyframes captionVlogFade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
