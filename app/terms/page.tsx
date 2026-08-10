@@ -8,6 +8,7 @@ import {
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
@@ -87,7 +88,8 @@ export default function TermsPage() {
             AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本が正常に生成された時点で1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分を使用します。
           </li>
           <li>
-            AI処理の上限は1動画あたり、無料体験3回、1動画作成5回、月額プラン10回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
+            AI処理の上限は1動画あたり、無料体験3回、1動画作成5回、月額プラン
+            {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
           </li>
           <li>
             Starterは月{STARTER_MONTHLY_VIDEO_LIMIT}本・月額

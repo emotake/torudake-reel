@@ -4,6 +4,7 @@ import {
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
@@ -96,7 +97,9 @@ export default function CommercialDisclosurePage() {
           </div>
           <div>
             <dt>Starter・Standard・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
-            <dd>1動画あたり10回</dd>
+            <dd>
+              1動画あたり{SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+            </dd>
           </div>
         </dl>
         <p>

@@ -86,11 +86,11 @@ function addReservation(database, id, now, duration = 90) {
 
 test("maps every billing bucket to its shared AI action limit", () => {
   assert.equal(FREE_AI_OPERATION_SUCCESS_LIMIT, 3);
-  assert.equal(SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT, 10);
+  assert.equal(SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT, 6);
   assert.equal(ONE_TIME_AI_OPERATION_SUCCESS_LIMIT, 5);
   assert.equal(OPERATOR_AI_OPERATION_SUCCESS_LIMIT, 10);
   assert.equal(getAiOperationSuccessLimit("free"), 3);
-  assert.equal(getAiOperationSuccessLimit("subscription"), 10);
+  assert.equal(getAiOperationSuccessLimit("subscription"), 6);
   assert.equal(getAiOperationSuccessLimit("one_time"), 5);
   assert.equal(getAiOperationSuccessLimit("operator"), 10);
 });

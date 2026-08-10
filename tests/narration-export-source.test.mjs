@@ -513,8 +513,19 @@ test("shows and enforces the shared server-backed AI processing allowance", () =
   assert.match(pageSource, /X-AI-Operations-Remaining/);
   assert.match(pageSource, /aiOperationLimitRef/);
   assert.match(pageSource, /narrationGenerationLimit=\{aiOperationLimit\}/);
-  assert.match(pageSource, /無料利用では、この動画1本につき合計3回まで利用できます/);
-  assert.match(pageSource, /月額プランでは、この動画1本につき合計10回まで利用できます/);
+  assert.match(
+    pageSource,
+    /function describeAiOperationQuota/,
+  );
+  assert.match(pageSource, /case "free"/);
+  assert.match(pageSource, /case "subscription"/);
+  assert.match(pageSource, /case "one_time"/);
+  assert.match(pageSource, /case "operator"/);
+  assert.match(pageSource, /サンプルではAI処理の利用回数を消費しません/);
+  assert.match(
+    pageSource,
+    /describeAiOperationQuota\(\s*usageBucket,\s*narrationGenerationLimit/,
+  );
   assert.match(pageSource, /AI処理の利用回数/);
   assert.match(pageSource, /失敗・内部の分割処理・自動尺調整では追加消費しません/);
   assert.match(pageSource, /高精度で再生成（AI処理1回）/);

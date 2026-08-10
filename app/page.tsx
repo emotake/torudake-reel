@@ -49,8 +49,12 @@ import {
 } from "../lib/caption-design";
 import {
   canSaveCompletedVideo,
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
   isBillingBucket,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   ONE_TIME_PRICE_JPY,
+  OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
@@ -230,7 +234,12 @@ class ApiRequestError extends Error {
 }
 
 const DIRECT_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
-const MAX_AI_OPERATION_LIMIT = 10;
+const MAX_AI_OPERATION_LIMIT = Math.max(
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
+  OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
+);
 const MAX_EDIT_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
@@ -256,6 +265,24 @@ function readAiOperationQuota(response: Response): AiOperationQuotaResult {
       : null;
 
   return { aiOperationLimit, aiOperationsRemaining };
+}
+
+function describeAiOperationQuota(
+  usageBucket: BillingBucket | null,
+  limit: number,
+) {
+  switch (usageBucket) {
+    case "free":
+      return `無料利用では、この動画1本につき合計${limit}回まで利用できます。`;
+    case "subscription":
+      return `月額プランでは、この動画1本につき合計${limit}回まで利用できます。`;
+    case "one_time":
+      return `1動画作成では、この動画1本につき合計${limit}回まで利用できます。`;
+    case "operator":
+      return `運営端末では、この動画1本につき合計${limit}回まで利用できます。`;
+    default:
+      return "サンプルではAI処理の利用回数を消費しません。";
+  }
 }
 
 async function inspectCompletedVideoQuality(
@@ -3740,7 +3767,10 @@ function Landing({
             </span>
             <ul>
               <li>✓ 90秒まで</li>
-              <li>✓ AI処理は1動画につき10回</li>
+              <li>
+                ✓ AI処理は1動画につき
+                {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+              </li>
               <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 編集スタイルを記憶</li>
             </ul>
@@ -3767,7 +3797,10 @@ function Landing({
             </span>
             <ul>
               <li>✓ 90秒まで</li>
-              <li>✓ AI処理は1動画につき10回</li>
+              <li>
+                ✓ AI処理は1動画につき
+                {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+              </li>
               <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 編集スタイルを記憶</li>
             </ul>
@@ -8461,11 +8494,10 @@ function ResultWorkspace({
                   </span>
                 </div>
                 <small>
-                  {narrationGenerationLimit === 3
-                    ? "無料利用では、この動画1本につき合計3回まで利用できます。"
-                    : narrationGenerationLimit === 10
-                      ? "月額プランでは、この動画1本につき合計10回まで利用できます。"
-                      : `1動画作成では、この動画1本につき合計${narrationGenerationLimit}回まで利用できます。`}
+                  {describeAiOperationQuota(
+                    usageBucket,
+                    narrationGenerationLimit,
+                  )}
                   初回のAI台本とAI音声はまとめて1回です。作成後のAI音声の作り直し、文字起こし、高精度再解析は、正常に完了するたびに1回分を使います。失敗・内部の分割処理・自動尺調整では追加消費しません。
                 </small>
                 {narrationGenerationLimitReached && (
@@ -9531,11 +9563,10 @@ function ResultWorkspace({
             </span>
           </div>
           <small>
-            {narrationGenerationLimit === 3
-              ? "無料利用では、この動画1本につき合計3回まで利用できます。"
-              : narrationGenerationLimit === 10
-                ? "月額プランでは、この動画1本につき合計10回まで利用できます。"
-                : `1動画作成では、この動画1本につき合計${narrationGenerationLimit}回まで利用できます。`}
+            {describeAiOperationQuota(
+              usageBucket,
+              narrationGenerationLimit,
+            )}
             文字起こしと高精度再解析が完成するたびに1回分を使います。テロップ・カット・音量・表紙の変更、プレビュー、書き出しでは減りません。
           </small>
           {narrationGenerationLimitReached && (

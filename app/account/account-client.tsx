@@ -15,6 +15,7 @@ import {
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
   STANDARD_MONTHLY_VIDEO_LIMIT,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   ONE_TIME_PRICE_JPY,
   type MonthlyPlanKey,
 } from "../../lib/billing-policy";
@@ -448,7 +449,7 @@ export default function AccountClient() {
               <strong>{activeMonthlyPlanLabel(status)}</strong>
               <span>
                 {status.monthly?.active
-                  ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり10回`
+                  ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
                   : `残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒・AI処理は1動画あたり3回`}
               </span>
             </article>
@@ -486,7 +487,10 @@ export default function AccountClient() {
               <span className="accountPlanUnit">1本あたり125円</span>
               <ul>
                 <li>毎月{STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存</li>
-                <li>AI処理は1動画あたり10回</li>
+                <li>
+                  AI処理は1動画あたり
+                  {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+                </li>
                 <li>Starterより1本あたり約42円お得</li>
               </ul>
               <button
@@ -513,7 +517,10 @@ export default function AccountClient() {
               <span className="accountPlanUnit">1本あたり約167円</span>
               <ul>
                 <li>毎月{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存</li>
-                <li>AI処理は1動画あたり10回</li>
+                <li>
+                  AI処理は1動画あたり
+                  {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+                </li>
                 <li>いつでも解約可能</li>
               </ul>
               <button
@@ -565,7 +572,8 @@ export default function AccountClient() {
         動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
       </p>
       <p className="accountSecurity">
-        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、1動画作成5回、月額プラン10回です。
+        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、1動画作成5回、月額プラン
+        {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。
       </p>
       <div className="accountLegalLinks">
         <Link href="/terms">利用規約</Link>
