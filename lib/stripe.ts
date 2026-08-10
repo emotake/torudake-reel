@@ -1,19 +1,26 @@
 import { env } from "cloudflare:workers";
 import { SITE_ORIGIN } from "./site";
 import {
-  LIGHT_MONTHLY_PRICE_JPY,
+  LEGACY_MONTHLY_PRICE_JPY,
+  type MonthlyPlanKey,
   ONE_TIME_PRICE_JPY,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PRICE_JPY,
 } from "./billing-policy";
 
 type StripeEnvironment = {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_PRICE_STARTER_MONTHLY?: string;
+  STRIPE_PRICE_STANDARD_MONTHLY?: string;
+  // The former ¥1,480 price is retained only to keep existing subscriptions
+  // synchronized. It is never offered by Checkout.
   STRIPE_PRICE_LIGHT_MONTHLY?: string;
   STRIPE_PRICE_ONE_TIME?: string;
   PUBLIC_ORIGIN?: string;
 };
 
-export type StripePlan = "light" | "one_time";
+export type StripePlan = "starter" | "standard" | "one_time";
 
 type StripePrice = {
   id?: string;
@@ -51,7 +58,11 @@ export function getStripeConfig() {
   return {
     secretKey: stripeEnv.STRIPE_SECRET_KEY?.trim() ?? "",
     webhookSecret: stripeEnv.STRIPE_WEBHOOK_SECRET?.trim() ?? "",
-    lightPriceId: stripeEnv.STRIPE_PRICE_LIGHT_MONTHLY?.trim() ?? "",
+    starterPriceId:
+      stripeEnv.STRIPE_PRICE_STARTER_MONTHLY?.trim() ?? "",
+    standardPriceId:
+      stripeEnv.STRIPE_PRICE_STANDARD_MONTHLY?.trim() ?? "",
+    legacyPriceId: stripeEnv.STRIPE_PRICE_LIGHT_MONTHLY?.trim() ?? "",
     oneTimePriceId: stripeEnv.STRIPE_PRICE_ONE_TIME?.trim() ?? "",
   };
 }
@@ -61,7 +72,8 @@ export function isBillingConfigured() {
   return Boolean(
     config.secretKey &&
       config.webhookSecret &&
-      config.lightPriceId &&
+      config.starterPriceId &&
+      config.standardPriceId &&
       config.oneTimePriceId,
   );
 }
@@ -93,18 +105,43 @@ export async function getStripeReadiness(): Promise<StripeReadiness> {
   let value: StripeReadiness;
   try {
     const config = getStripeConfig();
-    const [lightPrice, oneTimePrice, account] = await Promise.all([
-      stripeGet<StripePrice>(
-        `/v1/prices/${encodeURIComponent(config.lightPriceId)}`,
-      ),
-      stripeGet<StripePrice>(
-        `/v1/prices/${encodeURIComponent(config.oneTimePriceId)}`,
-      ),
-      stripeGet<StripeAccount>("/v1/account"),
-    ]);
+    const [starterPrice, standardPrice, oneTimePrice, legacyPrice, account] =
+      await Promise.all([
+        stripeGet<StripePrice>(
+          `/v1/prices/${encodeURIComponent(config.starterPriceId)}`,
+        ),
+        stripeGet<StripePrice>(
+          `/v1/prices/${encodeURIComponent(config.standardPriceId)}`,
+        ),
+        stripeGet<StripePrice>(
+          `/v1/prices/${encodeURIComponent(config.oneTimePriceId)}`,
+        ),
+        config.legacyPriceId
+          ? stripeGet<StripePrice>(
+              `/v1/prices/${encodeURIComponent(config.legacyPriceId)}`,
+            )
+          : Promise.resolve(null),
+        stripeGet<StripeAccount>("/v1/account"),
+      ]);
     const catalogValid =
-      validMonthlyPrice(lightPrice, config.lightPriceId) &&
-      validOneTimePrice(oneTimePrice, config.oneTimePriceId);
+      validMonthlyPrice(
+        starterPrice,
+        config.starterPriceId,
+        STARTER_MONTHLY_PRICE_JPY,
+      ) &&
+      validMonthlyPrice(
+        standardPrice,
+        config.standardPriceId,
+        STANDARD_MONTHLY_PRICE_JPY,
+      ) &&
+      validOneTimePrice(oneTimePrice, config.oneTimePriceId) &&
+      (!legacyPrice ||
+        validMonthlyPrice(
+          legacyPrice,
+          config.legacyPriceId,
+          LEGACY_MONTHLY_PRICE_JPY,
+          false,
+        ));
     const chargesEnabled = account.charges_enabled === true;
     const detailsSubmitted = account.details_submitted === true;
     const liveAccountReady =
@@ -137,7 +174,25 @@ export async function getStripeReadiness(): Promise<StripeReadiness> {
 
 export function stripePriceForPlan(plan: StripePlan) {
   const config = getStripeConfig();
-  return plan === "light" ? config.lightPriceId : config.oneTimePriceId;
+  if (plan === "starter") return config.starterPriceId;
+  if (plan === "standard") return config.standardPriceId;
+  return config.oneTimePriceId;
+}
+
+export function stripeMonthlyPlanForPrice(
+  priceId: string,
+): MonthlyPlanKey | null {
+  const config = getStripeConfig();
+  if (priceId === config.starterPriceId && config.starterPriceId) {
+    return "starter";
+  }
+  if (priceId === config.standardPriceId && config.standardPriceId) {
+    return "standard";
+  }
+  if (priceId === config.legacyPriceId && config.legacyPriceId) {
+    return "legacy_1480";
+  }
+  return null;
 }
 
 export async function stripeRequest<T>(
@@ -278,16 +333,34 @@ export function isCanonicalBillingRequest(request: Request) {
   );
 }
 
+export function isStripeWebhookConfigured() {
+  const config = getStripeConfig();
+  return Boolean(
+    config.secretKey &&
+      config.webhookSecret &&
+      (config.starterPriceId ||
+        config.standardPriceId ||
+        config.legacyPriceId ||
+        config.oneTimePriceId),
+  );
+}
+
 function isLocalDevelopmentHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
-function validMonthlyPrice(price: StripePrice, expectedId: string) {
+function validMonthlyPrice(
+  price: StripePrice,
+  expectedId: string,
+  expectedAmount: number,
+  requireActive = true,
+) {
   return (
     price.id === expectedId &&
-    price.active === true &&
+    (!requireActive || typeof price.active === "boolean") &&
+    (!requireActive || price.active === true) &&
     price.currency?.toLowerCase() === "jpy" &&
-    price.unit_amount === LIGHT_MONTHLY_PRICE_JPY &&
+    price.unit_amount === expectedAmount &&
     price.type === "recurring" &&
     price.recurring?.interval === "month" &&
     price.recurring.interval_count === 1 &&

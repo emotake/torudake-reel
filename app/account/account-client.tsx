@@ -11,17 +11,22 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  type MonthlyPlanKey,
 } from "../../lib/billing-policy";
+
+type CheckoutPlan = "starter" | "standard" | "one_time";
 
 type BillingStatus = {
   configured: boolean;
   authenticationAvailable: boolean;
   authenticated: boolean;
   billingMode: "live" | "test" | "unconfigured";
-  plan?: "free" | "light";
+  plan?: "free" | MonthlyPlanKey;
   free?: {
     videosUsed: number;
     videoLimit: number;
@@ -30,6 +35,8 @@ type BillingStatus = {
   };
   monthly?: {
     active: boolean;
+    accessRevoked: boolean;
+    planKey: MonthlyPlanKey | null;
     videosUsed: number;
     videoLimit: number;
     renewsAt: number | null;
@@ -52,10 +59,14 @@ const CHECKOUT_STATUS_POLL_INTERVAL_MS = 1_500;
 
 function checkoutReflected(
   status: BillingStatus,
-  plan: "light" | "one_time" | null,
+  plan: CheckoutPlan | null,
   oneTimeCreditsBefore: number | null,
 ) {
-  if (plan === "light") return status.monthly?.active === true;
+  if (plan === "starter" || plan === "standard") {
+    return (
+      status.monthly?.active === true && status.monthly.planKey === plan
+    );
+  }
   if (plan === "one_time") {
     return (
       (status.oneTimeCredits ?? 0) >
@@ -65,12 +76,33 @@ function checkoutReflected(
   return false;
 }
 
+function activeMonthlyPlanLabel(status: BillingStatus) {
+  const planKey = status.monthly?.planKey ?? status.plan;
+  switch (planKey) {
+    case "starter":
+      return `Starter・月${STARTER_MONTHLY_VIDEO_LIMIT}本`;
+    case "standard":
+      return `Standard・月${STANDARD_MONTHLY_VIDEO_LIMIT}本`;
+    case "legacy_1480":
+      return "旧月8本プラン（既存契約）";
+    default:
+      return status.monthly?.active
+        ? `月${status.monthly.videoLimit}本プラン`
+        : "無料体験";
+  }
+}
+
 export default function AccountClient() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState<
-    "register" | "login" | "light" | "one_time" | "portal" | "logout" | null
+    | "register"
+    | "login"
+    | CheckoutPlan
+    | "portal"
+    | "logout"
+    | null
   >(null);
   const checkoutStarted = useRef(false);
 
@@ -179,7 +211,7 @@ export default function AccountClient() {
     }
   }
 
-  async function startCheckout(plan: "light" | "one_time") {
+  async function startCheckout(plan: CheckoutPlan) {
     setBusy(plan);
     setError("");
     try {
@@ -221,7 +253,11 @@ export default function AccountClient() {
       const checkout = query.get("checkout");
       const rawPlan = query.get("plan");
       const checkoutPlan =
-        rawPlan === "light" || rawPlan === "one_time" ? rawPlan : null;
+        rawPlan === "starter" ||
+        rawPlan === "standard" ||
+        rawPlan === "one_time"
+          ? rawPlan
+          : null;
       const rawCreditsBefore = query.get("credits_before");
       const parsedCreditsBefore = Number(rawCreditsBefore);
       const oneTimeCreditsBefore =
@@ -288,7 +324,11 @@ export default function AccountClient() {
   useEffect(() => {
     if (!status?.authenticated || checkoutStarted.current) return;
     const checkout = new URLSearchParams(window.location.search).get("checkout");
-    if (checkout === "light" || checkout === "one_time") {
+    if (
+      checkout === "starter" ||
+      checkout === "standard" ||
+      checkout === "one_time"
+    ) {
       checkoutStarted.current = true;
       window.history.replaceState({}, "", "/account");
       const timer = window.setTimeout(() => {
@@ -394,13 +434,18 @@ export default function AccountClient() {
           決済設定が未完了のため、現在は購入できません。
         </div>
       )}
+      {status?.monthly?.accessRevoked && (
+        <div className="accountNotice" role="alert">
+          返金または支払い異議により今月の利用枠は停止中です。「支払い方法・解約を管理」から契約状況をご確認ください。
+        </div>
+      )}
 
       {status && (
         <>
           <section className="accountUsageGrid">
             <article>
               <p>現在のプラン</p>
-              <strong>{status.monthly?.active ? `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プラン` : "無料体験"}</strong>
+              <strong>{activeMonthlyPlanLabel(status)}</strong>
               <span>
                 {status.monthly?.active
                   ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり10回`
@@ -423,24 +468,78 @@ export default function AccountClient() {
             </article>
           </section>
 
-          <section className="accountPlans">
-            <article className="featured">
-              <p>LIGHT</p>
-              <h2>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h2>
-              <strong>¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 月</strong>
-              <div>文字起こし・AI台本・AI音声などのAI処理：1動画あたり10回</div>
+          <section className="accountPlans" aria-labelledby="accountPlansTitle">
+            <header className="accountPlansIntro">
+              <p className="eyebrow">SAVE PLAN</p>
+              <h2 id="accountPlansTitle">保存するペースで選ぶ</h2>
+              <p>どのプランも編集とプレビューは同じ。違いは毎月保存できる本数です。</p>
+            </header>
+            <article className="accountPlanCard standardPlan featured">
+              <span className="accountPlanRecommend">おすすめ</span>
+              <span className="accountPlanFit">継続して投稿したい方</span>
+              <p>STANDARD</p>
+              <h2>スタンダード</h2>
+              <strong>
+                ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                <small> / 月</small>
+              </strong>
+              <span className="accountPlanUnit">1本あたり125円</span>
+              <ul>
+                <li>毎月{STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存</li>
+                <li>AI処理は1動画あたり10回</li>
+                <li>Starterより1本あたり約42円お得</li>
+              </ul>
               <button
                 disabled={busy !== null || !status.configured || status.monthly?.active}
-                onClick={() => startCheckout("light")}
+                onClick={() => startCheckout("standard")}
               >
-                {status.monthly?.active ? "利用中" : busy === "light" ? "準備中…" : `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランを始める`}
+                {status.monthly?.active
+                  ? status.monthly.planKey === "standard"
+                    ? "利用中"
+                    : "変更は支払い管理から"
+                  : busy === "standard"
+                    ? "準備中…"
+                    : "Standardを始める"}
               </button>
             </article>
-            <article>
+            <article className="accountPlanCard starterPlan">
+              <span className="accountPlanFit">月3本から始めたい方</span>
+              <p>STARTER</p>
+              <h2>スターター</h2>
+              <strong>
+                ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                <small> / 月</small>
+              </strong>
+              <span className="accountPlanUnit">1本あたり約167円</span>
+              <ul>
+                <li>毎月{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存</li>
+                <li>AI処理は1動画あたり10回</li>
+                <li>いつでも解約可能</li>
+              </ul>
+              <button
+                disabled={busy !== null || !status.configured || status.monthly?.active}
+                onClick={() => startCheckout("starter")}
+              >
+                {status.monthly?.active
+                  ? status.monthly.planKey === "starter"
+                    ? "利用中"
+                    : "変更は支払い管理から"
+                  : busy === "starter"
+                    ? "準備中…"
+                    : "Starterを始める"}
+              </button>
+            </article>
+            <article className="accountPlanCard oneTimePlan">
+              <span className="accountPlanFit">必要なときだけ保存</span>
               <p>ONE TIME</p>
               <h2>1動画作成</h2>
               <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-              <div>文字起こし・AI台本・AI音声などのAI処理：この動画で5回</div>
+              <span className="accountPlanUnit">月額料金なし・有効期限なし</span>
+              <ul>
+                <li>完成動画を1本保存</li>
+                <li>AI処理はこの動画で5回</li>
+                <li>自動更新なし</li>
+              </ul>
               <button
                 disabled={busy !== null || !status.configured}
                 onClick={() => startCheckout("one_time")}

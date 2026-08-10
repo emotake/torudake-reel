@@ -1715,10 +1715,10 @@ a {
 
 .priceGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   align-items: stretch;
-  width: min(820px, 100%);
+  width: min(1040px, 100%);
   margin: 20px auto 0;
 }
 
@@ -4664,16 +4664,48 @@ footer > small {
 }
 
 .accountPlans {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 18px;
+  align-items: stretch;
+}
+
+.accountPlansIntro {
+  grid-column: 1 / -1;
+  margin: 20px 0 4px;
+  text-align: center;
+}
+
+.accountPlansIntro .eyebrow {
+  margin: 0 0 8px;
+}
+
+.accountPlansIntro h2 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 40px);
+  letter-spacing: -0.04em;
+}
+
+.accountPlansIntro > p:last-child {
+  margin: 10px auto 0;
+  color: #737b87;
+  line-height: 1.7;
 }
 
 .accountPlans article {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 420px;
+  flex-direction: column;
   padding: 28px;
 }
 
 .accountPlans article.featured {
   border-color: rgba(223, 88, 63, 0.45);
+  background:
+    radial-gradient(circle at 92% 3%, rgba(255, 191, 172, 0.3), transparent 32%),
+    rgba(255, 255, 255, 0.94);
+  box-shadow: 0 24px 68px rgba(124, 67, 48, 0.14);
 }
 
 .accountPlans h2 {
@@ -4682,8 +4714,68 @@ footer > small {
 
 .accountPlans strong {
   display: block;
-  margin-bottom: 22px;
+  margin-bottom: 8px;
   font-size: 28px;
+}
+
+.accountPlans strong small {
+  color: #737b87;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.accountPlanFit,
+.accountPlanUnit {
+  display: block;
+}
+
+.accountPlanFit {
+  width: max-content;
+  max-width: 100%;
+  margin-bottom: 22px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f3f0e8;
+  color: #6d6257;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.accountPlanUnit {
+  color: #8b635a;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.accountPlanRecommend {
+  position: absolute;
+  top: -12px;
+  right: 20px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: #df583f;
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 8px 22px rgba(157, 65, 46, 0.22);
+}
+
+.accountPlans ul {
+  display: grid;
+  gap: 9px;
+  margin: 22px 0 26px;
+  padding: 0;
+  color: #596273;
+  font-size: 13px;
+  line-height: 1.55;
+  list-style: none;
+}
+
+.accountPlans li::before {
+  margin-right: 8px;
+  color: #309765;
+  content: "✓";
+  font-weight: 900;
 }
 
 .accountPlans button,
@@ -4785,7 +4877,7 @@ footer > small {
   border-radius: 12px;
   background: #fff7e8;
   color: #6f5a37;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.75;
 }
 
@@ -4827,6 +4919,15 @@ footer > small {
   .accountPlans {
     grid-template-columns: 1fr;
   }
+
+  .accountPlansIntro {
+    text-align: left;
+  }
+
+  .accountPlans article {
+    min-height: 0;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5789,6 +5890,11 @@ footer > small {
   cursor: pointer;
 }
 
+.accountPlans button {
+  width: 100%;
+  margin-top: auto;
+}
+
 .photoReelPlayback button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -6566,7 +6672,7 @@ footer > small {
   border-radius: 12px;
   background: var(--ink);
   color: white;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -6581,29 +6687,75 @@ footer > small {
 
 .photoReelPurchaseOptions > strong {
   color: var(--ink);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .photoReelPurchaseOptions > small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
 .photoReelPurchaseOptions > div {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
 .photoReelPurchaseOptions .photoReelPurchaseLink {
+  display: grid;
+  min-height: 116px;
+  gap: 4px;
+  align-items: stretch;
+  align-content: center;
+  justify-content: stretch;
+  padding: 12px 10px;
   margin-top: 0;
+  text-align: left;
 }
 
-.photoReelPurchaseOptions .photoReelPurchaseLink.secondary {
+.photoReelPurchaseLink > span,
+.photoReelPurchaseLink > small {
+  font-size: 12px;
+}
+
+.photoReelPurchaseLink > span {
+  color: var(--mint);
+  font-family: "DM Sans", sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.photoReelPurchaseLink > strong {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.photoReelPurchaseLink > small {
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.45;
+}
+
+.photoReelPurchaseOptions .photoReelPurchaseLink.standard {
+  background: linear-gradient(145deg, #df583f, #c9452f);
+  box-shadow: 0 12px 26px rgba(167, 67, 47, 0.2);
+}
+
+.photoReelPurchaseOptions .photoReelPurchaseLink.starter,
+.photoReelPurchaseOptions .photoReelPurchaseLink.oneTime {
   border: 1px solid var(--ink);
   background: white;
   color: var(--ink);
+}
+
+.photoReelPurchaseLink.starter > span,
+.photoReelPurchaseLink.oneTime > span {
+  color: #8b635a;
+}
+
+.photoReelPurchaseLink.starter > small,
+.photoReelPurchaseLink.oneTime > small {
+  color: var(--muted);
 }
 
 .photoReelError,
@@ -8992,7 +9144,7 @@ footer > small {
 
 .freeExportGate {
   display: grid;
-  min-width: min(430px, 48vw);
+  min-width: min(650px, 66vw);
   gap: 10px;
   padding: 13px 14px;
   border: 1px solid #ffd1c8;
@@ -9020,7 +9172,7 @@ footer > small {
 
 .freeExportGate > div {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  grid-template-columns: 1.2fr 1fr 1fr;
   gap: 8px;
 }
 
@@ -10801,6 +10953,14 @@ footer > small {
     min-height: 44px;
     padding: 0 11px;
     font-size: 12px;
+  }
+
+  .photoReelPurchaseOptions > div {
+    grid-template-columns: 1fr;
+  }
+
+  .photoReelPurchaseOptions .photoReelPurchaseLink {
+    min-height: 92px;
   }
 
   .siteShell :is(button, select, textarea, summary, [role="button"]),

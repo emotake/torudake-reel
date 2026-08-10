@@ -16,6 +16,8 @@ declare module "cloudflare:workers" {
     PUBLIC_ORIGIN?: string;
     STRIPE_SECRET_KEY?: string;
     STRIPE_WEBHOOK_SECRET?: string;
+    STRIPE_PRICE_STARTER_MONTHLY?: string;
+    STRIPE_PRICE_STANDARD_MONTHLY?: string;
     STRIPE_PRICE_LIGHT_MONTHLY?: string;
     STRIPE_PRICE_ONE_TIME?: string;
     OPERATOR_ENROLLMENT_CODE?: string;

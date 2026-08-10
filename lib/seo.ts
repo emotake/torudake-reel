@@ -1,7 +1,9 @@
 import {
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "./billing-policy";
 import {
   SITE_DESCRIPTION,
@@ -64,13 +66,26 @@ export function buildSiteStructuredData() {
           },
           {
             "@type": "Offer",
-            name: `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プラン`,
-            price: LIGHT_MONTHLY_PRICE_JPY,
+            name: `Starter（月${STARTER_MONTHLY_VIDEO_LIMIT}本）`,
+            price: STARTER_MONTHLY_PRICE_JPY,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",
             priceSpecification: {
               "@type": "UnitPriceSpecification",
-              price: LIGHT_MONTHLY_PRICE_JPY,
+              price: STARTER_MONTHLY_PRICE_JPY,
+              priceCurrency: "JPY",
+              billingDuration: "P1M",
+            },
+          },
+          {
+            "@type": "Offer",
+            name: `Standard（月${STANDARD_MONTHLY_VIDEO_LIMIT}本）`,
+            price: STANDARD_MONTHLY_PRICE_JPY,
+            priceCurrency: "JPY",
+            availability: "https://schema.org/InStock",
+            priceSpecification: {
+              "@type": "UnitPriceSpecification",
+              price: STANDARD_MONTHLY_PRICE_JPY,
               priceCurrency: "JPY",
               billingDuration: "P1M",
             },

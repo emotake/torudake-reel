@@ -124,7 +124,8 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(requestFlow, /if \(!completedVideoSaveAllowed\)/);
   assert.match(confirmationFlow, /if \(!completedVideoSaveAllowed\)/);
   assert.match(pageSource, /完成動画を保存するにはプランを選択/);
-  assert.match(pageSource, /月\$\{LIGHT_MONTHLY_VIDEO_LIMIT\}本・¥/);
+  assert.match(pageSource, /月\$\{STANDARD_MONTHLY_VIDEO_LIMIT\}本・¥/);
+  assert.match(pageSource, /月\$\{STARTER_MONTHLY_VIDEO_LIMIT\}本・¥/);
   assert.match(pageSource, /1動画作成・¥/);
   assert.match(pageSource, /編集・プレビューまで/);
   assert.match(pageSource, /完成動画の保存は有料/);

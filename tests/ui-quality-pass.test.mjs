@@ -78,7 +78,18 @@ test("shows photo-reel preview and save pricing before editing", () => {
   assert.match(photoReelSource, /photoReelIntroOffer/);
   assert.match(photoReelSource, /仕上がりプレビューは無料/);
   assert.match(photoReelSource, /保存は1動画/);
-  assert.match(photoReelSource, /LIGHT_MONTHLY_VIDEO_LIMIT/);
+  assert.match(photoReelSource, /STARTER_MONTHLY_VIDEO_LIMIT/);
+  assert.match(photoReelSource, /STANDARD_MONTHLY_VIDEO_LIMIT/);
+  assert.match(photoReelSource, /checkout=starter/);
+  assert.match(photoReelSource, /checkout=standard/);
+  assert.doesNotMatch(photoReelSource, /checkout=light/);
+  assert.match(cssSource, /\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/);
+  assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*?\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
+  assert.match(cssSource, /\.accountPlans\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/);
+  assert.ok(
+    photoReelSource.indexOf('checkout=standard') <
+      photoReelSource.indexOf('checkout=starter'),
+  );
 });
 
 test("wires local visual scoring into narration and cover selection", () => {

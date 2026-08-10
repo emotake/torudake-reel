@@ -7,16 +7,21 @@ import {
   recordOneTimePurchase,
   setStripeCustomerId,
   setStripeCustomerIdentity,
+  setSubscriptionPeriodRevocationState,
   upsertSubscription,
 } from "../../../../lib/billing-store";
 import {
   getStripeConfig,
-  isBillingConfigured,
+  isStripeWebhookConfigured,
   stripeGet,
+  stripeMonthlyPlanForPrice,
   stripePriceForPlan,
   verifyStripeSignature,
 } from "../../../../lib/stripe";
-import { reconcileOneTimePurchase } from "../../../../lib/stripe-purchase-state";
+import {
+  reconcileOneTimePurchase,
+  summarizeStripePurchaseState,
+} from "../../../../lib/stripe-purchase-state";
 
 type StripeObject = Record<string, unknown>;
 
@@ -29,6 +34,7 @@ type StripeEvent = {
 };
 
 const MAX_WEBHOOK_BYTES = 1_000_000;
+const MAX_STRIPE_LIST_PAGES = 10;
 const PURCHASE_STATE_EVENT_TYPES = new Set([
   "refund.created",
   "refund.updated",
@@ -44,7 +50,7 @@ const PURCHASE_STATE_EVENT_TYPES = new Set([
 export async function POST(request: Request) {
   const { webhookSecret } = getStripeConfig();
   const signature = request.headers.get("stripe-signature");
-  if (!isBillingConfigured() || !webhookSecret) {
+  if (!isStripeWebhookConfigured() || !webhookSecret) {
     return Response.json(
       { error: "Webhook is not configured." },
       { status: 503 },
@@ -129,7 +135,12 @@ export async function POST(request: Request) {
 
 async function handleCheckoutCompleted(session: StripeObject) {
   const plan = metadataValue(session, "plan");
-  if (plan !== "light" && plan !== "one_time") {
+  if (
+    plan !== "starter" &&
+    plan !== "standard" &&
+    plan !== "light" &&
+    plan !== "one_time"
+  ) {
     // The Stripe account can contain products unrelated to this service.
     return;
   }
@@ -150,7 +161,7 @@ async function handleCheckoutCompleted(session: StripeObject) {
   });
 
   const mode = stringValue(session.mode);
-  if (plan === "light") {
+  if (plan !== "one_time") {
     if (mode !== "subscription") {
       throw new Error("Monthly checkout has an unexpected mode.");
     }
@@ -163,6 +174,14 @@ async function handleCheckoutCompleted(session: StripeObject) {
     );
     if (objectId(subscription.customer) !== customerId) {
       throw new Error("Checkout and subscription customers do not match.");
+    }
+    const item = firstSubscriptionItem(subscription);
+    const actualPlan = item
+      ? stripeMonthlyPlanForPrice(objectId(item.price) ?? "")
+      : null;
+    const expectedPlan = plan === "light" ? "legacy_1480" : plan;
+    if (actualPlan !== expectedPlan) {
+      throw new Error("Checkout subscription does not match the selected plan.");
     }
     await saveSubscription(user.id, subscription);
     return;
@@ -212,20 +231,121 @@ async function handlePurchaseStateChanged(
     throw new Error("Refund or dispute charge has no payment intent.");
   }
 
-  // Unknown PaymentIntents belong to another product (or a monthly invoice)
-  // in the same Stripe account and are intentionally ignored.
-  await reconcileOneTimePurchase(paymentIntentId);
+  // One-time purchases and monthly invoices share the same Stripe account.
+  // Reconcile the former first, then resolve an invoiced subscription only
+  // when the PaymentIntent belongs to a known monthly price.
+  const purchaseState = await reconcileOneTimePurchase(paymentIntentId);
+  if (purchaseState === "missing") {
+    await reconcileMonthlySubscriptionPaymentState(paymentIntentId);
+  }
+}
+
+async function reconcileMonthlySubscriptionPaymentState(
+  paymentIntentId: string,
+) {
+  const paymentIntent = await stripeGet<StripeObject>(
+    `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}`,
+  );
+  let invoiceId = objectId(paymentIntent.invoice);
+  if (!invoiceId) {
+    const chargeId = objectId(paymentIntent.latest_charge);
+    if (chargeId) {
+      const charge = await stripeGet<StripeObject>(
+        `/v1/charges/${encodeURIComponent(chargeId)}`,
+      );
+      invoiceId = objectId(charge.invoice);
+    }
+  }
+  if (!invoiceId) return;
+
+  const invoice = await stripeGet<StripeObject>(
+    `/v1/invoices/${encodeURIComponent(invoiceId)}`,
+  );
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  const periodStart = invoicePeriodStart(invoice);
+  if (!subscriptionId || !periodStart) return;
+
+  const subscription = await stripeGet<StripeObject>(
+    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  const item = firstSubscriptionItem(subscription);
+  const priceId = item ? objectId(item.price) : null;
+  if (!priceId || !stripeMonthlyPlanForPrice(priceId)) return;
+
+  // Persist the latest Stripe subscription snapshot before changing the
+  // period-specific entitlement flag.
+  await handleSubscriptionChanged(subscription);
+  const [refunds, disputes] = await Promise.all([
+    listStripePaymentObjects("/v1/refunds", paymentIntentId),
+    listStripePaymentObjects("/v1/disputes", paymentIntentId),
+  ]);
+  const paymentState = summarizeStripePurchaseState(refunds, disputes);
+  await setSubscriptionPeriodRevocationState(
+    subscriptionId,
+    periodStart,
+    paymentState.blocked,
+  );
+}
+
+async function listStripePaymentObjects(
+  path: "/v1/refunds" | "/v1/disputes",
+  paymentIntentId: string,
+) {
+  const objects: StripeObject[] = [];
+  let startingAfter: string | null = null;
+  for (let page = 0; page < MAX_STRIPE_LIST_PAGES; page += 1) {
+    const parameters = new URLSearchParams({
+      payment_intent: paymentIntentId,
+      limit: "100",
+    });
+    if (startingAfter) parameters.set("starting_after", startingAfter);
+    const list = await stripeGet<{ data?: unknown[]; has_more?: boolean }>(
+      `${path}?${parameters}`,
+    );
+    if (!Array.isArray(list.data) || typeof list.has_more !== "boolean") {
+      throw new Error("Stripe returned an invalid payment-state list.");
+    }
+    const pageRefunds = list.data.map(recordValue);
+    if (pageRefunds.some((refund) => refund === null)) {
+      throw new Error("Stripe returned an invalid payment-state object.");
+    }
+    objects.push(...(pageRefunds as StripeObject[]));
+    if (!list.has_more) return objects;
+    startingAfter = stringValue(pageRefunds.at(-1)?.id);
+    if (!startingAfter) {
+      throw new Error("Stripe payment-state pagination has no cursor.");
+    }
+  }
+  throw new Error("Stripe payment-state pagination exceeded its limit.");
 }
 
 async function handleInvoiceChanged(invoice: StripeObject) {
-  const subscriptionId =
-    objectId(invoice.subscription) ??
-    objectId(recordValue(recordValue(invoice.parent)?.subscription_details)?.subscription);
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
   if (!subscriptionId) return;
   const subscription = await stripeGet<StripeObject>(
     `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
   );
   await handleSubscriptionChanged(subscription);
+}
+
+function subscriptionIdFromInvoice(invoice: StripeObject) {
+  return (
+    objectId(invoice.subscription) ??
+    objectId(
+      recordValue(recordValue(invoice.parent)?.subscription_details)
+        ?.subscription,
+    )
+  );
+}
+
+function invoicePeriodStart(invoice: StripeObject) {
+  const direct = numberValue(invoice.period_start);
+  if (direct) return direct;
+  const lines = recordValue(invoice.lines);
+  const firstLine = Array.isArray(lines?.data)
+    ? recordValue(lines.data[0])
+    : null;
+  return numberValue(recordValue(firstLine?.period)?.start);
 }
 
 async function resolveCheckoutUser(
@@ -281,7 +401,7 @@ async function handleSubscriptionChanged(subscription: StripeObject) {
   const customerId = objectId(subscription.customer);
   const item = firstSubscriptionItem(subscription);
   const priceId = item ? objectId(item.price) : null;
-  if (priceId !== stripePriceForPlan("light")) {
+  if (!priceId || !stripeMonthlyPlanForPrice(priceId)) {
     // Ignore subscriptions for other products in the same Stripe account.
     return;
   }
@@ -315,18 +435,20 @@ async function saveSubscription(userId: string, subscription: StripeObject) {
     numberValue(item?.current_period_end);
   const status = stringValue(subscription.status);
   const metadataUserId = metadataValue(subscription, "app_user_id");
+  const planKey = priceId ? stripeMonthlyPlanForPrice(priceId) : null;
 
   if (
     !subscriptionId ||
     !customerId ||
     !priceId ||
+    !planKey ||
     !status ||
     !currentPeriodStart ||
     !currentPeriodEnd
   ) {
     throw new Error("Subscription payload is incomplete.");
   }
-  if (priceId !== stripePriceForPlan("light")) {
+  if (!planKey) {
     throw new Error("Subscription price does not match the configured plan.");
   }
   if (metadataUserId && metadataUserId !== userId) {
@@ -338,6 +460,7 @@ async function saveSubscription(userId: string, subscription: StripeObject) {
     id: subscriptionId,
     customerId,
     priceId,
+    planKey,
     status,
     currentPeriodStart,
     currentPeriodEnd,

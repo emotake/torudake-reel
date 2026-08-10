@@ -95,7 +95,20 @@ test("describes the real web application without invented ratings", () => {
   assert.equal("review" in application, false);
   assert.deepEqual(
     application.offers.map((offer) => offer.price),
-    [0, 200, 1480],
+    [0, 200, 500, 1000],
+  );
+  assert.deepEqual(
+    application.offers.map((offer) => offer.name),
+    [
+      "無料体験（編集・プレビュー）",
+      "1動画作成",
+      "Starter（月3本）",
+      "Standard（月8本）",
+    ],
+  );
+  assert.equal(
+    application.offers.some((offer) => offer.price === 1480),
+    false,
   );
 });
 

@@ -6,10 +6,15 @@ import {
   chooseBillingBucket,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
+  LEGACY_MONTHLY_PRICE_JPY,
+  LEGACY_MONTHLY_VIDEO_LIMIT,
+  MONTHLY_PLANS,
   ONE_TIME_PRICE_JPY,
   OPERATOR_DAILY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
   startOfTokyoDaySeconds,
 } from "../lib/billing-policy.ts";
 
@@ -18,17 +23,21 @@ const emptyUsage = {
   freeSecondsUsed: 0,
   monthlyVideosUsed: 0,
   monthlyPlanActive: false,
+  monthlyVideoLimit: 0,
   oneTimeCreditsRemaining: 0,
 };
 
-test("keeps the simple launch pricing in one policy", () => {
-  assert.equal(LIGHT_MONTHLY_VIDEO_LIMIT, 8);
-  assert.equal(LIGHT_MONTHLY_PRICE_JPY, 1480);
+test("keeps every current and grandfathered price in one policy", () => {
+  assert.equal(STARTER_MONTHLY_VIDEO_LIMIT, 3);
+  assert.equal(STARTER_MONTHLY_PRICE_JPY, 500);
+  assert.equal(STANDARD_MONTHLY_VIDEO_LIMIT, 8);
+  assert.equal(STANDARD_MONTHLY_PRICE_JPY, 1000);
+  assert.equal(LEGACY_MONTHLY_VIDEO_LIMIT, 8);
+  assert.equal(LEGACY_MONTHLY_PRICE_JPY, 1480);
   assert.equal(ONE_TIME_PRICE_JPY, 200);
-  assert.equal(
-    Math.floor(LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT),
-    185,
-  );
+  assert.equal(MONTHLY_PLANS.starter.purchasable, true);
+  assert.equal(MONTHLY_PLANS.standard.purchasable, true);
+  assert.equal(MONTHLY_PLANS.legacy_1480.purchasable, false);
 });
 
 test("allows completed-video saving only for paid and operator buckets", () => {
@@ -67,13 +76,14 @@ test("stops the free trial at either two videos or three minutes", () => {
   );
 });
 
-test("uses monthly allowance before one-time credits", () => {
+test("uses each plan's monthly allowance before one-time credits", () => {
   assert.equal(
     chooseBillingBucket(
       {
         ...emptyUsage,
         monthlyPlanActive: true,
-        monthlyVideosUsed: LIGHT_MONTHLY_VIDEO_LIMIT - 1,
+        monthlyVideoLimit: STARTER_MONTHLY_VIDEO_LIMIT,
+        monthlyVideosUsed: STARTER_MONTHLY_VIDEO_LIMIT - 1,
         oneTimeCreditsRemaining: 2,
       },
       90,
@@ -85,7 +95,8 @@ test("uses monthly allowance before one-time credits", () => {
       {
         ...emptyUsage,
         monthlyPlanActive: true,
-        monthlyVideosUsed: LIGHT_MONTHLY_VIDEO_LIMIT,
+        monthlyVideoLimit: STARTER_MONTHLY_VIDEO_LIMIT,
+        monthlyVideosUsed: STARTER_MONTHLY_VIDEO_LIMIT,
         oneTimeCreditsRemaining: 2,
       },
       90,
@@ -101,7 +112,8 @@ test("uses the operator allowance without consuming customer buckets", () => {
         ...emptyUsage,
         freeVideosUsed: FREE_VIDEO_LIMIT,
         monthlyPlanActive: true,
-        monthlyVideosUsed: LIGHT_MONTHLY_VIDEO_LIMIT,
+        monthlyVideoLimit: STANDARD_MONTHLY_VIDEO_LIMIT,
+        monthlyVideosUsed: STANDARD_MONTHLY_VIDEO_LIMIT,
         oneTimeCreditsRemaining: 3,
         operatorActive: true,
         operatorVideosUsedToday: OPERATOR_DAILY_VIDEO_LIMIT - 1,

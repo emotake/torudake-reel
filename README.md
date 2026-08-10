@@ -52,10 +52,15 @@ PCM 24kHzのWAVへ変換してプレビューと書き出しへ渡します。�
 R2の `MEDIA` bindingは、公開導線のない開発用ファイル転送APIを使う場合だけ任意です。
 
 Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
-`STRIPE_PRICE_LIGHT_MONTHLY`、`STRIPE_PRICE_ONE_TIME` が必要です。月額価格は
-1,480円・月8本、単品価格は300円・1本としてStripe側の価格を検証し、金額、通貨、
-課金周期のいずれかが異なる場合はCheckoutを開始しません。本番キーを使う場合は、
-Stripeアカウントの本人確認、事業者情報、入金口座を完了してから設定してください。
+`STRIPE_PRICE_STARTER_MONTHLY`、`STRIPE_PRICE_STANDARD_MONTHLY`、
+`STRIPE_PRICE_ONE_TIME` が必要です。Starterは500円・月3本、Standardは
+1,000円・月8本、単品は200円・1動画としてStripe側の価格を検証し、金額、通貨、
+課金周期のいずれかが異なる場合はCheckoutを開始しません。
+
+旧1,480円・月8本プランは既存契約者だけに提供し、新規販売しません。既存契約を
+継続する環境では、互換用の `STRIPE_PRICE_LIGHT_MONTHLY` を任意で設定します。
+本番キーを使う場合は、Stripeアカウントの本人確認、事業者情報、入金口座を完了してから
+設定してください。
 
 ## コマンド
 

@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import {
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
+  LEGACY_MONTHLY_PRICE_JPY,
+  LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "../../lib/billing-policy";
 
 export const metadata = buildPublicPageMetadata({
@@ -13,7 +17,7 @@ export const metadata = buildPublicPageMetadata({
 });
 
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
-const LAST_UPDATED = "2026年8月9日";
+const LAST_UPDATED = "2026年8月10日";
 
 export default function CommercialDisclosurePage() {
   return (
@@ -53,12 +57,22 @@ export default function CommercialDisclosurePage() {
         <h2>販売価格</h2>
         <dl className="legalDetails">
           <div>
-            <dt>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</dt>
-            <dd>月額{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+            <dt>Starter（月{STARTER_MONTHLY_VIDEO_LIMIT}本）</dt>
+            <dd>月額{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+          </div>
+          <div>
+            <dt>Standard（月{STANDARD_MONTHLY_VIDEO_LIMIT}本）</dt>
+            <dd>月額{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
           </div>
           <div>
             <dt>1動画作成</dt>
             <dd>{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+          </div>
+          <div>
+            <dt>旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン（新規申込終了）</dt>
+            <dd>
+              月額{LEGACY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円・既存契約者のみ
+            </dd>
           </div>
         </dl>
         <p>
@@ -81,7 +95,7 @@ export default function CommercialDisclosurePage() {
             <dd>1動画あたり5回</dd>
           </div>
           <div>
-            <dt>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</dt>
+            <dt>Starter・Standard・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
             <dd>1動画あたり10回</dd>
           </div>
         </dl>
@@ -103,7 +117,7 @@ export default function CommercialDisclosurePage() {
           <li>クレジットカード決済（決済処理はStripeが行います）</li>
           <li>1動画作成は、注文確定時に支払いが確定します。</li>
           <li>
-            月{LIGHT_MONTHLY_VIDEO_LIMIT}本プランは、申込時に初回の支払いが確定し、解約されるまで1か月ごとに自動更新されます。
+            Starter、Standardおよび既存契約者向けの旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プランは、申込時または契約更新時に支払いが確定し、解約されるまで1か月ごとに自動更新されます。
           </li>
         </ul>
       </article>

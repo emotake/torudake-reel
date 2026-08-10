@@ -21,6 +21,17 @@ test("polls the authenticated account after Stripe redirects back", () => {
   assert.match(accountSource, /お支払いが利用枠へ反映されました/);
   assert.match(accountSource, /window\.history\.replaceState\(\{\}, "", "\/account"\)/);
   assert.match(accountSource, /運営へ復旧・解約を相談/);
+  assert.match(accountSource, /type CheckoutPlan = "starter" \| "standard" \| "one_time"/);
+  assert.match(accountSource, /startCheckout\("starter"\)/);
+  assert.match(accountSource, /startCheckout\("standard"\)/);
+  assert.doesNotMatch(accountSource, /startCheckout\("light"\)/);
+  assert.match(accountSource, /accountPlanRecommend">おすすめ/);
+  assert.match(accountSource, /STARTER_MONTHLY_PRICE_JPY/);
+  assert.match(accountSource, /STANDARD_MONTHLY_PRICE_JPY/);
+  assert.ok(
+    accountSource.indexOf('className="accountPlanCard standardPlan featured"') <
+      accountSource.indexOf('className="accountPlanCard starterPlan"'),
+  );
 });
 
 test("rejects Checkout and Portal calls from old deployment hosts", () => {
@@ -36,4 +47,11 @@ test("explains the per-video shared AI processing limits on the account screen",
   assert.match(accountSource, /初回ナレーションは台本完成時に1回分/);
   assert.match(accountSource, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(accountSource, /作成後の再生成などは正常に完了するごとに1回分/);
+});
+
+test("shows a billing-management notice only when monthly access was revoked", () => {
+  assert.match(accountSource, /accessRevoked:\s*boolean/);
+  assert.match(accountSource, /status\?\.monthly\?\.accessRevoked/);
+  assert.match(accountSource, /返金または支払い異議により今月の利用枠は停止中です/);
+  assert.match(accountSource, /支払い方法・解約を管理/);
 });

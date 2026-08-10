@@ -55,13 +55,15 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /目的に合わせて自動編集/);
   assert.doesNotMatch(html, /AIが全部整える/);
-  assert.match(html, /保存方法は、2つだけ。/);
+  assert.match(html, /使い方に合う保存方法を。/);
   assert.match(html, /最大500MB/);
   assert.match(html, /合計3分または2動画まで/);
   assert.match(html, /編集・プレビューまで/);
   assert.match(html, /完成動画の保存は有料/);
-  assert.match(html, /月8本プランを始める/);
-  assert.match(html, /1本あたり185円/);
+  assert.match(html, /月8本で始める/);
+  assert.match(html, /月3本で始める/);
+  assert.match(html, /1本あたり125円/);
+  assert.match(html, /1本あたり約167円/);
   assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
   assert.match(html, /編集結果が完成した時点/);
@@ -88,6 +90,10 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(html, /1080×1920/);
   assert.match(html, /仕上がりプレビューは無料/);
   assert.match(html, /保存は1動画/);
+  assert.match(html, /Starter/);
+  assert.match(html, /Standard/);
+  assert.match(html, /¥(?:<!-- -->)?500/);
+  assert.match(html, /¥(?:<!-- -->)?1,000/);
   assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本/);
   assert.match(
     html,
@@ -190,7 +196,11 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /特定商取引法に基づく表記/);
   assert.match(html, /torudake\.reel@gmail\.com/);
   assert.match(html, /遅滞なく電子メールで開示/);
-  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本プラン/);
+  assert.match(html, /Starter/);
+  assert.match(html, /Standard/);
+  assert.match(html, /月(?:<!-- -->)?3(?:<!-- -->)?本/);
+  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本/);
+  assert.match(html, /新規申込終了/);
   assert.match(html, /1動画作成/);
   assert.match(html, /Stripe/);
   assert.match(html, /最大500MB/);

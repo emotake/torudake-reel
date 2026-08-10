@@ -1,0 +1,11 @@
+{
+  "duration": 10.4,
+  "maxStaticSec": 1.25,
+  "assertions": [
+    { "kind": "appearsBy", "selector": "#rain", "bySec": 0.05 },
+    { "kind": "appearsBy", "selector": "#coast", "bySec": 3.45 },
+    { "kind": "appearsBy", "selector": "#sunset", "bySec": 7.15 },
+    { "kind": "before", "a": "#rain", "b": "#coast" },
+    { "kind": "before", "a": "#coast", "b": "#sunset" }
+  ]
+}

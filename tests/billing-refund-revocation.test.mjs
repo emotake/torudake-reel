@@ -13,6 +13,7 @@ const [
   billingStoreSource,
   migrationSource,
   assignmentMigrationSource,
+  subscriptionPlanMigrationSource,
 ] = await Promise.all([
   readFile(
     new URL("../app/api/billing/webhook/route.ts", import.meta.url),
@@ -25,6 +26,10 @@ const [
   ),
   readFile(
     new URL("../drizzle/0012_one_time_purchase_assignment.sql", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../drizzle/0014_known_multiple_man.sql", import.meta.url),
     "utf8",
   ),
 ]);
@@ -192,6 +197,52 @@ test("reconciles Stripe state immediately after recording a paid checkout", () =
   assert.ok(
     reconcilePosition > recordPosition,
     "the recorded purchase must be reconciled before checkout handling completes",
+  );
+});
+
+test("revokes only the refunded monthly billing period", () => {
+  assert.match(
+    webhookSource,
+    /purchaseState === "missing"[\s\S]{0,200}reconcileMonthlySubscriptionPaymentState/,
+  );
+  assert.match(
+    webhookSource,
+    /listStripePaymentObjects\("\/v1\/refunds"/,
+  );
+  assert.match(
+    webhookSource,
+    /listStripePaymentObjects\("\/v1\/disputes"/,
+  );
+  assert.match(
+    webhookSource,
+    /summarizeStripePurchaseState\(refunds, disputes\)/,
+  );
+  assert.match(
+    webhookSource,
+    /setSubscriptionPeriodRevocationState\([\s\S]{0,200}periodStart,[\s\S]{0,100}paymentState\.blocked/,
+  );
+  assert.match(
+    billingStoreSource,
+    /currentSubscription\?\.revokedPeriodStart ===[\s\S]{0,100}currentSubscription\?\.currentPeriodStart/,
+  );
+  assert.match(
+    billingStoreSource,
+    /revoked_period_start IS NULL[\s\S]{0,100}revoked_period_start != current_period_start/,
+  );
+  assert.match(
+    billingStoreSource,
+    /setSubscriptionPeriodRevocationState[\s\S]*eq\(billingSubscriptions\.currentPeriodStart, periodStart\)[\s\S]*releaseOrCompleteUsageReservation/,
+  );
+});
+
+test("subscription migration preserves the old plan and refund period", () => {
+  assert.match(
+    subscriptionPlanMigrationSource,
+    /ADD `plan_key` text DEFAULT 'legacy_1480' NOT NULL/,
+  );
+  assert.match(
+    subscriptionPlanMigrationSource,
+    /ADD `revoked_period_start` integer/,
   );
 });
 

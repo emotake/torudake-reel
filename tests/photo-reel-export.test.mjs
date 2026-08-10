@@ -167,7 +167,11 @@ test("does not create or expose a completed photo reel for the free bucket", asy
   assert.ok(freeGateIndex < exportIndex);
   assert.match(saveFlow, /canSaveCompletedVideo\(result\.billingBucket\)/);
   assert.match(client, /無料体験では編集とプレビューまで利用できます/);
-  assert.match(client, /月\{LIGHT_MONTHLY_VIDEO_LIMIT\}本/);
+  assert.match(client, /月\{STARTER_MONTHLY_VIDEO_LIMIT\}本/);
+  assert.match(client, /月\{STANDARD_MONTHLY_VIDEO_LIMIT\}本/);
+  assert.match(client, /href="\/account\?checkout=starter"/);
+  assert.match(client, /href="\/account\?checkout=standard"/);
+  assert.doesNotMatch(client, /checkout=light/);
   assert.match(client, /1動画作成・¥/);
   assert.match(client, /target="_blank"/);
   assert.match(client, /購入を確認して写真リールを書き出す/);

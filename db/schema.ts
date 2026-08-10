@@ -138,9 +138,17 @@ export const billingSubscriptions = sqliteTable(
     userId: text("user_id").notNull(),
     stripeCustomerId: text("stripe_customer_id").notNull(),
     stripePriceId: text("stripe_price_id").notNull(),
+    planKey: text("plan_key", {
+      enum: ["starter", "standard", "legacy_1480"],
+    })
+      .notNull()
+      .default("legacy_1480"),
     status: text("status").notNull(),
     currentPeriodStart: integer("current_period_start").notNull(),
     currentPeriodEnd: integer("current_period_end").notNull(),
+    // A refund or dispute revokes only the invoiced billing period. When
+    // Stripe advances current_period_start after renewal, access resumes.
+    revokedPeriodStart: integer("revoked_period_start"),
     cancelAtPeriodEnd: integer("cancel_at_period_end", {
       mode: "boolean",
     })

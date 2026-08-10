@@ -19,7 +19,6 @@ import {
   stripeRequest,
   type StripePlan,
 } from "../../../../lib/stripe";
-import { LIGHT_MONTHLY_VIDEO_LIMIT } from "../../../../lib/billing-policy";
 import { isSameOriginMutation } from "../../../../lib/operator-session";
 
 type StripeCustomer = {
@@ -32,7 +31,11 @@ type StripeCheckoutSession = {
 };
 
 function isStripePlan(value: unknown): value is StripePlan {
-  return value === "light" || value === "one_time";
+  return (
+    value === "starter" ||
+    value === "standard" ||
+    value === "one_time"
+  );
 }
 
 export async function POST(request: Request) {
@@ -101,11 +104,12 @@ export async function POST(request: Request) {
     }
     const user = await getOrCreateBillingUser(currentUser);
     const billingStatus = await getBillingStatusForUser(user.id);
-    if (payload.plan === "light") {
-      if (billingStatus.monthlyPlanActive) {
+    if (payload.plan !== "one_time") {
+      if (billingStatus.monthlySubscriptionActive) {
         return Response.json(
           {
-            error: `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランはすでに利用中です。変更や解約はアカウント画面から行えます。`,
+            error:
+              "月額プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
             code: "subscription_already_active",
           },
           { status: 409 },
@@ -133,7 +137,7 @@ export async function POST(request: Request) {
     const sessionParams = new URLSearchParams();
     sessionParams.set(
       "mode",
-      payload.plan === "light" ? "subscription" : "payment",
+      payload.plan === "one_time" ? "payment" : "subscription",
     );
     sessionParams.set("customer", stripeCustomerId);
     sessionParams.set("line_items[0][price]", priceId);
@@ -149,7 +153,7 @@ export async function POST(request: Request) {
     );
     sessionParams.set("cancel_url", `${origin}/account?checkout=cancelled`);
 
-    if (payload.plan === "light") {
+    if (payload.plan !== "one_time") {
       sessionParams.set(
         "subscription_data[metadata][app_user_id]",
         user.id,

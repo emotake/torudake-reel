@@ -27,9 +27,11 @@ import {
 import {
   canSaveCompletedVideo,
   isBillingBucket,
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
   type BillingBucket,
 } from "../../lib/billing-policy";
 
@@ -974,9 +976,11 @@ export default function PhotoReelClient() {
           <p>
             <strong>仕上がりプレビューは無料</strong>
             <small>
-              保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}、または月
-              {LIGHT_MONTHLY_VIDEO_LIMIT}本 ¥
-              {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}、Starterは月
+              {STARTER_MONTHLY_VIDEO_LIMIT}本 ¥
+              {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}、Standardは月
+              {STANDARD_MONTHLY_VIDEO_LIMIT}本 ¥
+              {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
             </small>
           </p>
         </div>
@@ -1385,22 +1389,42 @@ export default function PhotoReelClient() {
                 <small>
                   決済は別タブで開きます。購入後、この編集画面へ戻って上の「購入を確認して写真リールを書き出す」を押してください。
                 </small>
-                <div>
+                <div className="photoReelPurchaseGrid">
                   <Link
-                    className="photoReelPurchaseLink"
-                    href="/account?checkout=light"
+                    className="photoReelPurchaseLink standard"
+                    href="/account?checkout=standard"
                     target="_blank"
                     rel="noreferrer"
                   >
-                    月{LIGHT_MONTHLY_VIDEO_LIMIT}本・¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} →
+                    <span>おすすめ · STANDARD</span>
+                    <strong>
+                      月{STANDARD_MONTHLY_VIDEO_LIMIT}本・¥
+                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                    </strong>
+                    <small>1本あたり125円</small>
                   </Link>
                   <Link
-                    className="photoReelPurchaseLink secondary"
+                    className="photoReelPurchaseLink starter"
+                    href="/account?checkout=starter"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span>STARTER</span>
+                    <strong>
+                      月{STARTER_MONTHLY_VIDEO_LIMIT}本・¥
+                      {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                    </strong>
+                    <small>月3本から始めたい方</small>
+                  </Link>
+                  <Link
+                    className="photoReelPurchaseLink oneTime"
                     href="/account?checkout=one_time"
                     target="_blank"
                     rel="noreferrer"
                   >
-                    1動画作成・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")} →
+                    <span>ONE TIME</span>
+                    <strong>1動画作成・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+                    <small>必要なときだけ・有効期限なし</small>
                   </Link>
                 </div>
               </div>

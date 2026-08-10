@@ -69,7 +69,7 @@ test("does not create a checkout session without trusted authentication", async 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        plan: "light",
+        plan: "starter",
         requestId: "billing-test-request",
       }),
     }),
@@ -108,7 +108,9 @@ test("spoofed identity headers cannot activate billing on public hosting", async
   const worker = await loadWorker("billing-spoofed", {
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-    STRIPE_PRICE_LIGHT_MONTHLY: "price_light",
+    STRIPE_PRICE_STARTER_MONTHLY: "price_starter",
+    STRIPE_PRICE_STANDARD_MONTHLY: "price_standard",
+    STRIPE_PRICE_LIGHT_MONTHLY: "price_legacy",
     STRIPE_PRICE_ONE_TIME: "price_one_time",
   });
   const response = await worker.fetch(
@@ -135,7 +137,9 @@ test("the Cloudflare Pages entry strips identity headers defensively", async () 
     TRUST_SITES_AUTH_HEADERS: "true",
     STRIPE_SECRET_KEY: "sk_test_placeholder",
     STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-    STRIPE_PRICE_LIGHT_MONTHLY: "price_light",
+    STRIPE_PRICE_STARTER_MONTHLY: "price_starter",
+    STRIPE_PRICE_STANDARD_MONTHLY: "price_standard",
+    STRIPE_PRICE_LIGHT_MONTHLY: "price_legacy",
     STRIPE_PRICE_ONE_TIME: "price_one_time",
   };
   for (const key of Object.keys(runtimeEnv)) delete runtimeEnv[key];

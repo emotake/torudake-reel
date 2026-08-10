@@ -50,9 +50,11 @@ import {
 import {
   canSaveCompletedVideo,
   isBillingBucket,
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
   type BillingBucket,
 } from "../lib/billing-policy";
 import { LINE_SHARE_URL } from "../lib/line-share";
@@ -1868,7 +1870,7 @@ export default function Home() {
     useState<TransferReceipt | null>(null);
   const [transferError, setTransferError] = useState("");
   const [billingBusyPlan, setBillingBusyPlan] = useState<
-    "light" | "one_time" | null
+    "starter" | "standard" | "one_time" | null
   >(null);
   const [billingError, setBillingError] = useState("");
 
@@ -2888,7 +2890,9 @@ export default function Home() {
     }
   }
 
-  async function startCheckout(plan: "light" | "one_time") {
+  async function startCheckout(
+    plan: "starter" | "standard" | "one_time",
+  ) {
     if (billingBusyPlan) return;
     setBillingError("");
     setBillingBusyPlan(plan);
@@ -3431,13 +3435,17 @@ function TransferPortal({
 }
 
 const DEMO_CAPTIONS = [
-  { start: 0, end: 2.31, text: "撮った動画を選ぶだけ。" },
-  { start: 2.31, end: 5.85, text: "話した言葉を、読みやすいテロップに。" },
-  { start: 5.85, end: 10.2, text: "カットも音声も、投稿しやすい1本へ。" },
+  { start: 0.55, end: 2.42, text: "ふと撮った、今日の景色。" },
+  {
+    start: 3.43,
+    end: 6.53,
+    text: "少しの工夫で、空気感まで伝わる一本に。",
+  },
+  { start: 7.36, end: 9.4, text: "編集は、もっと心地よく。" },
 ] as const;
 
 function RealVideoDemo() {
-  const [caption, setCaption] = useState<string>(DEMO_CAPTIONS[0].text);
+  const [caption, setCaption] = useState<string | null>(null);
   const [videoUnavailable, setVideoUnavailable] = useState(false);
 
   return (
@@ -3462,20 +3470,21 @@ function RealVideoDemo() {
             onError={() => setVideoUnavailable(true)}
             onTimeUpdate={(event) => {
               const currentTime = event.currentTarget.currentTime;
-              const next =
-                DEMO_CAPTIONS.find(
-                  (item) => currentTime >= item.start && currentTime < item.end,
-                ) ?? DEMO_CAPTIONS[DEMO_CAPTIONS.length - 1];
-              setCaption(next.text);
+              const next = DEMO_CAPTIONS.find(
+                (item) => currentTime >= item.start && currentTime < item.end,
+              );
+              setCaption(next?.text ?? null);
             }}
           />
           <div className="realDemoStatus">
             <span>編集後デモ</span>
             <strong>音声をオンにして確認できます</strong>
           </div>
-          <div className="realDemoCaption" aria-live="off">
-            {caption}
-          </div>
+          {caption ? (
+            <div className="realDemoCaption" aria-live="off">
+              {caption}
+            </div>
+          ) : null}
         </div>
       )}
       <figcaption className="visualResult" id="realDemoCaption">
@@ -3500,8 +3509,8 @@ function Landing({
   openPicker: () => void;
   openSample: () => void | Promise<void>;
   isSampleLoading: boolean;
-  startCheckout: (plan: "light" | "one_time") => void;
-  billingBusyPlan: "light" | "one_time" | null;
+  startCheckout: (plan: "starter" | "standard" | "one_time") => void;
+  billingBusyPlan: "starter" | "standard" | "one_time" | null;
   billingError: string;
 }) {
   return (
@@ -3551,8 +3560,8 @@ function Landing({
             <div className="heroOfferPrice">
               <strong>保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
               <small>
-                または月{LIGHT_MONTHLY_VIDEO_LIMIT}本 ¥
-                {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                または月{STARTER_MONTHLY_VIDEO_LIMIT}本 ¥
+                {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から
               </small>
             </div>
             <a href="#price">
@@ -3701,7 +3710,7 @@ function Landing({
       <section className="priceSection" id="price">
         <div className="sectionHeading compact">
           <p className="eyebrow">SIMPLE PRICE</p>
-          <h2>保存方法は、2つだけ。</h2>
+          <h2>使い方に合う保存方法を。</h2>
           <p>まず無料で仕上がりを確認。気に入った動画だけ保存できます。</p>
         </div>
         <div className="freePreviewBand">
@@ -3716,13 +3725,65 @@ function Landing({
         </div>
         <p className="paidChoiceLabel">仕上がりが気に入ったら、保存方法を選択</p>
         <div className="priceGrid">
-          <article className="featuredPrice">
-            <span className="popular">初めての方</span>
+          <article className="featuredPrice subscriptionPrice">
+            <span className="popular">おすすめ</span>
+            <p>STANDARD</p>
+            <h3>月{STANDARD_MONTHLY_VIDEO_LIMIT}本</h3>
+            <strong>
+              ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              <small>/月</small>
+            </strong>
+            <span>
+              {`1本あたり${Math.floor(
+                STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
+              )}円`}
+            </span>
+            <ul>
+              <li>✓ 90秒まで</li>
+              <li>✓ AI処理は1動画につき10回</li>
+              <li>✓ 最大1080p・透かしなし</li>
+              <li>✓ 編集スタイルを記憶</li>
+            </ul>
+            <button
+              onClick={() => startCheckout("standard")}
+              disabled={billingBusyPlan !== null}
+            >
+              {billingBusyPlan === "standard"
+                ? "決済画面を準備中…"
+                : `月${STANDARD_MONTHLY_VIDEO_LIMIT}本で始める`}
+            </button>
+          </article>
+          <article className="subscriptionPrice">
+            <p>STARTER</p>
+            <h3>月{STARTER_MONTHLY_VIDEO_LIMIT}本</h3>
+            <strong>
+              ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              <small>/月</small>
+            </strong>
+            <span>
+              {`1本あたり約${Math.round(
+                STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
+              )}円`}
+            </span>
+            <ul>
+              <li>✓ 90秒まで</li>
+              <li>✓ AI処理は1動画につき10回</li>
+              <li>✓ 最大1080p・透かしなし</li>
+              <li>✓ 編集スタイルを記憶</li>
+            </ul>
+            <button
+              onClick={() => startCheckout("starter")}
+              disabled={billingBusyPlan !== null}
+            >
+              {billingBusyPlan === "starter"
+                ? "決済画面を準備中…"
+                : `月${STARTER_MONTHLY_VIDEO_LIMIT}本で始める`}
+            </button>
+          </article>
+          <article>
             <p>ONE TIME</p>
             <h3>1動画作成</h3>
-            <strong>
-              ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
-            </strong>
+            <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
             <span>買い切り・サブスクなし</span>
             <ul>
               <li>✓ 90秒まで</li>
@@ -3737,34 +3798,6 @@ function Landing({
               {billingBusyPlan === "one_time"
                 ? "決済画面を準備中…"
                 : "この動画を保存する"}
-            </button>
-          </article>
-          <article className="subscriptionPrice">
-            <span className="popular">継続する方</span>
-            <p>LIGHT</p>
-            <h3>月{LIGHT_MONTHLY_VIDEO_LIMIT}本プラン</h3>
-            <strong>
-              ¥{LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/月</small>
-            </strong>
-            <span>
-              {`1本あたり${Math.floor(
-                LIGHT_MONTHLY_PRICE_JPY / LIGHT_MONTHLY_VIDEO_LIMIT,
-              )}円`}
-            </span>
-            <ul>
-              <li>✓ 90秒まで</li>
-              <li>✓ AI処理は1動画につき10回</li>
-              <li>✓ 最大1080p・透かしなし</li>
-              <li>✓ 編集スタイルを記憶</li>
-            </ul>
-            <button
-              onClick={() => startCheckout("light")}
-              disabled={billingBusyPlan !== null}
-            >
-              {billingBusyPlan === "light"
-                ? "決済画面を準備中…"
-                : `月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランを始める`}
             </button>
           </article>
         </div>
@@ -9567,20 +9600,28 @@ function ResultWorkspace({
               <p>
                 <strong>完成動画を保存するにはプランを選択</strong>
                 <small>
-                  編集内容はプレビューで確認できます。保存は月8本プラン、または1動画作成から利用できます。
+                  編集内容はプレビューで確認できます。保存は月3本・月8本・1動画作成から選べます。
                 </small>
               </p>
               <div>
                 <Link
                   className="mainCta"
-                  href="/account?checkout=light"
+                  href="/account?checkout=standard"
                   target="_blank"
                   rel="noreferrer"
                 >
                   <span>
-                    {`月${LIGHT_MONTHLY_VIDEO_LIMIT}本・¥${LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
+                    {`月${STANDARD_MONTHLY_VIDEO_LIMIT}本・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
                   </span>
                   <i>→</i>
+                </Link>
+                <Link
+                  className="quietButton"
+                  href="/account?checkout=starter"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {`月${STARTER_MONTHLY_VIDEO_LIMIT}本・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
                 </Link>
                 <Link
                   className="quietButton"

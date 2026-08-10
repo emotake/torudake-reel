@@ -5,9 +5,13 @@ import {
   NARRATION_TERMS_VERSION,
 } from "../../lib/narration";
 import {
-  LIGHT_MONTHLY_PRICE_JPY,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
+  LEGACY_MONTHLY_PRICE_JPY,
+  LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_VIDEO_LIMIT,
+  STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "../../lib/billing-policy";
 
 export const metadata = buildPublicPageMetadata({
@@ -86,8 +90,14 @@ export default function TermsPage() {
             AI処理の上限は1動画あたり、無料体験3回、1動画作成5回、月額プラン10回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
           </li>
           <li>
-            月{LIGHT_MONTHLY_VIDEO_LIMIT}本プランは月額
-            {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
+            Starterは月{STARTER_MONTHLY_VIDEO_LIMIT}本・月額
+            {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、Standardは月
+            {STANDARD_MONTHLY_VIDEO_LIMIT}本・月額
+            {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
+          </li>
+          <li>
+            旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン（月額
+            {LEGACY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円）は既存契約者専用で、新規申込は受け付けません。
           </li>
           <li>
             1動画作成は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。

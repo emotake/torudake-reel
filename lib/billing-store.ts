@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import {
@@ -14,7 +14,8 @@ import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
   getAiOperationSuccessLimit,
-  LIGHT_MONTHLY_VIDEO_LIMIT,
+  monthlyPlanVideoLimit,
+  type MonthlyPlanKey,
   OPERATOR_DAILY_VIDEO_LIMIT,
   startOfTokyoDaySeconds,
 } from "./billing-policy";
@@ -76,7 +77,7 @@ type QueryD1Database = {
 export class UsageLimitError extends Error {
   constructor() {
     super(
-      `無料枠を使い切りました。月${LIGHT_MONTHLY_VIDEO_LIMIT}本プランまたは1動画作成を選んでください。`,
+      "無料枠を使い切りました。月額プランまたは1動画作成を選んでください。",
     );
     this.name = "UsageLimitError";
   }
@@ -197,12 +198,17 @@ export async function getBillingStatusForUser(userId: string) {
     .from(billingSubscriptions)
     .where(eq(billingSubscriptions.userId, userId))
     .orderBy(desc(billingSubscriptions.updatedAt));
-  const subscription =
+  const currentSubscription =
     subscriptions.find(
       (item) =>
         ACTIVE_SUBSCRIPTION_STATUSES.includes(item.status) &&
         item.currentPeriodEnd > now,
     ) ?? null;
+  const subscription =
+    currentSubscription?.revokedPeriodStart ===
+    currentSubscription?.currentPeriodStart
+      ? null
+      : currentSubscription;
 
   const purchases = await db
     .select()
@@ -236,14 +242,17 @@ export async function getBillingStatusForUser(userId: string) {
       item.bucket === "operator" &&
       item.createdAt >= operatorDayStart,
   ).length;
-  const monthlyUsage = subscription
+  const monthlyUsage = currentSubscription
     ? usage.filter(
         (item) =>
           item.bucket === "subscription" &&
-          item.createdAt >= subscription.currentPeriodStart &&
-          item.createdAt < subscription.currentPeriodEnd,
+          item.createdAt >= currentSubscription.currentPeriodStart &&
+          item.createdAt < currentSubscription.currentPeriodEnd,
       )
     : [];
+  const monthlyVideoLimit = currentSubscription
+    ? monthlyPlanVideoLimit(currentSubscription.planKey)
+    : 0;
   const purchasedCredits = purchases.reduce(
     (total, purchase) => total + purchase.credits,
     0,
@@ -251,6 +260,7 @@ export async function getBillingStatusForUser(userId: string) {
 
   return {
     subscription,
+    currentSubscription,
     freeVideosUsed: freeUsage.length,
     freeSecondsUsed: freeUsage.reduce(
       (total, item) => total + item.sourceDurationSeconds,
@@ -258,6 +268,10 @@ export async function getBillingStatusForUser(userId: string) {
     ),
     monthlyVideosUsed: monthlyUsage.length,
     monthlyPlanActive: Boolean(subscription),
+    monthlySubscriptionActive: Boolean(currentSubscription),
+    monthlyAccessRevoked: Boolean(currentSubscription) && !subscription,
+    monthlyPlanKey: currentSubscription?.planKey ?? null,
+    monthlyVideoLimit,
     operatorVideosUsedToday,
     oneTimeCreditsRemaining: Math.max(
       0,
@@ -392,7 +406,14 @@ async function insertUsageReservationAtomically(
           WHERE id = ?
             AND user_id = ?
             AND status IN ('active', 'trialing')
+            AND current_period_start = ?
+            AND current_period_end = ?
             AND current_period_end > ?
+            AND plan_key = ?
+            AND (
+              revoked_period_start IS NULL
+              OR revoked_period_start != current_period_start
+            )
         )
         AND (
           SELECT COUNT(*)
@@ -409,11 +430,14 @@ async function insertUsageReservationAtomically(
         ...values,
         status.subscription.id,
         reservation.userId,
+        status.subscription.currentPeriodStart,
+        status.subscription.currentPeriodEnd,
         reservation.createdAt,
+        status.subscription.planKey,
         reservation.userId,
         status.subscription.currentPeriodStart,
         status.subscription.currentPeriodEnd,
-        LIGHT_MONTHLY_VIDEO_LIMIT,
+        status.monthlyVideoLimit,
       );
   } else if (reservation.bucket === "one_time") {
     statement = database
@@ -769,6 +793,7 @@ type StripeSubscriptionRecord = {
   id: string;
   customerId: string;
   priceId: string;
+  planKey: MonthlyPlanKey;
   status: string;
   currentPeriodStart: number;
   currentPeriodEnd: number;
@@ -787,6 +812,7 @@ export async function upsertSubscription(
       userId,
       stripeCustomerId: subscription.customerId,
       stripePriceId: subscription.priceId,
+      planKey: subscription.planKey,
       status: subscription.status,
       currentPeriodStart: subscription.currentPeriodStart,
       currentPeriodEnd: subscription.currentPeriodEnd,
@@ -800,6 +826,7 @@ export async function upsertSubscription(
         userId,
         stripeCustomerId: subscription.customerId,
         stripePriceId: subscription.priceId,
+        planKey: subscription.planKey,
         status: subscription.status,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
@@ -807,6 +834,68 @@ export async function upsertSubscription(
         updatedAt: now,
       },
     });
+}
+
+/**
+ * Revokes only the subscription period paid by a refunded invoice. Keeping
+ * the period boundary instead of a permanent flag lets a later paid renewal
+ * resume access without manual intervention.
+ */
+export async function setSubscriptionPeriodRevocationState(
+  subscriptionId: string,
+  periodStart: number,
+  blocked: boolean,
+) {
+  if (!Number.isSafeInteger(periodStart) || periodStart <= 0) {
+    throw new Error("Refunded subscription period is invalid.");
+  }
+  const db = getDb();
+  if (blocked) {
+    const updated = await db
+      .update(billingSubscriptions)
+      .set({ revokedPeriodStart: periodStart })
+      .where(
+        and(
+          eq(billingSubscriptions.id, subscriptionId),
+          eq(billingSubscriptions.currentPeriodStart, periodStart),
+        ),
+      )
+      .returning({
+        userId: billingSubscriptions.userId,
+        currentPeriodStart: billingSubscriptions.currentPeriodStart,
+        currentPeriodEnd: billingSubscriptions.currentPeriodEnd,
+      });
+    if (updated[0]) {
+      const reservations = await db
+        .select({ id: usageReservations.id })
+        .from(usageReservations)
+        .where(
+          and(
+            eq(usageReservations.userId, updated[0].userId),
+            eq(usageReservations.bucket, "subscription"),
+            eq(usageReservations.status, "reserved"),
+            gte(usageReservations.createdAt, periodStart),
+            lt(usageReservations.createdAt, updated[0].currentPeriodEnd),
+          ),
+        );
+      for (const reservation of reservations) {
+        await releaseOrCompleteUsageReservation(
+          reservation.id,
+          updated[0].userId,
+        );
+      }
+    }
+    return;
+  }
+  await db
+    .update(billingSubscriptions)
+    .set({ revokedPeriodStart: null })
+    .where(
+      and(
+        eq(billingSubscriptions.id, subscriptionId),
+        eq(billingSubscriptions.revokedPeriodStart, periodStart),
+      ),
+    );
 }
 
 export async function recordOneTimePurchase(values: {
@@ -1453,7 +1542,7 @@ export function publicBillingStatus(
   status: Awaited<ReturnType<typeof getBillingStatusForUser>>,
 ) {
   return {
-    plan: status.monthlyPlanActive ? "light" : "free",
+    plan: status.monthlyPlanKey ?? "free",
     free: {
       videosUsed: status.freeVideosUsed,
       videoLimit: FREE_VIDEO_LIMIT,
@@ -1461,11 +1550,14 @@ export function publicBillingStatus(
       secondsLimit: FREE_SECONDS_LIMIT,
     },
     monthly: {
-      active: status.monthlyPlanActive,
+      active: status.monthlySubscriptionActive,
+      accessRevoked: status.monthlyAccessRevoked,
+      planKey: status.monthlyPlanKey,
       videosUsed: status.monthlyVideosUsed,
-      videoLimit: LIGHT_MONTHLY_VIDEO_LIMIT,
-      renewsAt: status.subscription?.currentPeriodEnd ?? null,
-      cancelAtPeriodEnd: status.subscription?.cancelAtPeriodEnd ?? false,
+      videoLimit: status.monthlyVideoLimit,
+      renewsAt: status.currentSubscription?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd:
+        status.currentSubscription?.cancelAtPeriodEnd ?? false,
     },
     oneTimeCredits: status.oneTimeCreditsRemaining,
   };
