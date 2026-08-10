@@ -7397,6 +7397,259 @@ footer > small {
   line-height: 1.65;
 }
 
+.intonationEditor {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid #cfded8;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(185, 245, 208, 0.26), transparent 30%),
+    linear-gradient(145deg, #fbfffd, #f8faf9);
+}
+
+.intonationEditorHeading,
+.intonationEditorHeading > div,
+.intonationComparisonHeading,
+.intonationComparisonHeading > div {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.intonationEditorHeading,
+.intonationComparisonHeading {
+  justify-content: space-between;
+}
+
+.intonationEditorHeading > div,
+.intonationComparisonHeading > div {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.intonationEditorHeading strong {
+  font-size: 15px;
+}
+
+.intonationEditorHeading small,
+.intonationComparisonHeading small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.intonationEditorHeading > span {
+  padding: 5px 8px;
+  border: 1px solid #a8d6c0;
+  border-radius: 999px;
+  background: #edfbf4;
+  color: #17633f;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.intonationEditor > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.intonationSentencePicker,
+.intonationEmphasisInput {
+  display: grid;
+  gap: 7px;
+}
+
+.intonationSentencePicker > span,
+.intonationEmphasisInput > span,
+.intonationPresetPicker legend {
+  color: #35443d;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.intonationSentencePicker select,
+.intonationEmphasisInput input {
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 11px;
+  border: 1px solid #ccd6d1;
+  border-radius: 10px;
+  outline: none;
+  background: white;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.intonationSentencePicker select:focus,
+.intonationEmphasisInput input:focus {
+  border-color: var(--mint-dark);
+  box-shadow: 0 0 0 3px rgba(32, 122, 81, 0.09);
+}
+
+.intonationEmphasisInput input[aria-invalid="true"] {
+  border-color: #d83a24;
+}
+
+.intonationEmphasisInput small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.intonationEmphasisInput input[aria-invalid="true"] + small {
+  color: #a02b1e;
+  font-weight: 800;
+}
+
+.intonationPresetPicker {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.intonationPresetPicker > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.intonationPresetPicker button {
+  display: grid;
+  gap: 3px;
+  min-height: 62px;
+  padding: 10px 11px;
+  border: 1px solid #d6dedb;
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.intonationPresetPicker button.active {
+  border-color: #193f31;
+  background: #173c2f;
+  color: white;
+  box-shadow: 0 8px 18px rgba(23, 60, 47, 0.16);
+}
+
+.intonationPresetPicker button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.intonationPresetPicker strong {
+  font-size: 12px;
+}
+
+.intonationPresetPicker small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.intonationPresetPicker button.active small {
+  color: #cfe3da;
+}
+
+.intonationPendingNotice {
+  padding: 10px 11px;
+  border: 1px solid #edc37a;
+  border-radius: 9px;
+  background: #fff9ec;
+  color: #765016 !important;
+  font-weight: 800;
+}
+
+.generateIntonationCorrection {
+  width: 100%;
+  min-height: 48px;
+  justify-content: center;
+}
+
+.intonationComparison {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #98cbb2;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 12px 28px rgba(31, 79, 58, 0.08);
+}
+
+.intonationComparisonHeading span {
+  color: #17633f;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.intonationComparisonHeading strong {
+  font-size: 13px;
+}
+
+.intonationCompareAudios {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.intonationCompareAudios label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1e7e4;
+  border-radius: 10px;
+  background: #f9fbfa;
+}
+
+.intonationCompareAudios span {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.intonationCompareAudios label:last-child span {
+  color: #17633f;
+}
+
+.intonationCompareAudios audio {
+  width: 100%;
+  height: 38px;
+}
+
+.intonationComparisonActions {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr;
+  gap: 8px;
+}
+
+.intonationComparisonActions button {
+  min-height: 46px;
+  justify-content: center;
+}
+
+.intonationComparison > p,
+.intonationCostNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.intonationCostNote {
+  padding-left: 9px;
+  border-left: 3px solid #6eb28e;
+  color: #3f6251 !important;
+  font-weight: 700;
+}
+
 .fixedDisclosure {
   display: grid;
   gap: 5px;
@@ -7706,6 +7959,21 @@ footer > small {
 
   .pronunciationActions > span {
     text-align: right;
+  }
+
+  .intonationEditor {
+    padding: 13px;
+  }
+
+  .intonationEditorHeading,
+  .intonationComparisonHeading {
+    align-items: flex-start;
+  }
+
+  .intonationPresetPicker > div,
+  .intonationCompareAudios,
+  .intonationComparisonActions {
+    grid-template-columns: 1fr;
   }
 
   .modalActions {

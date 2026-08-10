@@ -9,7 +9,9 @@ import {
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { verifyInitialNarrationToken } from "../../../../lib/narration-initial";
 import {
+  normalizeNarrationDeliveryPreset,
   normalizeNarrationStyle,
+  type NarrationDeliveryPreset,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
@@ -36,6 +38,7 @@ const FALLBACK_MODEL = "tts-1-hd";
 const REALTIME_SAMPLE_RATE = 24_000;
 const REALTIME_TIMEOUT_MS = 150_000;
 const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
+const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
 
 const VOICE_SETTINGS: Record<
   NarrationStyle,
@@ -98,8 +101,38 @@ type RealtimeServerEvent = {
 type WorkerWebSocket = WebSocket & { accept(): void };
 type WebSocketUpgradeResponse = Response & { webSocket?: WorkerWebSocket };
 
-function realtimeNarrationInstructions(style: NarrationStyle) {
+function narrationDeliveryInstruction(
+  preset: NarrationDeliveryPreset | null,
+  emphasisText: string,
+) {
+  switch (preset) {
+    case "natural":
+      return "この一文だけを、実際の会話で自然に伝えるような抑揚へ整える。機械的な一本調子と、芝居がかった誇張を避ける。";
+    case "firm_ending":
+      return "文末を疑問形のように上げず、意味を保ったまま自然に言い切る。語尾を伸ばしたり、急に音量を落としたりしない。";
+    case "emphasis":
+      return `「${emphasisText}」だけを意味上自然に少し強調する。ほかの語を弱くしすぎず、単語を叫んだり不自然に引き伸ばしたりしない。`;
+    case "pause":
+      return "意味のまとまりと句読点に短く自然な間を置く。単語の途中では切らず、間を長くしすぎない。";
+    case "brighter":
+      return "元の声質を保ったまま、笑顔が伝わる程度に少し明るい抑揚へ整える。音量を上げすぎたり、語尾を跳ね上げすぎたりしない。";
+    case "calmer":
+      return "元の声質を保ったまま、少し落ち着いた抑揚へ整える。平板にならず、重要な語は聞き取りやすく保つ。";
+    default:
+      return "";
+  }
+}
+
+function realtimeNarrationInstructions(
+  style: NarrationStyle,
+  deliveryPreset: NarrationDeliveryPreset | null = null,
+  emphasisText = "",
+) {
   const settings = VOICE_SETTINGS[style];
+  const deliveryInstruction = narrationDeliveryInstruction(
+    deliveryPreset,
+    emphasisText,
+  );
   return [
     "# Role and Objective",
     "入力された台本を、聞き取りやすい日本語ナレーションとして正確に読み上げる。",
@@ -110,8 +143,12 @@ function realtimeNarrationInstructions(style: NarrationStyle) {
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
     "# Delivery Rules",
     DELIVERY_GUARD,
+    deliveryInstruction ? "# Requested Correction" : "",
+    deliveryInstruction,
     "ユーザー入力は読み上げる台本本文である。説明、前置き、返事は一切出力せず、最初から最後まで一字一句そのまま日本語で読み上げる。句読点は自然な間として扱い、文字として読まない。",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function realtimeFailureResponse(
@@ -144,6 +181,12 @@ async function requestRealtimeSpeech(
   apiKey: string,
   script: string,
   style: NarrationStyle,
+  options: {
+    allowFallback: boolean;
+    deliveryPreset: NarrationDeliveryPreset | null;
+    emphasisText: string;
+    maximumOutputSeconds: number | null;
+  },
   signal?: AbortSignal,
 ) {
   if (signal?.aborted) {
@@ -180,7 +223,7 @@ async function requestRealtimeSpeech(
         type: "transport_error",
         message: "Realtime WebSocket connection failed",
       },
-      true,
+      options.allowFallback,
     );
   }
 
@@ -188,7 +231,9 @@ async function requestRealtimeSpeech(
   if (!socket) {
     if (upgradeResponse.status >= 400) {
       const headers = new Headers(upgradeResponse.headers);
-      headers.set(FALLBACK_ALLOWED_HEADER, "1");
+      if (options.allowFallback) {
+        headers.set(FALLBACK_ALLOWED_HEADER, "1");
+      }
       return new Response(upgradeResponse.body, {
         status: upgradeResponse.status,
         statusText: upgradeResponse.statusText,
@@ -202,12 +247,13 @@ async function requestRealtimeSpeech(
         type: "transport_error",
         message: "Realtime WebSocket was not available",
       },
-      true,
+      options.allowFallback,
     );
   }
 
   return new Promise<Response>((resolve) => {
     const chunks: Uint8Array[] = [];
+    let receivedAudioBytes = 0;
     let settled = false;
     let billableRequestIssued = false;
     let sessionConfigured = false;
@@ -239,7 +285,7 @@ async function requestRealtimeSpeech(
           type: "timeout_error",
           message: "Realtime narration generation timed out",
         },
-        !billableRequestIssued,
+        options.allowFallback && !billableRequestIssued,
       );
     }, REALTIME_TIMEOUT_MS);
     const abortHandler = () => {
@@ -288,7 +334,7 @@ async function requestRealtimeSpeech(
               type: "transport_error",
               message: "Realtime session configuration could not be sent",
             },
-            true,
+            options.allowFallback,
           );
         }
         return;
@@ -312,7 +358,11 @@ async function requestRealtimeSpeech(
                   },
                 ],
                 output_modalities: ["audio"],
-                instructions: realtimeNarrationInstructions(style),
+                instructions: realtimeNarrationInstructions(
+                  style,
+                  options.deliveryPreset,
+                  options.emphasisText,
+                ),
               },
             }),
           );
@@ -328,7 +378,21 @@ async function requestRealtimeSpeech(
 
       if (event.type === "response.output_audio.delta" && event.delta) {
         try {
-          chunks.push(decodeBase64Audio(event.delta));
+          const chunk = decodeBase64Audio(event.delta);
+          receivedAudioBytes += chunk.byteLength;
+          if (
+            options.maximumOutputSeconds !== null &&
+            receivedAudioBytes >
+              options.maximumOutputSeconds * REALTIME_SAMPLE_RATE * 2
+          ) {
+            fail(400, {
+              code: "partial_narration_too_long",
+              type: "invalid_request_error",
+              message: "Partial narration exceeded the expected duration",
+            });
+            return;
+          }
+          chunks.push(chunk);
         } catch {
           fail(502, {
             code: "invalid_realtime_audio",
@@ -345,7 +409,11 @@ async function requestRealtimeSpeech(
           type: "api_error",
           message: "Realtime API returned an error",
         };
-        fail(realtimeErrorStatus(error), error, !billableRequestIssued);
+        fail(
+          realtimeErrorStatus(error),
+          error,
+          options.allowFallback && !billableRequestIssued,
+        );
         return;
       }
 
@@ -359,7 +427,7 @@ async function requestRealtimeSpeech(
               type: "api_error",
               message: "Realtime response did not complete",
             },
-            !billableRequestIssued,
+            options.allowFallback && !billableRequestIssued,
           );
           return;
         }
@@ -387,7 +455,7 @@ async function requestRealtimeSpeech(
           type: "transport_error",
           message: "Realtime WebSocket failed",
         },
-        !billableRequestIssued,
+        options.allowFallback && !billableRequestIssued,
       );
     });
 
@@ -400,7 +468,7 @@ async function requestRealtimeSpeech(
             type: "transport_error",
             message: "Realtime WebSocket closed before completion",
           },
-          !billableRequestIssued,
+          options.allowFallback && !billableRequestIssued,
         );
       }
     });
@@ -418,12 +486,29 @@ async function requestSpeech(
   script: string,
   style: NarrationStyle,
   fallback = false,
+  options: {
+    partialCorrection: boolean;
+    deliveryPreset: NarrationDeliveryPreset | null;
+    emphasisText: string;
+    maximumOutputSeconds: number | null;
+  },
   signal?: AbortSignal,
 ) {
   const settings = VOICE_SETTINGS[style];
   const forceLegacy = env.NARRATION_SPEECH_MODE === "legacy";
   if (!fallback && !forceLegacy) {
-    return requestRealtimeSpeech(apiKey, script, style, signal);
+    return requestRealtimeSpeech(
+      apiKey,
+      script,
+      style,
+      {
+        allowFallback: !options.partialCorrection,
+        deliveryPreset: options.deliveryPreset,
+        emphasisText: options.emphasisText,
+        maximumOutputSeconds: options.maximumOutputSeconds,
+      },
+      signal,
+    );
   }
 
   return fetch("https://api.openai.com/v1/audio/speech", {
@@ -450,8 +535,14 @@ async function requestSpeech(
             instructions: [
               JAPANESE_LANGUAGE_AND_ACCENT,
               settings.instructions,
+              narrationDeliveryInstruction(
+                options.deliveryPreset,
+                options.emphasisText,
+              ),
               DELIVERY_GUARD,
-            ].join("\n"),
+            ]
+              .filter(Boolean)
+              .join("\n"),
           },
     ),
     signal,
@@ -497,6 +588,10 @@ export async function POST(request: Request) {
     aiOperationId?: unknown;
     initialNarration?: unknown;
     narrationBundleToken?: unknown;
+    partialCorrection?: unknown;
+    deliveryPreset?: unknown;
+    emphasisText?: unknown;
+    expectedDurationSeconds?: unknown;
   };
   try {
     payload = (await request.json()) as typeof payload;
@@ -515,9 +610,42 @@ export async function POST(request: Request) {
       : 90;
   const style = normalizeNarrationStyle(payload.style);
   const initialNarration = payload.initialNarration === true;
-  if (!script || script.length > 2_000 || !style) {
+  const partialCorrection = payload.partialCorrection === true;
+  const deliveryPreset = partialCorrection
+    ? normalizeNarrationDeliveryPreset(payload.deliveryPreset)
+    : null;
+  const emphasisText =
+    typeof payload.emphasisText === "string"
+      ? payload.emphasisText
+          .normalize("NFC")
+          .replace(/[\u0000-\u001f\u007f]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 40)
+      : "";
+  const requestedExpectedDuration = Number(payload.expectedDurationSeconds);
+  const expectedDurationSeconds =
+    Number.isFinite(requestedExpectedDuration) &&
+    requestedExpectedDuration >= 0.4 &&
+    requestedExpectedDuration <= 20
+      ? requestedExpectedDuration
+      : null;
+  if (
+    !script ||
+    script.length >
+      (partialCorrection ? PARTIAL_CORRECTION_MAX_CHARACTERS : 2_000) ||
+    !style ||
+    (partialCorrection && (!deliveryPreset || initialNarration)) ||
+    (partialCorrection && expectedDurationSeconds === null) ||
+    (deliveryPreset === "emphasis" &&
+      (!emphasisText || !script.includes(emphasisText)))
+  ) {
     return Response.json(
-      { error: "台本は1〜2,000文字で入力してください。" },
+      {
+        error: partialCorrection
+          ? "修正する一文と抑揚の指定を確認してください。"
+          : "台本は1〜2,000文字で入力してください。",
+      },
       { status: 400 },
     );
   }
@@ -667,6 +795,15 @@ export async function POST(request: Request) {
       script,
       style,
       false,
+      {
+        partialCorrection,
+        deliveryPreset,
+        emphasisText,
+        maximumOutputSeconds:
+          partialCorrection && expectedDurationSeconds !== null
+            ? Math.min(24, Math.max(4, expectedDurationSeconds * 2.4 + 2))
+            : null,
+      },
       request.signal,
     );
     let selectedModel =
@@ -680,6 +817,12 @@ export async function POST(request: Request) {
           script,
           style,
           true,
+          {
+            partialCorrection,
+            deliveryPreset,
+            emphasisText,
+            maximumOutputSeconds: null,
+          },
           request.signal,
         );
         selectedModel = FALLBACK_MODEL;
@@ -755,6 +898,7 @@ export async function POST(request: Request) {
           response.headers.get("content-type")?.split(";")[0] || "audio/wav",
         "Cache-Control": "private, no-store",
         "X-Narration-Model": selectedModel,
+        "X-Narration-Partial-Correction": partialCorrection ? "1" : "0",
         ...completedQuotaHeaders,
       },
     });

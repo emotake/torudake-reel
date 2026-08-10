@@ -79,16 +79,23 @@ import {
   getNarrationMixLevels,
   getNarrationPlaybackRate,
   MAX_NARRATION_ORIGINAL_AUDIO_PERCENT,
+  NARRATION_DELIVERY_PRESETS,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
   validateNarrationPronunciationGuide,
+  type NarrationDeliveryPreset,
   type NarrationPlan,
   type NarrationOriginalAudioLevel,
   type NarrationStyle,
   type VideoAudioMode,
 } from "../lib/narration";
+import {
+  buildNarrationAudioSpans,
+  resolveNarrationAudioBoundaries,
+  spliceNarrationAudioSegment,
+} from "../lib/narration-audio-edit";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
 type Goal = CaptionGoal;
@@ -100,6 +107,8 @@ type PreviewTransportState =
   | "seeking"
   | "ended";
 type TransferStatus = "idle" | "uploading" | "done" | "error";
+
+const PARTIAL_NARRATION_MODEL = "gpt-realtime-2.1-mini";
 
 type CompletedVideoQuality = {
   meetsTargetResolution: boolean | null;
@@ -139,6 +148,23 @@ type TranscriptionResult = {
   aiOperationsRemaining: number | null;
   refined: boolean;
   segments: TranscriptLine[];
+};
+
+type NarrationSegmentCorrectionResult = {
+  audio: Blob;
+  originalPreview: Blob;
+  correctedPreview: Blob;
+  baseAudioUrl: string;
+  baseAudioRevision: number;
+  segmentIndex: number;
+  remaining: number;
+};
+
+type NarrationSegmentCorrectionCandidate = {
+  result: NarrationSegmentCorrectionResult;
+  originalPreviewUrl: string;
+  correctedPreviewUrl: string;
+  deliveryPreset: NarrationDeliveryPreset;
 };
 
 type AiOperationQuotaResult = {
@@ -1061,6 +1087,11 @@ async function requestNarrationSpeech(
   signal?: AbortSignal,
   initialNarration = false,
   narrationBundleToken?: string,
+  correction?: {
+    deliveryPreset: NarrationDeliveryPreset;
+    emphasisText: string;
+    expectedDurationSeconds: number;
+  },
 ) {
   const response = await fetch("/api/narration/speech", {
     method: "POST",
@@ -1073,6 +1104,10 @@ async function requestNarrationSpeech(
       aiOperationId,
       initialNarration,
       narrationBundleToken,
+      partialCorrection: Boolean(correction),
+      deliveryPreset: correction?.deliveryPreset,
+      emphasisText: correction?.emphasisText,
+      expectedDurationSeconds: correction?.expectedDurationSeconds,
     }),
     signal,
   });
@@ -1093,6 +1128,7 @@ async function requestNarrationSpeech(
   if (!audio.size) throw new Error("AI音声を生成できませんでした。");
   return {
     audio,
+    model: response.headers.get("X-Narration-Model") ?? "",
     ...quota,
   };
 }
@@ -1365,7 +1401,17 @@ export default function Home() {
   const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
     null,
   );
-  const [narrationAudioUrl, setNarrationAudioUrl] = useState("");
+  const [narrationAudioUrl, setNarrationAudioUrlState] = useState("");
+  const narrationAudioUrlRef = useRef("");
+  const narrationAudioRevisionRef = useRef(0);
+  function setNarrationAudioUrl(nextUrl: string) {
+    if (narrationAudioUrlRef.current !== nextUrl) {
+      narrationAudioUrlRef.current = nextUrl;
+      narrationAudioRevisionRef.current += 1;
+    }
+    setNarrationAudioUrlState(nextUrl);
+  }
+  const [narrationAudioModel, setNarrationAudioModel] = useState("");
   const [aiOperationsRemaining, setAiOperationsRemaining] = useState(
     MAX_AI_OPERATION_LIMIT,
   );
@@ -1527,6 +1573,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    setNarrationAudioModel("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
@@ -1546,6 +1593,7 @@ export default function Home() {
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    setNarrationAudioModel("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
@@ -1829,6 +1877,7 @@ export default function Home() {
       setTranscript(timeline);
       setNarrationPlan(nextPlan);
       setNarrationAudioUrl(URL.createObjectURL(audio));
+      setNarrationAudioModel(speechResult.model);
       setUsedHighAccuracy(true);
       if (newlyReservedUsage) {
         const usageCompleted = await updateVideoUsage(
@@ -1979,6 +2028,7 @@ export default function Home() {
         ),
       );
       setNarrationAudioUrl(URL.createObjectURL(audio));
+      setNarrationAudioModel(speechResult.model);
       return remaining;
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -1995,6 +2045,195 @@ export default function Home() {
         narrationRegenerationAbortRef.current = null;
       }
     }
+  }
+
+  async function regenerateNarrationSegment(
+    segmentIndex: number,
+    deliveryPreset: NarrationDeliveryPreset,
+    emphasisText: string,
+  ): Promise<NarrationSegmentCorrectionResult> {
+    if (!file || !narrationPlan || !narrationAudioUrl) {
+      throw new Error("修正するAI音声が見つかりませんでした。");
+    }
+    if (narrationRegenerationAbortRef.current) {
+      throw new Error("別のAI音声を生成中です。完了まで少しお待ちください。");
+    }
+    if (aiOperationsRemainingRef.current <= 0) {
+      throw new Error(
+        `この動画で利用できるAI処理の上限（${aiOperationLimitRef.current}回）に達しました。`,
+      );
+    }
+    if (
+      narrationAudioModel &&
+      narrationAudioModel !== PARTIAL_NARRATION_MODEL
+    ) {
+      throw new Error(
+        "現在の音声は部分修正と異なる音声方式で作られています。台本の生成ボタンでAI音声全体を一度更新してからお試しください。",
+      );
+    }
+    const segment = narrationPlan.segments[segmentIndex];
+    if (!segment?.text.trim()) {
+      throw new Error("修正する一文を選んでください。");
+    }
+    const spokenText = (segment.speechText || segment.text)
+      .replace(/\s+/g, " ")
+      .trim();
+    const cleanEmphasis = emphasisText.replace(/\s+/g, " ").trim();
+    if (
+      deliveryPreset === "emphasis" &&
+      (!cleanEmphasis || !spokenText.includes(cleanEmphasis))
+    ) {
+      throw new Error("強調したい言葉を、選んだ一文と同じ表記で入力してください。");
+    }
+
+    const controller = new AbortController();
+    const generation = editGenerationRef.current;
+    const baseAudioUrl = narrationAudioUrlRef.current;
+    const baseAudioRevision = narrationAudioRevisionRef.current;
+    narrationRegenerationAbortRef.current = controller;
+    const AudioContextConstructor = getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      narrationRegenerationAbortRef.current = null;
+      throw new Error("このブラウザはAI音声の部分修正に対応していません。");
+    }
+    const audioContext = new AudioContextConstructor();
+    try {
+      const currentResponse = await fetch(baseAudioUrl, {
+        signal: controller.signal,
+      });
+      if (!currentResponse.ok) {
+        throw new Error("現在のAI音声を読み込めませんでした。");
+      }
+      const originalBuffer = await audioContext.decodeAudioData(
+        await currentResponse.arrayBuffer(),
+      );
+      const targetSpan = buildNarrationAudioSpans(
+        narrationPlan.segments,
+        originalBuffer.duration,
+      ).find((span) => span.index === segmentIndex);
+      if (!targetSpan) {
+        throw new Error("修正する一文の位置を確認できませんでした。");
+      }
+      const expectedDurationSeconds = Math.min(
+        20,
+        Math.max(0.4, targetSpan.end - targetSpan.start),
+      );
+      // Confirm both joins are genuinely quiet before spending an AI action.
+      // The same boundaries are reused for the splice so the preflight and
+      // final edit cannot choose different cut points.
+      const resolvedBoundaries = resolveNarrationAudioBoundaries(
+        originalBuffer,
+        targetSpan.start,
+        targetSpan.end,
+      );
+      const sourceDuration = await getVideoDurationSeconds(file);
+      const maximumDuration = Math.max(
+        1,
+        Math.min(narrationAutoCutEnabled ? length : 90, sourceDuration),
+      );
+      const speechResult = await requestNarrationSpeech(
+        spokenText,
+        narrationStyle,
+        usageReservationRef.current,
+        maximumDuration,
+        crypto.randomUUID(),
+        controller.signal,
+        false,
+        undefined,
+        {
+          deliveryPreset,
+          emphasisText:
+            deliveryPreset === "emphasis" ? cleanEmphasis : "",
+          expectedDurationSeconds,
+        },
+      );
+      const remaining = recordAiOperationResult(speechResult);
+      if (
+        speechResult.model &&
+        speechResult.model !== PARTIAL_NARRATION_MODEL
+      ) {
+        throw new Error(
+          "元の声質と同じ方式で修正版を生成できませんでした。少し待ってからもう一度お試しください。",
+        );
+      }
+      const replacementBuffer = await audioContext.decodeAudioData(
+        await speechResult.audio.arrayBuffer(),
+      );
+      const splice = spliceNarrationAudioSegment(
+        originalBuffer,
+        replacementBuffer,
+        targetSpan.start,
+        targetSpan.end,
+        resolvedBoundaries,
+      );
+      if (
+        splice.duration >
+        maximumDuration + NARRATION_DURATION_TOLERANCE_SECONDS
+      ) {
+        throw new Error(
+          `修正版を入れるとAI音声が約${Math.ceil(splice.duration)}秒になり、動画の長さへ自然に収まりません。別の抑揚をお試しください（AI処理 残り${remaining}回）。`,
+        );
+      }
+      if (
+        Math.abs(splice.duration - originalBuffer.duration) >
+        NARRATION_DURATION_TOLERANCE_SECONDS
+      ) {
+        throw new Error(
+          `修正版の長さを元の一文へ合わせられませんでした。別の抑揚をお試しください（AI処理 残り${remaining}回）。`,
+        );
+      }
+      throwIfProcessingAborted(controller.signal);
+      if (
+        editGenerationRef.current !== generation ||
+        narrationAudioRevisionRef.current !== baseAudioRevision ||
+        narrationAudioUrlRef.current !== baseAudioUrl
+      ) {
+        throw new DOMException("AI音声が更新されました。", "AbortError");
+      }
+      return {
+        audio: new Blob([splice.audio], { type: "audio/wav" }),
+        originalPreview: new Blob([splice.originalPreview], {
+          type: "audio/wav",
+        }),
+        correctedPreview: new Blob([splice.correctedPreview], {
+          type: "audio/wav",
+        }),
+        baseAudioUrl,
+        baseAudioRevision,
+        segmentIndex,
+        remaining,
+      };
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        if (error.aiOperationLimit !== null) {
+          rememberAiOperationLimit(error.aiOperationLimit);
+        }
+        if (error.aiOperationsRemaining !== null) {
+          rememberAiOperationsRemaining(error.aiOperationsRemaining);
+        }
+      }
+      throw error;
+    } finally {
+      await audioContext.close().catch(() => undefined);
+      if (narrationRegenerationAbortRef.current === controller) {
+        narrationRegenerationAbortRef.current = null;
+      }
+    }
+  }
+
+  function applyNarrationSegmentCorrection(
+    correction: NarrationSegmentCorrectionResult,
+  ) {
+    if (
+      narrationAudioRevisionRef.current !== correction.baseAudioRevision ||
+      narrationAudioUrlRef.current !== correction.baseAudioUrl
+    ) {
+      throw new Error(
+        "AI音声が更新されたため、この修正候補は採用できません。もう一度生成してください。",
+      );
+    }
+    setNarrationAudioUrl(URL.createObjectURL(correction.audio));
+    setNarrationAudioModel(PARTIAL_NARRATION_MODEL);
   }
 
   async function updateNarrationCutMode(autoCut: boolean) {
@@ -2052,6 +2291,7 @@ export default function Home() {
     setNarrationAutoCutEnabled(false);
     setNarrationPlan(null);
     setNarrationAudioUrl("");
+    setNarrationAudioModel("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2390,6 +2630,8 @@ export default function Home() {
           usageReservationPendingExport={usageReservationPendingExport}
           setNarrationOriginalAudio={setNarrationOriginalAudio}
           regenerateNarration={regenerateNarration}
+          regenerateNarrationSegment={regenerateNarrationSegment}
+          applyNarrationSegmentCorrection={applyNarrationSegmentCorrection}
           checkPaidExportAccess={checkPaidExportAccess}
           isCheckingPaidExportAccess={isCheckingPaidExportAccess}
           markExportReservationCompleted={() => {
@@ -3820,6 +4062,8 @@ function ResultWorkspace({
   usageReservationPendingExport,
   setNarrationOriginalAudio,
   regenerateNarration,
+  regenerateNarrationSegment,
+  applyNarrationSegmentCorrection,
   checkPaidExportAccess,
   isCheckingPaidExportAccess,
   markExportReservationCompleted,
@@ -3864,6 +4108,14 @@ function ResultWorkspace({
     style: NarrationStyle,
     pronunciationGuide: string,
   ) => Promise<number>;
+  regenerateNarrationSegment: (
+    segmentIndex: number,
+    deliveryPreset: NarrationDeliveryPreset,
+    emphasisText: string,
+  ) => Promise<NarrationSegmentCorrectionResult>;
+  applyNarrationSegmentCorrection: (
+    correction: NarrationSegmentCorrectionResult,
+  ) => void;
   checkPaidExportAccess: () => Promise<void>;
   isCheckingPaidExportAccess: boolean;
   markExportReservationCompleted: () => void;
@@ -3960,6 +4212,15 @@ function ResultWorkspace({
   );
   const [isRegeneratingNarration, setIsRegeneratingNarration] =
     useState(false);
+  const [selectedNarrationSegmentIndex, setSelectedNarrationSegmentIndex] =
+    useState(0);
+  const [narrationDeliveryPreset, setNarrationDeliveryPreset] =
+    useState<NarrationDeliveryPreset>("natural");
+  const [narrationEmphasisText, setNarrationEmphasisText] = useState("");
+  const [narrationCorrectionCandidate, setNarrationCorrectionCandidate] =
+    useState<NarrationSegmentCorrectionCandidate | null>(null);
+  const [isGeneratingNarrationCorrection, setIsGeneratingNarrationCorrection] =
+    useState(false);
   const [isUpdatingNarrationCutMode, setIsUpdatingNarrationCutMode] =
     useState(false);
   const pronunciationValidation = useMemo(() => {
@@ -4028,6 +4289,15 @@ function ResultWorkspace({
   );
   const hasPendingNarrationChanges =
     pendingNarrationGenerationKey !== lastNarrationGenerationKey;
+  const narrationSegments = narrationPlan?.segments ?? [];
+  const selectedNarrationSegment =
+    narrationSegments[selectedNarrationSegmentIndex] ?? narrationSegments[0];
+  const selectedNarrationSpeechText =
+    selectedNarrationSegment?.speechText || selectedNarrationSegment?.text || "";
+  const narrationEmphasisIsValid =
+    narrationDeliveryPreset !== "emphasis" ||
+    (Boolean(narrationEmphasisText.trim()) &&
+      selectedNarrationSpeechText.includes(narrationEmphasisText.trim()));
   const narrationGenerationLimitReached =
     narrationGenerationsRemaining <= 0;
   const isSourceMetadataPending = Boolean(
@@ -4037,8 +4307,24 @@ function ResultWorkspace({
     isExporting ||
     isGeneratingThumbnail ||
     isRegeneratingNarration ||
+    isGeneratingNarrationCorrection ||
     isUpdatingNarrationCutMode ||
     isSourceMetadataPending;
+  useEffect(
+    () => () => {
+      if (narrationCorrectionCandidate?.originalPreviewUrl) {
+        URL.revokeObjectURL(
+          narrationCorrectionCandidate.originalPreviewUrl,
+        );
+      }
+      if (narrationCorrectionCandidate?.correctedPreviewUrl) {
+        URL.revokeObjectURL(
+          narrationCorrectionCandidate.correctedPreviewUrl,
+        );
+      }
+    },
+    [narrationCorrectionCandidate],
+  );
   const [showDisclosureConfirm, setShowDisclosureConfirm] = useState(false);
   const [disclosureConfirmed, setDisclosureConfirmed] = useState(false);
   const [isRecordingDisclosure, setIsRecordingDisclosure] = useState(false);
@@ -4629,6 +4915,7 @@ function ResultWorkspace({
 
   function updateLine(id: number, text: string) {
     if (isMediaBusy) return;
+    setNarrationCorrectionCandidate(null);
     const highlight = selectCaptionHighlight(text);
     setTranscript(
       transcript.map((line) =>
@@ -5286,16 +5573,19 @@ function ResultWorkspace({
     field: "surface" | "reading",
     value: string,
   ) {
+    setNarrationCorrectionCandidate(null);
     setNarrationPronunciationRows((rows) =>
       rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
   }
 
   function enableNarrationPronunciationCorrections() {
+    setNarrationCorrectionCandidate(null);
     setUsePronunciationCorrections(true);
   }
 
   function disableNarrationPronunciationCorrections() {
+    setNarrationCorrectionCandidate(null);
     setUsePronunciationCorrections(false);
     setNarrationPronunciationRows((rows) => [
       {
@@ -5329,6 +5619,7 @@ function ResultWorkspace({
       notify(`「${selectedTerm}」はすでに追加されています`);
       return;
     }
+    setNarrationCorrectionCandidate(null);
     setUsePronunciationCorrections(true);
     setNarrationPronunciationRows((rows) => {
       const emptyRowIndex = rows.findIndex(
@@ -5349,6 +5640,7 @@ function ResultWorkspace({
 
   function addNarrationPronunciationRow() {
     if (!canAddPronunciationRow) return;
+    setNarrationCorrectionCandidate(null);
     const id = pronunciationRowSequenceRef.current;
     pronunciationRowSequenceRef.current += 1;
     setNarrationPronunciationRows((rows) => [
@@ -5358,6 +5650,7 @@ function ResultWorkspace({
   }
 
   function removeNarrationPronunciationRow(id: number) {
+    setNarrationCorrectionCandidate(null);
     setNarrationPronunciationRows((rows) => {
       if (rows.length === 1) {
         return [{ ...rows[0], surface: "", reading: "" }];
@@ -5388,6 +5681,9 @@ function ResultWorkspace({
       setLastAppliedPronunciationGuide(
         normalizedNarrationPronunciationGuide,
       );
+      setSelectedNarrationSegmentIndex(0);
+      setNarrationEmphasisText("");
+      setNarrationCorrectionCandidate(null);
       notify(
         pronunciationEntryCount
           ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました（AI処理 残り${remaining}回）`
@@ -5406,6 +5702,76 @@ function ResultWorkspace({
     }
   }
 
+  function selectNarrationCorrectionSegment(index: number) {
+    setSelectedNarrationSegmentIndex(index);
+    setNarrationEmphasisText("");
+    setNarrationCorrectionCandidate(null);
+  }
+
+  function selectNarrationDeliveryPreset(preset: NarrationDeliveryPreset) {
+    setNarrationDeliveryPreset(preset);
+    if (preset !== "emphasis") setNarrationEmphasisText("");
+    setNarrationCorrectionCandidate(null);
+  }
+
+  async function handleNarrationCorrectionGeneration() {
+    if (
+      isMediaBusy ||
+      isExportingRef.current ||
+      hasPendingNarrationChanges ||
+      narrationGenerationLimitReached ||
+      !selectedNarrationSegment ||
+      !narrationEmphasisIsValid
+    ) {
+      return;
+    }
+    pausePreviewTransport();
+    narrationSampleAudioRef.current?.pause();
+    setNarrationCorrectionCandidate(null);
+    setIsGeneratingNarrationCorrection(true);
+    try {
+      const result = await regenerateNarrationSegment(
+        selectedNarrationSegmentIndex,
+        narrationDeliveryPreset,
+        narrationEmphasisText,
+      );
+      setNarrationCorrectionCandidate({
+        result,
+        originalPreviewUrl: URL.createObjectURL(result.originalPreview),
+        correctedPreviewUrl: URL.createObjectURL(result.correctedPreview),
+        deliveryPreset: narrationDeliveryPreset,
+      });
+      notify(
+        `修正前後を聴き比べられます（AI処理 残り${result.remaining}回）`,
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "この一文のAI音声を修正できませんでした",
+      );
+    } finally {
+      setIsGeneratingNarrationCorrection(false);
+    }
+  }
+
+  function handleNarrationCorrectionApply() {
+    if (!narrationCorrectionCandidate || isMediaBusy) return;
+    try {
+      pausePreviewTransport();
+      narrationSampleAudioRef.current?.pause();
+      applyNarrationSegmentCorrection(narrationCorrectionCandidate.result);
+      setNarrationCorrectionCandidate(null);
+      notify("修正版をAIナレーションへ反映しました。追加のAI処理は使用していません");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "修正版を反映できませんでした",
+      );
+    }
+  }
+
   async function handleNarrationCutModeChange(autoCut: boolean) {
     if (
       isMediaBusy ||
@@ -5416,6 +5782,7 @@ function ResultWorkspace({
     }
     pausePreviewTransport();
     narrationSampleAudioRef.current?.pause();
+    setNarrationCorrectionCandidate(null);
     setIsUpdatingNarrationCutMode(true);
     try {
       await setNarrationAutoCutEnabled(autoCut);
@@ -6846,7 +7213,10 @@ function ResultWorkspace({
                   rows={6}
                   maxLength={2_000}
                   disabled={isMediaBusy}
-                  onChange={(event) => setNarrationDraft(event.target.value)}
+                  onChange={(event) => {
+                    setNarrationDraft(event.target.value);
+                    setNarrationCorrectionCandidate(null);
+                  }}
                 />
               </label>
               <div
@@ -7069,7 +7439,10 @@ function ResultWorkspace({
                       draftNarrationStyle === style.id ? "active" : ""
                     }
                     aria-pressed={draftNarrationStyle === style.id}
-                    onClick={() => setDraftNarrationStyle(style.id)}
+                    onClick={() => {
+                      setDraftNarrationStyle(style.id);
+                      setNarrationCorrectionCandidate(null);
+                    }}
                     disabled={isMediaBusy}
                   >
                     <strong>{style.label}</strong>
@@ -7152,6 +7525,196 @@ function ResultWorkspace({
               <p className="naturalNarrationNote">
                 声を動画尺に合わせて引き伸ばさず、自然な1倍速で再生・書き出しします。読み方を直す場合も、動画分析はやり直しません。
               </p>
+              <div className="intonationEditor">
+                <div className="intonationEditorHeading">
+                  <div>
+                    <strong>声の抑揚を一文だけ直す</strong>
+                    <small>気になる部分だけ生成して、採用前に聴き比べ</small>
+                  </div>
+                  <span>部分修正</span>
+                </div>
+                <p>
+                  イントネーションや語尾が不自然な一文を選び、直し方を指定してください。テロップの文字とほかの音声は変わりません。
+                </p>
+                <label className="intonationSentencePicker">
+                  <span>1. 直したい一文</span>
+                  <select
+                    value={selectedNarrationSegmentIndex}
+                    disabled={isMediaBusy || !narrationSegments.length}
+                    onChange={(event) =>
+                      selectNarrationCorrectionSegment(
+                        Number(event.target.value),
+                      )
+                    }
+                  >
+                    {narrationSegments.map((segment, index) => (
+                      <option key={`${index}-${segment.text}`} value={index}>
+                        {index + 1}. {segment.text}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset className="intonationPresetPicker">
+                  <legend>2. どのように直すか</legend>
+                  <div>
+                    {NARRATION_DELIVERY_PRESETS.map((preset) => (
+                      <button
+                        type="button"
+                        key={preset.id}
+                        className={
+                          narrationDeliveryPreset === preset.id ? "active" : ""
+                        }
+                        aria-pressed={narrationDeliveryPreset === preset.id}
+                        disabled={isMediaBusy}
+                        onClick={() =>
+                          selectNarrationDeliveryPreset(preset.id)
+                        }
+                      >
+                        <strong>{preset.label}</strong>
+                        <small>{preset.note}</small>
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                {narrationDeliveryPreset === "emphasis" && (
+                  <label className="intonationEmphasisInput">
+                    <span>強調したい言葉</span>
+                    <input
+                      type="text"
+                      maxLength={40}
+                      value={narrationEmphasisText}
+                      disabled={isMediaBusy}
+                      aria-invalid={!narrationEmphasisIsValid}
+                      placeholder="選んだ一文にある言葉を入力"
+                      onChange={(event) => {
+                        setNarrationEmphasisText(event.target.value);
+                        setNarrationCorrectionCandidate(null);
+                      }}
+                    />
+                    <small>
+                      {narrationEmphasisIsValid
+                        ? `例：${selectedNarrationSegment?.text
+                            .replace(/[。！？!?]/g, "")
+                            .slice(0, 12) || "おすすめ"}`
+                        : "選んだ一文と同じ表記で入力してください。"}
+                    </small>
+                  </label>
+                )}
+                {hasPendingNarrationChanges && (
+                  <p className="intonationPendingNotice" role="status">
+                    台本・読み方・声の変更がまだ音声へ反映されていません。先に上の「変更内容をAI音声に反映」を押してください。
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="quietButton generateIntonationCorrection"
+                  disabled={
+                    isMediaBusy ||
+                    hasPendingNarrationChanges ||
+                    narrationGenerationLimitReached ||
+                    !selectedNarrationSegment ||
+                    !narrationEmphasisIsValid
+                  }
+                  onClick={() =>
+                    void handleNarrationCorrectionGeneration()
+                  }
+                >
+                  {isGeneratingNarrationCorrection
+                    ? "この一文を修正中…"
+                    : narrationGenerationLimitReached
+                      ? "AI処理の上限に達しました"
+                      : narrationCorrectionCandidate
+                        ? "別の修正候補を生成（AI処理1回）"
+                        : "この一文の修正候補を生成（AI処理1回）"}
+                </button>
+                {narrationCorrectionCandidate && (
+                  <div className="intonationComparison">
+                    <div className="intonationComparisonHeading">
+                      <div>
+                        <span>修正候補ができました</span>
+                        <strong>
+                          {
+                            NARRATION_DELIVERY_PRESETS.find(
+                              (preset) =>
+                                preset.id ===
+                                narrationCorrectionCandidate.deliveryPreset,
+                            )?.label
+                          }
+                        </strong>
+                      </div>
+                      <small>前後を含めて確認できます</small>
+                    </div>
+                    <div className="intonationCompareAudios">
+                      <label>
+                        <span>修正前</span>
+                        <audio
+                          src={
+                            narrationCorrectionCandidate.originalPreviewUrl
+                          }
+                          controls
+                          preload="metadata"
+                          onPlay={(event) => {
+                            pausePreviewTransport();
+                            narrationSampleAudioRef.current?.pause();
+                            event.currentTarget
+                              .closest(".intonationCompareAudios")
+                              ?.querySelectorAll("audio")
+                              .forEach((audio) => {
+                                if (audio !== event.currentTarget) audio.pause();
+                              });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        <span>修正後</span>
+                        <audio
+                          src={
+                            narrationCorrectionCandidate.correctedPreviewUrl
+                          }
+                          controls
+                          preload="metadata"
+                          onPlay={(event) => {
+                            pausePreviewTransport();
+                            narrationSampleAudioRef.current?.pause();
+                            event.currentTarget
+                              .closest(".intonationCompareAudios")
+                              ?.querySelectorAll("audio")
+                              .forEach((audio) => {
+                                if (audio !== event.currentTarget) audio.pause();
+                              });
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <div className="intonationComparisonActions">
+                      <button
+                        type="button"
+                        className="mainCta"
+                        disabled={isMediaBusy}
+                        onClick={handleNarrationCorrectionApply}
+                      >
+                        この修正版を採用
+                      </button>
+                      <button
+                        type="button"
+                        className="quietButton"
+                        disabled={isMediaBusy}
+                        onClick={() =>
+                          setNarrationCorrectionCandidate(null)
+                        }
+                      >
+                        採用せず閉じる
+                      </button>
+                    </div>
+                    <p>
+                      採用・破棄・聴き直しでは、AI処理の残り回数は減りません。
+                    </p>
+                  </div>
+                )}
+                <p className="intonationCostNote">
+                  候補の生成が正常に完了したときだけAI処理を1回使用します。音声全体は作り直しません。
+                </p>
+              </div>
             </div>
             <div className="postCaptionEditor">
               <label>

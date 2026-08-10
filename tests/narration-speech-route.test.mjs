@@ -378,6 +378,119 @@ test("does not create a second billable request after realtime generation is req
   }
 });
 
+test("applies an allowlisted intonation correction to one sentence", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const socket = new MockRealtimeSocket();
+  globalThis.fetch = async () => realtimeUpgrade(socket);
+
+  try {
+    const worker = await loadWorker("narration-partial-intonation");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "今日のおすすめを紹介します。",
+          style: "bright",
+          partialCorrection: true,
+          deliveryPreset: "emphasis",
+          emphasisText: "おすすめ",
+          expectedDurationSeconds: 3.2,
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-narration-partial-correction"), "1");
+    assert.equal(response.headers.get("x-narration-model"), "gpt-realtime-2.1-mini");
+    const generated = socket.sent[1].response;
+    assert.equal(
+      generated.input[0].content[0].text,
+      "今日のおすすめを紹介します。",
+    );
+    assert.match(generated.instructions, /Requested Correction/);
+    assert.match(generated.instructions, /「おすすめ」だけを意味上自然に少し強調/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects an emphasis word that is not in the selected sentence", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return realtimeUpgrade(new MockRealtimeSocket());
+  };
+
+  try {
+    const worker = await loadWorker("narration-invalid-emphasis");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "今日のおすすめを紹介します。",
+          style: "bright",
+          partialCorrection: true,
+          deliveryPreset: "emphasis",
+          emphasisText: "明日の予定",
+          expectedDurationSeconds: 3.2,
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(requestCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("does not switch voice models when a partial correction cannot connect", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return realtimeUpgrade(new MockRealtimeSocket("error"));
+  };
+
+  try {
+    const worker = await loadWorker("narration-partial-no-fallback");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/narration/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: "語尾を自然に言い切ります。",
+          style: "calm",
+          partialCorrection: true,
+          deliveryPreset: "firm_ending",
+          expectedDurationSeconds: 3,
+        }),
+      }),
+      workerEnv,
+      workerContext,
+    );
+
+    assert.equal(response.status, 502);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("closes realtime generation when the browser request is aborted", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;

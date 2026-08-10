@@ -9,6 +9,13 @@ export const NARRATION_DISCLOSURE_TEXT =
 export const NARRATION_TERMS_VERSION = "2026-07-30";
 export type VideoAudioMode = "spoken" | "narration";
 export type NarrationStyle = "bright" | "calm" | "comedy" | "party";
+export type NarrationDeliveryPreset =
+  | "natural"
+  | "firm_ending"
+  | "emphasis"
+  | "pause"
+  | "brighter"
+  | "calmer";
 export type NarrationOriginalAudioLevel = number;
 
 export type NarrationPronunciationEntry = {
@@ -52,6 +59,43 @@ export const NARRATION_STYLES: Array<{
     id: "party",
     label: "明るい女性",
     note: "華やかでノリのよい声｜イベント・SNS",
+  },
+];
+
+export const NARRATION_DELIVERY_PRESETS: Array<{
+  id: NarrationDeliveryPreset;
+  label: string;
+  note: string;
+}> = [
+  {
+    id: "natural",
+    label: "自然な抑揚",
+    note: "一文全体を会話のように整える",
+  },
+  {
+    id: "firm_ending",
+    label: "語尾を言い切る",
+    note: "文末を上げず、自然に着地する",
+  },
+  {
+    id: "emphasis",
+    label: "言葉を強調",
+    note: "選んだ言葉だけを自然に立たせる",
+  },
+  {
+    id: "pause",
+    label: "間を整える",
+    note: "意味の切れ目に短い間を入れる",
+  },
+  {
+    id: "brighter",
+    label: "少し明るく",
+    note: "声質は変えず、前向きな抑揚にする",
+  },
+  {
+    id: "calmer",
+    label: "少し落ち着いて",
+    note: "声質は変えず、穏やかに読む",
   },
 ];
 
@@ -379,6 +423,18 @@ export function getNarrationMixLevels(
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {
   return NARRATION_STYLES.some((style) => style.id === value);
+}
+
+export function isNarrationDeliveryPreset(
+  value: unknown,
+): value is NarrationDeliveryPreset {
+  return NARRATION_DELIVERY_PRESETS.some((preset) => preset.id === value);
+}
+
+export function normalizeNarrationDeliveryPreset(
+  value: unknown,
+): NarrationDeliveryPreset | null {
+  return isNarrationDeliveryPreset(value) ? value : null;
 }
 
 /**
