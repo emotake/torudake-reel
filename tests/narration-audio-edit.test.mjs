@@ -227,8 +227,35 @@ test("does not turn down a whole replacement because of one transient peak", () 
   );
   const wav = decodePcm16Wav(result.audio);
   const voicedFrame = Math.floor((result.correctedStart + 0.1) * wav.sampleRate);
+  const correctedStartFrame = Math.floor(result.correctedStart * wav.sampleRate);
+  const correctedEndFrame = Math.ceil(result.correctedEnd * wav.sampleRate);
+  let correctedPeak = 0;
+  let fullScaleSamples = 0;
+  for (let frame = correctedStartFrame; frame < correctedEndFrame; frame += 1) {
+    const magnitude = Math.abs(wav.sample(frame));
+    correctedPeak = Math.max(correctedPeak, magnitude);
+    if (magnitude >= 0.999) fullScaleSamples += 1;
+  }
 
   assert.ok(Math.abs(wav.sample(voicedFrame) - 0.3) < 0.02);
+  assert.equal(fullScaleSamples, 0);
+  assert.ok(correctedPeak > 0.82 && correctedPeak <= 0.951);
+});
+
+test("keeps a full fade when a replacement overhangs by only two samples", () => {
+  const original = audioSource(Array.from({ length: 3_000 }, () => 0));
+  const result = spliceNarrationAudioSegment(
+    original,
+    audioSource(Array.from({ length: 1_002 }, () => 0.5)),
+    1,
+    2,
+    { originalStart: 1, originalEnd: 2 },
+  );
+  const wav = decodePcm16Wav(result.audio);
+
+  assert.equal(result.duration, original.duration);
+  assert.ok(Math.abs(wav.sample(999)) < 0.04);
+  assert.ok(Math.abs(wav.sample(2_000)) < 0.001);
 });
 
 test("rejects a trimmed replacement that exceeds the safe overhang", () => {

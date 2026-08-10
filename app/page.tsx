@@ -4147,6 +4147,9 @@ function ResultWorkspace({
   const videoRef = useRef<HTMLVideoElement>(null);
   const narrationDraftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const narrationSampleAudioRef = useRef<HTMLAudioElement>(null);
+  const narrationCorrectionAudioRefs = useRef<
+    [HTMLAudioElement | null, HTMLAudioElement | null]
+  >([null, null]);
   const previewNarrationEngineRef = useRef<{
     url: string;
     context: AudioContext;
@@ -4243,6 +4246,23 @@ function ResultWorkspace({
   const [narrationEmphasisText, setNarrationEmphasisText] = useState("");
   const [narrationCorrectionCandidate, setNarrationCorrectionCandidate] =
     useState<NarrationSegmentCorrectionCandidate | null>(null);
+  function stopNarrationCorrectionComparisonAudio(
+    except: HTMLAudioElement | null = null,
+  ) {
+    narrationCorrectionAudioRefs.current.forEach((audio) => {
+      if (!audio || audio === except) return;
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // The element may not have loaded metadata yet. Pausing is sufficient.
+      }
+    });
+  }
+  function clearNarrationCorrectionCandidate() {
+    stopNarrationCorrectionComparisonAudio();
+    setNarrationCorrectionCandidate(null);
+  }
   const [isGeneratingNarrationCorrection, setIsGeneratingNarrationCorrection] =
     useState(false);
   const [isUpdatingNarrationCutMode, setIsUpdatingNarrationCutMode] =
@@ -4939,7 +4959,7 @@ function ResultWorkspace({
 
   function updateLine(id: number, text: string) {
     if (isMediaBusy) return;
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     const highlight = selectCaptionHighlight(text);
     setTranscript(
       transcript.map((line) =>
@@ -5535,6 +5555,7 @@ function ResultWorkspace({
     }
 
     narrationSampleAudioRef.current?.pause();
+    stopNarrationCorrectionComparisonAudio();
     const shouldRestart =
       previewHoldingFinalFrameRef.current ||
       previewTransportState === "ended" ||
@@ -5597,19 +5618,19 @@ function ResultWorkspace({
     field: "surface" | "reading",
     value: string,
   ) {
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setNarrationPronunciationRows((rows) =>
       rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
   }
 
   function enableNarrationPronunciationCorrections() {
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setUsePronunciationCorrections(true);
   }
 
   function disableNarrationPronunciationCorrections() {
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setUsePronunciationCorrections(false);
     setNarrationPronunciationRows((rows) => [
       {
@@ -5643,7 +5664,7 @@ function ResultWorkspace({
       notify(`「${selectedTerm}」はすでに追加されています`);
       return;
     }
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setUsePronunciationCorrections(true);
     setNarrationPronunciationRows((rows) => {
       const emptyRowIndex = rows.findIndex(
@@ -5664,7 +5685,7 @@ function ResultWorkspace({
 
   function addNarrationPronunciationRow() {
     if (!canAddPronunciationRow) return;
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     const id = pronunciationRowSequenceRef.current;
     pronunciationRowSequenceRef.current += 1;
     setNarrationPronunciationRows((rows) => [
@@ -5674,7 +5695,7 @@ function ResultWorkspace({
   }
 
   function removeNarrationPronunciationRow(id: number) {
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setNarrationPronunciationRows((rows) => {
       if (rows.length === 1) {
         return [{ ...rows[0], surface: "", reading: "" }];
@@ -5694,6 +5715,7 @@ function ResultWorkspace({
     }
     pausePreviewTransport();
     narrationSampleAudioRef.current?.pause();
+    clearNarrationCorrectionCandidate();
     setIsRegeneratingNarration(true);
     try {
       const remaining = await regenerateNarration(
@@ -5707,7 +5729,6 @@ function ResultWorkspace({
       );
       setSelectedNarrationSegmentIndex(0);
       setNarrationEmphasisText("");
-      setNarrationCorrectionCandidate(null);
       notify(
         pronunciationEntryCount
           ? `読み方${pronunciationEntryCount}件を反映してAI音声を更新しました（AI処理 残り${remaining}回）`
@@ -5727,15 +5748,15 @@ function ResultWorkspace({
   }
 
   function selectNarrationCorrectionSegment(index: number) {
+    clearNarrationCorrectionCandidate();
     setSelectedNarrationSegmentIndex(index);
     setNarrationEmphasisText("");
-    setNarrationCorrectionCandidate(null);
   }
 
   function selectNarrationDeliveryPreset(preset: NarrationDeliveryPreset) {
+    clearNarrationCorrectionCandidate();
     setNarrationDeliveryPreset(preset);
     if (preset !== "emphasis") setNarrationEmphasisText("");
-    setNarrationCorrectionCandidate(null);
   }
 
   async function handleNarrationCorrectionGeneration() {
@@ -5751,7 +5772,7 @@ function ResultWorkspace({
     }
     pausePreviewTransport();
     narrationSampleAudioRef.current?.pause();
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setIsGeneratingNarrationCorrection(true);
     try {
       const result = await regenerateNarrationSegment(
@@ -5784,8 +5805,9 @@ function ResultWorkspace({
     try {
       pausePreviewTransport();
       narrationSampleAudioRef.current?.pause();
+      stopNarrationCorrectionComparisonAudio();
       applyNarrationSegmentCorrection(narrationCorrectionCandidate.result);
-      setNarrationCorrectionCandidate(null);
+      clearNarrationCorrectionCandidate();
       notify("修正版をAIナレーションへ反映しました。追加のAI処理は使用していません");
     } catch (error) {
       notify(
@@ -5806,7 +5828,7 @@ function ResultWorkspace({
     }
     pausePreviewTransport();
     narrationSampleAudioRef.current?.pause();
-    setNarrationCorrectionCandidate(null);
+    clearNarrationCorrectionCandidate();
     setIsUpdatingNarrationCutMode(true);
     try {
       await setNarrationAutoCutEnabled(autoCut);
@@ -7239,7 +7261,7 @@ function ResultWorkspace({
                   disabled={isMediaBusy}
                   onChange={(event) => {
                     setNarrationDraft(event.target.value);
-                    setNarrationCorrectionCandidate(null);
+                    clearNarrationCorrectionCandidate();
                   }}
                 />
               </label>
@@ -7465,7 +7487,7 @@ function ResultWorkspace({
                     aria-pressed={draftNarrationStyle === style.id}
                     onClick={() => {
                       setDraftNarrationStyle(style.id);
-                      setNarrationCorrectionCandidate(null);
+                      clearNarrationCorrectionCandidate();
                     }}
                     disabled={isMediaBusy}
                   >
@@ -7543,6 +7565,7 @@ function ResultWorkspace({
                     event.currentTarget.pause();
                     return;
                   }
+                  stopNarrationCorrectionComparisonAudio();
                   pausePreviewTransport();
                 }}
               />
@@ -7612,7 +7635,7 @@ function ResultWorkspace({
                       placeholder="選んだ一文にある言葉を入力"
                       onChange={(event) => {
                         setNarrationEmphasisText(event.target.value);
-                        setNarrationCorrectionCandidate(null);
+                        clearNarrationCorrectionCandidate();
                       }}
                     />
                     <small>
@@ -7672,6 +7695,9 @@ function ResultWorkspace({
                       <label>
                         <span>修正前</span>
                         <audio
+                          ref={(audio) => {
+                            narrationCorrectionAudioRefs.current[0] = audio;
+                          }}
                           src={
                             narrationCorrectionCandidate.originalPreviewUrl
                           }
@@ -7680,18 +7706,18 @@ function ResultWorkspace({
                           onPlay={(event) => {
                             pausePreviewTransport();
                             narrationSampleAudioRef.current?.pause();
-                            event.currentTarget
-                              .closest(".intonationCompareAudios")
-                              ?.querySelectorAll("audio")
-                              .forEach((audio) => {
-                                if (audio !== event.currentTarget) audio.pause();
-                              });
+                            stopNarrationCorrectionComparisonAudio(
+                              event.currentTarget,
+                            );
                           }}
                         />
                       </label>
                       <label>
                         <span>修正後</span>
                         <audio
+                          ref={(audio) => {
+                            narrationCorrectionAudioRefs.current[1] = audio;
+                          }}
                           src={
                             narrationCorrectionCandidate.correctedPreviewUrl
                           }
@@ -7700,12 +7726,9 @@ function ResultWorkspace({
                           onPlay={(event) => {
                             pausePreviewTransport();
                             narrationSampleAudioRef.current?.pause();
-                            event.currentTarget
-                              .closest(".intonationCompareAudios")
-                              ?.querySelectorAll("audio")
-                              .forEach((audio) => {
-                                if (audio !== event.currentTarget) audio.pause();
-                              });
+                            stopNarrationCorrectionComparisonAudio(
+                              event.currentTarget,
+                            );
                           }}
                         />
                       </label>
@@ -7723,9 +7746,7 @@ function ResultWorkspace({
                         type="button"
                         className="quietButton"
                         disabled={isMediaBusy}
-                        onClick={() =>
-                          setNarrationCorrectionCandidate(null)
-                        }
+                        onClick={clearNarrationCorrectionCandidate}
                       >
                         採用せず閉じる
                       </button>

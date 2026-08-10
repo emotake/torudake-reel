@@ -42,6 +42,8 @@ const MIN_REPLACEMENT_RMS = 0.0005;
 const MIN_RMS_MATCH_GAIN = 0.5;
 const MAX_RMS_MATCH_GAIN = 2;
 const MATCHED_PEAK_LIMIT = 0.95;
+const LOCAL_LIMITER_THRESHOLD = 0.82;
+const LOCAL_LIMITER_CEILING = 0.95;
 const MAX_REPLACEMENT_OVERHANG_SECONDS = 0.06;
 const SPEECH_REFERENCE_SECONDS = 0.28;
 const SPEECH_REFERENCE_GUARD_SECONDS = 0.035;
@@ -55,6 +57,18 @@ const PEAK_HISTOGRAM_BINS = 1_024;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function limitTransientPeak(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  const magnitude = Math.abs(value);
+  if (magnitude <= LOCAL_LIMITER_THRESHOLD) return value;
+  const headroom = LOCAL_LIMITER_CEILING - LOCAL_LIMITER_THRESHOLD;
+  const limitedMagnitude =
+    LOCAL_LIMITER_THRESHOLD +
+    headroom *
+      Math.tanh((magnitude - LOCAL_LIMITER_THRESHOLD) / headroom);
+  return Math.sign(value) * Math.min(LOCAL_LIMITER_CEILING, limitedMagnitude);
 }
 
 function cleanLength(value: string | undefined) {
@@ -688,56 +702,56 @@ export function spliceNarrationAudioSegment(
         trimmedReplacement.startFrame +
           (frame * replacement.sampleRate) / sampleRate,
       );
+      let replacementFade = 1;
+      if (
+        fadeFrames > 0 &&
+        !(replacementOffset === 0 && prefixFrames === 0) &&
+        frame < fadeFrames
+      ) {
+        replacementFade *= Math.sin(
+          (Math.PI / 2) * ((frame + 1) / fadeFrames),
+        );
+      }
+      if (
+        fadeFrames > 0 &&
+        !(
+          replacementEndFrame === original.length &&
+          suffixSourceFrame === original.length
+        ) &&
+        frame >= replacementFrames - fadeFrames
+      ) {
+        replacementFade *= Math.cos(
+          (Math.PI / 2) *
+            ((frame - (replacementFrames - fadeFrames) + 1) / fadeFrames),
+        );
+      }
       const replacementSample =
         sampleAt(
           replacement,
           channel,
           channels,
           sourceFrame / replacement.sampleRate,
-        ) * rmsGain;
+        ) * rmsGain * replacementFade;
 
       if (outputFrame < prefixFrames) {
         const overlapFrames = prefixFrames - replacementOffset;
         const progress = (frame + 1) / overlapFrames;
         const angle = (Math.PI / 2) * progress;
-        output[outputFrame] =
+        output[outputFrame] = limitTransientPeak(
           (originalChannel[outputFrame] ?? 0) * Math.cos(angle) +
-          replacementSample * Math.sin(angle);
+            replacementSample * Math.sin(angle),
+        );
       } else if (outputFrame >= suffixSourceFrame) {
         const overlapFrames = replacementEndFrame - suffixSourceFrame;
         const progress =
           (outputFrame - suffixSourceFrame + 1) / overlapFrames;
         const angle = (Math.PI / 2) * progress;
-        output[outputFrame] =
+        output[outputFrame] = limitTransientPeak(
           replacementSample * Math.cos(angle) +
-          (originalChannel[outputFrame] ?? 0) * Math.sin(angle);
+            (originalChannel[outputFrame] ?? 0) * Math.sin(angle),
+        );
       } else {
-        let replacementFade = 1;
-        if (
-          fadeFrames > 0 &&
-          replacementOffset >= prefixFrames &&
-          !(replacementOffset === 0 && prefixFrames === 0) &&
-          frame < fadeFrames
-        ) {
-          replacementFade *= Math.sin(
-            (Math.PI / 2) * ((frame + 1) / fadeFrames),
-          );
-        }
-        if (
-          fadeFrames > 0 &&
-          replacementEndFrame <= suffixSourceFrame &&
-          !(
-            replacementEndFrame === original.length &&
-            suffixSourceFrame === original.length
-          ) &&
-          frame >= replacementFrames - fadeFrames
-        ) {
-          replacementFade *= Math.cos(
-            (Math.PI / 2) *
-              ((frame - (replacementFrames - fadeFrames) + 1) / fadeFrames),
-          );
-        }
-        output[outputFrame] = replacementSample * replacementFade;
+        output[outputFrame] = limitTransientPeak(replacementSample);
       }
     }
     for (let frame = 0; frame < output.length; frame += 1) {

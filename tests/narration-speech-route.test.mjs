@@ -419,6 +419,10 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
       response.headers.get("x-narration-profile"),
       "2026-08-10-continuity-v1:bright:gpt-realtime-2.1-mini:marin:1",
     );
+    const session = socket.sent[0].session;
+    assert.equal(session.audio.output.voice, "marin");
+    assert.equal(session.audio.output.speed, 1);
+    assert.equal(session.audio.output.format.rate, 24_000);
     const generated = socket.sent[1].response;
     assert.equal(
       generated.input[0].content[0].text,
@@ -429,7 +433,18 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.match(generated.instructions, /同一話者/);
     assert.match(generated.instructions, /全体の音量を上げ下げしない/);
     assert.match(generated.instructions, /約3\.2秒/);
-    assert.match(generated.instructions, /「おすすめ」だけを意味上自然に少し強調/);
+    assert.match(
+      generated.instructions,
+      /「おすすめ」だけを、日本語として自然な高低アクセント（ピッチアクセント）/,
+    );
+    assert.match(generated.instructions, /直前・直後のごく短い間だけ/);
+    assert.match(generated.instructions, /一文全体のピーク音量、平均音量/);
+    assert.match(generated.instructions, /声質、息遣い、収録距離感/);
+    assert.match(
+      generated.instructions,
+      /音量を上げる、叫ぶ、息を強く当てる、破裂音や摩擦音を強くする/,
+    );
+    assert.match(generated.instructions, /音を歪ませる表現は禁止/);
   } finally {
     globalThis.fetch = originalFetch;
   }

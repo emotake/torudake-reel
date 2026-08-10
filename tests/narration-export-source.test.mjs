@@ -332,6 +332,95 @@ test("keeps a partial intonation correction on the original voice profile", () =
   assert.match(correctionFlow, /setNarrationAudioProfile\(correction\.profile\)/);
 });
 
+test("stops both correction comparison audios before switching playback or clearing a candidate", () => {
+  const stopStart = pageSource.indexOf(
+    "function stopNarrationCorrectionComparisonAudio(",
+  );
+  const stopEnd = pageSource.indexOf(
+    "\n  function clearNarrationCorrectionCandidate()",
+    stopStart,
+  );
+  const stopFlow = pageSource.slice(stopStart, stopEnd);
+  const clearEnd = pageSource.indexOf(
+    "\n  const [isGeneratingNarrationCorrection",
+    stopEnd,
+  );
+  const clearFlow = pageSource.slice(stopEnd, clearEnd);
+
+  assert.ok(stopStart >= 0);
+  assert.match(stopFlow, /narrationCorrectionAudioRefs\.current\.forEach/);
+  assert.match(stopFlow, /audio === except/);
+  assert.match(stopFlow, /audio\.pause\(\)/);
+  assert.match(stopFlow, /audio\.currentTime = 0/);
+  assert.match(
+    clearFlow,
+    /stopNarrationCorrectionComparisonAudio\(\)[\s\S]*?setNarrationCorrectionCandidate\(null\)/,
+  );
+  assert.equal(
+    pageSource.match(/setNarrationCorrectionCandidate\(null\)/g)?.length,
+    1,
+  );
+
+  const toggleStart = pageSource.indexOf("async function togglePlayback()");
+  const toggleEnd = pageSource.indexOf(
+    "\n  function downloadText",
+    toggleStart,
+  );
+  const toggleFlow = pageSource.slice(toggleStart, toggleEnd);
+  assert.ok(
+    toggleFlow.indexOf("stopNarrationCorrectionComparisonAudio()") <
+      toggleFlow.indexOf("playPreviewFromEditedTime("),
+  );
+
+  const sampleStart = pageSource.indexOf("ref={narrationSampleAudioRef}");
+  const sampleEnd = pageSource.indexOf(
+    '<p className="naturalNarrationNote">',
+    sampleStart,
+  );
+  const sampleFlow = pageSource.slice(sampleStart, sampleEnd);
+  assert.match(
+    sampleFlow,
+    /onPlay=\{\(event\) => \{[\s\S]*?stopNarrationCorrectionComparisonAudio\(\)/,
+  );
+
+  const generationStart = pageSource.indexOf(
+    "async function handleNarrationCorrectionGeneration()",
+  );
+  const generationEnd = pageSource.indexOf(
+    "\n  function handleNarrationCorrectionApply()",
+    generationStart,
+  );
+  const generationFlow = pageSource.slice(generationStart, generationEnd);
+  assert.ok(
+    generationFlow.indexOf("clearNarrationCorrectionCandidate()") <
+      generationFlow.indexOf("regenerateNarrationSegment("),
+  );
+
+  const applyEnd = pageSource.indexOf(
+    "\n  async function handleNarrationCutModeChange",
+    generationEnd,
+  );
+  const applyFlow = pageSource.slice(generationEnd, applyEnd);
+  assert.ok(
+    applyFlow.indexOf("stopNarrationCorrectionComparisonAudio()") <
+      applyFlow.indexOf("applyNarrationSegmentCorrection("),
+  );
+  assert.match(
+    pageSource,
+    /narrationCorrectionAudioRefs\.current\[0\] = audio[\s\S]*?narrationCorrectionAudioRefs\.current\[1\] = audio/,
+  );
+  assert.equal(
+    pageSource.match(
+      /stopNarrationCorrectionComparisonAudio\(\s*event\.currentTarget,?\s*\)/g,
+    )?.length,
+    2,
+  );
+  assert.match(
+    pageSource,
+    /onClick=\{clearNarrationCorrectionCandidate\}[\s\S]*?採用せず閉じる/,
+  );
+});
+
 test("uses one initial narration action while charging each manual voice regeneration once", () => {
   const initialStart = pageSource.indexOf(
     "async function startNarrationEditing()",
