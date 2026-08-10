@@ -45,6 +45,13 @@ const MATCHED_PEAK_LIMIT = 0.95;
 const MAX_REPLACEMENT_OVERHANG_SECONDS = 0.06;
 const SPEECH_REFERENCE_SECONDS = 0.28;
 const SPEECH_REFERENCE_GUARD_SECONDS = 0.035;
+const SPEECH_LOUDNESS_WINDOW_SECONDS = 0.02;
+const SPEECH_LOUDNESS_HOP_SECONDS = 0.01;
+const SPEECH_ACTIVE_FLOOR = 0.0015;
+const SPEECH_ACTIVE_PEAK_RATIO = 0.14;
+const SPEECH_LOUDNESS_PERCENTILE = 0.6;
+const ROBUST_PEAK_PERCENTILE = 0.995;
+const PEAK_HISTOGRAM_BINS = 1_024;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -140,21 +147,74 @@ function audioRms(
   return count ? Math.sqrt(squared / count) : 0;
 }
 
-function audioPeak(
+function activeSpeechRms(
   source: DecodedAudioSource,
   startFrame = 0,
   endFrame = source.length,
 ) {
   const start = clamp(Math.floor(startFrame), 0, source.length);
   const end = clamp(Math.ceil(endFrame), start, source.length);
-  let peak = 0;
-  for (let frame = start; frame < end; frame += 1) {
+  if (end <= start) return 0;
+  const windowFrames = Math.max(
+    1,
+    Math.round(SPEECH_LOUDNESS_WINDOW_SECONDS * source.sampleRate),
+  );
+  const hopFrames = Math.max(
+    1,
+    Math.round(SPEECH_LOUDNESS_HOP_SECONDS * source.sampleRate),
+  );
+  const windows: number[] = [];
+  for (let frame = start; frame < end; frame += hopFrames) {
+    windows.push(audioRms(source, frame, Math.min(end, frame + windowFrames)));
+  }
+  const peakWindow = Math.max(0, ...windows);
+  const threshold = Math.max(
+    SPEECH_ACTIVE_FLOOR,
+    peakWindow * SPEECH_ACTIVE_PEAK_RATIO,
+  );
+  const activeWindows = windows
+    .filter((value) => value >= threshold)
+    .sort((left, right) => left - right);
+  if (!activeWindows.length) return 0;
+  const index = Math.min(
+    activeWindows.length - 1,
+    Math.floor((activeWindows.length - 1) * SPEECH_LOUDNESS_PERCENTILE),
+  );
+  return activeWindows[index] ?? 0;
+}
+
+function robustAudioPeak(
+  source: DecodedAudioSource,
+  startFrame = 0,
+  endFrame = source.length,
+) {
+  const start = clamp(Math.floor(startFrame), 0, source.length);
+  const end = clamp(Math.ceil(endFrame), start, source.length);
+  const histogram = new Uint32Array(PEAK_HISTOGRAM_BINS);
+  const sampleStep = Math.max(1, Math.floor(source.sampleRate / 12_000));
+  let sampleCount = 0;
+  for (let frame = start; frame < end; frame += sampleStep) {
     for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
       const value = source.getChannelData(channel)[frame] ?? 0;
-      if (Number.isFinite(value)) peak = Math.max(peak, Math.abs(value));
+      if (!Number.isFinite(value)) continue;
+      const bin = Math.min(
+        PEAK_HISTOGRAM_BINS - 1,
+        Math.floor(Math.abs(value) * PEAK_HISTOGRAM_BINS),
+      );
+      histogram[bin] += 1;
+      sampleCount += 1;
     }
   }
-  return peak;
+  if (!sampleCount) return 0;
+  const target = Math.max(1, Math.ceil(sampleCount * ROBUST_PEAK_PERCENTILE));
+  let cumulative = 0;
+  for (let bin = 0; bin < histogram.length; bin += 1) {
+    cumulative += histogram[bin] ?? 0;
+    if (cumulative >= target) {
+      return (bin + 1) / PEAK_HISTOGRAM_BINS;
+    }
+  }
+  return 1;
 }
 
 function boundaryEnergy(source: DecodedAudioSource, centerSeconds: number) {
@@ -385,8 +445,10 @@ function trimReplacementSilence(
   return {
     startFrame,
     endFrame,
-    speechRms: audioRms(replacement, firstActiveFrame, lastActiveFrame),
-    peak: audioPeak(replacement, startFrame, endFrame),
+    speechRms:
+      activeSpeechRms(replacement, firstActiveFrame, lastActiveFrame) ||
+      audioRms(replacement, firstActiveFrame, lastActiveFrame),
+    peak: robustAudioPeak(replacement, startFrame, endFrame),
   };
 }
 
@@ -395,6 +457,13 @@ function nearbyOriginalSpeechRms(
   startFrame: number,
   endFrame: number,
 ) {
+  // The sentence being replaced is the closest reliable loudness reference.
+  // Quiet join boundaries and pauses must not make the new sentence quieter.
+  const replacedSpeechRms = activeSpeechRms(original, startFrame, endFrame);
+  if (replacedSpeechRms >= MIN_REPLACEMENT_RMS) {
+    return replacedSpeechRms;
+  }
+
   const referenceFrames = Math.round(
     SPEECH_REFERENCE_SECONDS * original.sampleRate,
   );
@@ -405,18 +474,15 @@ function nearbyOriginalSpeechRms(
   const beforeStart = Math.max(0, beforeEnd - referenceFrames);
   const afterStart = Math.min(original.length, endFrame + guardFrames);
   const afterEnd = Math.min(original.length, afterStart + referenceFrames);
-  const beforeFrames = beforeEnd - beforeStart;
-  const afterFrames = afterEnd - afterStart;
-  const beforeRms = audioRms(original, beforeStart, beforeEnd);
-  const afterRms = audioRms(original, afterStart, afterEnd);
-  const outsideFrames = beforeFrames + afterFrames;
-  if (outsideFrames > 0) {
-    const outsideRms = Math.sqrt(
-      (beforeRms * beforeRms * beforeFrames +
-        afterRms * afterRms * afterFrames) /
-        outsideFrames,
+  const outsideReferences = [
+    activeSpeechRms(original, beforeStart, beforeEnd),
+    activeSpeechRms(original, afterStart, afterEnd),
+  ].filter((value) => value >= MIN_REPLACEMENT_RMS);
+  if (outsideReferences.length) {
+    return (
+      outsideReferences.reduce((total, value) => total + value, 0) /
+      outsideReferences.length
     );
-    if (outsideRms >= MIN_REPLACEMENT_RMS) return outsideRms;
   }
   return audioRms(original, startFrame, endFrame);
 }
@@ -682,34 +748,26 @@ export function spliceNarrationAudioSegment(
   const combined = createFloatAudio(outputChannels, sampleRate);
   const correctedStart = replacementOffset / sampleRate;
   const correctedEnd = replacementEndFrame / sampleRate;
-  const originalPreviewStart = Math.max(
+  const previewStart = Math.max(
     0,
-    originalStart - DEFAULT_PREVIEW_CONTEXT_SECONDS,
+    Math.min(originalStart, correctedStart) - DEFAULT_PREVIEW_CONTEXT_SECONDS,
   );
-  const originalPreviewEnd = Math.min(
+  const previewEnd = Math.min(
     original.duration,
-    originalEnd + DEFAULT_PREVIEW_CONTEXT_SECONDS,
-  );
-  const correctedPreviewStart = Math.max(
-    0,
-    correctedStart - DEFAULT_PREVIEW_CONTEXT_SECONDS,
-  );
-  const correctedPreviewEnd = Math.min(
-    combined.duration,
-    correctedEnd + DEFAULT_PREVIEW_CONTEXT_SECONDS,
+    Math.max(originalEnd, correctedEnd) + DEFAULT_PREVIEW_CONTEXT_SECONDS,
   );
 
   return {
     audio: encodeFloatAudioRange(combined),
     originalPreview: encodeFloatAudioRange(
       original,
-      originalPreviewStart,
-      originalPreviewEnd,
+      previewStart,
+      previewEnd,
     ),
     correctedPreview: encodeFloatAudioRange(
       combined,
-      correctedPreviewStart,
-      correctedPreviewEnd,
+      previewStart,
+      previewEnd,
     ),
     originalStart,
     originalEnd,

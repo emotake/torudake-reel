@@ -154,6 +154,9 @@ type NarrationSegmentCorrectionResult = {
   audio: Blob;
   originalPreview: Blob;
   correctedPreview: Blob;
+  model: string;
+  voice: string;
+  profile: string;
   baseAudioUrl: string;
   baseAudioRevision: number;
   segmentIndex: number;
@@ -1129,6 +1132,8 @@ async function requestNarrationSpeech(
   return {
     audio,
     model: response.headers.get("X-Narration-Model") ?? "",
+    voice: response.headers.get("X-Narration-Voice") ?? "",
+    profile: response.headers.get("X-Narration-Profile") ?? "",
     ...quota,
   };
 }
@@ -1412,6 +1417,8 @@ export default function Home() {
     setNarrationAudioUrlState(nextUrl);
   }
   const [narrationAudioModel, setNarrationAudioModel] = useState("");
+  const [narrationAudioVoice, setNarrationAudioVoice] = useState("");
+  const [narrationAudioProfile, setNarrationAudioProfile] = useState("");
   const [aiOperationsRemaining, setAiOperationsRemaining] = useState(
     MAX_AI_OPERATION_LIMIT,
   );
@@ -1574,6 +1581,8 @@ export default function Home() {
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     setNarrationAudioModel("");
+    setNarrationAudioVoice("");
+    setNarrationAudioProfile("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
@@ -1594,6 +1603,8 @@ export default function Home() {
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     setNarrationAudioModel("");
+    setNarrationAudioVoice("");
+    setNarrationAudioProfile("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     setStage("setup");
@@ -1878,6 +1889,8 @@ export default function Home() {
       setNarrationPlan(nextPlan);
       setNarrationAudioUrl(URL.createObjectURL(audio));
       setNarrationAudioModel(speechResult.model);
+      setNarrationAudioVoice(speechResult.voice);
+      setNarrationAudioProfile(speechResult.profile);
       setUsedHighAccuracy(true);
       if (newlyReservedUsage) {
         const usageCompleted = await updateVideoUsage(
@@ -2029,6 +2042,8 @@ export default function Home() {
       );
       setNarrationAudioUrl(URL.createObjectURL(audio));
       setNarrationAudioModel(speechResult.model);
+      setNarrationAudioVoice(speechResult.voice);
+      setNarrationAudioProfile(speechResult.profile);
       return remaining;
     } catch (error) {
       if (error instanceof ApiRequestError) {
@@ -2064,8 +2079,9 @@ export default function Home() {
       );
     }
     if (
-      narrationAudioModel &&
-      narrationAudioModel !== PARTIAL_NARRATION_MODEL
+      narrationAudioModel !== PARTIAL_NARRATION_MODEL ||
+      !narrationAudioVoice ||
+      !narrationAudioProfile
     ) {
       throw new Error(
         "現在の音声は部分修正と異なる音声方式で作られています。台本の生成ボタンでAI音声全体を一度更新してからお試しください。",
@@ -2149,8 +2165,9 @@ export default function Home() {
       );
       const remaining = recordAiOperationResult(speechResult);
       if (
-        speechResult.model &&
-        speechResult.model !== PARTIAL_NARRATION_MODEL
+        speechResult.model !== PARTIAL_NARRATION_MODEL ||
+        speechResult.voice !== narrationAudioVoice ||
+        speechResult.profile !== narrationAudioProfile
       ) {
         throw new Error(
           "元の声質と同じ方式で修正版を生成できませんでした。少し待ってからもう一度お試しください。",
@@ -2198,6 +2215,9 @@ export default function Home() {
         correctedPreview: new Blob([splice.correctedPreview], {
           type: "audio/wav",
         }),
+        model: speechResult.model,
+        voice: speechResult.voice,
+        profile: speechResult.profile,
         baseAudioUrl,
         baseAudioRevision,
         segmentIndex,
@@ -2233,7 +2253,9 @@ export default function Home() {
       );
     }
     setNarrationAudioUrl(URL.createObjectURL(correction.audio));
-    setNarrationAudioModel(PARTIAL_NARRATION_MODEL);
+    setNarrationAudioModel(correction.model);
+    setNarrationAudioVoice(correction.voice);
+    setNarrationAudioProfile(correction.profile);
   }
 
   async function updateNarrationCutMode(autoCut: boolean) {
@@ -2292,6 +2314,8 @@ export default function Home() {
     setNarrationPlan(null);
     setNarrationAudioUrl("");
     setNarrationAudioModel("");
+    setNarrationAudioVoice("");
+    setNarrationAudioProfile("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
     window.scrollTo({ top: 0, behavior: "smooth" });

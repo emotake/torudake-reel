@@ -142,8 +142,10 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
   try {
     const worker = await loadWorker("narration-realtime-voices");
     const styles = ["calm", "bright", "comedy", "party"];
+    const voices = ["cedar", "marin", "ash", "coral"];
+    const speeds = [0.99, 1, 1.07, 1.07];
 
-    for (const style of styles) {
+    for (const [index, style] of styles.entries()) {
       const response = await worker.fetch(
         new Request("http://localhost/api/narration/speech", {
           method: "POST",
@@ -161,6 +163,11 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
       assert.equal(
         response.headers.get("x-narration-model"),
         "gpt-realtime-2.1-mini",
+      );
+      assert.equal(response.headers.get("x-narration-voice"), voices[index]);
+      assert.equal(
+        response.headers.get("x-narration-profile"),
+        `2026-08-10-continuity-v1:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
       );
       const wav = new Uint8Array(await response.arrayBuffer());
       assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
@@ -182,7 +189,7 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
     const responses = sockets.map((socket) => socket.sent[1].response);
     assert.deepEqual(
       sessions.map((session) => session.audio.output.voice),
-      ["cedar", "marin", "ash", "coral"],
+      voices,
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
@@ -190,7 +197,7 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
-      [0.99, 1, 1.07, 1.07],
+      speeds,
     );
     assert.ok(
       sessions.every(
@@ -407,12 +414,21 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-narration-partial-correction"), "1");
     assert.equal(response.headers.get("x-narration-model"), "gpt-realtime-2.1-mini");
+    assert.equal(response.headers.get("x-narration-voice"), "marin");
+    assert.equal(
+      response.headers.get("x-narration-profile"),
+      "2026-08-10-continuity-v1:bright:gpt-realtime-2.1-mini:marin:1",
+    );
     const generated = socket.sent[1].response;
     assert.equal(
       generated.input[0].content[0].text,
       "今日のおすすめを紹介します。",
     );
     assert.match(generated.instructions, /Requested Correction/);
+    assert.match(generated.instructions, /Voice Continuity/);
+    assert.match(generated.instructions, /同一話者/);
+    assert.match(generated.instructions, /全体の音量を上げ下げしない/);
+    assert.match(generated.instructions, /約3\.2秒/);
     assert.match(generated.instructions, /「おすすめ」だけを意味上自然に少し強調/);
   } finally {
     globalThis.fetch = originalFetch;

@@ -70,7 +70,7 @@ export const NARRATION_DELIVERY_PRESETS: Array<{
   {
     id: "natural",
     label: "自然な抑揚",
-    note: "一文全体を会話のように整える",
+    note: "今の声と音量を保ち、抑揚だけ整える",
   },
   {
     id: "firm_ending",

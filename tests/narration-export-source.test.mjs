@@ -301,6 +301,37 @@ test("offers a mobile-friendly pronunciation editor without using the API while 
   );
 });
 
+test("keeps a partial intonation correction on the original voice profile", () => {
+  const correctionStart = pageSource.indexOf(
+    "async function regenerateNarrationSegment(",
+  );
+  const correctionEnd = pageSource.indexOf(
+    "\n  async function updateNarrationCutMode",
+    correctionStart,
+  );
+  const correctionFlow = pageSource.slice(correctionStart, correctionEnd);
+
+  assert.ok(correctionStart >= 0);
+  assert.match(
+    correctionFlow,
+    /narrationAudioModel !== PARTIAL_NARRATION_MODEL/,
+  );
+  assert.match(correctionFlow, /!narrationAudioVoice/);
+  assert.match(correctionFlow, /!narrationAudioProfile/);
+  assert.match(
+    correctionFlow,
+    /speechResult\.voice !== narrationAudioVoice/,
+  );
+  assert.match(
+    correctionFlow,
+    /speechResult\.profile !== narrationAudioProfile/,
+  );
+  assert.match(correctionFlow, /model: speechResult\.model/);
+  assert.match(correctionFlow, /voice: speechResult\.voice/);
+  assert.match(correctionFlow, /profile: speechResult\.profile/);
+  assert.match(correctionFlow, /setNarrationAudioProfile\(correction\.profile\)/);
+});
+
 test("uses one initial narration action while charging each manual voice regeneration once", () => {
   const initialStart = pageSource.indexOf(
     "async function startNarrationEditing()",

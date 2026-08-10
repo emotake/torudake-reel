@@ -103,6 +103,10 @@ test("replaces one narration range without changing the full duration", () => {
     assert.ok(bytes.length > 44);
   }
   assert.equal(decodePcm16Wav(result.audio).frameCount, originalSamples.length);
+  assert.equal(
+    decodePcm16Wav(result.originalPreview).frameCount,
+    decodePcm16Wav(result.correctedPreview).frameCount,
+  );
 });
 
 test("rejects partial replacement before generation when boundaries are not quiet", () => {
@@ -158,6 +162,73 @@ test("trims replacement silence and RMS-matches speech in a valid WAV", () => {
     ((result.correctedStart + result.correctedEnd) / 2) * wav.sampleRate,
   );
   assert.ok(Math.abs(wav.sample(replacementMiddleFrame) - 0.25) < 0.015);
+});
+
+test("matches loudness to the replaced speech instead of quiet join context", () => {
+  const originalSamples = Array.from({ length: 4_000 }, () => 0.001);
+  for (let index = 1_050; index < 1_950; index += 1) {
+    originalSamples[index] = 0.4;
+  }
+  const original = audioSource(originalSamples);
+  const boundaries = resolveNarrationAudioBoundaries(original, 1, 2);
+  const result = spliceNarrationAudioSegment(
+    original,
+    audioSource(Array.from({ length: 650 }, () => 0.4)),
+    1,
+    2,
+    boundaries,
+  );
+  const wav = decodePcm16Wav(result.audio);
+  const middleFrame = Math.floor(
+    ((result.correctedStart + result.correctedEnd) / 2) * wav.sampleRate,
+  );
+
+  assert.ok(Math.abs(wav.sample(middleFrame) - 0.4) < 0.02);
+});
+
+test("does not boost a replacement merely because it contains a natural pause", () => {
+  const originalSamples = Array.from({ length: 4_000 }, () => 0.25);
+  for (let index = 950; index < 1_050; index += 1) originalSamples[index] = 0;
+  for (let index = 1_950; index < 2_050; index += 1) originalSamples[index] = 0;
+  const replacementSamples = [
+    ...Array.from({ length: 300 }, () => 0.25),
+    ...Array.from({ length: 200 }, () => 0),
+    ...Array.from({ length: 300 }, () => 0.25),
+  ];
+  const original = audioSource(originalSamples);
+  const boundaries = resolveNarrationAudioBoundaries(original, 1, 2);
+  const result = spliceNarrationAudioSegment(
+    original,
+    audioSource(replacementSamples),
+    1,
+    2,
+    boundaries,
+  );
+  const wav = decodePcm16Wav(result.audio);
+  const voicedFrame = Math.floor((result.correctedStart + 0.1) * wav.sampleRate);
+
+  assert.ok(Math.abs(wav.sample(voicedFrame) - 0.25) < 0.02);
+});
+
+test("does not turn down a whole replacement because of one transient peak", () => {
+  const originalSamples = Array.from({ length: 4_000 }, () => 0.3);
+  for (let index = 950; index < 1_050; index += 1) originalSamples[index] = 0;
+  for (let index = 1_950; index < 2_050; index += 1) originalSamples[index] = 0;
+  const replacementSamples = Array.from({ length: 650 }, () => 0.3);
+  replacementSamples[325] = 1;
+  const original = audioSource(originalSamples);
+  const boundaries = resolveNarrationAudioBoundaries(original, 1, 2);
+  const result = spliceNarrationAudioSegment(
+    original,
+    audioSource(replacementSamples),
+    1,
+    2,
+    boundaries,
+  );
+  const wav = decodePcm16Wav(result.audio);
+  const voicedFrame = Math.floor((result.correctedStart + 0.1) * wav.sampleRate);
+
+  assert.ok(Math.abs(wav.sample(voicedFrame) - 0.3) < 0.02);
 });
 
 test("rejects a trimmed replacement that exceeds the safe overhang", () => {

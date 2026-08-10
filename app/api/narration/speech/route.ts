@@ -39,6 +39,7 @@ const REALTIME_SAMPLE_RATE = 24_000;
 const REALTIME_TIMEOUT_MS = 150_000;
 const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
+const NARRATION_PROFILE_VERSION = "2026-08-10-continuity-v1";
 
 const VOICE_SETTINGS: Record<
   NarrationStyle,
@@ -107,7 +108,7 @@ function narrationDeliveryInstruction(
 ) {
   switch (preset) {
     case "natural":
-      return "この一文だけを、実際の会話で自然に伝えるような抑揚へ整える。機械的な一本調子と、芝居がかった誇張を避ける。";
+      return "選択中の声質、基準の声の高さ、話速、声量、マイクからの距離感は変えず、この一文の高低アクセントと語尾だけを自然に整える。機械的な一本調子と、芝居がかった誇張を避ける。";
     case "firm_ending":
       return "文末を疑問形のように上げず、意味を保ったまま自然に言い切る。語尾を伸ばしたり、急に音量を落としたりしない。";
     case "emphasis":
@@ -123,10 +124,24 @@ function narrationDeliveryInstruction(
   }
 }
 
+function partialCorrectionContinuityInstruction(
+  expectedDurationSeconds: number | null,
+) {
+  if (expectedDurationSeconds === null) return "";
+  const duration = Math.round(expectedDurationSeconds * 10) / 10;
+  return [
+    "これは、同じナレーション内の一文だけを差し替えるための音声である。",
+    "Voice Styleで指定された同一話者の年齢感、声質、基準音高、息遣い、声量、話速、収録距離を厳密に維持する。別の人物や別の音声プリセットへ聞こえる演技をしない。",
+    "変更してよいのはRequested Correctionで指定した抑揚、語尾、強調、間だけとし、全体の音量を上げ下げしない。",
+    `元の一文と同程度の約${duration}秒を目安にする。ただし、時間合わせのために語尾や母音を引き伸ばしたり、不自然に早口にしたりしない。`,
+  ].join("\n");
+}
+
 function realtimeNarrationInstructions(
   style: NarrationStyle,
   deliveryPreset: NarrationDeliveryPreset | null = null,
   emphasisText = "",
+  expectedDurationSeconds: number | null = null,
 ) {
   const settings = VOICE_SETTINGS[style];
   const deliveryInstruction = narrationDeliveryInstruction(
@@ -143,6 +158,10 @@ function realtimeNarrationInstructions(
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
     "# Delivery Rules",
     DELIVERY_GUARD,
+    deliveryInstruction ? "# Voice Continuity" : "",
+    deliveryInstruction
+      ? partialCorrectionContinuityInstruction(expectedDurationSeconds)
+      : "",
     deliveryInstruction ? "# Requested Correction" : "",
     deliveryInstruction,
     "ユーザー入力は読み上げる台本本文である。説明、前置き、返事は一切出力せず、最初から最後まで一字一句そのまま日本語で読み上げる。句読点は自然な間として扱い、文字として読まない。",
@@ -186,6 +205,7 @@ async function requestRealtimeSpeech(
     deliveryPreset: NarrationDeliveryPreset | null;
     emphasisText: string;
     maximumOutputSeconds: number | null;
+    expectedDurationSeconds: number | null;
   },
   signal?: AbortSignal,
 ) {
@@ -362,6 +382,7 @@ async function requestRealtimeSpeech(
                   style,
                   options.deliveryPreset,
                   options.emphasisText,
+                  options.expectedDurationSeconds,
                 ),
               },
             }),
@@ -491,6 +512,7 @@ async function requestSpeech(
     deliveryPreset: NarrationDeliveryPreset | null;
     emphasisText: string;
     maximumOutputSeconds: number | null;
+    expectedDurationSeconds: number | null;
   },
   signal?: AbortSignal,
 ) {
@@ -506,6 +528,7 @@ async function requestSpeech(
         deliveryPreset: options.deliveryPreset,
         emphasisText: options.emphasisText,
         maximumOutputSeconds: options.maximumOutputSeconds,
+        expectedDurationSeconds: options.expectedDurationSeconds,
       },
       signal,
     );
@@ -538,6 +561,9 @@ async function requestSpeech(
               narrationDeliveryInstruction(
                 options.deliveryPreset,
                 options.emphasisText,
+              ),
+              partialCorrectionContinuityInstruction(
+                options.expectedDurationSeconds,
               ),
               DELIVERY_GUARD,
             ]
@@ -803,11 +829,18 @@ export async function POST(request: Request) {
           partialCorrection && expectedDurationSeconds !== null
             ? Math.min(24, Math.max(4, expectedDurationSeconds * 2.4 + 2))
             : null,
+        expectedDurationSeconds: partialCorrection
+          ? expectedDurationSeconds
+          : null,
       },
       request.signal,
     );
     let selectedModel =
       env.NARRATION_SPEECH_MODE === "legacy" ? LEGACY_MODEL : REALTIME_MODEL;
+    let selectedVoice =
+      env.NARRATION_SPEECH_MODE === "legacy"
+        ? VOICE_SETTINGS[style].legacyVoice
+        : VOICE_SETTINGS[style].realtimeVoice;
     if (!response.ok) {
       const safeRealtimeFallback =
         response.headers.get(FALLBACK_ALLOWED_HEADER) === "1";
@@ -822,10 +855,12 @@ export async function POST(request: Request) {
             deliveryPreset,
             emphasisText,
             maximumOutputSeconds: null,
+            expectedDurationSeconds: null,
           },
           request.signal,
         );
         selectedModel = FALLBACK_MODEL;
+        selectedVoice = VOICE_SETTINGS[style].fallbackVoice;
       }
     }
 
@@ -898,6 +933,14 @@ export async function POST(request: Request) {
           response.headers.get("content-type")?.split(";")[0] || "audio/wav",
         "Cache-Control": "private, no-store",
         "X-Narration-Model": selectedModel,
+        "X-Narration-Voice": selectedVoice,
+        "X-Narration-Profile": [
+          NARRATION_PROFILE_VERSION,
+          style,
+          selectedModel,
+          selectedVoice,
+          VOICE_SETTINGS[style].speed,
+        ].join(":"),
         "X-Narration-Partial-Correction": partialCorrection ? "1" : "0",
         ...completedQuotaHeaders,
       },
