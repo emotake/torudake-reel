@@ -126,6 +126,7 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(pageSource, /完成動画を保存するにはプランを選択/);
   assert.match(pageSource, /月\$\{STANDARD_MONTHLY_VIDEO_LIMIT\}本・¥/);
   assert.match(pageSource, /月\$\{STARTER_MONTHLY_VIDEO_LIMIT\}本・¥/);
+  assert.doesNotMatch(pageSource, /月3本・月8本・1動画作成/);
   assert.match(pageSource, /1動画作成・¥/);
   assert.match(pageSource, /編集・プレビューまで/);
   assert.match(pageSource, /完成動画の保存は有料/);

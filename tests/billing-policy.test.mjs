@@ -30,7 +30,7 @@ const emptyUsage = {
 test("keeps every current and grandfathered price in one policy", () => {
   assert.equal(STARTER_MONTHLY_VIDEO_LIMIT, 3);
   assert.equal(STARTER_MONTHLY_PRICE_JPY, 500);
-  assert.equal(STANDARD_MONTHLY_VIDEO_LIMIT, 8);
+  assert.equal(STANDARD_MONTHLY_VIDEO_LIMIT, 7);
   assert.equal(STANDARD_MONTHLY_PRICE_JPY, 1000);
   assert.equal(LEGACY_MONTHLY_VIDEO_LIMIT, 8);
   assert.equal(LEGACY_MONTHLY_PRICE_JPY, 1480);
@@ -103,6 +103,40 @@ test("uses each plan's monthly allowance before one-time credits", () => {
     ),
     "one_time",
   );
+});
+
+test("keeps Standard at seven videos and the grandfathered plan at eight", () => {
+  for (const videoLimit of [
+    STANDARD_MONTHLY_VIDEO_LIMIT,
+    LEGACY_MONTHLY_VIDEO_LIMIT,
+  ]) {
+    assert.equal(
+      chooseBillingBucket(
+        {
+          ...emptyUsage,
+          monthlyPlanActive: true,
+          monthlyVideoLimit: videoLimit,
+          monthlyVideosUsed: videoLimit - 1,
+          oneTimeCreditsRemaining: 1,
+        },
+        90,
+      ),
+      "subscription",
+    );
+    assert.equal(
+      chooseBillingBucket(
+        {
+          ...emptyUsage,
+          monthlyPlanActive: true,
+          monthlyVideoLimit: videoLimit,
+          monthlyVideosUsed: videoLimit,
+          oneTimeCreditsRemaining: 1,
+        },
+        90,
+      ),
+      "one_time",
+    );
+  }
 });
 
 test("uses the operator allowance without consuming customer buckets", () => {

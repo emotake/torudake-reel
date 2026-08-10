@@ -103,7 +103,7 @@ test("describes the real web application without invented ratings", () => {
       "無料体験（編集・プレビュー）",
       "1動画作成",
       "Starter（月3本）",
-      "Standard（月8本）",
+      "Standard（月7本）",
     ],
   );
   assert.equal(

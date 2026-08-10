@@ -1401,7 +1401,14 @@ export default function PhotoReelClient() {
                       月{STANDARD_MONTHLY_VIDEO_LIMIT}本・¥
                       {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
                     </strong>
-                    <small>1本あたり125円</small>
+                    <small>
+                      1本あたり約
+                      {Math.round(
+                        STANDARD_MONTHLY_PRICE_JPY /
+                          STANDARD_MONTHLY_VIDEO_LIMIT,
+                      )}
+                      円
+                    </small>
                   </Link>
                   <Link
                     className="photoReelPurchaseLink starter"

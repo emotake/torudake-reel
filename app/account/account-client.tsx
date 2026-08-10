@@ -484,14 +484,28 @@ export default function AccountClient() {
                 ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
                 <small> / 月</small>
               </strong>
-              <span className="accountPlanUnit">1本あたり125円</span>
+              <span className="accountPlanUnit">
+                1本あたり約
+                {Math.round(
+                  STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
+                )}
+                円
+              </span>
               <ul>
                 <li>毎月{STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存</li>
                 <li>
                   AI処理は1動画あたり
                   {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
                 </li>
-                <li>Starterより1本あたり約42円お得</li>
+                <li>
+                  Starterより1本あたり約
+                  {Math.round(
+                    STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT -
+                      STANDARD_MONTHLY_PRICE_JPY /
+                        STANDARD_MONTHLY_VIDEO_LIMIT,
+                  )}
+                  円お得
+                </li>
               </ul>
               <button
                 disabled={busy !== null || !status.configured || status.monthly?.active}

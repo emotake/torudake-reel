@@ -3761,9 +3761,11 @@ function Landing({
               <small>/月</small>
             </strong>
             <span>
-              {`1本あたり${Math.floor(
+              1本あたり約
+              {Math.round(
                 STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
-              )}円`}
+              )}
+              円
             </span>
             <ul>
               <li>✓ 90秒まで</li>
@@ -9631,7 +9633,8 @@ function ResultWorkspace({
               <p>
                 <strong>完成動画を保存するにはプランを選択</strong>
                 <small>
-                  編集内容はプレビューで確認できます。保存は月3本・月8本・1動画作成から選べます。
+                  編集内容はプレビューで確認できます。保存は月3本・月
+                  {STANDARD_MONTHLY_VIDEO_LIMIT}本・1動画作成から選べます。
                 </small>
               </p>
               <div>

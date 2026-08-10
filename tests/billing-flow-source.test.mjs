@@ -28,6 +28,11 @@ test("polls the authenticated account after Stripe redirects back", () => {
   assert.match(accountSource, /accountPlanRecommend">おすすめ/);
   assert.match(accountSource, /STARTER_MONTHLY_PRICE_JPY/);
   assert.match(accountSource, /STANDARD_MONTHLY_PRICE_JPY/);
+  assert.match(
+    accountSource,
+    /STANDARD_MONTHLY_PRICE_JPY\s*\/\s*STANDARD_MONTHLY_VIDEO_LIMIT/,
+  );
+  assert.doesNotMatch(accountSource, /125円|42円お得/);
   assert.ok(
     accountSource.indexOf('className="accountPlanCard standardPlan featured"') <
       accountSource.indexOf('className="accountPlanCard starterPlan"'),

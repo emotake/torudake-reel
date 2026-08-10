@@ -60,9 +60,12 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /合計3分または2動画まで/);
   assert.match(html, /編集・プレビューまで/);
   assert.match(html, /完成動画の保存は有料/);
-  assert.match(html, /月8本で始める/);
+  assert.match(html, /月7本で始める/);
   assert.match(html, /月3本で始める/);
-  assert.match(html, /1本あたり125円/);
+  assert.match(
+    html,
+    /1本あたり約(?:<!-- -->)?143(?:<!-- -->)?円/,
+  );
   assert.match(html, /1本あたり約167円/);
   assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
@@ -94,7 +97,7 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(html, /Standard/);
   assert.match(html, /¥(?:<!-- -->)?500/);
   assert.match(html, /¥(?:<!-- -->)?1,000/);
-  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本/);
+  assert.match(html, /月(?:<!-- -->)?7(?:<!-- -->)?本/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/photo-reel"/,
@@ -198,8 +201,14 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /遅滞なく電子メールで開示/);
   assert.match(html, /Starter/);
   assert.match(html, /Standard/);
-  assert.match(html, /月(?:<!-- -->)?3(?:<!-- -->)?本/);
-  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本/);
+  assert.match(
+    html,
+    /Standard（月(?:<!-- -->)?7(?:<!-- -->)?本）[\s\S]*月額(?:<!-- -->)?1,000(?:<!-- -->)?円/,
+  );
+  assert.match(
+    html,
+    /旧月(?:<!-- -->)?8(?:<!-- -->)?本プラン（新規申込終了）[\s\S]*月額(?:<!-- -->)?1,480(?:<!-- -->)?円・既存契約者のみ/,
+  );
   assert.match(html, /新規申込終了/);
   assert.match(html, /1動画作成/);
   assert.match(html, /Stripe/);
@@ -229,6 +238,14 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(
     html,
     /無料体験3回、1動画作成5回、月額プラン(?:<!-- -->)?6(?:<!-- -->)?回/,
+  );
+  assert.match(
+    html,
+    /Starterは月(?:<!-- -->)?3(?:<!-- -->)?本・月額(?:<!-- -->)?500(?:<!-- -->)?円、Standardは月(?:<!-- -->)?7(?:<!-- -->)?本・月額(?:<!-- -->)?1,000(?:<!-- -->)?円/,
+  );
+  assert.match(
+    html,
+    /旧月(?:<!-- -->)?8(?:<!-- -->)?本プラン（月額(?:<!-- -->)?1,480(?:<!-- -->)?円）は既存契約者専用/,
   );
   assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);

@@ -169,6 +169,11 @@ test("does not create or expose a completed photo reel for the free bucket", asy
   assert.match(client, /無料体験では編集とプレビューまで利用できます/);
   assert.match(client, /月\{STARTER_MONTHLY_VIDEO_LIMIT\}本/);
   assert.match(client, /月\{STANDARD_MONTHLY_VIDEO_LIMIT\}本/);
+  assert.match(
+    client,
+    /STANDARD_MONTHLY_PRICE_JPY\s*\/\s*STANDARD_MONTHLY_VIDEO_LIMIT/,
+  );
+  assert.doesNotMatch(client, /1本あたり125円/);
   assert.match(client, /href="\/account\?checkout=starter"/);
   assert.match(client, /href="\/account\?checkout=standard"/);
   assert.doesNotMatch(client, /checkout=light/);
