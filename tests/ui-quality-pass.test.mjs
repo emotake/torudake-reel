@@ -50,6 +50,10 @@ test("keeps mobile account access and accessible touch targets visible", () => {
   assert.match(cssSource, /\.siteShell :is\(button, select, textarea, summary, \[role="button"\]\),[\s\S]*?min-height:\s*44px/);
   assert.match(cssSource, /\.siteShell \.brandText small,[\s\S]*?\.siteShell footer :is\(span, a, small\),[\s\S]*?font-size:\s*12px/);
   assert.match(cssSource, /\.accentChoices > button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px/);
+  assert.match(cssSource, /\.brand\s*\{[\s\S]*?min-height:\s*44px/);
+  assert.match(cssSource, /\.trialButton,[\s\S]*?\.transferButton\s*\{[\s\S]*?min-height:\s*44px/);
+  assert.match(cssSource, /\.topbar nav a,[\s\S]*?\.footerLinks a\s*\{[\s\S]*?min-width:\s*44px/);
+  assert.match(cssSource, /\.visuallyHidden\[type="file"\]\s*\{[\s\S]*?display:\s*none/);
   assert.doesNotMatch(cssSource, /font-size:\s*max\(12px, 1em\)/);
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.mobilePriceLink\s*\{[\s\S]*?display:\s*none/);
 });

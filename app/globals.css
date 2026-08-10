@@ -78,6 +78,7 @@ a {
 .brand {
   display: inline-flex;
   width: max-content;
+  min-height: 44px;
   gap: 11px;
   align-items: center;
   padding: 0;
@@ -168,7 +169,7 @@ a {
 .trialButton,
 .quietButton,
 .transferButton {
-  min-height: 39px;
+  min-height: 44px;
   padding: 0 17px;
   border-radius: 10px;
   font-size: 12px;
@@ -221,6 +222,12 @@ a {
   overflow: hidden;
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
+}
+
+/* File pickers are opened by labelled, full-size buttons and must not create
+   a separate 1px focus or touch target. */
+.visuallyHidden[type="file"] {
+  display: none;
 }
 
 .hero {
@@ -10783,7 +10790,9 @@ footer > small {
 .topbar nav a,
 .footerLinks a {
   display: inline-flex;
+  min-width: 44px;
   align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 760px) {
