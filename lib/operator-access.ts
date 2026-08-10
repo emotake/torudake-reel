@@ -1,7 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
 import { env } from "cloudflare:workers";
-import { getDb } from "../db";
-import { operatorDevices } from "../db/schema";
 import {
   getCurrentUser,
   type CurrentUser,
@@ -26,7 +23,17 @@ export {
   operatorSessionCookie,
 } from "./operator-session";
 
-export const OPERATOR_SLOT = "primary";
+export const OPERATOR_DEVICE_LIMIT = 5;
+
+export class OperatorDeviceLimitError extends Error {
+  readonly limit: number;
+
+  constructor(limit = OPERATOR_DEVICE_LIMIT) {
+    super(`A maximum of ${limit} operator devices can be active.`);
+    this.name = "OperatorDeviceLimitError";
+    this.limit = limit;
+  }
+}
 
 const OPERATOR_INTERNAL_USER: CurrentUser = {
   id: null,
@@ -40,7 +47,9 @@ type OperatorEnvironment = {
 };
 
 type D1Statement = {
-  bind?: (...values: unknown[]) => D1Statement;
+  bind: (...values: unknown[]) => D1Statement;
+  first: <T>() => Promise<T | null>;
+  run: () => Promise<{ meta?: { changes?: number } }>;
 };
 
 type D1SchemaDatabase = {
@@ -52,10 +61,7 @@ let operatorSchemaReady = false;
 
 async function ensureOperatorSchema() {
   if (operatorSchemaReady) return;
-  const database = env.DB as unknown as D1SchemaDatabase | undefined;
-  if (!database?.prepare || !database?.batch) {
-    throw new Error("Operator device database binding is unavailable.");
-  }
+  const database = operatorDatabase();
 
   await database.batch([
     database.prepare(`
@@ -111,31 +117,46 @@ export async function activateOperatorDevice(
   const sessionHash = await sha256(token);
   const expiresAt =
     nowSeconds + OPERATOR_ACCESS_DAYS * 24 * 60 * 60;
+  const slot = `device:${randomOperatorToken()}`;
+  const normalizedLabel = normalizeOperatorLabel(label);
 
-  await getDb()
-    .insert(operatorDevices)
-    .values({
-      slot: OPERATOR_SLOT,
+  // Keep the device cap and insertion in one D1 statement so simultaneous
+  // enrollments cannot exceed the limit. Legacy `primary` rows remain valid.
+  const inserted = await operatorDatabase()
+    .prepare(`
+      INSERT INTO operator_devices (
+        slot,
+        session_hash,
+        label,
+        activated_at,
+        expires_at,
+        revoked_at
+      )
+      SELECT ?, ?, ?, ?, ?, NULL
+      WHERE (
+        SELECT COUNT(*)
+        FROM operator_devices
+        WHERE revoked_at IS NULL AND expires_at > ?
+      ) < ?
+    `)
+    .bind(
+      slot,
       sessionHash,
-      label: normalizeOperatorLabel(label),
-      activatedAt: nowSeconds,
+      normalizedLabel,
+      nowSeconds,
       expiresAt,
-      revokedAt: null,
-    })
-    .onConflictDoUpdate({
-      target: operatorDevices.slot,
-      set: {
-        sessionHash,
-        label: normalizeOperatorLabel(label),
-        activatedAt: nowSeconds,
-        expiresAt,
-        revokedAt: null,
-      },
-    });
+      nowSeconds,
+      OPERATOR_DEVICE_LIMIT,
+    )
+    .run();
+
+  if (inserted.meta?.changes !== 1) {
+    throw new OperatorDeviceLimitError();
+  }
 
   return {
     token,
-    label: normalizeOperatorLabel(label),
+    label: normalizedLabel,
     activatedAt: nowSeconds,
     expiresAt,
   };
@@ -150,23 +171,24 @@ export async function getOperatorDevice(
 
   await ensureOperatorSchema();
   const sessionHash = await sha256(token);
-  const rows = await getDb()
-    .select({
-      label: operatorDevices.label,
-      activatedAt: operatorDevices.activatedAt,
-      expiresAt: operatorDevices.expiresAt,
-    })
-    .from(operatorDevices)
-    .where(
-      and(
-        eq(operatorDevices.slot, OPERATOR_SLOT),
-        eq(operatorDevices.sessionHash, sessionHash),
-        isNull(operatorDevices.revokedAt),
-        gt(operatorDevices.expiresAt, nowSeconds),
-      ),
-    )
-    .limit(1);
-  return rows[0] ?? null;
+  return operatorDatabase()
+    .prepare(`
+      SELECT
+        label,
+        activated_at AS activatedAt,
+        expires_at AS expiresAt
+      FROM operator_devices
+      WHERE session_hash = ?
+        AND revoked_at IS NULL
+        AND expires_at > ?
+      LIMIT 1
+    `)
+    .bind(sessionHash, nowSeconds)
+    .first<{
+      label: string;
+      activatedAt: number;
+      expiresAt: number;
+    }>();
 }
 
 export async function revokeOperatorDevice(
@@ -178,18 +200,16 @@ export async function revokeOperatorDevice(
 
   await ensureOperatorSchema();
   const sessionHash = await sha256(token);
-  const revoked = await getDb()
-    .update(operatorDevices)
-    .set({ revokedAt: nowSeconds })
-    .where(
-      and(
-        eq(operatorDevices.slot, OPERATOR_SLOT),
-        eq(operatorDevices.sessionHash, sessionHash),
-        isNull(operatorDevices.revokedAt),
-      ),
-    )
-    .returning({ slot: operatorDevices.slot });
-  return revoked.length > 0;
+  const revoked = await operatorDatabase()
+    .prepare(`
+      UPDATE operator_devices
+      SET revoked_at = ?
+      WHERE session_hash = ?
+        AND revoked_at IS NULL
+    `)
+    .bind(nowSeconds, sessionHash)
+    .run();
+  return revoked.meta?.changes === 1;
 }
 
 export async function getUsagePrincipal(
@@ -239,6 +259,14 @@ export async function getUsagePrincipal(
 function operatorEnrollmentCode() {
   const operatorEnv = env as typeof env & OperatorEnvironment;
   return operatorEnv.OPERATOR_ENROLLMENT_CODE?.trim() ?? "";
+}
+
+function operatorDatabase() {
+  const database = env.DB as unknown as D1SchemaDatabase | undefined;
+  if (!database?.prepare || !database?.batch) {
+    throw new Error("Operator device database binding is unavailable.");
+  }
+  return database;
 }
 
 async function constantTimeHashEqual(left: string, right: string) {

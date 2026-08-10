@@ -23,7 +23,7 @@ const EMPTY_STATUS: OperatorStatus = {
 export default function OperatorDeviceClient() {
   const [status, setStatus] = useState<OperatorStatus | null>(null);
   const [code, setCode] = useState("");
-  const [label, setLabel] = useState("運営スマホ");
+  const [label, setLabel] = useState("運営端末");
   const [busy, setBusy] = useState<"enroll" | "revoke" | null>(null);
   const [error, setError] = useState("");
 
@@ -73,7 +73,7 @@ export default function OperatorDeviceClient() {
       setStatus({
         configured: true,
         registered: true,
-        label: payload.label ?? (label.trim() || "運営スマホ"),
+        label: payload.label ?? (label.trim() || "運営端末"),
         activatedAt: Math.floor(Date.now() / 1_000),
         expiresAt: payload.expiresAt ?? null,
       });
@@ -165,7 +165,7 @@ export default function OperatorDeviceClient() {
           <>
             <h1>運営端末を登録</h1>
             <p className="operatorAccessLead">
-              登録すると、このブラウザだけ運営用の利用枠へ切り替わります。以前の運営端末は自動で解除されます。
+              このブラウザを運営用の利用枠へ追加します。登録済みのスマホやPCはそのまま利用でき、最大5台まで登録できます。
             </p>
 
             {status.configured ? (
@@ -217,7 +217,7 @@ export default function OperatorDeviceClient() {
         )}
 
         <p className="operatorAccessNote">
-          SafariのWebサイトデータ削除、プライベートブラウズ、別ブラウザでは再登録が必要です。
+          登録はブラウザ単位です。Webサイトデータの削除、プライベートブラウズ、別ブラウザでは再登録が必要です。
         </p>
       </section>
     </main>

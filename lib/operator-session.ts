@@ -4,9 +4,9 @@ export const OPERATOR_ACCESS_DAYS = 180;
 const OPERATOR_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 export function normalizeOperatorLabel(value: unknown) {
-  if (typeof value !== "string") return "運営スマホ";
+  if (typeof value !== "string") return "運営端末";
   const normalized = value.replace(/\s+/g, " ").trim().slice(0, 40);
-  return normalized || "運営スマホ";
+  return normalized || "運営端末";
 }
 
 export function operatorSessionCookie(

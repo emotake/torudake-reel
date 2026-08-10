@@ -68,6 +68,6 @@ test("normalizes a short human-readable device label", () => {
     normalizeOperatorLabel("  iPhone   Safari  "),
     "iPhone Safari",
   );
-  assert.equal(normalizeOperatorLabel(""), "運営スマホ");
+  assert.equal(normalizeOperatorLabel(""), "運営端末");
   assert.equal(normalizeOperatorLabel("a".repeat(80)).length, 40);
 });

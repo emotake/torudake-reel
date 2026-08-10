@@ -3,6 +3,7 @@ import {
   isOperatorEnrollmentConfigured,
   isSameOriginMutation,
   normalizeOperatorLabel,
+  OperatorDeviceLimitError,
   operatorEnrollmentCodeMatches,
   operatorSessionCookie,
 } from "../../../../lib/operator-access";
@@ -58,9 +59,25 @@ export async function POST(request: Request) {
     );
   }
 
-  const device = await activateOperatorDevice(
-    normalizeOperatorLabel(payload.label),
-  );
+  let device: Awaited<ReturnType<typeof activateOperatorDevice>>;
+  try {
+    device = await activateOperatorDevice(
+      normalizeOperatorLabel(payload.label),
+    );
+  } catch (error) {
+    if (error instanceof OperatorDeviceLimitError) {
+      await clearOperatorEnrollmentFailures(request);
+      return privateJson(
+        {
+          error:
+            `登録できる運営端末は${error.limit}台までです。` +
+            "使わない端末で登録を解除してから、もう一度お試しください。",
+        },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
   const response = privateJson({
     registered: true,
     label: device.label,
