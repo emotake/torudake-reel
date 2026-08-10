@@ -816,6 +816,14 @@ async function ensurePortableAacEncoding(
   },
 ) {
   if (await media.canEncodeAudio("aac", settings)) return true;
+  // This extension is a browser-only WebAssembly fallback. Keeping its
+  // dynamic import out of the SSR graph prevents Node's worker_threads shim
+  // from being evaluated by the Cloudflare Pages worker at startup.
+  if (
+    (import.meta as ImportMeta & { env: { SSR: boolean } }).env.SSR
+  ) {
+    return false;
+  }
 
   try {
     portableAacEncoderRegistration ??= import("@mediabunny/aac-encoder").then(

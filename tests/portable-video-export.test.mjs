@@ -235,6 +235,7 @@ test("loads the AAC encoder extension when an iPhone lacks native AAC encoding",
   );
   assert.match(source, /import\("@mediabunny\/aac-encoder"\)/);
   assert.match(source, /registerAacEncoder\(\)/);
+  assert.match(source, /env\.SSR/);
   assert.match(source, /ensurePortableAacEncoding\(media/);
 });
 
