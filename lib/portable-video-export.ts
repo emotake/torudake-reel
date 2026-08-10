@@ -13,7 +13,283 @@ const DEFAULT_AUDIO_BITRATE = 192_000;
 const OUTPUT_SAMPLE_RATE = 48_000;
 const OUTPUT_CHANNELS = 2;
 const RANGE_EPSILON = 1e-7;
+export const PORTABLE_AUDIO_CUT_FADE_SECONDS = 0.02;
+export const PORTABLE_VIDEO_CROSSFADE_SECONDS = 0.08;
+export const PORTABLE_NARRATION_DUCKING_RATIO = 0.42;
+const PORTABLE_DUCK_ATTACK_SECONDS = 0.08;
+const PORTABLE_DUCK_RELEASE_SECONDS = 0.18;
+const PORTABLE_NARRATION_ACTIVITY_WINDOW_SECONDS = 0.02;
 export const MAX_SAFE_WHOLE_FILE_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
+
+let portableAacEncoderRegistration: Promise<void> | null = null;
+
+export type PortableAudioActivityRange = Readonly<{
+  start: number;
+  end: number;
+}>;
+
+export type PortableAudioEnvelopePoint = Readonly<{
+  time: number;
+  gain: number;
+}>;
+
+export function getPortableEqualPowerFadeGain(
+  progress: number,
+  direction: "in" | "out",
+) {
+  const safeProgress = Math.max(0, Math.min(1, progress));
+  return direction === "in"
+    ? Math.sin((Math.PI / 2) * safeProgress)
+    : Math.cos((Math.PI / 2) * safeProgress);
+}
+
+export function computePortableOriginalNormalizationGain(
+  rms: number,
+  peak: number,
+) {
+  if (
+    !Number.isFinite(rms) ||
+    !Number.isFinite(peak) ||
+    rms < 0 ||
+    peak < 0
+  ) {
+    throw new RangeError("Audio level values must be finite and non-negative.");
+  }
+  if (rms < 0.0001 || peak < 0.0001) return 1;
+
+  const targetRms = 10 ** (-18 / 20);
+  const rmsGain = targetRms / rms;
+  const peakSafeGain = 0.9 / peak;
+  const loudnessGain = Math.max(0.4, Math.min(1.8, rmsGain));
+  return Math.max(0, Math.min(loudnessGain, peakSafeGain));
+}
+
+export function detectPortableNarrationActivity(
+  channels: readonly Float32Array[],
+  sampleRate: number,
+  maximumDuration = Number.POSITIVE_INFINITY,
+): PortableAudioActivityRange[] {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    throw new RangeError("sampleRate must be a finite positive number.");
+  }
+  const availableFrames = channels.reduce(
+    (maximum, channel) => Math.max(maximum, channel.length),
+    0,
+  );
+  const maximumFrames = Number.isFinite(maximumDuration)
+    ? Math.max(0, Math.floor(maximumDuration * sampleRate))
+    : availableFrames;
+  const frameCount = Math.min(availableFrames, maximumFrames);
+  if (frameCount <= 0 || channels.length === 0) return [];
+
+  const windowFrames = Math.max(
+    1,
+    Math.round(PORTABLE_NARRATION_ACTIVITY_WINDOW_SECONDS * sampleRate),
+  );
+  const windowLevels: number[] = [];
+  let maximumWindowRms = 0;
+  for (let offset = 0; offset < frameCount; offset += windowFrames) {
+    const end = Math.min(frameCount, offset + windowFrames);
+    let sumSquares = 0;
+    let sampleCount = 0;
+    for (const channel of channels) {
+      const channelEnd = Math.min(end, channel.length);
+      for (let frame = offset; frame < channelEnd; frame += 1) {
+        const sample = channel[frame];
+        if (!Number.isFinite(sample)) continue;
+        sumSquares += sample * sample;
+        sampleCount += 1;
+      }
+    }
+    const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+    windowLevels.push(rms);
+    maximumWindowRms = Math.max(maximumWindowRms, rms);
+  }
+  if (maximumWindowRms < 0.004) return [];
+
+  const activityThreshold = Math.max(0.008, maximumWindowRms * 0.07);
+  const rawRanges: PortableAudioActivityRange[] = [];
+  let activeStartWindow = -1;
+  windowLevels.forEach((level, index) => {
+    if (level >= activityThreshold && activeStartWindow < 0) {
+      activeStartWindow = index;
+    }
+    const isLastWindow = index === windowLevels.length - 1;
+    if (activeStartWindow >= 0 && (level < activityThreshold || isLastWindow)) {
+      const endWindow = level < activityThreshold ? index : index + 1;
+      rawRanges.push({
+        start: (activeStartWindow * windowFrames) / sampleRate,
+        end: Math.min(frameCount / sampleRate, (endWindow * windowFrames) / sampleRate),
+      });
+      activeStartWindow = -1;
+    }
+  });
+
+  const padded = rawRanges.map((range) => ({
+    start: Math.max(0, range.start - 0.04),
+    end: Math.min(frameCount / sampleRate, range.end + 0.06),
+  }));
+  const merged: PortableAudioActivityRange[] = [];
+  for (const range of padded) {
+    const previous = merged.at(-1);
+    if (
+      previous &&
+      range.start <=
+        previous.end + PORTABLE_DUCK_ATTACK_SECONDS + PORTABLE_DUCK_RELEASE_SECONDS
+    ) {
+      merged[merged.length - 1] = {
+        start: previous.start,
+        end: Math.max(previous.end, range.end),
+      };
+    } else if (range.end - range.start >= 0.04) {
+      merged.push(range);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Clips activity measured on the narration buffer to the portion currently
+ * being played, then maps buffer time onto playback time. For example, at 2x
+ * playback an activity interval lasting 0.4 seconds in the buffer lasts 0.2
+ * seconds in the preview/export segment.
+ */
+export function remapPortableNarrationActivity(
+  activityRanges: readonly PortableAudioActivityRange[],
+  sourceOffset: number,
+  playbackRate: number,
+  duration: number,
+): PortableAudioActivityRange[] {
+  if (
+    !Number.isFinite(sourceOffset) ||
+    sourceOffset < 0 ||
+    !Number.isFinite(playbackRate) ||
+    playbackRate <= 0 ||
+    !Number.isFinite(duration) ||
+    duration < 0
+  ) {
+    throw new RangeError(
+      "Narration activity mapping values must be finite and non-negative, with a positive playbackRate.",
+    );
+  }
+  if (duration === 0) return [];
+
+  const sourceEnd = sourceOffset + duration * playbackRate;
+  const mapped = activityRanges
+    .map((range) => {
+      if (
+        !Number.isFinite(range.start) ||
+        !Number.isFinite(range.end)
+      ) {
+        return null;
+      }
+      const clippedStart = Math.max(sourceOffset, range.start);
+      const clippedEnd = Math.min(sourceEnd, range.end);
+      if (clippedEnd - clippedStart <= RANGE_EPSILON) return null;
+      return {
+        start: Math.max(0, (clippedStart - sourceOffset) / playbackRate),
+        end: Math.min(duration, (clippedEnd - sourceOffset) / playbackRate),
+      };
+    })
+    .filter((range): range is PortableAudioActivityRange => Boolean(range))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const merged: PortableAudioActivityRange[] = [];
+  for (const range of mapped) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end + RANGE_EPSILON) {
+      merged[merged.length - 1] = {
+        start: previous.start,
+        end: Math.max(previous.end, range.end),
+      };
+    } else {
+      merged.push(range);
+    }
+  }
+  return merged;
+}
+
+export function buildPortableDuckingEnvelope(
+  activityRanges: readonly PortableAudioActivityRange[],
+  baseGain: number,
+  duration: number,
+): PortableAudioEnvelopePoint[] {
+  if (
+    !Number.isFinite(baseGain) ||
+    baseGain < 0 ||
+    !Number.isFinite(duration) ||
+    duration < 0
+  ) {
+    throw new RangeError("Ducking values must be finite and non-negative.");
+  }
+  if (duration === 0) return [{ time: 0, gain: baseGain }];
+
+  const duckedGain = baseGain * PORTABLE_NARRATION_DUCKING_RATIO;
+  const normalized = activityRanges
+    .map((range) => ({
+      start: Math.max(0, Math.min(duration, range.start)),
+      end: Math.max(0, Math.min(duration, range.end)),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((left, right) => left.start - right.start);
+  const merged: PortableAudioActivityRange[] = [];
+  for (const range of normalized) {
+    const previous = merged.at(-1);
+    if (
+      previous &&
+      range.start <=
+        previous.end + PORTABLE_DUCK_ATTACK_SECONDS + PORTABLE_DUCK_RELEASE_SECONDS
+    ) {
+      merged[merged.length - 1] = {
+        start: previous.start,
+        end: Math.max(previous.end, range.end),
+      };
+    } else {
+      merged.push(range);
+    }
+  }
+  if (merged.length === 0 || baseGain === 0) {
+    return [
+      { time: 0, gain: baseGain },
+      { time: duration, gain: baseGain },
+    ];
+  }
+
+  const points: PortableAudioEnvelopePoint[] = [{ time: 0, gain: baseGain }];
+  for (const range of merged) {
+    const attackStart = Math.max(0, range.start - PORTABLE_DUCK_ATTACK_SECONDS);
+    const releaseEnd = Math.min(
+      duration,
+      range.end + PORTABLE_DUCK_RELEASE_SECONDS,
+    );
+    points.push(
+      { time: attackStart, gain: baseGain },
+      { time: range.start, gain: duckedGain },
+      { time: range.end, gain: duckedGain },
+    );
+    // When narration remains active through the final sample there is no
+    // post-speech region in which to release. Adding a base-gain point at the
+    // same timestamp would replace the ducked endpoint and create one long
+    // upward ramp underneath the narration.
+    if (releaseEnd > range.end + RANGE_EPSILON) {
+      points.push({ time: releaseEnd, gain: baseGain });
+    }
+  }
+  if (merged.at(-1)!.end < duration - RANGE_EPSILON) {
+    points.push({ time: duration, gain: baseGain });
+  }
+
+  const coalesced: PortableAudioEnvelopePoint[] = [];
+  for (const point of points.sort((left, right) => left.time - right.time)) {
+    const previous = coalesced.at(-1);
+    if (previous && Math.abs(previous.time - point.time) <= RANGE_EPSILON) {
+      coalesced[coalesced.length - 1] = point;
+    } else {
+      coalesced.push(point);
+    }
+  }
+  return coalesced;
+}
 
 export function canUseWholeFileAudioDecode(fileSize: number) {
   return (
@@ -33,6 +309,8 @@ export type PortableFrameScheduleEntry = Readonly<{
   editedTime: number;
   sourceTime: number;
   duration: number;
+  blendFromSourceTime?: number;
+  blendProgress?: number;
 }>;
 
 export type PortableCaptionDrawContext = Readonly<{
@@ -61,6 +339,64 @@ export type PortableAudioSlicePlacement = Readonly<{
   duration: number;
 }>;
 
+export type PortableAudioCrossfadePlan = Readonly<{
+  outgoing: PortableAudioSlicePlacement;
+  incoming: PortableAudioSlicePlacement;
+  fadeDuration: number;
+  overlapStart: number;
+  overlapEnd: number;
+}>;
+
+/**
+ * Extends only the outgoing source tail over the next cut. The incoming slice
+ * keeps its original timestamp, so video/audio duration and synchronization do
+ * not move. The two real source buffers then overlap under matching
+ * equal-power curves instead of meeting at a zero-gain seam.
+ */
+export function buildPortableAudioCrossfadePlan(
+  outgoing: PortableAudioSlicePlacement,
+  outgoingBufferDuration: number,
+  incoming: PortableAudioSlicePlacement,
+  maximumFadeDuration = PORTABLE_AUDIO_CUT_FADE_SECONDS,
+): PortableAudioCrossfadePlan | null {
+  if (
+    !Number.isFinite(outgoingBufferDuration) ||
+    outgoingBufferDuration < 0 ||
+    !Number.isFinite(maximumFadeDuration) ||
+    maximumFadeDuration < 0
+  ) {
+    throw new RangeError(
+      "Crossfade durations must be finite and non-negative.",
+    );
+  }
+
+  const outgoingEnd = outgoing.when + outgoing.duration;
+  if (Math.abs(outgoingEnd - incoming.when) > 0.001) return null;
+
+  const availableOutgoingTail = Math.max(
+    0,
+    outgoingBufferDuration - outgoing.offset - outgoing.duration,
+  );
+  const fadeDuration = Math.min(
+    maximumFadeDuration,
+    availableOutgoingTail,
+    outgoing.duration / 2,
+    incoming.duration / 2,
+  );
+  if (fadeDuration <= RANGE_EPSILON) return null;
+
+  return {
+    outgoing: {
+      ...outgoing,
+      duration: outgoing.duration + fadeDuration,
+    },
+    incoming,
+    fadeDuration,
+    overlapStart: incoming.when,
+    overlapEnd: incoming.when + fadeDuration,
+  };
+}
+
 export type PortableAudioTrackCandidate<T> = Readonly<{
   track: T;
   codec: string | null;
@@ -85,6 +421,37 @@ export function selectPreferredPortableAudioTrack<T>(
     candidates[0]?.track ??
     null
   );
+}
+
+type PortableAudioTrackSource<T> = Readonly<{
+  getAudioTracks: () => Promise<T[]>;
+  getPrimaryAudioTrack: () => Promise<T | null>;
+}>;
+
+/**
+ * Uses one compatibility choice for preview loudness measurement and final
+ * export. Some iPhone files expose an undecodable spatial-audio track as the
+ * primary track while also carrying a compatible secondary AAC track.
+ */
+export async function getPreferredPortableInputAudioTrack<
+  T extends Readonly<{
+    getCodec: () => Promise<string | null>;
+    canDecode: () => Promise<boolean>;
+  }>,
+>(input: PortableAudioTrackSource<T>) {
+  const [audioTracks, primaryAudioTrack] = await Promise.all([
+    input.getAudioTracks(),
+    input.getPrimaryAudioTrack(),
+  ]);
+  const candidates = await Promise.all(
+    audioTracks.map(async (track) => ({
+      track,
+      codec: await track.getCodec().catch(() => null),
+      decodable: await track.canDecode().catch(() => false),
+      primary: track === primaryAudioTrack,
+    })),
+  );
+  return selectPreferredPortableAudioTrack(candidates);
 }
 
 export type PortableVideoExportOptions = Readonly<{
@@ -342,11 +709,48 @@ export function buildPortableFrameSchedule(
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
     const editedTime = frameIndex * frameDuration;
     const sourceTime = mapPortableEditedTimeToSourceTime(ranges, editedTime);
+    let elapsed = 0;
+    let rangeIndex = 0;
+    for (; rangeIndex < ranges.length; rangeIndex += 1) {
+      const rangeDuration = ranges[rangeIndex].end - ranges[rangeIndex].start;
+      if (
+        editedTime < elapsed + rangeDuration - RANGE_EPSILON ||
+        rangeIndex === ranges.length - 1
+      ) {
+        break;
+      }
+      elapsed += rangeDuration;
+    }
+    const withinRange = Math.max(0, editedTime - elapsed);
+    const previousRange = ranges[rangeIndex - 1];
+    const currentRange = ranges[rangeIndex];
+    const crossfadeDuration = previousRange && currentRange
+      ? Math.min(
+          PORTABLE_VIDEO_CROSSFADE_SECONDS,
+          previousRange.end - previousRange.start,
+          currentRange.end - currentRange.start,
+        )
+      : 0;
+    const isCrossfadeFrame =
+      crossfadeDuration > RANGE_EPSILON &&
+      withinRange < crossfadeDuration - RANGE_EPSILON;
+    const blendProgress = isCrossfadeFrame
+      ? Math.min(1, (withinRange + frameDuration) / crossfadeDuration)
+      : 1;
     schedule.push({
       frameIndex,
       editedTime,
       sourceTime,
       duration: Math.min(frameDuration, totalDuration - editedTime),
+      ...(isCrossfadeFrame && blendProgress < 1 - RANGE_EPSILON
+        ? {
+            blendFromSourceTime: Math.max(
+              previousRange.start,
+              previousRange.end - frameDuration / 2,
+            ),
+            blendProgress,
+          }
+        : {}),
     });
   }
 
@@ -403,6 +807,31 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new PortableVideoExportAbortedError();
 }
 
+async function ensurePortableAacEncoding(
+  media: typeof import("mediabunny"),
+  settings: {
+    numberOfChannels: number;
+    sampleRate: number;
+    bitrate: number;
+  },
+) {
+  if (await media.canEncodeAudio("aac", settings)) return true;
+
+  try {
+    portableAacEncoderRegistration ??= import("@mediabunny/aac-encoder").then(
+      ({ registerAacEncoder }) => {
+        registerAacEncoder();
+      },
+    );
+    await portableAacEncoderRegistration;
+  } catch {
+    portableAacEncoderRegistration = null;
+    return false;
+  }
+
+  return media.canEncodeAudio("aac", settings);
+}
+
 function getOfflineAudioContextConstructor() {
   if (typeof OfflineAudioContext !== "undefined") return OfflineAudioContext;
   if (typeof window === "undefined") return null;
@@ -416,7 +845,37 @@ function getOfflineAudioContextConstructor() {
 type ScheduledAudioBuffer = {
   buffer: AudioBuffer;
   placement: PortableAudioSlicePlacement;
+  fadeIn: boolean;
+  fadeOut: boolean;
+  fadeInDuration?: number;
+  fadeOutDuration?: number;
 };
+
+export function applyPortableAudioCrossfades(
+  ranges: ScheduledAudioBuffer[][],
+) {
+  ranges.forEach((rangeBuffers) => {
+    if (rangeBuffers.length === 0) return;
+    rangeBuffers[0].fadeIn = true;
+    rangeBuffers[rangeBuffers.length - 1].fadeOut = true;
+  });
+
+  for (let index = 0; index < ranges.length - 1; index += 1) {
+    const outgoing = ranges[index].at(-1);
+    const incoming = ranges[index + 1][0];
+    if (!outgoing || !incoming) continue;
+    const plan = buildPortableAudioCrossfadePlan(
+      outgoing.placement,
+      outgoing.buffer.duration,
+      incoming.placement,
+    );
+    if (!plan) continue;
+
+    outgoing.placement = plan.outgoing;
+    outgoing.fadeOutDuration = plan.fadeDuration;
+    incoming.fadeInDuration = plan.fadeDuration;
+  }
+}
 
 async function collectDecodedOriginalAudio(
   media: typeof import("mediabunny"),
@@ -429,10 +888,11 @@ async function collectDecodedOriginalAudio(
   }
 
   const sink = new media.AudioBufferSink(audioTrack);
-  const decoded: ScheduledAudioBuffer[] = [];
+  const decodedRanges: ScheduledAudioBuffer[][] = [];
   let editedRangeStart = 0;
 
   for (const range of ranges) {
+    const rangeBuffers: ScheduledAudioBuffer[] = [];
     for await (const wrapped of sink.buffers(range.start, range.end)) {
       throwIfAborted(signal);
       const placement = getPortableAudioSlicePlacement(
@@ -441,19 +901,28 @@ async function collectDecodedOriginalAudio(
         wrapped.timestamp,
         wrapped.duration,
       );
-      if (placement) decoded.push({ buffer: wrapped.buffer, placement });
+      if (placement) {
+        rangeBuffers.push({
+          buffer: wrapped.buffer,
+          placement,
+          fadeIn: false,
+          fadeOut: false,
+        });
+      }
     }
+    if (rangeBuffers.length > 0) decodedRanges.push(rangeBuffers);
     editedRangeStart += range.end - range.start;
   }
 
-  return decoded;
+  applyPortableAudioCrossfades(decodedRanges);
+  return decodedRanges.flat();
 }
 
 function buildDecodedFileAudioSchedule(
   decodedAudio: AudioBuffer,
   ranges: readonly PortableVideoRange[],
 ) {
-  const scheduled: ScheduledAudioBuffer[] = [];
+  const scheduledRanges: ScheduledAudioBuffer[][] = [];
   let editedRangeStart = 0;
 
   for (const range of ranges) {
@@ -463,11 +932,19 @@ function buildDecodedFileAudioSchedule(
       0,
       decodedAudio.duration,
     );
-    if (placement) scheduled.push({ buffer: decodedAudio, placement });
+    if (placement) {
+      scheduledRanges.push([{
+        buffer: decodedAudio,
+        placement,
+        fadeIn: true,
+        fadeOut: true,
+      }]);
+    }
     editedRangeStart += range.end - range.start;
   }
 
-  return scheduled;
+  applyPortableAudioCrossfades(scheduledRanges);
+  return scheduledRanges.flat();
 }
 
 function scheduleAudioBuffer(
@@ -475,6 +952,12 @@ function scheduleAudioBuffer(
   destination: AudioNode,
   buffer: AudioBuffer,
   placement: PortableAudioSlicePlacement,
+  fades: {
+    fadeIn?: boolean;
+    fadeOut?: boolean;
+    fadeInDuration?: number;
+    fadeOutDuration?: number;
+  } = {},
 ) {
   const duration = Math.min(
     placement.duration,
@@ -484,8 +967,177 @@ function scheduleAudioBuffer(
 
   const source = context.createBufferSource();
   source.buffer = buffer;
-  source.connect(destination);
+  if (!fades.fadeIn && !fades.fadeOut) {
+    source.connect(destination);
+    source.start(placement.when, placement.offset, duration);
+    return;
+  }
+
+  const sliceGain = context.createGain();
+  source.connect(sliceGain);
+  sliceGain.connect(destination);
+
+  const maximumSingleFadeDuration = duration / (
+    fades.fadeIn && fades.fadeOut ? 2 : 1
+  );
+  const fadeInDuration = Math.min(
+    fades.fadeInDuration ?? PORTABLE_AUDIO_CUT_FADE_SECONDS,
+    maximumSingleFadeDuration,
+  );
+  const fadeOutDuration = Math.min(
+    fades.fadeOutDuration ?? PORTABLE_AUDIO_CUT_FADE_SECONDS,
+    maximumSingleFadeDuration,
+  );
+  const curveSteps = 32;
+  if (fades.fadeIn && fadeInDuration > RANGE_EPSILON) {
+    const fadeInCurve = Float32Array.from(
+      { length: curveSteps },
+      (_, index) =>
+        getPortableEqualPowerFadeGain(index / (curveSteps - 1), "in"),
+    );
+    sliceGain.gain.setValueCurveAtTime(
+      fadeInCurve,
+      placement.when,
+      fadeInDuration,
+    );
+  } else {
+    sliceGain.gain.setValueAtTime(1, placement.when);
+  }
+  if (fades.fadeOut && fadeOutDuration > RANGE_EPSILON) {
+    const fadeOutCurve = Float32Array.from(
+      { length: curveSteps },
+      (_, index) =>
+        getPortableEqualPowerFadeGain(index / (curveSteps - 1), "out"),
+    );
+    sliceGain.gain.setValueCurveAtTime(
+      fadeOutCurve,
+      placement.when + duration - fadeOutDuration,
+      fadeOutDuration,
+    );
+  }
   source.start(placement.when, placement.offset, duration);
+}
+
+function measureScheduledOriginalAudio(items: ScheduledAudioBuffer[]) {
+  const maximumSamples = 120_000;
+  const availableSamples = items.reduce(
+    (total, item) =>
+      total +
+      Math.ceil(item.placement.duration * item.buffer.sampleRate) *
+        item.buffer.numberOfChannels,
+    0,
+  );
+  const stride = Math.max(1, Math.ceil(availableSamples / maximumSamples));
+  let sumSquares = 0;
+  let peak = 0;
+  let sampleCount = 0;
+
+  for (const item of items) {
+    const startFrame = Math.max(
+      0,
+      Math.floor(item.placement.offset * item.buffer.sampleRate),
+    );
+    const endFrame = Math.min(
+      item.buffer.length,
+      Math.ceil(
+        (item.placement.offset + item.placement.duration) *
+          item.buffer.sampleRate,
+      ),
+    );
+    for (let channel = 0; channel < item.buffer.numberOfChannels; channel += 1) {
+      const samples = item.buffer.getChannelData(channel);
+      for (let frame = startFrame; frame < endFrame; frame += stride) {
+        const sample = samples[frame];
+        if (!Number.isFinite(sample)) continue;
+        sumSquares += sample * sample;
+        peak = Math.max(peak, Math.abs(sample));
+        sampleCount += 1;
+      }
+    }
+  }
+
+  return {
+    rms: sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0,
+    peak,
+  };
+}
+
+/**
+ * Pre-computes the same local source-audio normalization used by the final
+ * MP4 mixer so preview and fallback paths can share its gain. Unsupported
+ * decoders fail open at unity gain; playback must never be blocked merely
+ * because a loudness preview could not be measured.
+ */
+export async function measurePortableOriginalAudioNormalization(
+  file: File,
+  ranges: readonly PortableVideoRange[],
+  signal?: AbortSignal,
+) {
+  let input: InstanceType<(typeof import("mediabunny"))["Input"]> | null =
+    null;
+  try {
+    throwIfAborted(signal);
+    const media = await import("mediabunny");
+    input = new media.Input({
+      source: new media.BlobSource(file),
+      formats: media.ALL_FORMATS,
+    });
+    if (!(await input.canRead())) return 1;
+    const audioTrack = await getPreferredPortableInputAudioTrack(input);
+    if (!audioTrack || !(await audioTrack.canDecode())) return 1;
+    const sourceDuration = await audioTrack.computeDuration();
+    const normalizedRanges = normalizePortableVideoRanges(
+      ranges,
+      sourceDuration,
+    );
+    if (normalizedRanges.length === 0) return 1;
+    const decoded = await collectDecodedOriginalAudio(
+      media,
+      audioTrack,
+      normalizedRanges,
+      signal,
+    );
+    if (decoded.length === 0) return 1;
+    const level = measureScheduledOriginalAudio(decoded);
+    return computePortableOriginalNormalizationGain(level.rms, level.peak);
+  } catch (error) {
+    if (error instanceof PortableVideoExportAbortedError) throw error;
+    return 1;
+  } finally {
+    input?.dispose();
+  }
+}
+
+function narrationActivityFromBuffer(
+  buffer: AudioBuffer,
+  maximumDuration: number,
+) {
+  return detectPortableNarrationActivity(
+    Array.from(
+      { length: buffer.numberOfChannels },
+      (_, channel) => buffer.getChannelData(channel),
+    ),
+    buffer.sampleRate,
+    maximumDuration,
+  );
+}
+
+function automateOriginalAudioGain(
+  gain: AudioParam,
+  baseGain: number,
+  duration: number,
+  narrationActivity: readonly PortableAudioActivityRange[],
+) {
+  const envelope = buildPortableDuckingEnvelope(
+    narrationActivity,
+    baseGain,
+    duration,
+  );
+  gain.cancelScheduledValues(0);
+  envelope.forEach((point, index) => {
+    if (index === 0) gain.setValueAtTime(point.gain, point.time);
+    else gain.linearRampToValueAtTime(point.gain, point.time);
+  });
 }
 
 async function renderMixedAudio(
@@ -503,19 +1155,7 @@ async function renderMixedAudio(
 ): Promise<AudioBuffer | null> {
   let audioTrack: InputAudioTrack | null = null;
   if (options.originalGain > 0) {
-    const [audioTracks, primaryAudioTrack] = await Promise.all([
-      input.getAudioTracks(),
-      input.getPrimaryAudioTrack(),
-    ]);
-    const candidates = await Promise.all(
-      audioTracks.map(async (track) => ({
-        track,
-        codec: await track.getCodec().catch(() => null),
-        decodable: await track.canDecode().catch(() => false),
-        primary: track === primaryAudioTrack,
-      })),
-    );
-    audioTrack = selectPreferredPortableAudioTrack(candidates);
+    audioTrack = await getPreferredPortableInputAudioTrack(input);
   }
   if (!audioTrack && !options.narrationBuffer) return null;
 
@@ -539,6 +1179,12 @@ async function renderMixedAudio(
   limiter.attack.value = 0.002;
   limiter.release.value = 0.08;
   limiter.connect(context.destination);
+  const narrationActivity = options.narrationBuffer
+    ? narrationActivityFromBuffer(
+        options.narrationBuffer,
+        options.editedDuration,
+      )
+    : [];
 
   if (audioTrack && options.originalGain > 0) {
     throwIfAborted(options.signal);
@@ -579,7 +1225,24 @@ async function renderMixedAudio(
     }
 
     const originalGainNode = context.createGain();
-    originalGainNode.gain.value = options.originalGain;
+    const originalLevel = measureScheduledOriginalAudio(originalAudio);
+    const normalizationGain = computePortableOriginalNormalizationGain(
+      originalLevel.rms,
+      originalLevel.peak,
+    );
+    // The user's 8% / 12% choice remains the base proportion. Local
+    // normalization makes source loudness consistent, and narration activity
+    // temporarily ducks that base without changing the selected setting.
+    const normalizedOriginalGain = Math.min(
+      2,
+      options.originalGain * normalizationGain,
+    );
+    automateOriginalAudioGain(
+      originalGainNode.gain,
+      normalizedOriginalGain,
+      options.editedDuration,
+      narrationActivity,
+    );
     originalGainNode.connect(limiter);
     for (const item of originalAudio) {
       scheduleAudioBuffer(
@@ -587,6 +1250,7 @@ async function renderMixedAudio(
         originalGainNode,
         item.buffer,
         item.placement,
+        item,
       );
     }
   }
@@ -605,6 +1269,7 @@ async function renderMixedAudio(
         narrationGainNode,
         options.narrationBuffer,
         { when: 0, offset: 0, duration: narrationDuration },
+        { fadeIn: true, fadeOut: true },
       );
     }
   }
@@ -731,7 +1396,7 @@ export async function exportPortableVideoMp4(
 
     if (
       mixedAudio &&
-      !(await media.canEncodeAudio("aac", {
+      !(await ensurePortableAacEncoding(media, {
         numberOfChannels: OUTPUT_CHANNELS,
         sampleRate: OUTPUT_SAMPLE_RATE,
         bitrate: audioBitrate,
@@ -789,6 +1454,7 @@ export async function exportPortableVideoMp4(
       ? audioSource.add(mixedAudio).then(() => audioSource.close())
       : Promise.resolve();
     const frameSink = new media.VideoSampleSink(videoTrack);
+    const crossfadeFrameSink = new media.VideoSampleSink(videoTrack);
 
     try {
       const timestamps = schedule.map((frame) => frame.sourceTime);
@@ -800,14 +1466,41 @@ export async function exportPortableVideoMp4(
 
         context.fillStyle = "#000";
         context.fillRect(0, 0, canvas.width, canvas.height);
+        let blendSample: Awaited<ReturnType<typeof crossfadeFrameSink.getSample>> =
+          null;
         try {
-          sample?.draw(
-            context,
-            drawRect.x,
-            drawRect.y,
-            drawRect.width,
-            drawRect.height,
-          );
+          if (frame.blendFromSourceTime !== undefined) {
+            blendSample = await crossfadeFrameSink.getSample(
+              frame.blendFromSourceTime,
+            );
+          }
+          if (blendSample && sample) {
+            blendSample.draw(
+              context,
+              drawRect.x,
+              drawRect.y,
+              drawRect.width,
+              drawRect.height,
+            );
+            context.save();
+            context.globalAlpha = frame.blendProgress ?? 1;
+            sample.draw(
+              context,
+              drawRect.x,
+              drawRect.y,
+              drawRect.width,
+              drawRect.height,
+            );
+            context.restore();
+          } else {
+            sample?.draw(
+              context,
+              drawRect.x,
+              drawRect.y,
+              drawRect.width,
+              drawRect.height,
+            );
+          }
           await options.drawCaption?.({
             canvas,
             context,
@@ -821,6 +1514,7 @@ export async function exportPortableVideoMp4(
             frame.duration,
           );
         } finally {
+          blendSample?.close();
           sample?.close();
         }
 

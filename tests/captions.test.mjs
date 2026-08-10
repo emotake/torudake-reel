@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  attachCaptionWordTimings,
   buildCaptionSegments,
   buildCaptionSegmentsFromWords,
   selectCaptionHighlight,
@@ -78,6 +79,32 @@ test("uses word timestamps for natural caption timing", () => {
   assert.equal(
     captions.map((caption) => caption.text).join(""),
     "まずは3つのポイントを紹介します。",
+  );
+  assert.deepEqual(captions[0].wordTimings, [
+    { startOffset: 0, endOffset: 0.6, word: "まずは" },
+    { startOffset: 0.6, endOffset: 1.2, word: "3つの" },
+    { startOffset: 1.2, endOffset: 2.4, word: "ポイントを" },
+  ]);
+
+  const shifted = attachCaptionWordTimings(
+    [
+      {
+        ...captions[0],
+        start: captions[0].start + 30,
+        end: captions[0].end + 30,
+        wordTimings: undefined,
+      },
+    ],
+    [
+      { start: 30.2, end: 30.8, word: "まずは" },
+      { start: 30.8, end: 31.4, word: "3つの" },
+      { start: 31.4, end: 32.6, word: "ポイントを" },
+    ],
+  )[0];
+  assert.deepEqual(
+    shifted.wordTimings,
+    captions[0].wordTimings,
+    "relative word timings survive long-video chunk offsets",
   );
 });
 

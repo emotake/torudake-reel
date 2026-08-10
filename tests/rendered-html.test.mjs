@@ -31,11 +31,11 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集の手間を、もっと軽く。/);
-  assert.match(html, /lifestyleGallery/);
-  assert.match(html, /lifestyleFrameCity lifestyleFrameMain/);
-  assert.doesNotMatch(html, /lifestyleFrameCoast lifestyleFrameMain/);
-  assert.match(html, /aria-labelledby="lifestyleHeroCaption"/);
-  assert.match(html, /<figcaption[^>]+id="lifestyleHeroCaption"/);
+  assert.match(html, /class="heroVisual realDemo"/);
+  assert.match(html, /src="\/demo\/torudake-demo\.mp4"/);
+  assert.match(html, /音声・字幕つきデモ動画/);
+  assert.match(html, /実際の動画・音声・テロップで確認/);
+  assert.doesNotMatch(html, /lifestyleGallery/);
   assert.doesNotMatch(html, /4工程|AUTO CUT|AI VOICE/);
   assert.match(html, /動画を選んで無料で試す/);
   assert.match(html, /編集・プレビューは無料/);
@@ -86,6 +86,9 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(html, /クリーン/);
   assert.match(html, /追加API料金 0円/);
   assert.match(html, /1080×1920/);
+  assert.match(html, /仕上がりプレビューは無料/);
+  assert.match(html, /保存は1動画/);
+  assert.match(html, /月(?:<!-- -->)?8(?:<!-- -->)?本/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/photo-reel"/,

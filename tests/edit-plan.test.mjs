@@ -9,6 +9,7 @@ import {
   getEditedDuration,
   remapCaptionsToEditedTimeline,
   setCaptionCut,
+  snapEditRangesToTimedSilence,
   sourceTimeToEditedTime,
 } from "../lib/edit-plan.ts";
 
@@ -47,14 +48,20 @@ test("builds a natural edit near the requested duration from the full source", (
 });
 
 test("a 30 second edit keeps representative moments from early, middle, and late", () => {
-  const source = Array.from({ length: 18 }, (_, index) =>
-    caption(
+  const source = Array.from({ length: 18 }, (_, index) => ({
+    ...caption(
       index + 1,
       index * 4,
       index * 4 + 3.4,
       `要点${index + 1}を分かりやすく説明します。`,
     ),
-  );
+    wordTimings: [
+      { startOffset: 0, endOffset: 0.8, word: `要点${index + 1}` },
+      { startOffset: 0.8, endOffset: 1.8, word: "を分かりやすく" },
+      { startOffset: 1.8, endOffset: 2.7, word: "説明" },
+      { startOffset: 2.7, endOffset: 3.4, word: "します。" },
+    ],
+  }));
 
   const edited = createNaturalEdit(source, 30, "sales");
   const kept = edited.filter((item) => !item.removed);
@@ -70,12 +77,21 @@ test("a 30 second edit keeps representative moments from early, middle, and late
 test("clips an oversized single transcript segment to the requested duration", () => {
   const edited = createNaturalEdit(
     [
-      caption(
-        1,
-        0,
-        72,
-        "長い説明の中から必要な部分だけを自然な長さに収めて紹介します。",
-      ),
+      {
+        ...caption(
+          1,
+          0,
+          72,
+          "長い説明の中から必要な部分だけを自然な長さに収めて紹介します。",
+        ),
+        wordTimings: [
+          { startOffset: 0, endOffset: 8, word: "長い説明の" },
+          { startOffset: 8, endOffset: 18, word: "中から" },
+          { startOffset: 18, endOffset: 29.6, word: "必要な部分だけを" },
+          { startOffset: 29.6, endOffset: 43, word: "自然な長さに" },
+          { startOffset: 43, endOffset: 72, word: "収めて紹介します。" },
+        ],
+      },
     ],
     30,
     "reach",
@@ -83,8 +99,93 @@ test("clips an oversized single transcript segment to the requested duration", (
 
   assert.equal(edited.length, 1);
   assert.equal(edited[0].removed, false);
-  assert.equal(getEditedDuration(buildEditRanges(edited)), 30);
+  assert.equal(getEditedDuration(buildEditRanges(edited)), 29.6);
   assert.ok(edited[0].text.length > 0);
+  assert.equal(edited[0].end, 29.6);
+  assert.equal(edited[0].text, "長い説明の中から必要な部分だけを");
+  assert.ok(
+    edited[0].wordTimings.every((word) => word.endOffset <= 29.6),
+  );
+});
+
+test("keeps a whole caption when exact word timestamps are unavailable", () => {
+  const original = caption(
+    1,
+    0,
+    72,
+    "正確な単語時刻がない場合は発話途中を推定位置で切りません。",
+  );
+  const edited = createNaturalEdit([original], 30, "reach");
+
+  assert.equal(edited.length, 1);
+  assert.equal(edited[0].removed, false);
+  assert.equal(edited[0].start, original.start);
+  assert.equal(edited[0].end, original.end);
+  assert.equal(edited[0].text, original.text);
+});
+
+test("places automatic cut joins in timestamped quiet gaps", () => {
+  const transcript = [
+    {
+      ...caption(1, 0, 1, "前の言葉"),
+      removed: true,
+      wordTimings: [{ startOffset: 0, endOffset: 1, word: "前の言葉" }],
+    },
+    {
+      ...caption(2, 1.4, 2, "残す言葉"),
+      wordTimings: [{ startOffset: 0, endOffset: 0.6, word: "残す言葉" }],
+    },
+    {
+      ...caption(3, 2.4, 3, "後の言葉"),
+      removed: true,
+      wordTimings: [{ startOffset: 0, endOffset: 0.6, word: "後の言葉" }],
+    },
+  ];
+
+  assert.deepEqual(
+    snapEditRangesToTimedSilence(transcript, [{ start: 1.4, end: 2 }]),
+    [{ start: 1.38, end: 2.02 }],
+  );
+  assert.deepEqual(buildEditRanges(transcript), [
+    { start: 1.38, end: 2.02 },
+  ]);
+});
+
+test("does not invent silence joins without exact word timestamps", () => {
+  const transcript = [
+    { ...caption(1, 0, 1, "cut"), removed: true },
+    caption(2, 1.4, 2, "keep"),
+  ];
+
+  assert.deepEqual(
+    snapEditRangesToTimedSilence(transcript, [{ start: 1.4, end: 2 }]),
+    [{ start: 1.4, end: 2 }],
+  );
+});
+
+test("preserves waveform-measured cut handles instead of expanding them again", () => {
+  const transcript = [
+    {
+      ...caption(1, 0, 1, "before"),
+      removed: true,
+      wordTimings: [{ startOffset: 0, endOffset: 1, word: "before" }],
+    },
+    {
+      ...caption(2, 1.39, 2.01, "keep"),
+      localSilenceStart: true,
+      localSilenceEnd: true,
+      wordTimings: [{ startOffset: 0.01, endOffset: 0.61, word: "keep" }],
+    },
+    {
+      ...caption(3, 2.4, 3, "after"),
+      removed: true,
+      wordTimings: [{ startOffset: 0, endOffset: 0.6, word: "after" }],
+    },
+  ];
+
+  assert.deepEqual(buildEditRanges(transcript), [
+    { start: 1.39, end: 2.01 },
+  ]);
 });
 
 test("maps source timestamps onto the cut timeline", () => {

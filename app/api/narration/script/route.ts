@@ -19,6 +19,7 @@ import {
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { isDurationWithinReservation } from "../../../../lib/usage-duration";
+import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
@@ -170,7 +171,20 @@ export async function POST(request: Request) {
     typeof payload.brief === "string" ? payload.brief.trim().slice(0, 800) : "";
   const goal = typeof payload.goal === "string" ? payload.goal : "";
   const length = Number(payload.length);
-  const sourceDuration = Number(payload.sourceDuration);
+  const sourceDurationResult = validateVideoInputDuration(
+    payload.sourceDuration,
+  );
+  if (!sourceDurationResult.ok) {
+    return Response.json(
+      {
+        error: sourceDurationResult.message,
+        code: sourceDurationResult.code,
+        maximumSeconds: sourceDurationResult.maximumSeconds,
+      },
+      { status: 400 },
+    );
+  }
+  const sourceDuration = sourceDurationResult.durationSeconds;
   const style = normalizeNarrationStyle(payload.style);
   const timingScale =
     payload.timingScale === undefined ? 1 : Number(payload.timingScale);
@@ -190,9 +204,6 @@ export async function POST(request: Request) {
     !GOALS.has(goal) ||
     !LENGTHS.has(length) ||
     !style ||
-    !Number.isFinite(sourceDuration) ||
-    sourceDuration <= 0 ||
-    sourceDuration > 60 * 60 ||
     !Number.isFinite(timingScale) ||
     timingScale < 0.55 ||
     timingScale > 1

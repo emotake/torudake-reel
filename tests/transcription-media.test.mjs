@@ -37,6 +37,17 @@ test("keeps Dolby audio tracks available as a secondary fallback", () => {
   assert.equal(getDirectCopyAudioOutput("eac3")?.kind, "mp4");
 });
 
+test("extracts iPhone uncompressed PCM audio into an uploadable WAVE file", () => {
+  assert.deepEqual(getDirectCopyAudioOutput("pcm-s16"), {
+    extension: "wav",
+    kind: "wav",
+    mimeType: "audio/wav",
+  });
+  assert.ok(
+    getAudioCodecPriority("pcm-s16") < getAudioCodecPriority(null),
+  );
+});
+
 test("keeps direct-copy audio chunks below the upload limit", () => {
   assert.equal(DEFAULT_MAX_AUDIO_CHUNK_BYTES, 768 * 1024);
   assert.equal(MIN_AUDIO_CHUNK_BYTES, 192 * 1024);

@@ -78,6 +78,29 @@ test("tries a deterministic MP4 export before the MediaRecorder fallback", () =>
   assert.match(exportFlow, /if \(!canUseLegacyRecorder\) throw portableExportError/);
 });
 
+test("keeps preview and recorder fallback aligned with local loudness and ducking", () => {
+  const start = pageSource.indexOf("function ResultWorkspace(");
+  const end = pageSource.indexOf("\n  return (", start);
+  const workspaceFlow = pageSource.slice(start, end);
+  const exportStart = workspaceFlow.indexOf("async function exportCaptionedVideo(");
+  const exportFlow = workspaceFlow.slice(exportStart);
+
+  assert.match(workspaceFlow, /measurePortableOriginalAudioNormalization\(/);
+  assert.match(workspaceFlow, /detectPortableNarrationActivity\(/);
+  assert.match(workspaceFlow, /remapPortableNarrationActivity\(/);
+  assert.match(workspaceFlow, /buildPortableDuckingEnvelope\(/);
+  assert.match(workspaceFlow, /schedulePreviewOriginalDucking\(/);
+  assert.match(
+    exportFlow,
+    /getNarrationMixLevels\(narrationOriginalAudio\)\.original[\s\S]*originalAudioNormalizationGain/,
+  );
+  assert.match(exportFlow, /activeExportNarrationSliceGain/);
+  assert.match(exportFlow, /PORTABLE_AUDIO_CUT_FADE_SECONDS/);
+  assert.match(exportFlow, /PORTABLE_VIDEO_CROSSFADE_SECONDS/);
+  assert.match(exportFlow, /fallbackCrossfadeFrame/);
+  assert.match(exportFlow, /scheduleGainEnvelope\(/);
+});
+
 test("keeps free users in editing and preview while paid buckets can export", () => {
   const exportStart = pageSource.indexOf("async function exportCaptionedVideo(");
   const exportEnd = pageSource.indexOf("\n  function requestVideoExport()", exportStart);

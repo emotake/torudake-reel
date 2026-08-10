@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import {
+  attachCaptionWordTimings,
   buildCaptionSegments,
+  buildCaptionSegmentsFromWords,
   type RawCaptionSegment,
+  type RawCaptionWord,
 } from "../../../lib/captions";
 import {
   alignRefinedTextToSegments,
@@ -78,6 +81,11 @@ type TranscriptionResponse = {
     speaker?: string;
     text?: string;
   }>;
+  words?: Array<{
+    start?: number;
+    end?: number;
+    word?: string;
+  }>;
   text?: string;
 };
 
@@ -138,6 +146,22 @@ function getRawSegments(transcription: TranscriptionResponse) {
   return segments;
 }
 
+function getRawWords(transcription: TranscriptionResponse) {
+  return (transcription.words ?? [])
+    .map((word) => ({
+      start: Number(word.start),
+      end: Number(word.end),
+      word: word.word?.trim() ?? "",
+    }))
+    .filter(
+      (word): word is RawCaptionWord =>
+        Number.isFinite(word.start) &&
+        Number.isFinite(word.end) &&
+        word.end > word.start &&
+        Boolean(word.word),
+    );
+}
+
 async function requestTranscription(
   apiKey: string,
   file: File,
@@ -167,6 +191,7 @@ async function requestTranscription(
   formData.set("temperature", "0");
   if (isWhisperTimedPrimary) {
     formData.append("timestamp_granularities[]", "segment");
+    formData.append("timestamp_granularities[]", "word");
   }
   if (isDiarizedTimedFallback) {
     formData.set("chunking_strategy", "auto");
@@ -494,6 +519,7 @@ export async function POST(request: Request) {
     const transcription = timedResult.transcription;
     let transcriptionText = transcription.text?.trim() ?? "";
     const transcriptionDuration = Number(transcription.duration);
+    const rawWords = getRawWords(transcription);
     let rawSegments = getRawSegments(transcription);
     if (meteredAuthorization) {
       const observedDuration = Math.max(
@@ -501,6 +527,7 @@ export async function POST(request: Request) {
           ? transcriptionDuration
           : 0,
         ...rawSegments.map((segment) => segment.end),
+        ...rawWords.map((word) => word.end),
       );
       const observedUsage = await recordMeteredAiTranscriptionDuration(
         meteredAuthorization.action,
@@ -551,7 +578,12 @@ export async function POST(request: Request) {
       }
     }
 
-    const segments = buildCaptionSegments(rawSegments, 14);
+    const segments = rawWords.length > 0 && !refined
+      ? buildCaptionSegmentsFromWords(rawWords, 14)
+      : attachCaptionWordTimings(
+          buildCaptionSegments(rawSegments, 14),
+          rawWords,
+        );
 
     let completedQuotaHeaders: Record<string, string> = {};
     if (meteredAuthorization) {
@@ -601,6 +633,7 @@ export async function POST(request: Request) {
         language: transcription.language ?? "ja",
         duration:
           transcriptionDuration || segments.at(-1)?.end || 0,
+        words: rawWords,
         segments,
         refined,
         refinementReason: refined

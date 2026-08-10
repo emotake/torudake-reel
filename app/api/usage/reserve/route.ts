@@ -7,6 +7,7 @@ import { getAiOperationSuccessLimit } from "../../../../lib/billing-policy";
 import { authenticationRequired } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 
 export async function POST(request: Request) {
   if (!isUsageEnforcementEnabled()) {
@@ -27,10 +28,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "動画の長さを確認できませんでした。" }, { status: 400 });
   }
 
-  const duration = Number(payload.sourceDurationSeconds);
-  if (!Number.isFinite(duration) || duration <= 0 || duration > 60 * 60) {
-    return Response.json({ error: "動画の長さを確認できませんでした。" }, { status: 400 });
+  const durationResult = validateVideoInputDuration(
+    payload.sourceDurationSeconds,
+  );
+  if (!durationResult.ok) {
+    return Response.json(
+      {
+        error: durationResult.message,
+        code: durationResult.code,
+        maximumSeconds: durationResult.maximumSeconds,
+      },
+      { status: 400 },
+    );
   }
+  const duration = durationResult.durationSeconds;
   if (
     typeof payload.idempotencyKey !== "string" ||
     !/^[a-zA-Z0-9_-]{8,100}$/.test(payload.idempotencyKey)

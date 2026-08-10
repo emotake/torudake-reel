@@ -45,7 +45,7 @@ export function buildSiteStructuredData() {
           "最大10枚の写真から縦型リールを自動作成",
           "写真リールの5種類の自動編集",
           "投稿用表紙の生成",
-          "Instagram投稿文の作成",
+          "AIナレーションモードでInstagram投稿文を作成",
         ],
         offers: [
           {

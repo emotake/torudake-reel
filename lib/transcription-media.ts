@@ -10,7 +10,8 @@ type DirectCopyAudioCodec =
   | "opus"
   | "vorbis"
   | "ac3"
-  | "eac3";
+  | "eac3"
+  | "pcm-s16";
 
 export type TranscriptionAudioChunk = {
   file: File;
@@ -37,6 +38,13 @@ export function getDirectCopyAudioOutput(codec: string | null) {
       mimeType: "audio/webm",
     };
   }
+  if (codec === "pcm-s16") {
+    return {
+      extension: "wav",
+      kind: "wav" as const,
+      mimeType: "audio/wav",
+    };
+  }
   return null;
 }
 
@@ -54,6 +62,8 @@ export function getAudioCodecPriority(codec: string | null) {
       return 4;
     case "eac3":
       return 5;
+    case "pcm-s16":
+      return 6;
     default:
       return Number.POSITIVE_INFINITY;
   }
@@ -103,6 +113,7 @@ export async function* extractTranscriptionAudioChunks(
     Mp4OutputFormat,
     Output,
     QTFF,
+    WavOutputFormat,
     WEBM,
     WebMOutputFormat,
   } = await import("mediabunny");
@@ -180,7 +191,9 @@ export async function* extractTranscriptionAudioChunks(
       const format =
         outputSpec.kind === "mp4"
           ? new Mp4OutputFormat({ fastStart: "in-memory" })
-          : new WebMOutputFormat();
+          : outputSpec.kind === "webm"
+            ? new WebMOutputFormat()
+            : new WavOutputFormat();
       const output = new Output({ format, target });
       const packetSource = new EncodedAudioPacketSource(codec);
       output.addAudioTrack(packetSource);

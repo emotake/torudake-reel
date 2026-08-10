@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildSiteStructuredData } from "../lib/seo.ts";
-import { SITE_ORIGIN } from "../lib/site.ts";
+import { SITE_DESCRIPTION, SITE_ORIGIN } from "../lib/site.ts";
 
 const readProjectFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -83,6 +83,12 @@ test("describes the real web application without invented ratings", () => {
   assert.ok(application.featureList.includes("自動テロップ"));
   assert.ok(application.featureList.includes("AIナレーション"));
   assert.ok(
+    application.featureList.includes(
+      "AIナレーションモードでInstagram投稿文を作成",
+    ),
+  );
+  assert.ok(SITE_DESCRIPTION.includes("AIナレーションモードでは投稿文も作成"));
+  assert.ok(
     application.featureList.includes("最大10枚の写真から縦型リールを自動作成"),
   );
   assert.equal("aggregateRating" in application, false);
@@ -98,4 +104,5 @@ test("publishes a Japanese web app manifest", () => {
   assert.equal(value.start_url, "/");
   assert.equal(value.lang, "ja");
   assert.equal(value.icons[0].src, "/favicon.svg");
+  assert.match(value.description, /AIナレーションモードでは投稿文も作成/);
 });

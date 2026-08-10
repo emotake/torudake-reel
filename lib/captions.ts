@@ -10,11 +10,24 @@ export type RawCaptionWord = {
   word: string;
 };
 
+/**
+ * Word timing relative to the caption start. Relative values survive the
+ * client-side offset applied when long media is transcribed in chunks.
+ */
+export type CaptionWordTiming = {
+  startOffset: number;
+  endOffset: number;
+  word: string;
+};
+
 export type CaptionSegment = RawCaptionSegment & {
   id: number;
   removed: boolean;
   accent?: boolean;
   highlight?: string;
+  wordTimings?: CaptionWordTiming[];
+  localSilenceStart?: boolean;
+  localSilenceEnd?: boolean;
 };
 
 const DEFAULT_MAX_CAPTION_CHARS = 16;
@@ -267,22 +280,77 @@ export function buildCaptionSegmentsFromWords(
   words: RawCaptionWord[],
   maxChars = DEFAULT_MAX_CAPTION_CHARS,
 ) {
-  return buildCaptionSegments(
-    words
-      .map((word) => ({
-        start: Number(word.start),
-        end: Number(word.end),
+  const normalizedWords = words
+    .map((word) => ({
+      start: Number(word.start),
+      end: Number(word.end),
+      word: word.word.trim(),
+    }))
+    .filter(
+      (word) =>
+        Number.isFinite(word.start) &&
+        Number.isFinite(word.end) &&
+        word.end > word.start &&
+        Boolean(word.word),
+    )
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+
+  return attachCaptionWordTimings(
+    buildCaptionSegments(
+      normalizedWords.map((word) => ({
+        start: word.start,
+        end: word.end,
         text: word.word,
-      }))
+      })),
+      maxChars,
+    ),
+    normalizedWords,
+  );
+}
+
+/**
+ * Keeps exact word boundaries on captions whose display text may have been
+ * refined separately. Only complete words are attached, so a later cut never
+ * treats a proportional mid-word point as a safe boundary.
+ */
+export function attachCaptionWordTimings(
+  captions: CaptionSegment[],
+  words: RawCaptionWord[],
+) {
+  const normalizedWords = words
+    .map((word) => ({
+      start: Number(word.start),
+      end: Number(word.end),
+      word: word.word.trim(),
+    }))
+    .filter(
+      (word) =>
+        Number.isFinite(word.start) &&
+        Number.isFinite(word.end) &&
+        word.end > word.start &&
+        Boolean(word.word),
+    );
+
+  return captions.map((caption) => {
+    const wordTimings = normalizedWords
       .filter(
         (word) =>
-          Number.isFinite(word.start) &&
-          Number.isFinite(word.end) &&
-          word.end > word.start &&
-          Boolean(word.text.trim()),
-      ),
-    maxChars,
-  );
+          word.start >= caption.start - 0.001 &&
+          word.end <= caption.end + 0.001,
+      )
+      .map((word) => ({
+        startOffset: roundSeconds(Math.max(0, word.start - caption.start)),
+        endOffset: roundSeconds(
+          Math.min(caption.end - caption.start, word.end - caption.start),
+        ),
+        word: word.word,
+      }))
+      .filter((word) => word.endOffset > word.startOffset);
+
+    return wordTimings.length > 0
+      ? { ...caption, wordTimings }
+      : caption;
+  });
 }
 
 function formatTimestamp(seconds: number, decimalSeparator: "," | ".") {

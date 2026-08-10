@@ -25,7 +25,7 @@ test("turns an audio transcription into timestamped captions", async () => {
       assert.equal(init.body.get("temperature"), "0");
       assert.deepEqual(
         init.body.getAll("timestamp_granularities[]"),
-        ["segment"],
+        ["segment", "word"],
       );
 
       return Response.json({
@@ -35,6 +35,10 @@ test("turns an audio transcription into timestamped captions", async () => {
         segments: [
           { start: 0, end: 2, speaker: "A", text: "これは字幕です。" },
           { start: 2, end: 4.5, speaker: "A", text: "次の字幕です。" },
+        ],
+        words: [
+          { start: 0, end: 2, word: "これは字幕です。" },
+          { start: 2, end: 4.5, word: "次の字幕です。" },
         ],
       });
     }
@@ -81,6 +85,13 @@ test("turns an audio transcription into timestamped captions", async () => {
         { start: 2, end: 4.5, text: "次の字幕です。" },
       ],
     );
+    assert.deepEqual(payload.words, [
+      { start: 0, end: 2, word: "これは字幕です。" },
+      { start: 2, end: 4.5, word: "次の字幕です。" },
+    ]);
+    assert.deepEqual(payload.segments[0].wordTimings, [
+      { startOffset: 0, endOffset: 2, word: "これは字幕です。" },
+    ]);
   } finally {
     globalThis.fetch = nativeFetch;
     delete globalThis.__cloudflareEnv;

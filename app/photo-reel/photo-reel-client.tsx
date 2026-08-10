@@ -969,6 +969,17 @@ export default function PhotoReelClient() {
           <br />
           写真そのものは送信せず、スマホやパソコンの中でリール動画にします。
         </p>
+        <div className="photoReelIntroOffer" aria-label="写真リールの料金">
+          <span aria-hidden="true">¥0</span>
+          <p>
+            <strong>仕上がりプレビューは無料</strong>
+            <small>
+              保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}、または月
+              {LIGHT_MONTHLY_VIDEO_LIMIT}本 ¥
+              {LIGHT_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+            </small>
+          </p>
+        </div>
         <div className="photoReelTrust">
           <span>追加API料金 0円</span>
           <span>1080×1920 MP4</span>

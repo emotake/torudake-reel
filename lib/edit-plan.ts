@@ -173,10 +173,99 @@ export function buildEditRanges(
     ranges.push({ start: caption.start, end: caption.end });
   });
 
-  return ranges.map((range) => ({
+  return snapEditRangesToTimedSilence(captions, ranges).map((range) => ({
     start: roundSeconds(range.start),
     end: roundSeconds(range.end),
   }));
+}
+
+/**
+ * Leaves a small amount of real quiet room around an automatic edit instead
+ * of joining clips exactly on the first/last spoken sample. Whisper word
+ * timestamps expose the gaps between adjacent words, so this stays entirely
+ * local and never adds another AI request.
+ */
+export function snapEditRangesToTimedSilence(
+  captions: CaptionSegment[],
+  ranges: readonly EditRange[],
+): EditRange[] {
+  const words = captions
+    .flatMap((caption) =>
+      getExactWordTimings(caption).map((word) => ({
+        start: caption.start + word.startOffset,
+        end: caption.start + word.endOffset,
+      })),
+    )
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  if (words.length === 0) return ranges.map((range) => ({ ...range }));
+
+  const minimumUsefulSilence = 0.04;
+  const maximumNearbySilence = 1.2;
+  const quietHandleSeconds = 0.02;
+  const snapped = ranges.map((range) => {
+    const includedCaptions = captions
+      .filter(
+        (caption) =>
+          isIncludedCaption(caption) &&
+          caption.end > range.start - 0.001 &&
+          caption.start < range.end + 0.001,
+      )
+      .sort((left, right) => left.start - right.start);
+    const preserveMeasuredStart = Boolean(
+      includedCaptions[0]?.localSilenceStart,
+    );
+    const preserveMeasuredEnd = Boolean(
+      includedCaptions.at(-1)?.localSilenceEnd,
+    );
+    const includedWords = words.filter(
+      (word) =>
+        word.end > range.start - 0.001 &&
+        word.start < range.end + 0.001,
+    );
+    const firstWord = includedWords[0];
+    const lastWord = includedWords.at(-1);
+    if (!firstWord || !lastWord) return { ...range };
+
+    let start = range.start;
+    const previousWord = words.findLast(
+      (word) => word.end <= firstWord.start + 0.001,
+    );
+    if (previousWord && !preserveMeasuredStart) {
+      const gap = firstWord.start - previousWord.end;
+      if (gap >= minimumUsefulSilence && gap <= maximumNearbySilence) {
+        start = Math.min(
+          start,
+          firstWord.start - Math.min(quietHandleSeconds, gap / 2),
+        );
+      }
+    }
+
+    let end = range.end;
+    const nextWord = words.find(
+      (word) => word.start >= lastWord.end - 0.001,
+    );
+    if (nextWord && !preserveMeasuredEnd) {
+      const gap = nextWord.start - lastWord.end;
+      if (gap >= minimumUsefulSilence && gap <= maximumNearbySilence) {
+        end = Math.max(
+          end,
+          lastWord.end + Math.min(quietHandleSeconds, gap / 2),
+        );
+      }
+    }
+
+    return { start, end };
+  });
+
+  return snapped.map((range, index) => {
+    const previous = snapped[index - 1];
+    const next = snapped[index + 1];
+    const start = previous
+      ? Math.max(range.start, previous.end)
+      : Math.max(0, range.start);
+    const end = next ? Math.min(range.end, next.start) : range.end;
+    return end > start ? { start, end } : { ...ranges[index] };
+  });
 }
 
 export function buildSpokenEditRanges(
@@ -440,6 +529,78 @@ function buildEditUnits(
   return units;
 }
 
+function joinTimedWords(words: Array<{ word: string }>) {
+  return words.reduce((text, timing) => {
+    const word = timing.word.trim();
+    if (!word) return text;
+    const needsSpace = /[a-z0-9]$/i.test(text) && /^[a-z0-9]/i.test(word);
+    return `${text}${needsSpace ? " " : ""}${word}`;
+  }, "");
+}
+
+function splitIntoNaturalTokens(text: string) {
+  const normalized = text.trim();
+  if (!normalized) return [];
+
+  if (typeof Intl.Segmenter === "function") {
+    return [...new Intl.Segmenter("ja", { granularity: "word" }).segment(normalized)]
+      .map(({ segment }) => segment)
+      .filter((segment) => segment.trim());
+  }
+
+  return normalized
+    .split(/(?<=[、。，,.！？!?])|\s+/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function getExactWordTimings(caption: CaptionSegment) {
+  const duration = caption.end - caption.start;
+  return (caption.wordTimings ?? [])
+    .filter(
+      (word) =>
+        Number.isFinite(word.startOffset) &&
+        Number.isFinite(word.endOffset) &&
+        word.startOffset >= 0 &&
+        word.endOffset > word.startOffset &&
+        word.endOffset <= duration + 0.001 &&
+        Boolean(word.word.trim()),
+    )
+    .sort(
+      (left, right) =>
+        left.startOffset - right.startOffset ||
+        left.endOffset - right.endOffset,
+    );
+}
+
+function clippedCaptionText(
+  caption: CaptionSegment,
+  selectedWords: Array<{ word: string }>,
+  startRatio: number,
+  endRatio: number,
+) {
+  const joinedWords = joinTimedWords(selectedWords);
+  const allTimedWords = joinTimedWords(getExactWordTimings(caption));
+  if (
+    normalizeForComparison(allTimedWords) ===
+    normalizeForComparison(caption.text)
+  ) {
+    return joinedWords;
+  }
+
+  const textTokens = splitIntoNaturalTokens(caption.text);
+  if (textTokens.length === 0) return caption.text.trim();
+  const startIndex = Math.max(
+    0,
+    Math.min(textTokens.length - 1, Math.floor(startRatio * textTokens.length)),
+  );
+  const endIndex = Math.max(
+    startIndex + 1,
+    Math.min(textTokens.length, Math.ceil(endRatio * textTokens.length)),
+  );
+  return textTokens.slice(startIndex, endIndex).join("");
+}
+
 function clipCaptionToDuration(
   caption: CaptionSegment,
   duration: number,
@@ -448,22 +609,51 @@ function clipCaptionToDuration(
   const originalDuration = caption.end - caption.start;
   const safeDuration = Math.min(originalDuration, Math.max(0, duration));
   if (safeDuration >= originalDuration - 0.001) return { ...caption };
+  // A proportional timing estimate can still land inside a spoken word. When
+  // the transcription fallback has no real word timestamps, keep the whole
+  // caption interval instead of manufacturing an unsafe intra-caption cut.
+  const wordTimings = getExactWordTimings(caption);
+  if (wordTimings.length === 0) return null;
+  const naturalContentEnd = wordTimings.at(-1)!.endOffset;
 
-  const characters = Array.from(caption.text.trim());
-  const characterCount = Math.max(
-    1,
-    Math.min(
-      characters.length,
-      Math.round(characters.length * (safeDuration / originalDuration)),
-    ),
+  const firstSelectedIndex = preferEnd
+    ? wordTimings.findIndex(
+        (word) =>
+          naturalContentEnd - word.startOffset <= safeDuration + 0.001,
+      )
+    : 0;
+  const lastSelectedIndex = preferEnd
+    ? wordTimings.length - 1
+    : wordTimings.findLastIndex(
+        (word) => word.endOffset <= safeDuration + 0.001,
+      );
+  if (firstSelectedIndex < 0 || lastSelectedIndex < firstSelectedIndex) {
+    return null;
+  }
+
+  const selectedWords = wordTimings.slice(
+    firstSelectedIndex,
+    lastSelectedIndex + 1,
   );
+  const startOffset = selectedWords[0].startOffset;
+  const endOffset = selectedWords.at(-1)!.endOffset;
+  if (endOffset - startOffset < 0.12) return null;
+
   return {
     ...caption,
-    start: preferEnd ? roundSeconds(caption.end - safeDuration) : caption.start,
-    end: preferEnd ? caption.end : roundSeconds(caption.start + safeDuration),
-    text: preferEnd
-      ? characters.slice(-characterCount).join("")
-      : characters.slice(0, characterCount).join(""),
+    start: roundSeconds(caption.start + startOffset),
+    end: roundSeconds(caption.start + endOffset),
+    text: clippedCaptionText(
+      caption,
+      selectedWords,
+      startOffset / originalDuration,
+      endOffset / originalDuration,
+    ),
+    wordTimings: selectedWords.map((word) => ({
+      ...word,
+      startOffset: roundSeconds(word.startOffset - startOffset),
+      endOffset: roundSeconds(word.endOffset - startOffset),
+    })),
   };
 }
 
@@ -484,7 +674,8 @@ function takeUnitWithinDuration(unit: EditUnit, duration: number) {
       continue;
     }
     if (remaining >= 0.35) {
-      selected.push(clipCaptionToDuration(caption, remaining, preferEnd));
+      const clipped = clipCaptionToDuration(caption, remaining, preferEnd);
+      if (clipped) selected.push(clipped);
     }
     break;
   }
@@ -680,10 +871,13 @@ export function createNaturalEdit(
         const excess = actualDuration - safeTarget;
         const lastDuration = last.end - last.start;
         if (lastDuration - excess >= 0.35) {
-          selectedCaptions.set(
-            last.id,
-            clipCaptionToDuration(last, lastDuration - excess, true),
+          const clipped = clipCaptionToDuration(
+            last,
+            lastDuration - excess,
+            true,
           );
+          if (clipped) selectedCaptions.set(last.id, clipped);
+          else selectedCaptions.delete(last.id);
         } else {
           selectedCaptions.delete(last.id);
         }
@@ -695,6 +889,9 @@ export function createNaturalEdit(
             })),
           ),
         );
+      }
+      if (selectedCaptions.size === 0) {
+        return sorted.map((caption) => ({ ...caption, removed: false }));
       }
       selectedIds = new Set(selectedCaptions.keys());
       return sorted.map((caption) => {

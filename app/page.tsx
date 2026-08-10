@@ -58,15 +58,28 @@ import {
 import { LINE_SHARE_URL } from "../lib/line-share";
 import {
   calculateCoverCrop,
-  getThumbnailFrameTime,
-  selectThumbnailCandidates,
+  selectThumbnailFrames,
+  type ThumbnailCrop,
 } from "../lib/thumbnail";
 import {
+  buildPortableDuckingEnvelope,
   computePortableVideoDimensions,
   computePortableVideoDrawRect,
+  detectPortableNarrationActivity,
   HIGH_QUALITY_VIDEO_BITRATE,
+  measurePortableOriginalAudioNormalization,
+  PORTABLE_AUDIO_CUT_FADE_SECONDS,
+  PORTABLE_VIDEO_CROSSFADE_SECONDS,
+  remapPortableNarrationActivity,
 } from "../lib/portable-video-export";
 import { explainVideoExportResolution } from "../lib/video-export-quality";
+import { validateVideoInputDuration } from "../lib/video-input-policy";
+import { refineCaptionCutsWithLocalSilence } from "../lib/local-silence-analysis";
+import {
+  createRepresentativeFrameSampleTimes,
+  selectRepresentativeVideoFrames,
+  type NormalizedFace,
+} from "../lib/video-frame-analysis";
 import {
   applyNarrationPronunciationGuide,
   buildDisclosedPostCaption,
@@ -98,6 +111,17 @@ import {
 } from "../lib/narration-audio-edit";
 
 type Stage = "start" | "setup" | "processing" | "result" | "transfer";
+
+type BrowserFaceDetector = {
+  detect(
+    source: CanvasImageSource,
+  ): Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
+};
+
+type BrowserFaceDetectorConstructor = new (options?: {
+  fastMode?: boolean;
+  maxDetectedFaces?: number;
+}) => BrowserFaceDetector;
 type Goal = CaptionGoal;
 type PreviewMode = "before" | "after";
 type PreviewTransportState =
@@ -118,6 +142,22 @@ type CompletedVideoQuality = {
 type VideoDimensions = {
   width: number;
   height: number;
+};
+
+type ThumbnailFrameChoice = {
+  id: string;
+  time: number;
+  previewDataUrl: string;
+  crop: ThumbnailCrop;
+  faceCount: number;
+  score: number;
+  qualityLabel: string;
+};
+
+type ThumbnailFrameAnalysis = {
+  choices: ThumbnailFrameChoice[];
+  faceDetectionSupported: boolean;
+  detectedFaceCount: number;
 };
 
 type UploadedPart = {
@@ -315,6 +355,15 @@ function isSupportedVideoFile(selectedFile: File) {
     "video/x-m4v",
     "video/webm",
   ].includes(contentType);
+}
+
+function isSilentMediaError(error: unknown) {
+  return (
+    error instanceof Error &&
+    /動画に音声が見つかりません|音声を字幕にできません|声が聞こえる区間/.test(
+      error.message,
+    )
+  );
 }
 
 function throwIfProcessingAborted(signal?: AbortSignal) {
@@ -662,6 +711,9 @@ async function transcribeLargeVideo(
         if (mergedSegments.length > 0) {
           return { ...latestQuota, segments: mergedSegments, refined };
         }
+        if (completedChunks > 0) {
+          return { ...latestQuota, segments: [], refined };
+        }
         break;
       } catch (error) {
         if (
@@ -890,13 +942,26 @@ async function extractNarrationFrames(
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const context = canvas.getContext("2d");
     if (!context) throw new Error("動画の場面を読み取れませんでした。");
-    const frames: string[] = [];
     const frameCount = Math.max(3, Math.min(8, count));
+    const analysisCanvas = document.createElement("canvas");
+    const analysisScale = Math.min(1, 192 / Math.max(canvas.width, canvas.height));
+    analysisCanvas.width = Math.max(1, Math.round(canvas.width * analysisScale));
+    analysisCanvas.height = Math.max(1, Math.round(canvas.height * analysisScale));
+    const analysisContext = analysisCanvas.getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!analysisContext) {
+      throw new Error("動画の代表場面を確認できませんでした。");
+    }
+    const candidates: Array<{
+      time: number;
+      image: ImageData;
+      value: string;
+    }> = [];
+    const sampleTimes = createRepresentativeFrameSampleTimes(duration);
 
-    for (let index = 0; index < frameCount; index += 1) {
+    for (const time of sampleTimes) {
       throwIfProcessingAborted(signal);
-      const ratio = frameCount === 1 ? 0.5 : 0.06 + (index / (frameCount - 1)) * 0.88;
-      const time = Math.min(Math.max(0, duration - 0.05), duration * ratio);
       await new Promise<void>((resolve, reject) => {
         const timeout = window.setTimeout(
           () => reject(new Error("動画の場面の読み取りに時間がかかっています。")),
@@ -913,14 +978,368 @@ async function extractNarrationFrames(
         video.currentTime = time;
       });
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.7));
+      analysisContext.drawImage(
+        canvas,
+        0,
+        0,
+        analysisCanvas.width,
+        analysisCanvas.height,
+      );
+      candidates.push({
+        time,
+        image: analysisContext.getImageData(
+          0,
+          0,
+          analysisCanvas.width,
+          analysisCanvas.height,
+        ),
+        value: canvas.toDataURL("image/jpeg", 0.7),
+      });
     }
+    const frames = selectRepresentativeVideoFrames(candidates, {
+      count: frameCount,
+      duration,
+    })
+      .map((entry) => entry.candidate.value)
+      .filter((frame): frame is string => Boolean(frame));
     return { duration, frames };
   } finally {
     video.pause();
     video.removeAttribute("src");
     video.load();
     URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function clampFrameCoordinate(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function calculateFaceFocusedCoverCrop(
+  sourceWidth: number,
+  sourceHeight: number,
+  faces: readonly NormalizedFace[],
+): ThumbnailCrop {
+  const centered = calculateCoverCrop(sourceWidth, sourceHeight, 9, 16);
+  if (faces.length === 0) return centered;
+
+  const visibleFaces = faces.filter(
+    (face) =>
+      Number.isFinite(face.x) &&
+      Number.isFinite(face.y) &&
+      Number.isFinite(face.width) &&
+      Number.isFinite(face.height) &&
+      face.width > 0 &&
+      face.height > 0,
+  );
+  if (visibleFaces.length === 0) return centered;
+
+  const left = Math.min(...visibleFaces.map((face) => face.x));
+  const top = Math.min(...visibleFaces.map((face) => face.y));
+  const right = Math.max(
+    ...visibleFaces.map((face) => face.x + face.width),
+  );
+  const bottom = Math.max(
+    ...visibleFaces.map((face) => face.y + face.height),
+  );
+  const faceCenterX = clampFrameCoordinate((left + right) / 2, 0, 1);
+  const faceCenterY = clampFrameCoordinate((top + bottom) / 2, 0, 1);
+
+  if (centered.width < sourceWidth) {
+    centered.x = clampFrameCoordinate(
+      faceCenterX * sourceWidth - centered.width / 2,
+      0,
+      sourceWidth - centered.width,
+    );
+  }
+  if (centered.height < sourceHeight) {
+    // Keep a detected face slightly above center so the cover title has room.
+    centered.y = clampFrameCoordinate(
+      faceCenterY * sourceHeight - centered.height * 0.4,
+      0,
+      sourceHeight - centered.height,
+    );
+  }
+  return centered;
+}
+
+async function waitForDetachedVideoMetadata(
+  video: HTMLVideoElement,
+  videoUrl: string,
+  signal: AbortSignal,
+) {
+  throwIfProcessingAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => reject(new Error("表紙候補の解析に時間がかかっています。")),
+      15_000,
+    );
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadedmetadata", handleLoaded);
+      video.removeEventListener("error", handleError);
+      signal.removeEventListener("abort", handleAbort);
+    };
+    const handleLoaded = () => {
+      cleanup();
+      if (
+        video.videoWidth > 0 &&
+        video.videoHeight > 0 &&
+        Number.isFinite(video.duration) &&
+        video.duration > 0
+      ) {
+        resolve();
+      } else {
+        reject(new Error("動画の場面を読み取れませんでした。"));
+      }
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("動画の場面を読み取れませんでした。"));
+    };
+    const handleAbort = () => {
+      cleanup();
+      reject(new DOMException("処理を中止しました。", "AbortError"));
+    };
+    video.addEventListener("loadedmetadata", handleLoaded, { once: true });
+    video.addEventListener("error", handleError, { once: true });
+    signal.addEventListener("abort", handleAbort, { once: true });
+    video.src = videoUrl;
+    video.load();
+  });
+}
+
+async function seekDetachedVideoFrame(
+  video: HTMLVideoElement,
+  targetTime: number,
+  signal: AbortSignal,
+) {
+  throwIfProcessingAborted(signal);
+  const safeTime = Math.min(
+    Math.max(0, targetTime),
+    Math.max(0, video.duration - 0.04),
+  );
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => reject(new Error("表紙候補の場面を読み取れませんでした。")),
+      8_000,
+    );
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("error", handleError);
+      signal.removeEventListener("abort", handleAbort);
+    };
+    const handleSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("表紙候補の場面を読み取れませんでした。"));
+    };
+    const handleAbort = () => {
+      cleanup();
+      reject(new DOMException("処理を中止しました。", "AbortError"));
+    };
+    video.addEventListener("seeked", handleSeeked, { once: true });
+    video.addEventListener("error", handleError, { once: true });
+    signal.addEventListener("abort", handleAbort, { once: true });
+    video.currentTime = safeTime;
+  });
+
+  const decodedVideo = video as HTMLVideoElement & {
+    requestVideoFrameCallback?: (callback: () => void) => number;
+  };
+  if (!decodedVideo.requestVideoFrameCallback) {
+    await new Promise<void>((resolve) =>
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => resolve()),
+      ),
+    );
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    }, 1_000);
+    decodedVideo.requestVideoFrameCallback?.(() => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+async function analyzeThumbnailFrameChoices(
+  videoUrl: string,
+  signal: AbortSignal,
+): Promise<ThumbnailFrameAnalysis> {
+  const video = document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+
+  try {
+    await waitForDetachedVideoMetadata(video, videoUrl, signal);
+    const analysisLongEdge = 192;
+    const analysisScale = Math.min(
+      1,
+      analysisLongEdge / Math.max(video.videoWidth, video.videoHeight),
+    );
+    const analysisCanvas = document.createElement("canvas");
+    analysisCanvas.width = Math.max(
+      1,
+      Math.round(video.videoWidth * analysisScale),
+    );
+    analysisCanvas.height = Math.max(
+      1,
+      Math.round(video.videoHeight * analysisScale),
+    );
+    const analysisContext = analysisCanvas.getContext("2d", {
+      willReadFrequently: true,
+    });
+    if (!analysisContext) {
+      throw new Error("表紙候補を解析できませんでした。");
+    }
+
+    const FaceDetectorConstructor = (
+      globalThis as typeof globalThis & {
+        FaceDetector?: BrowserFaceDetectorConstructor;
+      }
+    ).FaceDetector;
+    let faceDetector: BrowserFaceDetector | null = null;
+    if (FaceDetectorConstructor) {
+      try {
+        faceDetector = new FaceDetectorConstructor({
+          fastMode: true,
+          maxDetectedFaces: 4,
+        });
+      } catch {
+        faceDetector = null;
+      }
+    }
+    let faceDetectionSupported = Boolean(faceDetector);
+    let detectedFaceCount = 0;
+    const candidates: Array<{
+      id: string;
+      time: number;
+      image: ImageData;
+      metadata?: { faces: NormalizedFace[] };
+      value: Omit<ThumbnailFrameChoice, "score" | "qualityLabel">;
+    }> = [];
+
+    for (const time of createRepresentativeFrameSampleTimes(video.duration, {
+      count: 10,
+    })) {
+      await seekDetachedVideoFrame(video, time, signal);
+      throwIfProcessingAborted(signal);
+      analysisContext.drawImage(
+        video,
+        0,
+        0,
+        analysisCanvas.width,
+        analysisCanvas.height,
+      );
+      let faces: NormalizedFace[] = [];
+      if (faceDetector) {
+        try {
+          faces = (await faceDetector.detect(analysisCanvas))
+            .map(({ boundingBox }) => ({
+              x: boundingBox.x / analysisCanvas.width,
+              y: boundingBox.y / analysisCanvas.height,
+              width: boundingBox.width / analysisCanvas.width,
+              height: boundingBox.height / analysisCanvas.height,
+              confidence: 1,
+            }))
+            .filter(
+              (face) =>
+                face.width > 0 &&
+                face.height > 0 &&
+                face.x + face.width > 0 &&
+                face.y + face.height > 0 &&
+                face.x < 1 &&
+                face.y < 1,
+            );
+          detectedFaceCount += faces.length;
+        } catch {
+          faceDetector = null;
+          faceDetectionSupported = false;
+          faces = [];
+        }
+      }
+
+      const crop = calculateFaceFocusedCoverCrop(
+        video.videoWidth,
+        video.videoHeight,
+        faces,
+      );
+      const previewCanvas = document.createElement("canvas");
+      previewCanvas.width = 144;
+      previewCanvas.height = 256;
+      const previewContext = previewCanvas.getContext("2d");
+      if (!previewContext) continue;
+      previewContext.drawImage(
+        video,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        previewCanvas.width,
+        previewCanvas.height,
+      );
+      const id = `frame-${time.toFixed(3)}`;
+      candidates.push({
+        id,
+        time,
+        image: analysisContext.getImageData(
+          0,
+          0,
+          analysisCanvas.width,
+          analysisCanvas.height,
+        ),
+        metadata: faces.length > 0 ? { faces } : undefined,
+        value: {
+          id,
+          time,
+          previewDataUrl: previewCanvas.toDataURL("image/jpeg", 0.78),
+          crop,
+          faceCount: faces.length,
+        },
+      });
+    }
+
+    const choices = selectThumbnailFrames(candidates, {
+      limit: Math.min(3, candidates.length),
+      minSpacingSeconds: Math.min(2.5, video.duration / 8),
+    }).flatMap((entry) => {
+      const value = entry.candidate.value;
+      if (!value) return [];
+      return [{
+        ...value,
+        score: entry.score,
+        qualityLabel:
+          value.faceCount > 0
+            ? "顔と構図が見やすい"
+            : entry.analysis.qualityScore >= 0.68
+              ? "明るさ・鮮明さが良好"
+              : "場面変化と構図から選択",
+      }];
+    });
+    if (choices.length === 0) {
+      throw new Error("表紙候補を作成できませんでした。");
+    }
+    return { choices, faceDetectionSupported, detectedFaceCount };
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
   }
 }
 
@@ -1426,6 +1845,8 @@ export default function Home() {
     MAX_AI_OPERATION_LIMIT,
   );
   const [file, setFile] = useState<File | null>(null);
+  const [isDemoSample, setIsDemoSample] = useState(false);
+  const [isSampleLoading, setIsSampleLoading] = useState(false);
   const videoUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : ""),
     [file],
@@ -1435,6 +1856,7 @@ export default function Home() {
   const [transcript, setTranscript] =
     useState<TranscriptLine[]>(initialTranscript);
   const [editError, setEditError] = useState("");
+  const [silentFallback, setSilentFallback] = useState(false);
   const [isHighAccuracyRun, setIsHighAccuracyRun] = useState(false);
   const [usedHighAccuracy, setUsedHighAccuracy] = useState(false);
   const [toast, setToast] = useState("");
@@ -1554,19 +1976,34 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
-  function chooseFile(selected?: File) {
-    if (!selected) return;
+  async function chooseFile(
+    selected?: File,
+    options: { demo?: boolean } = {},
+  ) {
+    if (!selected) return false;
     if (!isSupportedVideoFile(selected)) {
       notify(
         UNSUPPORTED_VIDEO_EXTENSION.test(selected.name)
           ? "AVI・MKVなどには対応していません。MP4・MOV・M4V・WebMの動画を選んでください"
           : "MP4・MOV・M4V・WebMの動画を選んでください",
       );
-      return;
+      return false;
     }
     if (selected.size > MAX_EDIT_VIDEO_BYTES) {
       notify("字幕の自動生成は500MBまでです");
-      return;
+      return false;
+    }
+    try {
+      const durationResult = validateVideoInputDuration(
+        await getVideoDurationSeconds(selected),
+      );
+      if (!durationResult.ok) {
+        notify(durationResult.message);
+        return false;
+      }
+    } catch {
+      notify("動画の長さを確認できませんでした。動画を選び直してください");
+      return false;
     }
     editAbortRef.current?.abort();
     narrationRegenerationAbortRef.current?.abort();
@@ -1575,7 +2012,9 @@ export default function Home() {
     editGenerationRef.current += 1;
     releasePendingExportReservation();
     setFile(selected);
+    setIsDemoSample(Boolean(options.demo));
     setEditError("");
+    setSilentFallback(false);
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
@@ -1587,28 +2026,37 @@ export default function Home() {
     rememberUsageReservation(null);
     setStage("setup");
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
   }
 
-  function useSample() {
-    editAbortRef.current?.abort();
-    narrationRegenerationAbortRef.current?.abort();
-    narrationRegenerationAbortRef.current = null;
-    editAbortRef.current = null;
-    editGenerationRef.current += 1;
-    releasePendingExportReservation();
-    setFile(null);
-    setEditError("");
-    setUsedHighAccuracy(false);
-    setIsHighAccuracyRun(false);
-    setNarrationPlan(null);
-    setNarrationAudioUrl("");
-    setNarrationAudioModel("");
-    setNarrationAudioVoice("");
-    setNarrationAudioProfile("");
-    resetAiOperationQuota();
-    rememberUsageReservation(null);
-    setStage("setup");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  async function loadSampleVideo() {
+    if (isSampleLoading) return;
+    setIsSampleLoading(true);
+    try {
+      const response = await fetch("/demo/torudake-demo.mp4", {
+        cache: "force-cache",
+      });
+      if (!response.ok) {
+        throw new Error("サンプル動画を読み込めませんでした。");
+      }
+      const blob = await response.blob();
+      if (!blob.size) {
+        throw new Error("サンプル動画を読み込めませんでした。");
+      }
+      const sampleFile = new File([blob], "torudake-demo.mp4", {
+        type: blob.type || "video/mp4",
+        lastModified: 1_786_291_200_000,
+      });
+      await chooseFile(sampleFile, { demo: true });
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? `${error.message} 通信を確認して、もう一度お試しください`
+          : "サンプル動画を読み込めませんでした。もう一度お試しください",
+      );
+    } finally {
+      setIsSampleLoading(false);
+    }
   }
 
   async function startEditing(highAccuracy = false) {
@@ -1640,9 +2088,15 @@ export default function Home() {
     const transcriptionOperationId = crypto.randomUUID();
 
     try {
-      let nextTranscript = initialTranscript;
+      let nextTranscript: TranscriptLine[] = isDemoSample
+        ? DEMO_CAPTIONS.map((caption, index) => ({
+            id: index + 1,
+            ...caption,
+            removed: false,
+          }))
+        : initialTranscript;
       let refined = false;
-      if (file && !highAccuracy) {
+      if (file && !isDemoSample && !highAccuracy) {
         const reservation = await reserveVideoUsage(file, controller.signal);
         newlyReservedUsage = reservation.reservationId;
         throwIfProcessingAborted(controller.signal);
@@ -1652,7 +2106,7 @@ export default function Home() {
       }
       const usageReservationId = usageReservationRef.current;
 
-      if (file) {
+      if (file && !isDemoSample) {
         if (needsBrowserAudioExtraction(file)) {
           const transcriptionResult = await transcribeLargeVideo(
             file,
@@ -1692,9 +2146,35 @@ export default function Home() {
       }
 
       throwIfProcessingAborted(controller.signal);
-      nextTranscript = spokenCutMode === "auto"
-        ? createNaturalEdit(nextTranscript, length, goal)
-        : nextTranscript.map((line) => ({ ...line, removed: false }));
+      if (file && !isDemoSample && nextTranscript.length === 0) {
+        if (progressTimer !== undefined) {
+          window.clearInterval(progressTimer);
+        }
+        usageReservationPendingExportRef.current = true;
+        setUsageReservationPendingExport(true);
+        setSilentFallback(true);
+        setSpokenCaptionsEnabled(false);
+        setSpokenCutMode("none");
+        setProgress(0);
+        setStage("setup");
+        return;
+      }
+      if (spokenCutMode === "auto") {
+        nextTranscript = createNaturalEdit(nextTranscript, length, goal);
+        if (file) {
+          nextTranscript = await refineCaptionCutsWithLocalSilence(
+            file,
+            nextTranscript,
+            controller.signal,
+          );
+          throwIfProcessingAborted(controller.signal);
+        }
+      } else {
+        nextTranscript = nextTranscript.map((line) => ({
+          ...line,
+          removed: false,
+        }));
+      }
       if (progressTimer !== undefined) {
         window.clearInterval(progressTimer);
       }
@@ -1725,6 +2205,16 @@ export default function Home() {
       if (progressTimer !== undefined) {
         window.clearInterval(progressTimer);
       }
+      if (isCurrent() && isSilentMediaError(error)) {
+        usageReservationPendingExportRef.current = true;
+        setUsageReservationPendingExport(true);
+        setSilentFallback(true);
+        setSpokenCaptionsEnabled(false);
+        setSpokenCutMode("none");
+        setProgress(0);
+        setStage("setup");
+        return;
+      }
       if (newlyReservedUsage) {
         await updateVideoUsage("release", newlyReservedUsage);
         if (usageReservationRef.current === newlyReservedUsage) {
@@ -1750,6 +2240,37 @@ export default function Home() {
     } finally {
       if (editAbortRef.current === controller) editAbortRef.current = null;
     }
+  }
+
+  async function chooseSilentNarrationMode() {
+    const reservationId = usageReservationRef.current;
+    if (reservationId) {
+      await releaseVideoUsageBestEffort(reservationId);
+    }
+    rememberUsageReservation(null);
+    setSilentFallback(false);
+    setEditError("");
+    setAudioMode("narration");
+    setNarrationAutoCutEnabled(false);
+    setNarrationCaptionsEnabled(true);
+  }
+
+  async function finishSilentVideoWithoutCaptions() {
+    const reservationId = usageReservationRef.current;
+    if (reservationId) {
+      const completed = await updateVideoUsage("complete", reservationId);
+      usageReservationPendingExportRef.current = !completed;
+      setUsageReservationPendingExport(!completed);
+    }
+    setSilentFallback(false);
+    setEditError("");
+    setAudioMode("spoken");
+    setSpokenCaptionsEnabled(false);
+    setSpokenCutMode("none");
+    setTranscript([]);
+    setPreviewMode("before");
+    setStage("result");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function startNarrationEditing() {
@@ -2298,11 +2819,13 @@ export default function Home() {
     editGenerationRef.current += 1;
     releasePendingExportReservation();
     setFile(null);
+    setIsDemoSample(false);
     setStage("start");
     setProgress(0);
     setPreviewMode("after");
     setTranscript(initialTranscript);
     setEditError("");
+    setSilentFallback(false);
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
@@ -2526,7 +3049,7 @@ export default function Home() {
         className="visuallyHidden"
         type="file"
         accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
-        onChange={(event) => chooseFile(event.target.files?.[0])}
+        onChange={(event) => void chooseFile(event.target.files?.[0])}
       />
       <input
         ref={transferInputRef}
@@ -2539,7 +3062,8 @@ export default function Home() {
       {stage === "start" && (
         <Landing
           openPicker={() => inputRef.current?.click()}
-          useSample={useSample}
+          openSample={loadSampleVideo}
+          isSampleLoading={isSampleLoading}
           startCheckout={startCheckout}
           billingBusyPlan={billingBusyPlan}
           billingError={billingError}
@@ -2569,7 +3093,6 @@ export default function Home() {
           goal={goal}
           setGoal={setGoal}
           captionProfile={captionProfile}
-          setCaptionProfile={setCaptionProfile}
           length={length}
           setLength={setLength}
           audioMode={audioMode}
@@ -2591,6 +3114,11 @@ export default function Home() {
           setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
           narrationAutoCutEnabled={narrationAutoCutEnabled}
           setNarrationAutoCutEnabled={setNarrationAutoCutEnabled}
+          silentFallback={silentFallback}
+          chooseSilentNarration={() => void chooseSilentNarrationMode()}
+          finishSilentWithoutCaptions={() =>
+            void finishSilentVideoWithoutCaptions()
+          }
           chooseAnother={() => inputRef.current?.click()}
           startEditing={() =>
             audioMode === "narration"
@@ -2796,7 +3324,7 @@ function TransferPortal({
                 onDrop={(event) => {
                   event.preventDefault();
                   if (status !== "uploading") {
-                    chooseFile(event.dataTransfer.files?.[0]);
+                    void chooseFile(event.dataTransfer.files?.[0]);
                   }
                 }}
               >
@@ -2902,15 +3430,76 @@ function TransferPortal({
   );
 }
 
+const DEMO_CAPTIONS = [
+  { start: 0, end: 2.31, text: "撮った動画を選ぶだけ。" },
+  { start: 2.31, end: 5.85, text: "話した言葉を、読みやすいテロップに。" },
+  { start: 5.85, end: 10.2, text: "カットも音声も、投稿しやすい1本へ。" },
+] as const;
+
+function RealVideoDemo() {
+  const [caption, setCaption] = useState<string>(DEMO_CAPTIONS[0].text);
+  const [videoUnavailable, setVideoUnavailable] = useState(false);
+
+  return (
+    <figure className="heroVisual realDemo" aria-labelledby="realDemoCaption">
+      {videoUnavailable ? (
+        <div className="realDemoFallback" role="status">
+          <span aria-hidden="true">▶</span>
+          <strong>デモ動画を準備しています</strong>
+          <p>動画を選ぶと、同じ編集画面で仕上がりを無料で確認できます。</p>
+        </div>
+      ) : (
+        <div className="realDemoPlayer">
+          <video
+            src="/demo/torudake-demo.mp4"
+            controls
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            aria-label="撮るだけリールで編集した音声・字幕つきデモ動画"
+            onError={() => setVideoUnavailable(true)}
+            onTimeUpdate={(event) => {
+              const currentTime = event.currentTarget.currentTime;
+              const next =
+                DEMO_CAPTIONS.find(
+                  (item) => currentTime >= item.start && currentTime < item.end,
+                ) ?? DEMO_CAPTIONS[DEMO_CAPTIONS.length - 1];
+              setCaption(next.text);
+            }}
+          />
+          <div className="realDemoStatus">
+            <span>編集後デモ</span>
+            <strong>音声をオンにして確認できます</strong>
+          </div>
+          <div className="realDemoCaption" aria-live="off">
+            {caption}
+          </div>
+        </div>
+      )}
+      <figcaption className="visualResult" id="realDemoCaption">
+        <span aria-hidden="true">✓</span>
+        <p>
+          <strong>実際の動画・音声・テロップで確認</strong>
+          再生しながら、仕上がりの雰囲気を確かめられます
+        </p>
+      </figcaption>
+    </figure>
+  );
+}
+
 function Landing({
   openPicker,
-  useSample,
+  openSample,
+  isSampleLoading,
   startCheckout,
   billingBusyPlan,
   billingError,
 }: {
   openPicker: () => void;
-  useSample: () => void;
+  openSample: () => void | Promise<void>;
+  isSampleLoading: boolean;
   startCheckout: (plan: "light" | "one_time") => void;
   billingBusyPlan: "light" | "one_time" | null;
   billingError: string;
@@ -2929,7 +3518,8 @@ function Landing({
             <em>編集の手間を、もっと軽く。</em>
           </h1>
           <p className="heroLead">
-            自動カット、自動テロップ、AIナレーション、表紙、投稿文まで。
+            自動カット、自動テロップ、AIナレーション、表紙まで。
+            AIナレーションモードなら投稿文も作れます。
             <br />
             仕上がりを見て、気になるところだけ直せます。
           </p>
@@ -2938,8 +3528,13 @@ function Landing({
               <span>無料で仕上がりを見る</span>
               <i>→</i>
             </button>
-            <button className="sampleButton" onClick={useSample}>
-              サンプルで体験
+            <button
+              className="sampleButton"
+              type="button"
+              disabled={isSampleLoading}
+              onClick={() => void openSample()}
+            >
+              {isSampleLoading ? "サンプルを読込中…" : "サンプルで体験"}
             </button>
           </div>
         </div>
@@ -2982,42 +3577,7 @@ function Landing({
           </div>
         </div>
 
-        <figure
-          className="heroVisual lifestyleHero"
-          aria-labelledby="lifestyleHeroCaption"
-        >
-          <div className="lifestyleGallery" aria-hidden="true">
-            <div className="lifestyleFrame lifestyleFrameCafe">
-              <span>00:08</span>
-            </div>
-            <div className="lifestyleFrame lifestyleFrameCity lifestyleFrameMain">
-              <span>00:12</span>
-              <div className="captionTop">
-                続けられる人が
-                <strong>最初にやること</strong>
-              </div>
-              <div className="captionBottom">
-                小さく始めるのが
-                <strong>一番の近道です</strong>
-              </div>
-              <div className="cutRail">
-                <i />
-                <i />
-                <i />
-              </div>
-            </div>
-            <div className="lifestyleFrame lifestyleFrameCoast">
-              <span>00:15</span>
-            </div>
-          </div>
-          <figcaption className="visualResult" id="lifestyleHeroCaption">
-            <span>✓</span>
-            <p>
-              <strong>仕上がりを見てから選べる</strong>
-              気になるところだけ直して、必要なら保存
-            </p>
-          </figcaption>
-        </figure>
+        <RealVideoDemo />
       </section>
 
       <section className="painStrip">
@@ -3168,7 +3728,7 @@ function Landing({
               <li>✓ 90秒まで</li>
               <li>✓ AI処理は1動画につき5回</li>
               <li>✓ 最大1080p・透かしなし</li>
-              <li>✓ 表紙と投稿文つき</li>
+              <li>✓ 表紙つき・AIナレーションなら投稿文も作成</li>
             </ul>
             <button
               onClick={() => startCheckout("one_time")}
@@ -3421,7 +3981,6 @@ function SetupWorkspace({
   goal,
   setGoal,
   captionProfile,
-  setCaptionProfile,
   length,
   setLength,
   audioMode,
@@ -3440,6 +3999,9 @@ function SetupWorkspace({
   setNarrationCaptionsEnabled,
   narrationAutoCutEnabled,
   setNarrationAutoCutEnabled,
+  silentFallback,
+  chooseSilentNarration,
+  finishSilentWithoutCaptions,
   chooseAnother,
   startEditing,
   error,
@@ -3449,7 +4011,6 @@ function SetupWorkspace({
   goal: Goal;
   setGoal: (goal: Goal) => void;
   captionProfile: CaptionProfile;
-  setCaptionProfile: (profile: CaptionProfile) => void;
   length: number;
   setLength: (length: number) => void;
   audioMode: VideoAudioMode;
@@ -3470,6 +4031,9 @@ function SetupWorkspace({
   setNarrationCaptionsEnabled: (enabled: boolean) => void;
   narrationAutoCutEnabled: boolean;
   setNarrationAutoCutEnabled: (enabled: boolean) => void;
+  silentFallback: boolean;
+  chooseSilentNarration: () => void;
+  finishSilentWithoutCaptions: () => void;
   chooseAnother: () => void;
   startEditing: () => Promise<void>;
   error: string;
@@ -3478,6 +4042,16 @@ function SetupWorkspace({
     audioMode === "narration"
       ? !narrationAutoCutEnabled
       : spokenCutMode === "none";
+  const recommendedPresetTitle =
+    audioMode === "narration"
+      ? narrationAutoCutEnabled
+        ? `${length}秒以内に整え、AIナレーションを追加`
+        : "元動画の順番と長さを保ち、AIナレーションを追加"
+      : spokenCutMode === "auto"
+        ? `${length}秒以内を目安に、会話を活かして自動編集`
+        : spokenCutMode === "manual"
+          ? "手動で選んだ区間だけをつないで仕上げる"
+          : "元動画の順番と長さを保ち、音声を活かす";
 
   return (
     <section className="workspace">
@@ -3499,8 +4073,15 @@ function SetupWorkspace({
               <video src={videoUrl} controls muted playsInline />
             ) : (
               <div className="sampleSource">
-                <CreatorFigure variant="before" />
-                <span>サンプル動画</span>
+                <video
+                  src="/demo/torudake-demo.mp4"
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  aria-label="編集に使用するサンプル動画"
+                />
+                <span>実際のサンプル動画</span>
               </div>
             )}
             <i>RAW</i>
@@ -3524,15 +4105,48 @@ function SetupWorkspace({
         </aside>
 
         <div className="setupForm">
-          <fieldset>
+          {silentFallback && (
+            <section className="silentFallback" aria-labelledby="silentFallbackTitle">
+              <span className="silentFallbackIcon" aria-hidden="true">♪</span>
+              <div>
+                <p className="eyebrow">NO SPOKEN AUDIO</p>
+                <h2 id="silentFallbackTitle">話し声のない動画でした</h2>
+                <p>
+                  エラーで止めず、動画に合う2つの仕上げ方から選べます。
+                </p>
+                <div className="silentFallbackActions">
+                  <button type="button" onClick={chooseSilentNarration}>
+                    <strong>AIナレーションを付ける</strong>
+                    <small>元動画はカットせず、声とテロップを追加</small>
+                  </button>
+                  <button type="button" onClick={finishSilentWithoutCaptions}>
+                    <strong>音声なしのまま仕上げる</strong>
+                    <small>カットもテロップもせず、元動画をそのまま使用</small>
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {!silentFallback && (
+          <>
+          <section className="setupQuickStart" aria-labelledby="quickStartTitle">
+            <div className="setupQuickStartHeading">
+              <div>
+                <span>RECOMMENDED</span>
+                <h2 id="quickStartTitle">おすすめで作る</h2>
+              </div>
+              <p>音声の使い方だけ選べば、見やすい設定でそのまま始められます。</p>
+            </div>
+          <fieldset className="quickAudioMode">
             <legend>
-              <span>01</span>
               音声の仕上げ方
             </legend>
             <div className="audioModeCards">
               <button
                 type="button"
                 className={audioMode === "spoken" ? "selected" : ""}
+                aria-pressed={audioMode === "spoken"}
                 onClick={() => setAudioMode("spoken")}
               >
                 <i aria-hidden="true">元</i>
@@ -3543,6 +4157,7 @@ function SetupWorkspace({
               <button
                 type="button"
                 className={audioMode === "narration" ? "selected" : ""}
+                aria-pressed={audioMode === "narration"}
                 onClick={() => setAudioMode("narration")}
               >
                 <i aria-hidden="true">AI</i>
@@ -3553,9 +4168,32 @@ function SetupWorkspace({
             </div>
           </fieldset>
 
+            <div className="recommendedPreset" role="status">
+              <span aria-hidden="true">✦</span>
+              <p>
+                <strong>
+                  {recommendedPresetTitle}
+                </strong>
+                <small>
+                  テロップは見やすい初期設定で作成し、色とデザインは仕上がりを見てから無料で変更できます。
+                </small>
+              </p>
+            </div>
+          </section>
+
+          <details className="advancedSettings">
+            <summary>
+              <span>
+                <strong>細かく設定</strong>
+                <small>目的・長さ・カット・声・元動画の音量を調整</small>
+              </span>
+              <b aria-hidden="true">＋</b>
+            </summary>
+            <div className="advancedSettingsBody">
+
           <fieldset>
             <legend>
-              <span>02</span>
+              <span>01</span>
               この動画の目的
             </legend>
             <div className="optionCards three">
@@ -3576,7 +4214,7 @@ function SetupWorkspace({
 
           <fieldset>
             <legend>
-              <span>03</span>
+              <span>02</span>
               動画の長さ
             </legend>
             {keepsOriginalVideo ? (
@@ -3623,7 +4261,7 @@ function SetupWorkspace({
           {audioMode === "spoken" && (
             <fieldset className="spokenOutputSetup">
               <legend>
-                <span>04</span>
+                <span>03</span>
                 元音声動画の仕上げ
               </legend>
               <div className="narrationOutputOptions">
@@ -3709,7 +4347,7 @@ function SetupWorkspace({
           {audioMode === "narration" && (
             <fieldset className="narrationSetup">
               <legend>
-                <span>04</span>
+                <span>03</span>
                 AIナレーションの仕上げ
               </legend>
               <p className="narrationOptionLabel">声の雰囲気</p>
@@ -3807,24 +4445,6 @@ function SetupWorkspace({
             </fieldset>
           )}
 
-          {((audioMode === "spoken" && spokenCaptionsEnabled) ||
-            (audioMode === "narration" && narrationCaptionsEnabled)) && (
-            <fieldset className="captionStyleSetup">
-              <legend>
-                <span>05</span>
-                テロップの雰囲気
-              </legend>
-              <CaptionStylePicker
-                profile={captionProfile}
-                setProfile={setCaptionProfile}
-                goal={goal}
-              />
-              <p className="optionCostNote">
-                見た目の変更は端末内で行うため、音声認識やAIの追加料金はかかりません。
-              </p>
-            </fieldset>
-          )}
-
           <div className="autoTelopNote">
             <span aria-hidden="true">Aa</span>
             <div>
@@ -3856,6 +4476,12 @@ function SetupWorkspace({
             </small>
           </div>
 
+              <p className="captionAfterPreviewNote">
+                テロップのデザインと色は、仕上がりプレビューを見ながら何度でも変更できます。見た目の変更ではAI処理の回数を使用しません。
+              </p>
+            </div>
+          </details>
+
           <div className="editSummary">
             <div>
               <span>今回の編集方針</span>
@@ -3882,7 +4508,7 @@ function SetupWorkspace({
                 {audioMode === "narration"
                   ? "AIナレーション付きで作る"
                   : spokenCutMode === "auto"
-                    ? "この設定で自動編集する"
+                    ? "おすすめ設定で作る"
                     : spokenCutMode === "manual"
                       ? "文字起こしして自分で選ぶ"
                       : "元動画の流れを保って仕上げる"}
@@ -3895,6 +4521,8 @@ function SetupWorkspace({
               <span>!</span>
               {error}
             </p>
+          )}
+          </>
           )}
         </div>
       </div>
@@ -4157,6 +4785,7 @@ function ResultWorkspace({
     originalGain: GainNode | null;
     mediaSource: MediaElementAudioSourceNode | null;
     buffer: AudioBuffer | null;
+    narrationActivity: ReturnType<typeof detectPortableNarrationActivity>;
     source: AudioBufferSourceNode | null;
     sourceOffset: number;
     sourceStartedAt: number;
@@ -4179,6 +4808,8 @@ function ResultWorkspace({
   const previewScrubTimeRef = useRef<number | null>(null);
   const captionEditStartTextRef = useRef(new Map<number, string>());
   const [currentTime, setCurrentTime] = useState(0);
+  const [originalAudioNormalizationGain, setOriginalAudioNormalizationGain] =
+    useState(1);
   const [sourceDuration, setSourceDuration] = useState(0);
   const [sourceVideoDimensions, setSourceVideoDimensions] =
     useState<VideoDimensions | null>(null);
@@ -4199,11 +4830,20 @@ function ResultWorkspace({
   const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [thumbnailCandidateId, setThumbnailCandidateId] = useState<
-    number | null
-  >(() => selectThumbnailCandidates(keptLines)[0]?.id ?? null);
+    string | null
+  >(null);
   const [thumbnailTitleOverrides, setThumbnailTitleOverrides] = useState<
-    Record<number, string>
+    Record<string, string>
   >({});
+  const [thumbnailFrameChoices, setThumbnailFrameChoices] = useState<
+    ThumbnailFrameChoice[]
+  >([]);
+  const [isAnalyzingThumbnailFrames, setIsAnalyzingThumbnailFrames] =
+    useState(false);
+  const [thumbnailAnalysisError, setThumbnailAnalysisError] = useState("");
+  const [thumbnailAnalysisNote, setThumbnailAnalysisNote] = useState("");
+  const [thumbnailAnalysisRevision, setThumbnailAnalysisRevision] =
+    useState(0);
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [thumbnailRevision, setThumbnailRevision] = useState<string | null>(
     null,
@@ -4354,6 +4994,48 @@ function ResultWorkspace({
     isGeneratingNarrationCorrection ||
     isUpdatingNarrationCutMode ||
     isSourceMetadataPending;
+  useEffect(() => {
+    if (!file || !videoUrl) return;
+
+    const controller = new AbortController();
+    window.queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setIsAnalyzingThumbnailFrames(true);
+      setThumbnailAnalysisError("");
+      setThumbnailAnalysisNote("");
+      void analyzeThumbnailFrameChoices(videoUrl, controller.signal)
+        .then((analysis) => {
+          if (controller.signal.aborted) return;
+          setThumbnailFrameChoices(analysis.choices);
+          setThumbnailCandidateId((current) =>
+            analysis.choices.some((choice) => choice.id === current)
+              ? current
+              : (analysis.choices[0]?.id ?? null),
+          );
+          setThumbnailAnalysisNote(
+            analysis.faceDetectionSupported
+              ? analysis.detectedFaceCount > 0
+                ? "顔・構図・明るさ・鮮明さ・場面変化を端末内で確認して選びました。顔が見やすい位置へ9:16で切り抜きます。"
+                : "顔が見つからなかったため、明るさ・鮮明さ・構図・場面変化を端末内で確認して選びました。"
+              : "この端末では顔検出に対応していないため、明るさ・鮮明さ・構図・場面変化から端末内で選びました。",
+          );
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setThumbnailFrameChoices([]);
+          setThumbnailCandidateId(null);
+          setThumbnailAnalysisError(
+            error instanceof Error
+              ? error.message
+              : "表紙候補を解析できませんでした。",
+          );
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsAnalyzingThumbnailFrames(false);
+        });
+    });
+    return () => controller.abort();
+  }, [file, thumbnailAnalysisRevision, videoUrl]);
   useEffect(
     () => () => {
       if (narrationCorrectionCandidate?.originalPreviewUrl) {
@@ -4404,6 +5086,24 @@ function ResultWorkspace({
       transcript,
     ],
   );
+  useEffect(() => {
+    const controller = new AbortController();
+    window.queueMicrotask(() => {
+      if (!controller.signal.aborted) setOriginalAudioNormalizationGain(1);
+    });
+    if (!file || editRanges.length === 0) return () => controller.abort();
+
+    void measurePortableOriginalAudioNormalization(
+      file,
+      editRanges,
+      controller.signal,
+    ).then((gain) => {
+      if (!controller.signal.aborted) {
+        setOriginalAudioNormalizationGain(gain);
+      }
+    });
+    return () => controller.abort();
+  }, [editRanges, file]);
   const previewRanges = useMemo(
     () => buildPreviewRanges(editRanges),
     [editRanges],
@@ -4462,16 +5162,29 @@ function ResultWorkspace({
         ? "#fffdf7"
         : captionDesign.palette.stroke || "#172033",
   } as CSSProperties;
-  const thumbnailCandidates = useMemo(
-    () => selectThumbnailCandidates(keptLines),
-    [keptLines],
-  );
-  const selectedThumbnailCandidate =
-    thumbnailCandidates.find((line) => line.id === thumbnailCandidateId) ??
-    thumbnailCandidates[0];
-  const thumbnailTitle = selectedThumbnailCandidate
-    ? (thumbnailTitleOverrides[selectedThumbnailCandidate.id] ??
-      selectedThumbnailCandidate.text.trim())
+  const selectedThumbnailFrame =
+    thumbnailFrameChoices.find(
+      (choice) => choice.id === thumbnailCandidateId,
+    ) ?? thumbnailFrameChoices[0];
+  const thumbnailTitleSourceCaption = selectedThumbnailFrame
+    ? keptLines
+        .filter((line) => line.text.trim())
+        .sort(
+          (left, right) =>
+            Math.abs((left.start + left.end) / 2 - selectedThumbnailFrame.time) -
+            Math.abs((right.start + right.end) / 2 - selectedThumbnailFrame.time),
+        )[0]
+    : undefined;
+  const thumbnailDefaultTitle = Array.from(
+    thumbnailTitleSourceCaption?.text.trim() ||
+      captionProfile.brandName.trim() ||
+      "今日のハイライト",
+  )
+    .slice(0, 36)
+    .join("");
+  const thumbnailTitle = selectedThumbnailFrame
+    ? (thumbnailTitleOverrides[selectedThumbnailFrame.id] ??
+      thumbnailDefaultTitle)
     : "";
   const exportName =
     file?.name.replace(/\.[^.]+$/, "") ?? "sample_reel_video";
@@ -4561,7 +5274,9 @@ function ResultWorkspace({
   }
   const thumbnailInputRevision = JSON.stringify({
     file: file ? [file.name, file.size, file.lastModified, file.type] : null,
-    candidateId: selectedThumbnailCandidate?.id ?? null,
+    candidateId: selectedThumbnailFrame?.id ?? null,
+    candidateTime: selectedThumbnailFrame?.time ?? null,
+    crop: selectedThumbnailFrame?.crop ?? null,
     title: thumbnailTitle.trim(),
     captionProfile,
   });
@@ -4585,10 +5300,74 @@ function ResultWorkspace({
       initialCutState.get(line.id) !== line.removed,
   );
 
+  function getPreviewOriginalBaseGain(
+    percent: NarrationOriginalAudioLevel = narrationOriginalAudio,
+  ) {
+    return (
+      getNarrationMixLevels(percent).original *
+      originalAudioNormalizationGain
+    );
+  }
+
+  function scheduleGainEnvelope(
+    param: AudioParam,
+    envelope: ReadonlyArray<{ time: number; gain: number }>,
+    startedAt: number,
+  ) {
+    param.cancelScheduledValues(startedAt);
+    envelope.forEach((point, index) => {
+      const time = startedAt + point.time;
+      if (index === 0) param.setValueAtTime(point.gain, time);
+      else param.linearRampToValueAtTime(point.gain, time);
+    });
+  }
+
+  function resetPreviewOriginalGain(
+    engine: NonNullable<typeof previewNarrationEngineRef.current>,
+    percent: NarrationOriginalAudioLevel = narrationOriginalAudio,
+  ) {
+    const originalGain = engine.originalGain?.gain;
+    if (!originalGain || engine.context.state === "closed") return;
+    const now = engine.context.currentTime;
+    originalGain.cancelScheduledValues(now);
+    originalGain.setValueAtTime(getPreviewOriginalBaseGain(percent), now);
+  }
+
+  function schedulePreviewOriginalDucking(
+    engine: NonNullable<typeof previewNarrationEngineRef.current>,
+    sourceOffset: number,
+    playbackRate: number,
+    percent: NarrationOriginalAudioLevel = narrationOriginalAudio,
+  ) {
+    if (!engine.buffer || !engine.originalGain) return;
+    const duration = Math.max(
+      0,
+      (engine.buffer.duration - sourceOffset) / playbackRate,
+    );
+    const activity = remapPortableNarrationActivity(
+      engine.narrationActivity,
+      sourceOffset,
+      playbackRate,
+      duration,
+    );
+    const envelope = buildPortableDuckingEnvelope(
+      activity,
+      getPreviewOriginalBaseGain(percent),
+      duration,
+    );
+    scheduleGainEnvelope(
+      engine.originalGain.gain,
+      envelope,
+      engine.context.currentTime,
+    );
+  }
+
   function stopPreviewNarrationSource() {
     const engine = previewNarrationEngineRef.current;
     const source = engine?.source;
-    if (!engine || !source) return;
+    if (!engine) return;
+    resetPreviewOriginalGain(engine);
+    if (!source) return;
     engine.source = null;
     source.onended = null;
     try {
@@ -4678,6 +5457,7 @@ function ResultWorkspace({
     if (engine) {
       engine.url = "";
       engine.buffer = null;
+      engine.narrationActivity = [];
     }
     videoRef.current?.pause();
     window.queueMicrotask(() => {
@@ -4998,10 +5778,17 @@ function ResultWorkspace({
     video.volume = 1;
     const engine = previewNarrationEngineRef.current;
     if (engine) {
-      engine.originalGain?.gain.setValueAtTime(
-        mix.original,
-        engine.context.currentTime,
-      );
+      const narrationTime = getPreviewNarrationTime();
+      if (engine.source && narrationTime !== null) {
+        schedulePreviewOriginalDucking(
+          engine,
+          narrationTime,
+          getNarrationPlaybackRate(),
+          percent,
+        );
+      } else {
+        resetPreviewOriginalGain(engine, percent);
+      }
       engine.gain.gain.setValueAtTime(
         mix.narration,
         engine.context.currentTime,
@@ -5027,6 +5814,9 @@ function ResultWorkspace({
         originalGain: null as GainNode | null,
         mediaSource: null as MediaElementAudioSourceNode | null,
         buffer: null as AudioBuffer | null,
+        narrationActivity: [] as ReturnType<
+          typeof detectPortableNarrationActivity
+        >,
         source: null as AudioBufferSourceNode | null,
         sourceOffset: 0,
         sourceStartedAt: 0,
@@ -5104,6 +5894,7 @@ function ResultWorkspace({
     stopPreviewNarrationSource();
     engine.url = narrationAudioUrl;
     engine.buffer = null;
+    engine.narrationActivity = [];
     const requestedUrl = narrationAudioUrl;
 
     const load = (async () => {
@@ -5119,6 +5910,14 @@ function ResultWorkspace({
         throw new Error("AI音声が更新されました。");
       }
       engine.buffer = buffer;
+      engine.narrationActivity = detectPortableNarrationActivity(
+        Array.from(
+          { length: buffer.numberOfChannels },
+          (_, channel) => buffer.getChannelData(channel),
+        ),
+        buffer.sampleRate,
+        buffer.duration,
+      );
       return buffer;
     })();
     previewNarrationLoadRef.current = load;
@@ -5136,6 +5935,7 @@ function ResultWorkspace({
       ) {
         engine.url = "";
         engine.buffer = null;
+        engine.narrationActivity = [];
       }
       if (error instanceof Error && error.message === "AI音声が更新されました。") {
         throw error;
@@ -5170,6 +5970,7 @@ function ResultWorkspace({
     engine.source = source;
     engine.sourceOffset = offset;
     engine.sourceStartedAt = engine.context.currentTime;
+    schedulePreviewOriginalDucking(engine, offset, rate);
     source.onended = () => {
       if (
         previewOperationRef.current !== operation ||
@@ -5180,6 +5981,7 @@ function ResultWorkspace({
       }
       engine.source = null;
       source.disconnect();
+      resetPreviewOriginalGain(engine);
       if (narrationKeepsFullVideo) {
         previewPlaybackReadyRef.current = false;
         return;
@@ -5650,7 +6452,7 @@ function ResultWorkspace({
     if (!selectedTerm) {
       notify("上の台本で、読み方を直したい言葉を選択してください");
       textarea.focus();
-      return;
+      return false;
     }
     if (selectedTerm.length > 50) {
       notify("選択する言葉は50文字以内にしてください");
@@ -5898,9 +6700,9 @@ function ResultWorkspace({
       return;
     }
 
-    const coverCaption = selectedThumbnailCandidate;
-    if (!coverCaption) {
-      notify("表紙に使う字幕を1つ以上残してください");
+    const coverFrame = selectedThumbnailFrame;
+    if (!coverFrame) {
+      notify("表紙に使う場面を選んでください");
       return;
     }
     const coverTitle = thumbnailTitle.trim();
@@ -5919,11 +6721,10 @@ function ResultWorkspace({
 
     try {
       video.pause();
-      const frameTime = getThumbnailFrameTime(
-        coverCaption,
-        sourceDuration || video.duration || coverCaption.end,
-      );
-      const sought = await seekVideoBeforePlayback(video, frameTime);
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 1) {
+        throw new Error("表紙に使う場面を読み込めませんでした。");
+      }
+      const sought = await seekVideoBeforePlayback(video, coverFrame.time);
       if (!sought) {
         throw new Error("表紙に使う場面を読み込めませんでした。");
       }
@@ -5964,12 +6765,21 @@ function ResultWorkspace({
 
       const sourceWidth = video.videoWidth;
       const sourceHeight = video.videoHeight;
-      const crop = calculateCoverCrop(
-        sourceWidth,
-        sourceHeight,
-        canvas.width,
-        canvas.height,
-      );
+      const analyzedCrop = coverFrame.crop;
+      const crop =
+        analyzedCrop.width > 0 &&
+        analyzedCrop.height > 0 &&
+        analyzedCrop.x >= 0 &&
+        analyzedCrop.y >= 0 &&
+        analyzedCrop.x + analyzedCrop.width <= sourceWidth + 1 &&
+        analyzedCrop.y + analyzedCrop.height <= sourceHeight + 1
+          ? analyzedCrop
+          : calculateCoverCrop(
+              sourceWidth,
+              sourceHeight,
+              canvas.width,
+              canvas.height,
+            );
       context.drawImage(
         video,
         crop.x,
@@ -6143,9 +6953,9 @@ function ResultWorkspace({
     }
   }
 
-  function chooseThumbnailCandidate(line: TranscriptLine) {
+  function chooseThumbnailCandidate(choice: ThumbnailFrameChoice) {
     if (isMediaBusy || isExportingRef.current) return;
-    setThumbnailCandidateId(line.id);
+    setThumbnailCandidateId(choice.id);
   }
 
   async function saveThumbnail() {
@@ -6518,11 +7328,15 @@ function ResultWorkspace({
     let outputStream: MediaStream | null = null;
     let exportAudioContext: AudioContext | null = preparedAudioContext;
     let exportNarrationBuffer: AudioBuffer | null = null;
+    let exportNarrationActivity: ReturnType<
+      typeof detectPortableNarrationActivity
+    > = [];
     let exportNarrationGain: GainNode | null = null;
     let exportOriginalAudioSource: AudioNode | null = null;
     let exportOriginalGain: GainNode | null = null;
     let exportLimiter: DynamicsCompressorNode | null = null;
     let activeExportNarrationSource: AudioBufferSourceNode | null = null;
+    let activeExportNarrationSliceGain: GainNode | null = null;
     let exportPreviewOriginalGain: GainNode | null = null;
     let exportPreviewOriginalGainValue = 1;
     let shouldCloseExportAudioContext = true;
@@ -6667,6 +7481,8 @@ function ResultWorkspace({
       if (!context) throw new Error("動画の描画を開始できませんでした。");
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
+      let fallbackCrossfadeFrame: HTMLCanvasElement | null = null;
+      let fallbackCrossfadeStartedAt: number | null = null;
 
       const drawFrame = () => {
         context.fillStyle = "#000";
@@ -6678,6 +7494,20 @@ function ResultWorkspace({
           drawRect.width,
           drawRect.height,
         );
+        if (fallbackCrossfadeFrame && fallbackCrossfadeStartedAt !== null) {
+          const progress =
+            (video.currentTime - fallbackCrossfadeStartedAt) /
+            PORTABLE_VIDEO_CROSSFADE_SECONDS;
+          if (progress >= 0 && progress < 1) {
+            context.save();
+            context.globalAlpha = 1 - progress;
+            context.drawImage(fallbackCrossfadeFrame, 0, 0);
+            context.restore();
+          } else if (progress >= 1) {
+            fallbackCrossfadeFrame = null;
+            fallbackCrossfadeStartedAt = null;
+          }
+        }
         drawCaptionOverlay(context, canvas, video.currentTime);
 
         if (keepDrawing) {
@@ -6747,9 +7577,10 @@ function ResultWorkspace({
       exportLimiter.connect(destination);
       if (exportOriginalAudioSource) {
         exportOriginalGain = exportAudioContext.createGain();
-        exportOriginalGain.gain.value = narrationPlan
-          ? getNarrationMixLevels(narrationOriginalAudio).original
-          : 1;
+        exportOriginalGain.gain.value =
+          (narrationPlan
+            ? getNarrationMixLevels(narrationOriginalAudio).original
+            : 1) * originalAudioNormalizationGain;
         exportOriginalAudioSource
           .connect(exportOriginalGain)
           .connect(exportLimiter);
@@ -6773,6 +7604,14 @@ function ResultWorkspace({
         ) {
           throw new Error("AI音声を読み込めませんでした。");
         }
+        exportNarrationActivity = detectPortableNarrationActivity(
+          Array.from(
+            { length: exportNarrationBuffer.numberOfChannels },
+            (_, channel) => exportNarrationBuffer!.getChannelData(channel),
+          ),
+          exportNarrationBuffer.sampleRate,
+          exportNarrationBuffer.duration,
+        );
         exportNarrationGain = exportAudioContext.createGain();
         exportNarrationGain.gain.value =
           getNarrationMixLevels(narrationOriginalAudio).narration;
@@ -6923,9 +7762,37 @@ function ResultWorkspace({
         rangeIndex += 1
       ) {
         const range = playableRanges[rangeIndex];
-        if (rangeIndex > 0) await pauseRecorderForSeek();
+        if (rangeIndex > 0) {
+          const outgoingFrame = document.createElement("canvas");
+          outgoingFrame.width = canvas.width;
+          outgoingFrame.height = canvas.height;
+          const outgoingContext = outgoingFrame.getContext("2d", {
+            alpha: false,
+          });
+          if (outgoingContext) {
+            outgoingContext.fillStyle = "#000";
+            outgoingContext.fillRect(
+              0,
+              0,
+              outgoingFrame.width,
+              outgoingFrame.height,
+            );
+            outgoingContext.drawImage(
+              video,
+              drawRect.x,
+              drawRect.y,
+              drawRect.width,
+              drawRect.height,
+            );
+            fallbackCrossfadeFrame = outgoingFrame;
+          }
+          await pauseRecorderForSeek();
+        }
         await seekExportMedia(video, range.start);
-        if (rangeIndex > 0) await resumeRecorderAfterSeek();
+        if (rangeIndex > 0) {
+          fallbackCrossfadeStartedAt = range.start;
+          await resumeRecorderAfterSeek();
+        }
 
         const rangeEnded = waitForRangeEnd(range);
         const rangeDuration = range.end - range.start;
@@ -6936,6 +7803,26 @@ function ResultWorkspace({
               exportNarrationBuffer.duration,
             )
           : null;
+        const narrationPlaybackRate = getNarrationPlaybackRate();
+        if (exportOriginalGain && exportAudioContext) {
+          const baseGain =
+            (narrationPlan
+              ? getNarrationMixLevels(narrationOriginalAudio).original
+              : 1) * originalAudioNormalizationGain;
+          const activity = narrationSlice
+            ? remapPortableNarrationActivity(
+                exportNarrationActivity,
+                narrationSlice.offset,
+                narrationPlaybackRate,
+                rangeDuration,
+              )
+            : [];
+          scheduleGainEnvelope(
+            exportOriginalGain.gain,
+            buildPortableDuckingEnvelope(activity, baseGain, rangeDuration),
+            exportAudioContext.currentTime,
+          );
+        }
         if (
           narrationSlice &&
           exportAudioContext &&
@@ -6945,9 +7832,33 @@ function ResultWorkspace({
           activeExportNarrationSource =
             exportAudioContext.createBufferSource();
           activeExportNarrationSource.buffer = exportNarrationBuffer;
-          activeExportNarrationSource.playbackRate.value =
-            getNarrationPlaybackRate();
-          activeExportNarrationSource.connect(exportNarrationGain);
+          activeExportNarrationSource.playbackRate.value = narrationPlaybackRate;
+          activeExportNarrationSliceGain = exportAudioContext.createGain();
+          activeExportNarrationSource
+            .connect(activeExportNarrationSliceGain)
+            .connect(exportNarrationGain);
+          const audibleDuration = Math.min(
+            rangeDuration,
+            narrationSlice.duration / narrationPlaybackRate,
+          );
+          const fadeDuration = Math.min(
+            PORTABLE_AUDIO_CUT_FADE_SECONDS,
+            audibleDuration / 2,
+          );
+          const startedAt = exportAudioContext.currentTime;
+          activeExportNarrationSliceGain.gain.setValueAtTime(0, startedAt);
+          activeExportNarrationSliceGain.gain.linearRampToValueAtTime(
+            1,
+            startedAt + fadeDuration,
+          );
+          activeExportNarrationSliceGain.gain.setValueAtTime(
+            1,
+            startedAt + Math.max(fadeDuration, audibleDuration - fadeDuration),
+          );
+          activeExportNarrationSliceGain.gain.linearRampToValueAtTime(
+            0,
+            startedAt + audibleDuration,
+          );
         }
         const videoPlayback = video.play();
         if (activeExportNarrationSource && narrationSlice) {
@@ -6966,6 +7877,8 @@ function ResultWorkspace({
           }
           activeExportNarrationSource.disconnect();
           activeExportNarrationSource = null;
+          activeExportNarrationSliceGain?.disconnect();
+          activeExportNarrationSliceGain = null;
         }
         narrationElapsed += rangeDuration;
         setExportProgress(
@@ -7025,6 +7938,7 @@ function ResultWorkspace({
         }
         activeExportNarrationSource.disconnect();
       }
+      activeExportNarrationSliceGain?.disconnect();
       if (exportOriginalAudioSource && exportOriginalGain) {
         try {
           exportOriginalAudioSource.disconnect(exportOriginalGain);
@@ -8333,7 +9247,7 @@ function ResultWorkspace({
             <p className="eyebrow">COVER MAKER</p>
             <h2>動画から、投稿用の表紙をつくる</h2>
             <p>
-              残したテロップから場面を選び、9:16の表紙を端末内で生成します。
+              顔・構図・画質・場面変化を端末内で確認し、実際の動画フレームから9:16の表紙を生成します。
             </p>
           </div>
           <span>1080 × 1920 JPEG</span>
@@ -8347,26 +9261,62 @@ function ResultWorkspace({
                 <strong>表紙に使う場面</strong>
                 <small>最大3候補</small>
               </div>
-              <div className="thumbnailCandidateList">
-                {thumbnailCandidates.map((line, index) => (
+              {isAnalyzingThumbnailFrames && (
+                <p className="thumbnailAnalysisStatus" role="status">
+                  動画全体から、表紙に向く場面を解析しています…
+                </p>
+              )}
+              {thumbnailAnalysisNote && (
+                <p className="thumbnailAnalysisNote">
+                  {thumbnailAnalysisNote}
+                </p>
+              )}
+              {thumbnailAnalysisError && (
+                <div className="thumbnailAnalysisStatus" role="alert">
+                  <p>{thumbnailAnalysisError}</p>
                   <button
                     type="button"
-                    key={line.id}
+                    className="thumbnailAnalysisRetry"
+                    onClick={() =>
+                      setThumbnailAnalysisRevision((current) => current + 1)
+                    }
+                  >
+                    候補をもう一度解析
+                  </button>
+                </div>
+              )}
+              <div className="thumbnailCandidateList">
+                {thumbnailFrameChoices.map((choice, index) => (
+                  <button
+                    type="button"
+                    key={choice.id}
                     className={
-                      selectedThumbnailCandidate?.id === line.id
+                      selectedThumbnailFrame?.id === choice.id
                         ? "active"
                         : ""
                     }
-                    aria-pressed={selectedThumbnailCandidate?.id === line.id}
-                    disabled={isMediaBusy}
-                    onClick={() => chooseThumbnailCandidate(line)}
+                    aria-pressed={selectedThumbnailFrame?.id === choice.id}
+                    disabled={isMediaBusy || isAnalyzingThumbnailFrames}
+                    onClick={() => chooseThumbnailCandidate(choice)}
                   >
-                    <b>{index === 0 ? "おすすめ" : `候補 ${index + 1}`}</b>
-                    <span>{line.text.trim()}</span>
-                    <small>
-                      {formatCaptionClock(line.start)}–
-                      {formatCaptionClock(line.end)}
-                    </small>
+                    <span className="thumbnailCandidateVisual">
+                      {/* Local data URL created from the selected source video. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={choice.previewDataUrl}
+                        alt={`${index === 0 ? "おすすめ" : `候補${index + 1}`}の動画フレーム`}
+                      />
+                      <b>{index === 0 ? "おすすめ" : `候補 ${index + 1}`}</b>
+                    </span>
+                    <span className="thumbnailCandidateCopy">
+                      <strong>{choice.qualityLabel}</strong>
+                      <small>
+                        動画の {formatCaptionClock(choice.time)} 付近
+                        {choice.faceCount > 0
+                          ? `・顔${choice.faceCount}件を検出`
+                          : ""}
+                      </small>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -8382,12 +9332,12 @@ function ResultWorkspace({
                 rows={2}
                 maxLength={36}
                 value={thumbnailTitle}
-                disabled={isMediaBusy || !selectedThumbnailCandidate}
+                disabled={isMediaBusy || !selectedThumbnailFrame}
                 onChange={(event) => {
-                  if (!selectedThumbnailCandidate) return;
+                  if (!selectedThumbnailFrame) return;
                   setThumbnailTitleOverrides((current) => ({
                     ...current,
-                    [selectedThumbnailCandidate.id]: event.target.value,
+                    [selectedThumbnailFrame.id]: event.target.value,
                   }));
                 }}
                 placeholder="表紙に表示する言葉"
@@ -8416,8 +9366,9 @@ function ResultWorkspace({
               onClick={() => void generateThumbnail()}
               disabled={
                 isMediaBusy ||
+                isAnalyzingThumbnailFrames ||
                 !file ||
-                !selectedThumbnailCandidate ||
+                !selectedThumbnailFrame ||
                 !thumbnailTitle.trim()
               }
             >

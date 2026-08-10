@@ -1,3 +1,11 @@
+import {
+  analyzeVideoFrame,
+  calculateSceneDifference,
+  type FrameCompositionMetadata,
+  type FrameVisualAnalysis,
+  type ImageDataLike,
+} from "./video-frame-analysis";
+
 export type ThumbnailCaption = {
   id?: number | string;
   start: number;
@@ -5,6 +13,27 @@ export type ThumbnailCaption = {
   text: string;
   removed?: boolean;
   accent?: boolean;
+};
+
+export type ThumbnailFrameCandidate<T = unknown> = {
+  id: number | string;
+  time: number;
+  image: ImageDataLike;
+  metadata?: FrameCompositionMetadata;
+  caption?: ThumbnailCaption;
+  value?: T;
+};
+
+export type RankedThumbnailFrame<T = unknown> = {
+  candidate: ThumbnailFrameCandidate<T>;
+  analysis: FrameVisualAnalysis;
+  score: number;
+};
+
+export type ThumbnailFrameSelectionOptions = {
+  limit?: number;
+  minSpacingSeconds?: number;
+  minSceneDifference?: number;
 };
 
 export type ThumbnailCrop = {
@@ -48,6 +77,94 @@ export function selectThumbnailCandidates<T extends ThumbnailCaption>(
   }
 
   return candidates;
+}
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+}
+
+function scoreCaptionForCover(caption?: ThumbnailCaption) {
+  if (!caption || caption.removed) return 0;
+  const length = Array.from(caption.text.trim()).length;
+  if (length === 0) return 0;
+  const readableLengthScore =
+    length <= 22 ? clamp01(length / 9) : clamp01(1 - (length - 22) / 30);
+  return clamp01(readableLengthScore * 0.75 + (caption.accent ? 0.25 : 0));
+}
+
+/**
+ * Ranks decoded cover frames by visual quality and composition. Caption order
+ * is intentionally not part of the score; text contributes only a small
+ * readability signal after the image has been assessed locally.
+ */
+export function rankThumbnailFrames<T>(
+  candidates: readonly ThumbnailFrameCandidate<T>[],
+): RankedThumbnailFrame<T>[] {
+  return candidates
+    .map((candidate, index) => {
+      const analysis = analyzeVideoFrame(candidate.image, candidate.metadata);
+      const captionScore = scoreCaptionForCover(candidate.caption);
+      const score = clamp01(
+        analysis.qualityScore * 0.69 +
+          analysis.compositionScore * 0.18 +
+          analysis.faceScore * 0.09 +
+          captionScore * 0.04,
+      );
+      return { candidate, analysis, score, index };
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.candidate.time - right.candidate.time ||
+        left.index - right.index,
+    )
+    .map((entry) => ({
+      candidate: entry.candidate,
+      analysis: entry.analysis,
+      score: entry.score,
+    }));
+}
+
+/**
+ * Returns visually distinct cover choices, preventing three nearly identical
+ * frames from occupying every thumbnail slot.
+ */
+export function selectThumbnailFrames<T>(
+  candidates: readonly ThumbnailFrameCandidate<T>[],
+  options: ThumbnailFrameSelectionOptions = {},
+): RankedThumbnailFrame<T>[] {
+  const limit = Math.max(
+    1,
+    Math.min(candidates.length, Math.round(options.limit ?? MAX_THUMBNAIL_CANDIDATES)),
+  );
+  const minSpacing = Math.max(0, options.minSpacingSeconds ?? 0.45);
+  const minSceneDifference = clamp01(options.minSceneDifference ?? 0.08);
+  const ranked = rankThumbnailFrames(candidates);
+  const selected: RankedThumbnailFrame<T>[] = [];
+
+  for (const entry of ranked) {
+    const isTooSimilar = selected.some(
+      (existing) =>
+        Math.abs(existing.candidate.time - entry.candidate.time) < minSpacing &&
+        calculateSceneDifference(
+          existing.candidate.image,
+          entry.candidate.image,
+        ) < minSceneDifference,
+    );
+    if (isTooSimilar) continue;
+    selected.push(entry);
+    if (selected.length === limit) break;
+  }
+
+  if (selected.length < limit) {
+    for (const entry of ranked) {
+      if (selected.includes(entry)) continue;
+      selected.push(entry);
+      if (selected.length === limit) break;
+    }
+  }
+
+  return selected;
 }
 
 function finiteOrZero(value: number) {

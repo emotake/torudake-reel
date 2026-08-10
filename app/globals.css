@@ -113,7 +113,7 @@ a {
 .brandIcon i {
   position: relative;
   left: 1px;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -127,7 +127,7 @@ a {
 .brandText small {
   color: var(--muted);
   font-family: "DM Sans", sans-serif;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -161,7 +161,7 @@ a {
   align-items: center;
   padding: 0 8px;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 850;
 }
 
@@ -171,7 +171,7 @@ a {
   min-height: 39px;
   padding: 0 17px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -270,7 +270,7 @@ a {
   border-radius: 999px;
   background: linear-gradient(135deg, #d8fae4, var(--mint));
   color: var(--mint-dark);
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   box-shadow: 0 7px 18px rgba(25, 115, 70, 0.08);
 }
@@ -364,14 +364,14 @@ a {
 }
 
 .heroOffer strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 900;
   line-height: 1.45;
 }
 
 .heroOffer small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 650;
   line-height: 1.55;
 }
@@ -394,7 +394,7 @@ a {
   padding: 0 11px;
   border-radius: 10px;
   background: rgba(16, 24, 40, 0.07);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 900;
   white-space: nowrap;
   transition: background 160ms ease, color 160ms ease, transform 160ms ease;
@@ -501,7 +501,7 @@ a {
     var(--ink);
   color: var(--ink);
   font-family: "DM Sans", sans-serif;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
 }
@@ -518,7 +518,7 @@ a {
 
 .photoReelEntry small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -539,7 +539,7 @@ a {
   gap: 8px;
   margin-top: 16px;
   color: #6e7889;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -572,7 +572,7 @@ a {
   border-radius: 14px;
   background: #06c755;
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 950;
   letter-spacing: -0.03em;
   box-shadow: 0 8px 18px rgba(6, 199, 85, 0.2);
@@ -595,7 +595,7 @@ a {
   display: block;
   margin-top: 2px;
   color: #7b867f;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -644,14 +644,14 @@ a {
   border-radius: 10px;
   background: #f3fff7;
   color: var(--mint-dark);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
 }
 
 .transferLink i {
   color: #5f7f6d;
-  font-size: 8px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -719,7 +719,7 @@ a {
 
 .visualBadge span {
   color: #536074;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -739,7 +739,7 @@ a {
   background: rgba(255, 255, 255, 0.09);
   color: rgba(255, 255, 255, 0.9);
   font-family: "DM Sans", sans-serif;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: 0.08em;
   box-shadow: 0 10px 26px rgba(2, 8, 20, 0.18);
@@ -1127,7 +1127,7 @@ a {
 
 .visualResult strong {
   color: var(--ink);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .lifestyleHero {
@@ -1231,7 +1231,7 @@ a {
   background: rgba(16, 24, 40, 0.46);
   color: white;
   font-family: "DM Sans", sans-serif;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   backdrop-filter: blur(10px);
@@ -1282,7 +1282,7 @@ a {
   bottom: 49px;
   left: 13px;
   z-index: 4;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .lifestyleFrameMain .cutRail {
@@ -1305,7 +1305,7 @@ a {
 }
 
 .lifestyleHero .visualResult strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .hero .mainCta {
@@ -1775,7 +1775,7 @@ a {
 .priceGrid article > span:not(.popular) {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .priceGrid ul {
@@ -1980,7 +1980,7 @@ a {
 .bottomLineNote {
   max-width: 330px;
   color: #9ea9b8;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.65;
   text-align: center;
 }
@@ -3915,7 +3915,7 @@ footer > small {
   box-shadow: none;
   color: #fff;
   font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: .055em;
   text-shadow:
@@ -5533,7 +5533,7 @@ footer > small {
 .photoReelBrand small {
   margin-top: 1px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -5685,7 +5685,7 @@ footer > small {
   border-radius: 999px;
   background: var(--cream);
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -9374,7 +9374,7 @@ footer > small {
   }
 
   .heroOffer small {
-    font-size: 10px;
+  font-size: 12px;
   }
 
   .photoReelEntry small {
@@ -10014,7 +10014,7 @@ footer > small {
 }
 
 .heroOffer small {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .trustRow {
@@ -10312,5 +10312,702 @@ footer > small {
 
   .priceSection {
     border-radius: 26px;
+  }
+}
+
+/* 2026-08-10 usability pass: real demo, simpler setup, readable touch UI */
+.realDemo {
+  display: grid;
+  min-height: 584px;
+  place-items: center;
+  margin: 0;
+  padding: 28px 28px 92px;
+  border-color: rgba(78, 57, 42, 0.12);
+  background:
+    radial-gradient(circle at 14% 10%, rgba(255, 255, 255, 0.9), transparent 30%),
+    radial-gradient(circle at 88% 86%, rgba(185, 245, 208, 0.3), transparent 34%),
+    linear-gradient(145deg, #eee4d7 0%, #f8f2e9 52%, #e5d8ca 100%);
+}
+
+.realDemoPlayer {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 286px);
+  height: 470px;
+  overflow: hidden;
+  border: 5px solid #fffdf9;
+  border-radius: 27px;
+  background: #111927;
+  box-shadow:
+    0 0 0 1px rgba(55, 42, 33, 0.09),
+    0 30px 68px rgba(58, 42, 31, 0.24);
+}
+
+.realDemoPlayer video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #111927;
+}
+
+.realDemoStatus {
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  left: 14px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.realDemoStatus span,
+.realDemoStatus strong {
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.7);
+  color: white;
+  font-size: 12px;
+  line-height: 1.25;
+  backdrop-filter: blur(12px);
+}
+
+.realDemoStatus strong {
+  font-weight: 750;
+}
+
+.realDemoCaption {
+  position: absolute;
+  right: 16px;
+  bottom: 74px;
+  left: 16px;
+  z-index: 2;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 11px;
+  background: rgba(255, 253, 249, 0.94);
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.16);
+  color: #172033;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+
+.realDemo .visualResult {
+  right: auto;
+  bottom: 20px;
+  left: 50%;
+  z-index: 4;
+  width: min(430px, calc(100% - 40px));
+  transform: translateX(-50%);
+}
+
+.realDemoFallback {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: min(100%, 360px);
+  min-height: 360px;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  border: 1px solid rgba(16, 24, 40, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.92);
+  text-align: center;
+}
+
+.realDemoFallback > span {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: white;
+}
+
+.realDemoFallback p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.setupQuickStart {
+  padding: 24px;
+  border: 1px solid rgba(47, 105, 73, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 95% 0, rgba(185, 245, 208, 0.34), transparent 31%),
+    linear-gradient(145deg, #fbfffc, #f5fbf7);
+  box-shadow: 0 16px 38px rgba(42, 79, 59, 0.07);
+}
+
+.setupQuickStartHeading {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.setupQuickStartHeading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.setupQuickStartHeading span {
+  color: var(--mint-dark);
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.setupQuickStartHeading h2 {
+  margin: 0;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.setupQuickStartHeading p {
+  max-width: 390px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.setupForm .setupQuickStart .quickAudioMode {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.setupForm .setupQuickStart .quickAudioMode legend {
+  font-size: 13px;
+}
+
+.recommendedPreset {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 11px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.06);
+}
+
+.recommendedPreset > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--ink);
+  color: var(--mint);
+}
+
+.recommendedPreset p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.recommendedPreset strong {
+  font-size: 13px;
+}
+
+.recommendedPreset small {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.advancedSettings {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdfa;
+}
+
+.advancedSettings > summary {
+  display: flex;
+  min-height: 66px;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 17px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advancedSettings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advancedSettings > summary > span {
+  display: grid;
+  gap: 3px;
+}
+
+.advancedSettings > summary strong {
+  font-size: 15px;
+}
+
+.advancedSettings > summary small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.advancedSettings > summary b {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--cream);
+  color: var(--coral-dark);
+  font-size: 20px;
+  transition: transform 160ms ease;
+}
+
+.advancedSettings[open] > summary b {
+  transform: rotate(45deg);
+}
+
+.advancedSettingsBody {
+  padding: 4px 22px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.advancedSettingsBody > fieldset:first-child {
+  padding-top: 22px;
+}
+
+.captionAfterPreviewNote {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: var(--cream);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.silentFallback {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 20px;
+  border: 1px solid rgba(226, 113, 78, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fff8f3, #fffdf9);
+  box-shadow: 0 16px 38px rgba(109, 65, 46, 0.08);
+}
+
+.silentFallbackIcon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 15px;
+  background: var(--coral);
+  color: white;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.silentFallback h2 {
+  margin: 2px 0 5px;
+  font-size: 21px;
+}
+
+.silentFallback > div > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.silentFallbackActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.silentFallbackActions button {
+  display: grid;
+  min-height: 74px;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.silentFallbackActions button:first-child {
+  border-color: rgba(255, 90, 60, 0.38);
+  background: #fff7f3;
+}
+
+.silentFallbackActions small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.photoReelIntroOffer {
+  display: inline-grid;
+  grid-template-columns: 48px auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 90, 60, 0.2);
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 14px 34px rgba(16, 24, 40, 0.07);
+  text-align: left;
+}
+
+.photoReelIntroOffer > span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--ink);
+  color: var(--mint);
+  font-family: "DM Sans", sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.photoReelIntroOffer p {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.photoReelIntroOffer strong {
+  font-size: 14px;
+}
+
+.photoReelIntroOffer small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* Targeted legibility pass: keep decorative scale while lifting meaningful microcopy. */
+.siteShell .brandIcon i,
+.siteShell .brandText small,
+.siteShell .mobilePriceLink,
+.siteShell .trialButton,
+.siteShell .quietButton,
+.siteShell .transferButton,
+.siteShell .workspaceStatus,
+.siteShell .eyebrow,
+.siteShell .eyebrow > span,
+.siteShell .heroOffer strong,
+.siteShell .heroOffer small,
+.siteShell .heroOffer > a,
+.siteShell .photoReelEntryMark,
+.siteShell .photoReelEntry small,
+.siteShell .trustRow,
+.siteShell .lineSaveMark,
+.siteShell .lineSaveCard small,
+.siteShell .transferLink,
+.siteShell .transferLink i,
+.siteShell .visualBadge span,
+.siteShell .visualFeaturePills span,
+.siteShell .phoneLabel,
+.siteShell .phone > small,
+.siteShell .captionTop,
+.siteShell .captionBottom,
+.siteShell .captionBottom strong,
+.siteShell .visualResult p,
+.siteShell .visualResult strong,
+.siteShell .lifestyleFrame:not(.lifestyleFrameMain)::after,
+.siteShell .lifestyleFrame > span,
+.siteShell .lifestyleHero .visualResult p,
+.siteShell .lifestyleHero .visualResult strong,
+.siteShell .painStrip > span,
+.siteShell .painStrip p,
+.siteShell .painStrip i,
+.siteShell .stepNo,
+.siteShell .stepGrid p,
+.siteShell .stepGrid small,
+.siteShell .differenceCopy li,
+.siteShell .differenceCopy li span,
+.siteShell .memoryTop,
+.siteShell .memoryTop i,
+.siteShell .styleCaption,
+.siteShell .memoryCard dt,
+.siteShell .memoryCard > p,
+.siteShell .priceGrid article > p,
+.siteShell .priceGrid article > strong small,
+.siteShell .priceGrid article > span:not(.popular),
+.siteShell .priceGrid article > button,
+.siteShell .popular,
+.siteShell .freePreviewBand > button,
+.siteShell .paidChoiceLabel,
+.siteShell .bottomLineNote,
+.siteShell footer :is(span, a, small),
+.photoReelShell .photoReelBrand small,
+.photoReelShell .photoReelTopbar nav a,
+.photoReelShell .photoReelIntroOffer small,
+.photoReelShell .photoReelFooter :is(span, a, small) {
+  font-size: 12px;
+}
+
+.topbar a,
+.photoReelTopbar a,
+.heroOffer > a,
+.photoReelEntry,
+.footerLinks a {
+  min-height: 44px;
+}
+
+.topbar nav a,
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .accountButton {
+    display: inline-flex;
+    min-height: 44px;
+    padding: 0 11px;
+    font-size: 12px;
+  }
+
+  .siteShell :is(button, select, textarea, summary, [role="button"]),
+  .photoReelShell :is(button, select, textarea, summary, [role="button"]),
+  .siteShell input:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"]):not([type="color"]),
+  .photoReelShell input:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"]):not([type="color"]),
+  .siteShell label:has(input[type="radio"]),
+  .siteShell label:has(input[type="checkbox"]),
+  .photoReelShell label:has(input[type="radio"]),
+  .photoReelShell label:has(input[type="checkbox"]) {
+    min-height: 44px;
+  }
+
+  .accentChoices > button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .customAccent {
+    min-height: 44px;
+    padding: 0 10px 0 0;
+    font-size: 12px;
+  }
+
+  .customAccent input {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 700px) {
+  .topActions {
+    gap: 5px;
+  }
+
+  .mobilePriceLink,
+  .trialButton {
+    min-height: 44px;
+  }
+
+  .realDemo {
+    min-height: 535px;
+    padding: 24px 14px 92px;
+    border-radius: 28px;
+  }
+
+  .realDemoPlayer {
+    width: min(100%, 272px);
+    height: 445px;
+  }
+
+  .realDemoStatus strong {
+    display: none;
+  }
+
+  .setupQuickStartHeading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .setupQuickStart,
+  .advancedSettingsBody {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .silentFallback {
+    grid-template-columns: 1fr;
+  }
+
+  .silentFallbackActions {
+    grid-template-columns: 1fr;
+  }
+
+  .photoReelIntroOffer {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .mobilePriceLink {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .topbar {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .topActions .trialButton {
+    display: none;
+  }
+
+  .accountButton {
+    flex: none;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+}
+
+/* Representative-frame cover choices use the real analysed video frames. */
+.thumbnailCandidateList button {
+  grid-template-columns: 64px minmax(0, 1fr);
+  min-height: 112px;
+  gap: 10px;
+  align-items: center;
+  align-content: center;
+  padding: 10px;
+}
+
+.thumbnailCandidateList .thumbnailCandidateVisual {
+  display: grid;
+  width: 64px;
+  height: 88px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #e9edf1, #d9e0e6);
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.08);
+}
+
+.thumbnailCandidateVisual img {
+  display: block;
+  width: 50px;
+  height: 88px;
+  object-fit: cover;
+}
+
+.thumbnailCandidateList .thumbnailCandidateCopy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  align-content: center;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.thumbnailCandidateList .thumbnailCandidateCopy > span {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.thumbnailCandidateList .thumbnailCandidateCopy > small,
+.thumbnailCandidateList .thumbnailCandidateCopy > b {
+  font-size: 12px;
+}
+
+.thumbnailAnalysisStatus {
+  display: flex;
+  min-height: 44px;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(25, 115, 70, 0.16);
+  border-radius: 11px;
+  background: #f3fff7;
+  color: var(--mint-dark);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.thumbnailAnalysisNote {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.thumbnailAnalysisRetry {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 10px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.thumbnailAnalysisRetry:hover {
+  border-color: var(--coral);
+  color: var(--coral-dark);
+}
+
+.thumbnailAnalysisRetry:focus-visible {
+  outline: 3px solid #e45f4d2b;
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  .thumbnailCandidateList button {
+    min-height: 112px;
   }
 }
