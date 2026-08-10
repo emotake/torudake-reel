@@ -26,6 +26,8 @@ export default function OperatorDeviceClient() {
   const [label, setLabel] = useState("運営端末");
   const [busy, setBusy] = useState<"enroll" | "revoke" | null>(null);
   const [error, setError] = useState("");
+  const [limitReached, setLimitReached] = useState(false);
+  const [replaceOldest, setReplaceOldest] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,16 +62,24 @@ export default function OperatorDeviceClient() {
         body: JSON.stringify({
           code: code.trim(),
           label: label.trim(),
+          replaceOldest,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as
-        Partial<OperatorStatus> & { error?: string };
+        Partial<OperatorStatus> & {
+          error?: string;
+          limitReached?: boolean;
+          replacedOldest?: boolean;
+        };
       if (!response.ok || !payload.registered) {
+        setLimitReached(payload.limitReached === true);
         throw new Error(
           payload.error || "登録情報を確認できませんでした。",
         );
       }
       setCode("");
+      setLimitReached(false);
+      setReplaceOldest(false);
       setStatus({
         configured: true,
         registered: true,
@@ -192,6 +202,18 @@ export default function OperatorDeviceClient() {
                     onChange={(event) => setCode(event.target.value)}
                   />
                 </label>
+                {limitReached && (
+                  <label className="operatorAccessReplace">
+                    <input
+                      type="checkbox"
+                      checked={replaceOldest}
+                      onChange={(event) =>
+                        setReplaceOldest(event.target.checked)
+                      }
+                    />
+                    最も古い運営端末の登録を解除して、この端末と入れ替える
+                  </label>
+                )}
                 <button
                   className="operatorAccessPrimary"
                   type="submit"
@@ -199,7 +221,9 @@ export default function OperatorDeviceClient() {
                 >
                   {busy === "enroll"
                     ? "登録しています…"
-                    : "この端末を登録"}
+                    : replaceOldest
+                      ? "最も古い端末と入れ替えて登録"
+                      : "この端末を登録"}
                 </button>
               </form>
             ) : (

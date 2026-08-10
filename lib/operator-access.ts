@@ -111,6 +111,7 @@ export async function operatorEnrollmentCodeMatches(candidate: string) {
 export async function activateOperatorDevice(
   label: string,
   nowSeconds = Math.floor(Date.now() / 1_000),
+  options: { replaceOldest?: boolean } = {},
 ) {
   await ensureOperatorSchema();
   const token = randomOperatorToken();
@@ -150,7 +151,37 @@ export async function activateOperatorDevice(
     )
     .run();
 
-  if (inserted.meta?.changes !== 1) {
+  let replacedOldest = false;
+  if (inserted.meta?.changes !== 1 && options.replaceOldest) {
+    const replaced = await operatorDatabase()
+      .prepare(`
+        UPDATE operator_devices
+        SET
+          session_hash = ?,
+          label = ?,
+          activated_at = ?,
+          expires_at = ?,
+          revoked_at = NULL
+        WHERE slot = (
+          SELECT slot
+          FROM operator_devices
+          WHERE revoked_at IS NULL AND expires_at > ?
+          ORDER BY activated_at ASC, slot ASC
+          LIMIT 1
+        )
+      `)
+      .bind(
+        sessionHash,
+        normalizedLabel,
+        nowSeconds,
+        expiresAt,
+        nowSeconds,
+      )
+      .run();
+    replacedOldest = replaced.meta?.changes === 1;
+  }
+
+  if (inserted.meta?.changes !== 1 && !replacedOldest) {
     throw new OperatorDeviceLimitError();
   }
 
@@ -159,6 +190,7 @@ export async function activateOperatorDevice(
     label: normalizedLabel,
     activatedAt: nowSeconds,
     expiresAt,
+    replacedOldest,
   };
 }
 

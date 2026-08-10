@@ -2865,6 +2865,27 @@ footer > small {
   box-shadow: 0 0 0 4px rgba(203, 118, 95, 0.13);
 }
 
+.operatorAccessForm .operatorAccessReplace {
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 13px 14px;
+  border: 1px solid rgba(156, 63, 43, 0.2);
+  border-radius: 13px;
+  background: #fff7f3;
+  color: #714b40;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.operatorAccessForm .operatorAccessReplace input {
+  width: 20px;
+  min-height: 20px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: #9c3f2b;
+}
+
 .operatorAccessPrimary,
 .operatorAccessQuiet {
   width: 100%;

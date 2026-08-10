@@ -1,5 +1,6 @@
 import {
   activateOperatorDevice,
+  getOperatorDevice,
   isOperatorEnrollmentConfigured,
   isSameOriginMutation,
   normalizeOperatorLabel,
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     code?: unknown;
     label?: unknown;
+    replaceOldest?: unknown;
   } | null;
   if (
     !payload ||
@@ -59,10 +61,27 @@ export async function POST(request: Request) {
     );
   }
 
+  // Clear failed-attempt state before changing device records. If this
+  // cleanup fails, enrollment stops without leaving an unreachable slot.
+  await clearOperatorEnrollmentFailures(request);
+
+  const existingDevice = await getOperatorDevice(request);
+  if (existingDevice) {
+    return privateJson({
+      registered: true,
+      label: existingDevice.label,
+      activatedAt: existingDevice.activatedAt,
+      expiresAt: existingDevice.expiresAt,
+      alreadyRegistered: true,
+    });
+  }
+
   let device: Awaited<ReturnType<typeof activateOperatorDevice>>;
   try {
     device = await activateOperatorDevice(
       normalizeOperatorLabel(payload.label),
+      undefined,
+      { replaceOldest: payload.replaceOldest === true },
     );
   } catch (error) {
     if (error instanceof OperatorDeviceLimitError) {
@@ -71,7 +90,8 @@ export async function POST(request: Request) {
         {
           error:
             `登録できる運営端末は${error.limit}台までです。` +
-            "使わない端末で登録を解除してから、もう一度お試しください。",
+            "必要な場合は、最も古い端末と入れ替えて登録できます。",
+          limitReached: true,
         },
         { status: 409 },
       );
@@ -82,8 +102,8 @@ export async function POST(request: Request) {
     registered: true,
     label: device.label,
     expiresAt: device.expiresAt,
+    replacedOldest: device.replacedOldest,
   });
-  await clearOperatorEnrollmentFailures(request);
   response.headers.set(
     "Set-Cookie",
     operatorSessionCookie(
