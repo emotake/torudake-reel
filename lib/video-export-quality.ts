@@ -1,3 +1,5 @@
+import type { InputAudioTrack } from "mediabunny";
+
 export const DEFAULT_VIDEO_EXPORT_QUALITY_TARGET = {
   minimumShortEdge: 1080,
   targetBitrate: 10_000_000,
@@ -9,6 +11,7 @@ export const DEFAULT_VIDEO_EXPORT_QUALITY_TARGET = {
 } as const;
 
 export type VideoExportQualityMetrics = {
+  containerMimeType: string | null;
   width: number | null;
   height: number | null;
   codec: string | null;
@@ -18,6 +21,27 @@ export type VideoExportQualityMetrics = {
   packetCount: number | null;
   durationSeconds: number | null;
   fileSizeBytes: number | null;
+  audioTrackPresent: boolean | null;
+  audioCodec: string | null;
+  audioCodecParameterString: string | null;
+  audioDurationSeconds: number | null;
+  audioChannels: number | null;
+  audioSampleRate: number | null;
+  audioRms: number | null;
+  audioPeak: number | null;
+  audioActivityRanges: VideoExportAudioActivityMetric[] | null;
+};
+
+export type VideoExportTimedRange = Readonly<{
+  start: number;
+  end: number;
+}>;
+
+export type VideoExportAudioActivityMetric = VideoExportTimedRange & {
+  rms: number;
+  peak: number;
+  activeRatio: number;
+  sampledFrames: number;
 };
 
 export type VideoExportQualityMetric = keyof VideoExportQualityMetrics;
@@ -34,6 +58,7 @@ export type VideoExportQualityInspection =
         | "unsupported-environment"
         | "unreadable-file"
         | "no-video-track"
+        | "no-audio-track"
         | "analysis-failed";
       metrics: null;
       unavailableMetrics: VideoExportQualityMetric[];
@@ -51,7 +76,20 @@ export type VideoExportQualityIssueCode =
   | "frame-rate-below-recommended"
   | "codec-unavailable"
   | "codec-compatibility"
-  | "h264-profile-fallback";
+  | "h264-profile-fallback"
+  | "duration-unavailable"
+  | "duration-mismatch"
+  | "audio-track-unavailable"
+  | "audio-track-missing"
+  | "audio-codec-unavailable"
+  | "audio-codec-compatibility"
+  | "audio-duration-unavailable"
+  | "audio-duration-mismatch"
+  | "audio-audibility-unavailable"
+  | "audio-silent"
+  | "narration-audibility-unavailable"
+  | "narration-audio-missing"
+  | "caption-timing-outside-video";
 
 export type VideoExportQualityIssue = {
   code: VideoExportQualityIssueCode;
@@ -71,6 +109,14 @@ export type VideoExportQualityTarget = {
   expectedHeight?: number;
   requireH264?: boolean;
   preferH264HighProfile?: boolean;
+  expectedDurationSeconds?: number;
+  durationToleranceSeconds?: number;
+  requireAudio?: boolean;
+  requireCompatibleAudio?: boolean;
+  expectedNarrationRanges?: readonly VideoExportTimedRange[];
+  captionRanges?: readonly VideoExportTimedRange[];
+  minimumAudibleRms?: number;
+  minimumNarrationActiveRatio?: number;
   /** Opt in only when a fixed-bitrate encoder is used. VBR is advisory. */
   useBitrateForVerdict?: boolean;
 };
@@ -88,6 +134,10 @@ export type VideoExportQualityInspectionOptions = {
    * every packet is inspected so the returned bitrate covers the whole video.
    */
   packetSampleCount?: number;
+  /** Expected speech positions in the finalized, edited timeline. */
+  expectedNarrationRanges?: readonly VideoExportTimedRange[];
+  /** Decode audio to confirm that the encoded track contains audible data. */
+  inspectAudioActivity?: boolean;
 };
 
 type PacketStatsLike = {
@@ -111,9 +161,24 @@ export type VideoQualityInspectableTrack = {
 export type VideoQualityInspectableInput = {
   canRead(): Promise<boolean>;
   getPrimaryVideoTrack(): Promise<VideoQualityInspectableTrack | null>;
+  getPrimaryAudioTrack?(): Promise<VideoQualityInspectableAudioTrack | null>;
+};
+
+export type VideoQualityInspectableAudioTrack = {
+  getCodec(): Promise<string | null>;
+  getCodecParameterString(): Promise<string | null>;
+  getDurationFromMetadata(): Promise<number | null>;
+  computeDuration(): Promise<number>;
+  getNumberOfChannels(): Promise<number>;
+  getSampleRate(): Promise<number>;
+  canDecode?(): Promise<boolean>;
+  inspectActivityRanges?(
+    ranges: readonly VideoExportTimedRange[],
+  ): Promise<VideoExportAudioActivityMetric[]>;
 };
 
 const ALL_METRICS: VideoExportQualityMetric[] = [
+  "containerMimeType",
   "width",
   "height",
   "codec",
@@ -123,6 +188,15 @@ const ALL_METRICS: VideoExportQualityMetric[] = [
   "packetCount",
   "durationSeconds",
   "fileSizeBytes",
+  "audioTrackPresent",
+  "audioCodec",
+  "audioCodecParameterString",
+  "audioDurationSeconds",
+  "audioChannels",
+  "audioSampleRate",
+  "audioRms",
+  "audioPeak",
+  "audioActivityRanges",
 ];
 
 function isBlobLike(source: unknown): source is Blob {
@@ -182,14 +256,295 @@ async function readDurationSeconds(track: VideoQualityInspectableTrack) {
   return finiteOrNull(await safelyRead(() => track.computeDuration()));
 }
 
+async function readAudioDurationSeconds(
+  track: VideoQualityInspectableAudioTrack,
+) {
+  const metadataDuration = finiteOrNull(
+    await safelyRead(() => track.getDurationFromMetadata()),
+  );
+  if (metadataDuration !== null) return metadataDuration;
+  return finiteOrNull(await safelyRead(() => track.computeDuration()));
+}
+
+function normalizeTimedRanges(
+  ranges: readonly VideoExportTimedRange[] | undefined,
+  duration: number,
+) {
+  if (!ranges || ranges.length === 0) return [];
+  return ranges
+    .map((range) => ({
+      start: Math.max(0, Math.min(duration, range.start)),
+      end: Math.max(0, Math.min(duration, range.end)),
+    }))
+    .filter(
+      (range) =>
+        Number.isFinite(range.start) &&
+        Number.isFinite(range.end) &&
+        range.end - range.start >= 0.04,
+    )
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+    .slice(0, 100);
+}
+
+function buildAudioInspectionRanges(
+  duration: number,
+  expectedRanges: readonly VideoExportTimedRange[] | undefined,
+) {
+  const normalized = normalizeTimedRanges(expectedRanges, duration);
+  if (normalized.length > 0) return normalized;
+  if (duration <= 30) return [{ start: 0, end: duration }];
+
+  const probeDuration = Math.min(5, duration / 3);
+  const middleStart = Math.max(
+    probeDuration,
+    duration / 2 - probeDuration / 2,
+  );
+  return [
+    { start: 0, end: probeDuration },
+    {
+      start: middleStart,
+      end: Math.min(duration, middleStart + probeDuration),
+    },
+    { start: Math.max(0, duration - probeDuration), end: duration },
+  ];
+}
+
+type MutableAudioRangeMeasurement = {
+  start: number;
+  end: number;
+  sumSquares: number;
+  peak: number;
+  sampledFrames: number;
+  windowSquares: Float64Array;
+  windowSamples: Uint32Array;
+};
+
+const AUDIO_ACTIVITY_WINDOW_SECONDS = 0.02;
+const MAX_ANALYZED_FRAMES_PER_RANGE = 240_000;
+
+function createAudioRangeMeasurement(
+  range: VideoExportTimedRange,
+): MutableAudioRangeMeasurement {
+  const windowCount = Math.max(
+    1,
+    Math.ceil((range.end - range.start) / AUDIO_ACTIVITY_WINDOW_SECONDS),
+  );
+  return {
+    ...range,
+    sumSquares: 0,
+    peak: 0,
+    sampledFrames: 0,
+    windowSquares: new Float64Array(windowCount),
+    windowSamples: new Uint32Array(windowCount),
+  };
+}
+
+function finishAudioRangeMeasurement(
+  measurement: MutableAudioRangeMeasurement,
+): VideoExportAudioActivityMetric {
+  let activeWindows = 0;
+  let measuredWindows = 0;
+  for (let index = 0; index < measurement.windowSamples.length; index += 1) {
+    const count = measurement.windowSamples[index];
+    if (count === 0) continue;
+    measuredWindows += 1;
+    const rms = Math.sqrt(measurement.windowSquares[index] / count);
+    if (rms >= 0.0035) activeWindows += 1;
+  }
+  return {
+    start: measurement.start,
+    end: measurement.end,
+    rms:
+      measurement.sampledFrames > 0
+        ? Math.sqrt(measurement.sumSquares / measurement.sampledFrames)
+        : 0,
+    peak: measurement.peak,
+    activeRatio: measuredWindows > 0 ? activeWindows / measuredWindows : 0,
+    sampledFrames: measurement.sampledFrames,
+  };
+}
+
+async function inspectDecodedAudioActivity(
+  media: typeof import("mediabunny"),
+  audioTrack: InputAudioTrack,
+  ranges: readonly VideoExportTimedRange[],
+) {
+  if (!(await audioTrack.canDecode())) return null;
+  const measurements = ranges.map(createAudioRangeMeasurement);
+  if (measurements.length === 0) return [];
+  const firstTimestamp = measurements[0].start;
+  const lastTimestamp = measurements.at(-1)!.end;
+  const sink = new media.AudioSampleSink(audioTrack);
+
+  for await (const audioSample of sink.samples(firstTimestamp, lastTimestamp)) {
+    try {
+      const sampleStart = audioSample.timestamp;
+      const sampleEnd = audioSample.timestamp + audioSample.duration;
+      for (const measurement of measurements) {
+        const overlapStart = Math.max(measurement.start, sampleStart);
+        const overlapEnd = Math.min(measurement.end, sampleEnd);
+        if (overlapEnd <= overlapStart) continue;
+        const startFrame = Math.max(
+          0,
+          Math.floor((overlapStart - sampleStart) * audioSample.sampleRate),
+        );
+        const endFrame = Math.min(
+          audioSample.numberOfFrames,
+          Math.ceil((overlapEnd - sampleStart) * audioSample.sampleRate),
+        );
+        const frameCount = Math.max(0, endFrame - startFrame);
+        if (frameCount === 0) continue;
+        const estimatedFrames = Math.max(
+          1,
+          Math.ceil(
+            (measurement.end - measurement.start) * audioSample.sampleRate,
+          ),
+        );
+        const stride = Math.max(
+          1,
+          Math.ceil(estimatedFrames / MAX_ANALYZED_FRAMES_PER_RANGE),
+        );
+        for (
+          let channel = 0;
+          channel < audioSample.numberOfChannels;
+          channel += 1
+        ) {
+          const samples = new Float32Array(frameCount);
+          audioSample.copyTo(samples, {
+            planeIndex: channel,
+            format: "f32-planar",
+            frameOffset: startFrame,
+            frameCount,
+          });
+          for (let frame = 0; frame < frameCount; frame += stride) {
+            const value = samples[frame];
+            if (!Number.isFinite(value)) continue;
+            const square = value * value;
+            measurement.sumSquares += square;
+            measurement.peak = Math.max(measurement.peak, Math.abs(value));
+            measurement.sampledFrames += 1;
+            const absoluteTime =
+              sampleStart + (startFrame + frame) / audioSample.sampleRate;
+            const windowIndex = Math.min(
+              measurement.windowSamples.length - 1,
+              Math.max(
+                0,
+                Math.floor(
+                  (absoluteTime - measurement.start) /
+                    AUDIO_ACTIVITY_WINDOW_SECONDS,
+                ),
+              ),
+            );
+            measurement.windowSquares[windowIndex] += square;
+            measurement.windowSamples[windowIndex] += 1;
+          }
+        }
+      }
+    } finally {
+      audioSample.close();
+    }
+  }
+
+  return measurements.map(finishAudioRangeMeasurement);
+}
+
+function summarizeAudioActivity(
+  ranges: readonly VideoExportAudioActivityMetric[] | null,
+) {
+  if (!ranges || ranges.length === 0) {
+    return { rms: null, peak: null };
+  }
+  let sumSquares = 0;
+  let sampledFrames = 0;
+  let peak = 0;
+  for (const range of ranges) {
+    sumSquares += range.rms * range.rms * range.sampledFrames;
+    sampledFrames += range.sampledFrames;
+    peak = Math.max(peak, range.peak);
+  }
+  return {
+    rms: sampledFrames > 0 ? Math.sqrt(sumSquares / sampledFrames) : null,
+    peak: sampledFrames > 0 ? peak : null,
+  };
+}
+
+function inspectAudioBufferActivity(
+  buffer: AudioBuffer,
+  ranges: readonly VideoExportTimedRange[],
+) {
+  return ranges.map((range) => {
+    const measurement = createAudioRangeMeasurement(range);
+    const startFrame = Math.max(0, Math.floor(range.start * buffer.sampleRate));
+    const endFrame = Math.min(
+      buffer.length,
+      Math.ceil(range.end * buffer.sampleRate),
+    );
+    const frameCount = Math.max(0, endFrame - startFrame);
+    const stride = Math.max(
+      1,
+      Math.ceil(frameCount / MAX_ANALYZED_FRAMES_PER_RANGE),
+    );
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      const samples = buffer.getChannelData(channel);
+      for (let frame = startFrame; frame < endFrame; frame += stride) {
+        const value = samples[frame];
+        if (!Number.isFinite(value)) continue;
+        const square = value * value;
+        measurement.sumSquares += square;
+        measurement.peak = Math.max(measurement.peak, Math.abs(value));
+        measurement.sampledFrames += 1;
+        const absoluteTime = frame / buffer.sampleRate;
+        const windowIndex = Math.min(
+          measurement.windowSamples.length - 1,
+          Math.max(
+            0,
+            Math.floor(
+              (absoluteTime - measurement.start) /
+                AUDIO_ACTIVITY_WINDOW_SECONDS,
+            ),
+          ),
+        );
+        measurement.windowSquares[windowIndex] += square;
+        measurement.windowSamples[windowIndex] += 1;
+      }
+    }
+    return finishAudioRangeMeasurement(measurement);
+  });
+}
+
+async function inspectBlobAudioActivityWithWebAudio(
+  source: Blob,
+  ranges: readonly VideoExportTimedRange[],
+) {
+  if (source.size > 96 * 1024 * 1024 || typeof window === "undefined") {
+    return null;
+  }
+  const AudioContextConstructor =
+    window.AudioContext ??
+    (
+      window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }
+    ).webkitAudioContext;
+  if (!AudioContextConstructor) return null;
+  const context = new AudioContextConstructor();
+  try {
+    const buffer = await context.decodeAudioData(await source.arrayBuffer());
+    return inspectAudioBufferActivity(buffer, ranges);
+  } finally {
+    await context.close().catch(() => undefined);
+  }
+}
+
 function getUnavailableMetrics(metrics: VideoExportQualityMetrics) {
   return ALL_METRICS.filter((metric) => metrics[metric] === null);
 }
 
 /**
  * Reads the encoded result without decoding or modifying it. This function is
- * deliberately non-throwing so a diagnostic failure can never invalidate a
- * successfully exported video.
+ * deliberately non-throwing so callers can show a precise validation error.
+ * A caller offering a download must still require a successful inspection;
+ * an unreadable result is not treated as a valid completed video.
  */
 export async function inspectVideoExportQuality(
   source: Blob | VideoQualityInspectableInput,
@@ -197,17 +552,21 @@ export async function inspectVideoExportQuality(
 ): Promise<VideoExportQualityInspection> {
   let input: VideoQualityInspectableInput | null = null;
   let ownedInput: { dispose?: () => void } | null = null;
+  let mediaModule: typeof import("mediabunny") | null = null;
   const fileSizeBytes = isBlobLike(source)
     ? finiteOrNull(source.size, true)
     : null;
+  const containerMimeType =
+    isBlobLike(source) && typeof source.type === "string" && source.type
+      ? source.type.toLowerCase()
+      : null;
 
   try {
     if (isInspectableInput(source)) {
       input = source;
     } else if (isBlobLike(source)) {
-      let media: typeof import("mediabunny");
       try {
-        media = await import("mediabunny");
+        mediaModule = await import("mediabunny");
       } catch {
         return {
           status: "unsupported-environment",
@@ -217,9 +576,9 @@ export async function inspectVideoExportQuality(
         };
       }
 
-      const createdInput = new media.Input({
-        source: new media.BlobSource(source),
-        formats: media.ALL_FORMATS,
+      const createdInput = new mediaModule.Input({
+        source: new mediaModule.BlobSource(source),
+        formats: mediaModule.ALL_FORMATS,
       });
       input = createdInput;
       ownedInput = createdInput;
@@ -269,7 +628,71 @@ export async function inspectVideoExportQuality(
         safelyRead(() => track.computePacketStats(packetSampleCount)),
       ]);
 
+    const audioTrack = input.getPrimaryAudioTrack
+      ? await safelyRead(() => input!.getPrimaryAudioTrack!())
+      : null;
+    let audioCodec: string | null = null;
+    let audioCodecParameterString: string | null = null;
+    let audioDurationSeconds: number | null = null;
+    let audioChannels: number | null = null;
+    let audioSampleRate: number | null = null;
+    let audioActivityRanges: VideoExportAudioActivityMetric[] | null = null;
+    if (audioTrack) {
+      [
+        audioCodec,
+        audioCodecParameterString,
+        audioDurationSeconds,
+        audioChannels,
+        audioSampleRate,
+      ] = await Promise.all([
+        safelyRead(() => audioTrack.getCodec()).then((value) =>
+          typeof value === "string" && value ? value : null,
+        ),
+        safelyRead(() => audioTrack.getCodecParameterString()).then((value) =>
+          typeof value === "string" && value ? value : null,
+        ),
+        readAudioDurationSeconds(audioTrack),
+        safelyRead(() => audioTrack.getNumberOfChannels()).then((value) =>
+          finiteOrNull(value),
+        ),
+        safelyRead(() => audioTrack.getSampleRate()).then((value) =>
+          finiteOrNull(value),
+        ),
+      ]);
+
+      if (
+        options.inspectAudioActivity !== false &&
+        audioDurationSeconds !== null
+      ) {
+        const activityRanges = buildAudioInspectionRanges(
+          audioDurationSeconds,
+          options.expectedNarrationRanges,
+        );
+        if (audioTrack.inspectActivityRanges) {
+          audioActivityRanges = await safelyRead(() =>
+            audioTrack.inspectActivityRanges!(activityRanges),
+          );
+        } else if (mediaModule) {
+          audioActivityRanges = await safelyRead(() =>
+            inspectDecodedAudioActivity(
+              mediaModule!,
+              audioTrack as InputAudioTrack,
+              activityRanges,
+            ),
+          );
+        }
+        if (audioActivityRanges === null && isBlobLike(source)) {
+          audioActivityRanges = await safelyRead(() =>
+            inspectBlobAudioActivityWithWebAudio(source, activityRanges),
+          );
+        }
+      }
+    }
+
+    const audioLevel = summarizeAudioActivity(audioActivityRanges);
+
     const metrics: VideoExportQualityMetrics = {
+      containerMimeType,
       width: finiteOrNull(width),
       height: finiteOrNull(height),
       codec: typeof codec === "string" && codec.length > 0 ? codec : null,
@@ -283,6 +706,15 @@ export async function inspectVideoExportQuality(
       packetCount: finiteOrNull(stats?.packetCount, true),
       durationSeconds,
       fileSizeBytes,
+      audioTrackPresent: Boolean(audioTrack),
+      audioCodec,
+      audioCodecParameterString,
+      audioDurationSeconds,
+      audioChannels,
+      audioSampleRate,
+      audioRms: audioLevel.rms,
+      audioPeak: audioLevel.peak,
+      audioActivityRanges,
     };
 
     return {
@@ -376,6 +808,43 @@ function isH264HighProfile(parameterString: string | null) {
   return profileHex === "64";
 }
 
+function isCompatibleAudioCodec(
+  codec: string | null,
+  parameterString: string | null,
+  containerMimeType: string | null,
+) {
+  const values = [codec, parameterString]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.toLowerCase());
+  const isAac = values.some(
+    (value) => value === "aac" || value.startsWith("mp4a.40"),
+  );
+  const isOpus = values.some((value) => value === "opus");
+  const isVorbis = values.some((value) => value === "vorbis");
+  const isMp3 = values.some(
+    (value) => value === "mp3" || value.includes("mp4a.69") || value.includes("mp4a.6b"),
+  );
+  if (containerMimeType?.includes("webm")) return isOpus || isVorbis;
+  if (containerMimeType?.includes("mp4") || containerMimeType?.includes("quicktime")) {
+    return isAac || isMp3;
+  }
+  return isAac || isOpus || isVorbis || isMp3;
+}
+
+function getDurationTolerance(
+  expectedDurationSeconds: number,
+  configuredTolerance: number | undefined,
+) {
+  if (
+    typeof configuredTolerance === "number" &&
+    Number.isFinite(configuredTolerance) &&
+    configuredTolerance >= 0
+  ) {
+    return configuredTolerance;
+  }
+  return Math.max(0.35, Math.min(1.5, expectedDurationSeconds * 0.015));
+}
+
 /**
  * Pure, deterministic quality judgement. The minimum bitrate is intentionally
  * lower than the 10 Mbps encoder target because variable-bitrate encoders use
@@ -389,6 +858,10 @@ export function assessVideoExportQuality(
     ...DEFAULT_VIDEO_EXPORT_QUALITY_TARGET,
     requireH264: true,
     preferH264HighProfile: true,
+    requireAudio: false,
+    requireCompatibleAudio: true,
+    minimumAudibleRms: 0.0025,
+    minimumNarrationActiveRatio: 0.08,
     useBitrateForVerdict: false,
     ...targetOverrides,
   };
@@ -477,6 +950,161 @@ export function assessVideoExportQuality(
     });
   }
 
+  const expectedDuration = finiteOrNull(target.expectedDurationSeconds);
+  if (expectedDuration !== null) {
+    if (metrics.durationSeconds === null) {
+      issues.push({
+        code: "duration-unavailable",
+        severity: "error",
+        message: "完成動画の長さを確認できませんでした。",
+      });
+    } else {
+      const tolerance = getDurationTolerance(
+        expectedDuration,
+        target.durationToleranceSeconds,
+      );
+      if (Math.abs(metrics.durationSeconds - expectedDuration) > tolerance) {
+        issues.push({
+          code: "duration-mismatch",
+          severity: "error",
+          message: `完成動画が予定の長さ（約${Math.round(expectedDuration)}秒）と一致しません。`,
+        });
+      }
+    }
+  }
+
+  if (target.requireAudio) {
+    if (metrics.audioTrackPresent === null) {
+      issues.push({
+        code: "audio-track-unavailable",
+        severity: "error",
+        message: "完成動画の音声トラックを確認できませんでした。",
+      });
+    } else if (!metrics.audioTrackPresent) {
+      issues.push({
+        code: "audio-track-missing",
+        severity: "error",
+        message: "完成動画に音声が入っていません。",
+      });
+    } else {
+      const hasAudioCodec =
+        metrics.audioCodec !== null ||
+        metrics.audioCodecParameterString !== null;
+      if (!hasAudioCodec) {
+        issues.push({
+          code: "audio-codec-unavailable",
+          severity: "error",
+          message: "完成動画の音声形式を確認できませんでした。",
+        });
+      } else if (
+        target.requireCompatibleAudio &&
+        !isCompatibleAudioCodec(
+          metrics.audioCodec,
+          metrics.audioCodecParameterString,
+          metrics.containerMimeType,
+        )
+      ) {
+        issues.push({
+          code: "audio-codec-compatibility",
+          severity: "error",
+          message: "完成動画の音声形式がiPhoneやSNS投稿に適していません。",
+        });
+      }
+
+      if (metrics.audioDurationSeconds === null) {
+        issues.push({
+          code: "audio-duration-unavailable",
+          severity: "error",
+          message: "完成動画の音声の長さを確認できませんでした。",
+        });
+      } else if (
+        metrics.durationSeconds !== null &&
+        Math.abs(metrics.audioDurationSeconds - metrics.durationSeconds) >
+          getDurationTolerance(metrics.durationSeconds, target.durationToleranceSeconds)
+      ) {
+        issues.push({
+          code: "audio-duration-mismatch",
+          severity: "error",
+          message: "映像と音声の長さが一致していません。",
+        });
+      }
+
+      if (metrics.audioRms === null) {
+        issues.push({
+          code: "audio-audibility-unavailable",
+          severity: "error",
+          message: "完成動画の音声が聞こえる状態か確認できませんでした。",
+        });
+      } else if (metrics.audioRms < (target.minimumAudibleRms ?? 0.0025)) {
+        issues.push({
+          code: "audio-silent",
+          severity: "error",
+          message: "完成動画の音声が無音に近い状態です。",
+        });
+      }
+    }
+  }
+
+  const expectedNarrationRanges = target.expectedNarrationRanges ?? [];
+  if (expectedNarrationRanges.length > 0) {
+    const measuredRanges = metrics.audioActivityRanges;
+    if (!measuredRanges || measuredRanges.length < expectedNarrationRanges.length) {
+      issues.push({
+        code: "narration-audibility-unavailable",
+        severity: "error",
+        message: "AIナレーションが完成動画へ入ったことを確認できませんでした。",
+      });
+    } else {
+      const minimumRms = target.minimumAudibleRms ?? 0.0025;
+      const minimumActiveRatio = target.minimumNarrationActiveRatio ?? 0.08;
+      const missingNarration = measuredRanges.some(
+        (range, index) => {
+          const expected = expectedNarrationRanges[index];
+          if (!expected) return false;
+          const expectedDurationForRange = expected.end - expected.start;
+          if (expectedDurationForRange < 0.12) return false;
+          return (
+            range.sampledFrames === 0 ||
+            range.rms < minimumRms ||
+            range.activeRatio < minimumActiveRatio
+          );
+        },
+      );
+      if (missingNarration) {
+        issues.push({
+          code: "narration-audio-missing",
+          severity: "error",
+          message: "AIナレーションが聞こえない区間があります。書き出し結果は保存できません。",
+        });
+      }
+    }
+  }
+
+  const captionRanges = target.captionRanges ?? [];
+  if (captionRanges.length > 0) {
+    const duration = metrics.durationSeconds;
+    const tolerance = duration === null
+      ? 0
+      : getDurationTolerance(duration, target.durationToleranceSeconds);
+    const invalidCaptionRange =
+      duration === null ||
+      captionRanges.some(
+        (range) =>
+          !Number.isFinite(range.start) ||
+          !Number.isFinite(range.end) ||
+          range.start < -tolerance ||
+          range.end <= range.start ||
+          range.end > duration + tolerance,
+      );
+    if (invalidCaptionRange) {
+      issues.push({
+        code: "caption-timing-outside-video",
+        severity: "error",
+        message: "テロップの表示時間と完成動画の長さが一致していません。",
+      });
+    }
+  }
+
   const hasError = issues.some((issue) => issue.severity === "error");
   const hasWarning = issues.some((issue) => issue.severity === "warning");
   const hasAnyMeasuredQuality =
@@ -487,7 +1115,12 @@ export function assessVideoExportQuality(
     meetsResolution !== null &&
     metrics.averageBitrate !== null &&
     metrics.averageFrameRate !== null &&
-    hasCodec;
+    hasCodec &&
+    (expectedDuration === null || metrics.durationSeconds !== null) &&
+    (!target.requireAudio ||
+      (metrics.audioTrackPresent === true &&
+        metrics.audioDurationSeconds !== null &&
+        metrics.audioRms !== null));
 
   return {
     verdict: hasError
@@ -510,16 +1143,17 @@ export function assessVideoExportQuality(
 export function assessExportedVideoQuality(
   inspection: VideoExportQualityInspection,
   expectedDimensions?: { width: number; height: number },
+  targetOverrides: Partial<VideoExportQualityTarget> = {},
 ): VideoExportQualityAssessment {
   if (inspection.status !== "ok") {
     return {
-      verdict: "unknown",
+      verdict: "fail",
       meetsTargetResolution: null,
       isComplete: false,
       issues: [
         {
           code: "resolution-unavailable",
-          severity: "info",
+          severity: "error",
           message: inspection.message,
         },
       ],
@@ -529,6 +1163,7 @@ export function assessExportedVideoQuality(
   return assessVideoExportQuality(inspection.metrics, {
     expectedWidth: expectedDimensions?.width,
     expectedHeight: expectedDimensions?.height,
+    ...targetOverrides,
   });
 }
 

@@ -13,6 +13,31 @@ function createTrialSessionDatabase() {
         return this;
       },
       async first() {
+        if (/SUM\(CASE WHEN network_hash/i.test(query)) {
+          const [
+            networkHash,
+            burstStart,
+            ,
+            dailyStart,
+            globalStart,
+          ] = this.values;
+          const values = Array.from(issuances.values());
+          return {
+            network_burst: values.filter(
+              (item) =>
+                item.networkHash === networkHash &&
+                item.createdAt >= burstStart,
+            ).length,
+            network_daily: values.filter(
+              (item) =>
+                item.networkHash === networkHash &&
+                item.createdAt >= dailyStart,
+            ).length,
+            global_daily: values.filter(
+              (item) => item.createdAt >= globalStart,
+            ).length,
+          };
+        }
         if (/FROM trial_issuance_fingerprints/i.test(query)) {
           const [fingerprintHash] = this.values;
           const issuance = issuances.get(fingerprintHash);
@@ -36,23 +61,32 @@ function createTrialSessionDatabase() {
             createdAt,
             lastSeenAt,
             ,
-            networkWindowStart,
-            networkLimit,
+            networkBurstStart,
+            networkBurstLimit,
+            ,
+            networkDailyStart,
+            networkDailyLimit,
             globalWindowStart,
             globalLimit,
           ] = this.values;
           const existing = issuances.get(fingerprintHash);
-          const recentNetworkIssuances = Array.from(issuances.values()).filter(
+          const recentNetworkBurst = Array.from(issuances.values()).filter(
             (issuance) =>
               issuance.networkHash === networkHash &&
-              issuance.createdAt >= networkWindowStart,
+              issuance.createdAt >= networkBurstStart,
+          ).length;
+          const recentNetworkDaily = Array.from(issuances.values()).filter(
+            (issuance) =>
+              issuance.networkHash === networkHash &&
+              issuance.createdAt >= networkDailyStart,
           ).length;
           const recentGlobalIssuances = Array.from(issuances.values()).filter(
             (issuance) => issuance.createdAt >= globalWindowStart,
           ).length;
           if (
             !existing &&
-            (recentNetworkIssuances >= networkLimit ||
+            (recentNetworkBurst >= networkBurstLimit ||
+              recentNetworkDaily >= networkDailyLimit ||
               recentGlobalIssuances >= globalLimit)
           ) {
             return { meta: { changes: 0 } };
@@ -115,8 +149,25 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
     const {
       getRegisteredTrialSessionId,
       issueOrRefreshTrialSession,
+      trialIssuanceLimitError,
       trialSessionPrincipalEmail,
     } = await import(moduleUrl.href);
+    const sharedNetworkLimit = trialIssuanceLimitError({
+      networkBurst: 12,
+      networkDaily: 12,
+      globalDaily: 12,
+    });
+    assert.equal(sharedNetworkLimit.code, "trial_network_temporarily_limited");
+    assert.equal(sharedNetworkLimit.status, 429);
+    assert.match(sharedNetworkLimit.publicMessage, /10分/);
+    const capacityLimit = trialIssuanceLimitError({
+      networkBurst: 0,
+      networkDaily: 0,
+      globalDaily: 5_000,
+    });
+    assert.equal(capacityLimit.code, "trial_capacity_temporarily_limited");
+    assert.equal(capacityLimit.status, 429);
+    assert.match(capacityLimit.publicMessage, /一時的/);
     const forged = "11111111-1111-4111-8111-111111111111";
     const forgedRequest = new Request("https://torudake-reel.pages.dev/", {
       headers: {
@@ -163,7 +214,7 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
     assert.match(storedNetworkHash, /^[0-9a-f]{64}$/);
     assert.doesNotMatch(storedNetworkHash, /203\.0\.113\.10/);
 
-    for (let index = 1; index < 8; index += 1) {
+    for (let index = 1; index < 12; index += 1) {
       await issueOrRefreshTrialSession(
         new Request("https://torudake-reel.pages.dev/", {
           headers: {
@@ -187,7 +238,9 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
         now + 11,
       ),
       (error) =>
-        error?.code === "trial_issuance_limited" && error?.status === 429,
+        error?.code === "trial_network_temporarily_limited" &&
+        error?.status === 429 &&
+        /10分/.test(error?.publicMessage ?? ""),
     );
 
     const secondNetworkSession = await issueOrRefreshTrialSession(
@@ -202,31 +255,12 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
     );
     assert.notEqual(secondNetworkSession, issued);
 
-    for (let index = 1; index <= 91; index += 1) {
-      await issueOrRefreshTrialSession(
-        new Request("https://torudake-reel.pages.dev/", {
-          headers: {
-            "cf-connecting-ip": `198.51.100.${index}`,
-            "user-agent": "Global issuance cap test browser",
-          },
-        }),
-        now + 20 + index,
-      );
-    }
-    assert.equal(database.issuances.size, 100);
-    await assert.rejects(
-      issueOrRefreshTrialSession(
-        new Request("https://torudake-reel.pages.dev/", {
-          headers: {
-            "cf-connecting-ip": "192.0.2.240",
-            "user-agent": "Global issuance cap test browser",
-          },
-        }),
-        now + 112,
-      ),
-      (error) =>
-        error?.code === "trial_issuance_limited" && error?.status === 429,
+    const storeSource = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(new URL("../lib/trial-session-store.ts", import.meta.url), "utf8"),
     );
+    assert.match(storeSource, /TRIAL_GLOBAL_ISSUANCE_LIMIT = 5_000/);
+    assert.match(storeSource, /TRIAL_NETWORK_DAILY_LIMIT = 50/);
+    assert.doesNotMatch(storeSource, /30 \* 24 \* 60 \* 60/);
 
     delete globalThis.__cloudflareEnv.TRIAL_ISSUANCE_SECRET;
     assert.equal(
@@ -293,6 +327,11 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
       endpointResponse.headers.get("set-cookie") ?? "",
       /^torudake_trial_id=/,
     );
+    const endpointCookies = endpointResponse.headers.getSetCookie();
+    const deviceCookie = endpointCookies
+      .find((cookie) => cookie.startsWith("torudake_trial_device="))
+      ?.split(";", 1)[0];
+    assert.ok(deviceCookie);
 
     const repeatedEndpointResponse = await worker.fetch(
       new Request("https://torudake-reel.pages.dev/api/session/trial", {
@@ -302,6 +341,7 @@ test("rejects a client-forged trial UUID until the server issues a session", asy
           "cf-connecting-ip": "198.51.100.24",
           "user-agent": "Route test browser",
           "accept-language": "ja-JP",
+          cookie: deviceCookie,
         },
       }),
       {

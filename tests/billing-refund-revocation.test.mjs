@@ -231,7 +231,11 @@ test("revokes only the refunded monthly billing period", () => {
   );
   assert.match(
     billingStoreSource,
-    /setSubscriptionPeriodRevocationState[\s\S]*eq\(billingSubscriptions\.currentPeriodStart, periodStart\)[\s\S]*releaseOrCompleteUsageReservation/,
+    /setSubscriptionPeriodRevocationState[\s\S]*revokedPeriodStart: subscription\.currentPeriodStart[\s\S]*expiresAt: now - 1[\s\S]*status: "released"/,
+  );
+  assert.match(
+    billingStoreSource,
+    /reservation\.bucket === "subscription"[\s\S]{0,200}subscriptionReservationHasActivePeriod/,
   );
 });
 

@@ -72,6 +72,7 @@ import {
   computePortableVideoDimensions,
   computePortableVideoDrawRect,
   detectPortableNarrationActivity,
+  getPortableExportMemoryPreflight,
   HIGH_QUALITY_VIDEO_BITRATE,
   measurePortableOriginalAudioNormalization,
   PORTABLE_AUDIO_CUT_FADE_SECONDS,
@@ -141,6 +142,7 @@ type TransferStatus = "idle" | "uploading" | "done" | "error";
 const PARTIAL_NARRATION_MODEL = "gpt-realtime-2.1-mini";
 
 type CompletedVideoQuality = {
+  accepted: boolean;
   meetsTargetResolution: boolean | null;
   userMessage: string;
 };
@@ -289,6 +291,12 @@ async function inspectCompletedVideoQuality(
   output: Blob,
   sourceDimensions: VideoDimensions,
   expectedDimensions: VideoDimensions,
+  validation: {
+    expectedDurationSeconds: number;
+    requireAudio: boolean;
+    expectedNarrationRanges: ReadonlyArray<{ start: number; end: number }>;
+    captionRanges: ReadonlyArray<{ start: number; end: number }>;
+  },
 ): Promise<CompletedVideoQuality> {
   try {
     const {
@@ -297,10 +305,18 @@ async function inspectCompletedVideoQuality(
     } = await import("../lib/video-export-quality");
     const inspection = await inspectExportedVideoQuality(output, {
       packetSampleCount: 360,
+      inspectAudioActivity: validation.requireAudio,
+      expectedNarrationRanges: validation.expectedNarrationRanges,
     });
     const assessment = assessExportedVideoQuality(
       inspection,
       expectedDimensions,
+      {
+        expectedDurationSeconds: validation.expectedDurationSeconds,
+        requireAudio: validation.requireAudio,
+        expectedNarrationRanges: validation.expectedNarrationRanges,
+        captionRanges: validation.captionRanges,
+      },
     );
 
     const outputDimensions =
@@ -323,13 +339,26 @@ async function inspectCompletedVideoQuality(
 
     if (inspection.status !== "ok") {
       return {
+        accepted: false,
         meetsTargetResolution: null,
-        userMessage: `${resolutionSummary}${resolution.detail} 動画はそのまま保存できます。`,
+        userMessage: `${resolutionSummary}${resolution.detail} 完成動画を安全に確認できなかったため、保存できません。もう一度書き出してください。`,
+      };
+    }
+
+    const blockingIssue = assessment.issues.find(
+      (issue) => issue.severity === "error",
+    );
+    if (blockingIssue) {
+      return {
+        accepted: false,
+        meetsTargetResolution: assessment.meetsTargetResolution,
+        userMessage: `${blockingIssue.message} 完成動画は保存せず、もう一度書き出してください。`,
       };
     }
 
     if (assessment.meetsTargetResolution === false) {
       return {
+        accepted: false,
         meetsTargetResolution: false,
         userMessage: `${resolutionSummary}${resolution.detail} SafariまたはiOSを最新版にして、もう一度書き出すと改善する場合があります。`,
       };
@@ -342,6 +371,7 @@ async function inspectCompletedVideoQuality(
     );
     if (hasFrameRateWarning) {
       return {
+        accepted: true,
         meetsTargetResolution: assessment.meetsTargetResolution,
         userMessage: `${resolutionSummary}${resolution.detail} 端末の負荷により動きが滑らかでない可能性があります。画面を開いたまま再度お試しください。`,
       };
@@ -352,12 +382,14 @@ async function inspectCompletedVideoQuality(
     );
     if (hasCompatibilityWarning) {
       return {
+        accepted: true,
         meetsTargetResolution: assessment.meetsTargetResolution,
         userMessage: `${resolutionSummary}${resolution.detail} iPhoneで使う場合はSafariから書き出すと、より互換性の高いMP4になります。`,
       };
     }
 
     return {
+      accepted: true,
       meetsTargetResolution: assessment.meetsTargetResolution,
       userMessage: `${resolutionSummary}${resolution.detail} iPhoneでは共有画面から「ビデオを保存」を選べます。`,
     };
@@ -368,8 +400,9 @@ async function inspectCompletedVideoQuality(
       expected: expectedDimensions,
     });
     return {
+      accepted: false,
       meetsTargetResolution: null,
-      userMessage: `元動画：${resolution.sourceResolutionLabel ?? "確認できません"}。完成動画の解像度を確認できませんでした。動画はそのまま保存できます。`,
+      userMessage: `元動画：${resolution.sourceResolutionLabel ?? "確認できません"}。完成動画を安全に確認できなかったため、保存できません。もう一度書き出してください。`,
     };
   }
 }
@@ -817,7 +850,7 @@ async function transcribeLargeVideo(
     }
     throw new Error(
       `動画から音声を取り出せませんでした。音声抽出の詳細：${
-        extractionDetail || "ブラウザーが動画の音声形式に対応していません"
+        extractionDetail || "ブラウザが動画の音声形式に対応していません"
       }`,
     );
   } finally {
@@ -1913,6 +1946,26 @@ export default function Home() {
     setUsageReservationPendingExport(pendingExport);
   }
 
+  async function settleVideoUsageAfterProcessing(
+    reservationId: string,
+    bucket: BillingBucket | null,
+  ) {
+    if (usageReservationRef.current !== reservationId) return;
+
+    if (bucket === "free") {
+      // A free trial is consumed when its preview is successfully prepared.
+      // Paid/operator reservations stay reversible until a verified export.
+      await updateVideoUsage("complete", reservationId);
+      if (usageReservationRef.current !== reservationId) return;
+      usageReservationPendingExportRef.current = false;
+      setUsageReservationPendingExport(false);
+      return;
+    }
+
+    usageReservationPendingExportRef.current = true;
+    setUsageReservationPendingExport(true);
+  }
+
   function releasePendingExportReservation() {
     const reservationId = usageReservationRef.current;
     if (usageReservationPendingExportRef.current && reservationId) {
@@ -2114,6 +2167,7 @@ export default function Home() {
 
     let progressTimer: number | undefined;
     let newlyReservedUsage: string | null = null;
+    let newlyReservedBucket: BillingBucket | null = null;
     const transcriptionOperationId = crypto.randomUUID();
 
     try {
@@ -2128,6 +2182,7 @@ export default function Home() {
       if (file && !isDemoSample && !highAccuracy) {
         const reservation = await reserveVideoUsage(file, controller.signal);
         newlyReservedUsage = reservation.reservationId;
+        newlyReservedBucket = reservation.bucket;
         throwIfProcessingAborted(controller.signal);
         rememberUsageReservation(newlyReservedUsage, reservation.bucket);
         rememberAiOperationLimit(reservation.aiOperationLimit);
@@ -2209,19 +2264,15 @@ export default function Home() {
       }
       setTranscript(nextTranscript);
       setUsedHighAccuracy(refined);
-      if (newlyReservedUsage) {
-        const usageCompleted = await updateVideoUsage(
-          "complete",
+      if (
+        newlyReservedUsage &&
+        isCurrent() &&
+        usageReservationRef.current === newlyReservedUsage
+      ) {
+        await settleVideoUsageAfterProcessing(
           newlyReservedUsage,
+          newlyReservedBucket,
         );
-        if (
-          !usageCompleted &&
-          isCurrent() &&
-          usageReservationRef.current === newlyReservedUsage
-        ) {
-          usageReservationPendingExportRef.current = true;
-          setUsageReservationPendingExport(true);
-        }
       }
       if (!isCurrent()) return;
       setProgress(100);
@@ -2287,9 +2338,7 @@ export default function Home() {
   async function finishSilentVideoWithoutCaptions() {
     const reservationId = usageReservationRef.current;
     if (reservationId) {
-      const completed = await updateVideoUsage("complete", reservationId);
-      usageReservationPendingExportRef.current = !completed;
-      setUsageReservationPendingExport(!completed);
+      await settleVideoUsageAfterProcessing(reservationId, usageBucket);
     }
     setSilentFallback(false);
     setEditError("");
@@ -2326,11 +2375,13 @@ export default function Home() {
     setProgress(4);
     setStage("processing");
     let newlyReservedUsage: string | null = null;
+    let newlyReservedBucket: BillingBucket | null = null;
     const initialNarrationOperationId = crypto.randomUUID();
 
     try {
       const reservation = await reserveVideoUsage(file, controller.signal);
       newlyReservedUsage = reservation.reservationId;
+      newlyReservedBucket = reservation.bucket;
       throwIfProcessingAborted(controller.signal);
       rememberUsageReservation(newlyReservedUsage, reservation.bucket);
       rememberAiOperationLimit(reservation.aiOperationLimit);
@@ -2442,19 +2493,15 @@ export default function Home() {
       setNarrationAudioVoice(speechResult.voice);
       setNarrationAudioProfile(speechResult.profile);
       setUsedHighAccuracy(true);
-      if (newlyReservedUsage) {
-        const usageCompleted = await updateVideoUsage(
-          "complete",
+      if (
+        newlyReservedUsage &&
+        isCurrent() &&
+        usageReservationRef.current === newlyReservedUsage
+      ) {
+        await settleVideoUsageAfterProcessing(
           newlyReservedUsage,
+          newlyReservedBucket,
         );
-        if (
-          !usageCompleted &&
-          isCurrent() &&
-          usageReservationRef.current === newlyReservedUsage
-        ) {
-          usageReservationPendingExportRef.current = true;
-          setUsageReservationPendingExport(true);
-        }
       }
       if (!isCurrent()) return;
       setProgress(100);
@@ -3227,7 +3274,7 @@ export default function Home() {
       <footer>
         <div>
           <strong>撮るだけリール</strong>
-          <span>動画を選ぶだけ。カット・AI音声・テロップ・表紙まで自動。</span>
+          <span>動画を選ぶだけ。カット・AI音声・テロップ・表紙候補まで提案。</span>
         </div>
         <div className="footerLinks">
           <a href="#how">使い方</a>
@@ -3502,7 +3549,14 @@ function RealVideoDemo() {
               );
               setCaption(next?.text ?? null);
             }}
-          />
+          >
+            <track
+              kind="captions"
+              src="/demo/torudake-demo-ja.vtt"
+              srcLang="ja"
+              label="日本語"
+            />
+          </video>
           <div className="realDemoStatus">
             <span>編集後デモ</span>
             <strong>音声をオンにして確認できます</strong>
@@ -3554,7 +3608,7 @@ function Landing({
             <em>編集の手間を、もっと軽く。</em>
           </h1>
           <p className="heroLead">
-            自動カット、自動テロップ、AIナレーション、表紙まで。
+            自動カット、自動テロップ、AIナレーション、表紙候補まで。
             AIナレーションモードなら投稿文も作れます。
             <br />
             仕上がりを見て、気になるところだけ直せます。
@@ -3653,7 +3707,7 @@ function Landing({
             <span className="stepNo">01</span>
             <div className="stepIcon uploadIcon">↑</div>
             <h3>撮った動画を送る</h3>
-            <p>1〜5分の縦動画をそのままアップロード。</p>
+            <p>5分までの縦動画をそのままアップロード。</p>
             <small>MP4・MOV・スマホ対応 / 最大500MB</small>
           </article>
           <article>
@@ -3745,7 +3799,7 @@ function Landing({
           <div>
             <strong>まずは無料で、編集後の動画を確認</strong>
             <small>
-              合計3分または2動画まで。AI処理は1動画につき3回。編集・プレビューまで無料、完成動画の保存は有料です。
+              合計3分以内・最大2動画まで（いずれか先に達するまで）。AI処理は1動画につき3回。編集・プレビューまで無料、完成動画の保存は有料です。
             </small>
           </div>
           <button onClick={openPicker}>無料で試す</button>
@@ -4148,7 +4202,14 @@ function SetupWorkspace({
                   playsInline
                   preload="metadata"
                   aria-label="編集に使用するサンプル動画"
-                />
+                >
+                  <track
+                    kind="captions"
+                    src="/demo/torudake-demo-ja.vtt"
+                    srcLang="ja"
+                    label="日本語"
+                  />
+                </video>
                 <span>実際のサンプル動画</span>
               </div>
             )}
@@ -4167,7 +4228,7 @@ function SetupWorkspace({
           <div className="localNote">
             <span>●</span>
             {audioMode === "narration"
-              ? "会話や周りの音が入った動画にも使えます。代表場面から台本を作り、AIナレーションを重ねます。"
+              ? "会話や周りの音が入った動画にも使えます。動画の内容に合わせて台本を作り、AIナレーションを重ねます。"
               : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
           </div>
         </aside>
@@ -4539,7 +4600,7 @@ function SetupWorkspace({
                   ? "テロップあり"
                   : "テロップなし"
                 : spokenCaptionsEnabled
-                  ? "追加API料金なし"
+                  ? "デザイン変更は追加料金なし"
                   : "テロップなし"}
             </small>
           </div>
@@ -4709,7 +4770,7 @@ function Processing({
           <p>
             {file?.name ?? "サンプル動画"}の
             {narration
-              ? `場面を読み取り、映像に合う台本とAI音声を作っています。${narrationAutoCutEnabled ? "代表場面を自然につなぎます。" : "元動画はカットしません。"}${narrationCaptionsEnabled ? "テロップも同期します。" : "テロップは付けません。"}`
+              ? `場面を読み取り、映像に合う台本とAI音声を作っています。${narrationAutoCutEnabled ? "選んだ長さを目安に映像をつなぎます。" : "元動画はカットしません。"}${narrationCaptionsEnabled ? "テロップも同期します。" : "テロップは付けません。"}`
               : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}${spokenCutMode === "auto" ? "音声に合わせて映像を自然につなぎ直しています。" : spokenCutMode === "manual" ? "文章ごとに残す区間を選べる状態へ準備しています。" : "元動画の映像・順番・長さを保って仕上げています。"}${spokenCaptionsEnabled ? "テロップも準備します。" : "テロップは付けません。"}`}
           </p>
           <div className="bigProgress">
@@ -5120,8 +5181,54 @@ function ResultWorkspace({
     [narrationCorrectionCandidate],
   );
   const [showDisclosureConfirm, setShowDisclosureConfirm] = useState(false);
+  const disclosureDialogRef = useRef<HTMLDivElement>(null);
+  const disclosurePreviousFocusRef = useRef<HTMLElement | null>(null);
   const [disclosureConfirmed, setDisclosureConfirmed] = useState(false);
   const [isRecordingDisclosure, setIsRecordingDisclosure] = useState(false);
+  useEffect(() => {
+    if (!showDisclosureConfirm) return;
+    disclosurePreviousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const dialog = disclosureDialogRef.current;
+    window.queueMicrotask(() => dialog?.focus());
+
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setShowDisclosureConfirm(false);
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("hidden"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleDialogKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDialogKeyDown);
+      const previous = disclosurePreviousFocusRef.current;
+      disclosurePreviousFocusRef.current = null;
+      window.queueMicrotask(() => previous?.focus());
+    };
+  }, [showDisclosureConfirm]);
   const [initialCutState] = useState(
     () =>
       new Map(
@@ -5371,10 +5478,10 @@ function ResultWorkspace({
   function getPreviewOriginalBaseGain(
     percent: NarrationOriginalAudioLevel = narrationOriginalAudio,
   ) {
-    return (
-      getNarrationMixLevels(percent).original *
-      originalAudioNormalizationGain
-    );
+    return narrationPlan
+      ? getNarrationMixLevels(percent).original *
+          originalAudioNormalizationGain
+      : originalAudioNormalizationGain;
   }
 
   function scheduleGainEnvelope(
@@ -5864,12 +5971,26 @@ function ResultWorkspace({
     }
   }
 
+  useEffect(() => {
+    const engine = previewNarrationEngineRef.current;
+    const video = videoRef.current;
+    if (!engine || !video || engine.context.state === "closed") return;
+    if (narrationPlan) {
+      applyNarrationPreviewMix(video, narrationOriginalAudio);
+    } else {
+      video.volume = 1;
+      resetPreviewOriginalGain(engine);
+    }
+    // The gain helpers use the current engine and do not change its lifecycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrationOriginalAudio, narrationPlan, originalAudioNormalizationGain]);
+
   async function ensureVideoAudioEngine(shouldResume = true) {
     let engine = previewNarrationEngineRef.current;
     if (!engine || engine.context.state === "closed") {
       const AudioContextConstructor = getAudioContextConstructor();
       if (!AudioContextConstructor) {
-        throw new Error("このブラウザはAI音声の再生に対応していません。");
+        throw new Error("このブラウザは仕上がり音声の再生に対応していません。");
       }
 
       const context = new AudioContextConstructor();
@@ -5894,7 +6015,6 @@ function ResultWorkspace({
         if (
           previewNarrationEngineRef.current !== createdEngine ||
           createdEngine.context.state !== "suspended" ||
-          !createdEngine.source ||
           !previewPlaybackReadyRef.current
         ) {
           return;
@@ -5930,7 +6050,10 @@ function ResultWorkspace({
       if (narrationPlan) {
         applyNarrationPreviewMix(video, narrationOriginalAudio);
       } else {
-        originalGain.gain.setValueAtTime(1, engine.context.currentTime);
+        originalGain.gain.setValueAtTime(
+          originalAudioNormalizationGain,
+          engine.context.currentTime,
+        );
       }
     }
 
@@ -6115,7 +6238,7 @@ function ResultWorkspace({
     );
     const enginePromise = narrationPlan
       ? ensurePreviewNarrationEngine(true)
-      : Promise.resolve(null);
+      : ensureVideoAudioEngine(true);
     let seekPromise: Promise<boolean> | null = null;
     let videoPlayPromise: Promise<void> | null = null;
     let unlockPromise: Promise<void> | null = null;
@@ -6162,6 +6285,7 @@ function ResultWorkspace({
       applyNarrationPreviewMix(video, narrationOriginalAudio);
     } else {
       video.volume = 1;
+      if (engine) resetPreviewOriginalGain(engine);
     }
 
     previewHoldingFinalFrameRef.current = false;
@@ -6172,7 +6296,7 @@ function ResultWorkspace({
       video.pause();
       return false;
     }
-    if (engine) {
+    if (engine && narrationPlan) {
       startPreviewNarrationSource(engine, safeEditedSeconds, operation);
     }
     previewPlaybackReadyRef.current = Boolean(engine);
@@ -6348,7 +6472,64 @@ function ResultWorkspace({
     });
   }
 
-  function moveToNextKeptRange(video: HTMLVideoElement) {
+  async function crossfadePreviewToSourceTime(
+    video: HTMLVideoElement,
+    targetTime: number,
+  ) {
+    if (previewContinuousCutSeekRef.current) return;
+    previewContinuousCutSeekRef.current = true;
+    const engine = previewNarrationEngineRef.current;
+    const gain = engine?.originalGain?.gain ?? null;
+    const halfFade = PORTABLE_VIDEO_CROSSFADE_SECONDS / 2;
+    const wasPlaying = !video.paused;
+    try {
+      if (gain && engine && engine.context.state !== "closed") {
+        const now = engine.context.currentTime;
+        const currentGain = Math.max(0, gain.value);
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(currentGain, now);
+        gain.linearRampToValueAtTime(0, now + halfFade);
+      }
+      video.animate?.(
+        [
+          { opacity: 1 },
+          { opacity: 0.86, offset: 0.5 },
+          { opacity: 1 },
+        ],
+        {
+          duration: PORTABLE_VIDEO_CROSSFADE_SECONDS * 1_000,
+          easing: "ease-in-out",
+        },
+      );
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, halfFade * 1_000),
+      );
+      video.pause();
+      const seeked = await seekVideoBeforePlayback(video, targetTime);
+      if (!seeked) throw new Error("カット後の映像へ移動できませんでした。");
+      setCurrentTime(video.currentTime);
+      if (gain && engine && engine.context.state !== "closed") {
+        const now = engine.context.currentTime;
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(0, now);
+        gain.linearRampToValueAtTime(
+          getPreviewOriginalBaseGain(),
+          now + halfFade,
+        );
+      }
+      if (wasPlaying) await video.play();
+    } catch {
+      video.pause();
+      setIsPlaying(false);
+      setPreviewTransportState("paused");
+      notify("カットのつなぎ目を再生できませんでした。もう一度お試しください。");
+    } finally {
+      previewContinuousCutSeekRef.current = false;
+    }
+  }
+
+  async function moveToNextKeptRange(video: HTMLVideoElement) {
+    if (previewContinuousCutSeekRef.current) return;
     if (editRanges.length === 0) {
       video.pause();
       setIsPlaying(false);
@@ -6366,8 +6547,7 @@ function ResultWorkspace({
       (range) => range.start > video.currentTime + 0.01,
     );
     if (nextRange) {
-      video.currentTime = nextRange.start;
-      setCurrentTime(nextRange.start);
+      await crossfadePreviewToSourceTime(video, nextRange.start);
       return;
     }
 
@@ -6400,7 +6580,7 @@ function ResultWorkspace({
       return;
     }
 
-    moveToNextKeptRange(video);
+    void moveToNextKeptRange(video);
   }
 
   async function togglePlayback() {
@@ -7363,6 +7543,45 @@ function ResultWorkspace({
       sourceExportDimensions.width,
       sourceExportDimensions.height,
     );
+    const editedDurationSeconds = playableRanges.reduce(
+      (total, range) => total + (range.end - range.start),
+      0,
+    );
+    const memoryPreflight = getPortableExportMemoryPreflight({
+      editedDurationSeconds,
+      userAgent: navigator.userAgent,
+      maximumTouchPoints: navigator.maxTouchPoints,
+      deviceMemoryGb:
+        (navigator as Navigator & { deviceMemory?: number }).deviceMemory ??
+        null,
+    });
+    if (!memoryPreflight.ok) {
+      await preparedAudioContext?.close().catch(() => undefined);
+      notify(
+        memoryPreflight.message ??
+          "この端末では動画を安全に書き出せません。PC版Chromeでお試しください。",
+      );
+      return;
+    }
+    const audibleTranscript = editedTranscript.filter(
+      (line) => !line.removed && line.text.trim(),
+    );
+    const completedVideoValidation = {
+      expectedDurationSeconds: editedDurationSeconds,
+      requireAudio: Boolean(narrationPlan || audibleTranscript.length > 0),
+      expectedNarrationRanges: narrationPlan
+        ? audibleTranscript.map((line) => ({
+            start: line.start,
+            end: line.end,
+          }))
+        : [],
+      captionRanges: captionsVisible
+        ? audibleTranscript.map((line) => ({
+            start: line.start,
+            end: line.end,
+          }))
+        : [],
+    };
 
     const canUseLegacyRecorder =
       typeof MediaRecorder !== "undefined" &&
@@ -7498,10 +7717,11 @@ function ResultWorkspace({
           output,
           sourceExportDimensions,
           expectedExportDimensions,
+          completedVideoValidation,
         );
-        if (portableQuality.meetsTargetResolution === false) {
+        if (!portableQuality.accepted) {
           throw new Error(
-            "高画質の完成動画を作れなかったため、端末互換の書き出し方法でもう一度試します。",
+            `${portableQuality.userMessage} 端末互換の書き出し方法でもう一度試します。`,
           );
         }
         const completedFile = new File(
@@ -7966,7 +8186,11 @@ function ResultWorkspace({
         output,
         sourceExportDimensions,
         expectedExportDimensions,
+        completedVideoValidation,
       );
+      if (!fallbackQuality.accepted) {
+        throw new Error(fallbackQuality.userMessage);
+      }
 
       const outputType = output.type.toLowerCase();
       const extension = outputType.includes("mp4") ? "mp4" : "webm";
@@ -9723,10 +9947,13 @@ function ResultWorkspace({
           }}
         >
           <div
+            ref={disclosureDialogRef}
             className="disclosureModal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="disclosure-title"
+            aria-describedby="disclosure-description"
+            tabIndex={-1}
           >
             <button
               type="button"
@@ -9738,7 +9965,7 @@ function ResultWorkspace({
             </button>
             <p className="eyebrow">BEFORE EXPORT</p>
             <h2 id="disclosure-title">投稿時の表示を確認してください</h2>
-            <p>
+            <p id="disclosure-description">
               動画には透かしを入れません。代わりに、コピー済みの投稿文へ次の一文を残して投稿してください。
             </p>
             <strong className="modalDisclosureText">

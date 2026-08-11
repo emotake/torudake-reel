@@ -33,10 +33,24 @@ test("polls the authenticated account after Stripe redirects back", () => {
     /STANDARD_MONTHLY_PRICE_JPY\s*\/\s*STANDARD_MONTHLY_VIDEO_LIMIT/,
   );
   assert.doesNotMatch(accountSource, /125円|42円お得/);
+  assert.match(accountSource, /月額プランは毎月の保存本数/);
+  assert.match(accountSource, /1動画作成は必要なときだけ1本/);
+  assert.match(accountSource, /表示価格はすべて税込/);
+  assert.doesNotMatch(accountSource, /違いは毎月保存できる本数です/);
   assert.ok(
     accountSource.indexOf('className="accountPlanCard standardPlan featured"') <
       accountSource.indexOf('className="accountPlanCard starterPlan"'),
   );
+});
+
+test("lets an authenticated user add a backup passkey without restarting the trial", () => {
+  assert.match(accountSource, /status\?\.authenticated === true/);
+  assert.match(
+    accountSource,
+    /if \(!addingBackupPasskey\) \{\s*await postJson<\{ ready: boolean \}>\("\/api\/session\/trial"\)/,
+  );
+  assert.match(accountSource, /予備パスキーを追加/);
+  assert.match(accountSource, /予備のパスキーを追加しました/);
 });
 
 test("rejects Checkout and Portal calls from old deployment hosts", () => {

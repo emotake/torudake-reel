@@ -10,7 +10,7 @@ import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 
 export async function POST(request: Request) {
-  if (!isUsageEnforcementEnabled()) {
+  if (!isUsageEnforcementEnabled(request)) {
     return Response.json({ required: false });
   }
   const { currentUser, isOperator } = await getUsagePrincipal(request, {

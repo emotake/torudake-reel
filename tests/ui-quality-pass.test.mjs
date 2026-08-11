@@ -54,6 +54,23 @@ test("keeps mobile account access and accessible touch targets visible", () => {
   assert.match(cssSource, /\.trialButton,[\s\S]*?\.transferButton\s*\{[\s\S]*?min-height:\s*44px/);
   assert.match(cssSource, /\.topbar nav a,[\s\S]*?\.footerLinks a\s*\{[\s\S]*?min-width:\s*44px/);
   assert.match(cssSource, /\.visuallyHidden\[type="file"\]\s*\{[\s\S]*?display:\s*none/);
+  assert.match(
+    cssSource,
+    /\.accountBrand,[\s\S]*?\.accountSignOut,[\s\S]*?\.accountRecoveryHelp a,[\s\S]*?\.accountLegalLinks a,[\s\S]*?\.legalBack,[\s\S]*?\.legalPage article a,[\s\S]*?min-height:\s*44px/,
+  );
+  assert.match(
+    cssSource,
+    /\.workspace :is\(p, li, label\),[\s\S]*?\.legalPage :is\(p, li, dt, dd\)\s*\{[\s\S]*?font-size:\s*14px/,
+  );
+  assert.match(
+    cssSource,
+    /\.workspace small,[\s\S]*?\.operatorAccessPage small\s*\{[\s\S]*?font-size:\s*12px/,
+  );
+  assert.match(
+    cssSource,
+    /\.modalClose\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px/,
+  );
+  assert.match(cssSource, /\.accountHeaderActions\s*\{[\s\S]*?display:\s*flex/);
   assert.doesNotMatch(cssSource, /font-size:\s*max\(12px, 1em\)/);
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.mobilePriceLink\s*\{[\s\S]*?display:\s*none/);
 });
@@ -90,6 +107,11 @@ test("shows photo-reel preview and save pricing before editing", () => {
     photoReelSource.indexOf('checkout=standard') <
       photoReelSource.indexOf('checkout=starter'),
   );
+  assert.match(photoReelSource, /function moveRadioSelection/);
+  assert.match(photoReelSource, /event\.key === "ArrowRight"/);
+  assert.match(photoReelSource, /event\.key === "Home"/);
+  assert.match(photoReelSource, /tabIndex=\{duration === seconds \? 0 : -1\}/);
+  assert.match(photoReelSource, /tabIndex=\{templateId === option\.id \? 0 : -1\}/);
 });
 
 test("wires local visual scoring into narration and cover selection", () => {

@@ -163,6 +163,22 @@ export const billingSubscriptions = sqliteTable(
   ],
 );
 
+export const billingCheckoutLocks = sqliteTable(
+  "billing_checkout_locks",
+  {
+    userId: text("user_id").primaryKey(),
+    lockToken: text("lock_token").notNull(),
+    requestId: text("request_id").notNull(),
+    planKey: text("plan_key", { enum: ["starter", "standard"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_checkout_locks_token_unique").on(table.lockToken),
+    index("billing_checkout_locks_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
 export const billingPurchases = sqliteTable(
   "billing_purchases",
   {
@@ -365,11 +381,15 @@ export const trialSessions = sqliteTable(
   "trial_sessions",
   {
     sessionHash: text("session_hash").primaryKey(),
+    accountUserId: text("account_user_id"),
     createdAt: integer("created_at").notNull(),
     lastSeenAt: integer("last_seen_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
   },
-  (table) => [index("trial_sessions_expires_at_idx").on(table.expiresAt)],
+  (table) => [
+    index("trial_sessions_expires_at_idx").on(table.expiresAt),
+    index("trial_sessions_account_user_id_idx").on(table.accountUserId),
+  ],
 );
 
 export const trialIssuanceFingerprints = sqliteTable(

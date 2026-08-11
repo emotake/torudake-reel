@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -12,6 +13,7 @@ import {
 
 function qualityMetrics(overrides = {}) {
   return {
+    containerMimeType: "video/mp4",
     width: 1080,
     height: 1920,
     codec: "avc",
@@ -21,6 +23,24 @@ function qualityMetrics(overrides = {}) {
     packetCount: 300,
     durationSeconds: 10,
     fileSizeBytes: 10_000_000,
+    audioTrackPresent: true,
+    audioCodec: "aac",
+    audioCodecParameterString: "mp4a.40.2",
+    audioDurationSeconds: 10,
+    audioChannels: 2,
+    audioSampleRate: 48_000,
+    audioRms: 0.08,
+    audioPeak: 0.6,
+    audioActivityRanges: [
+      {
+        start: 0,
+        end: 10,
+        rms: 0.08,
+        peak: 0.6,
+        activeRatio: 0.8,
+        sampledFrames: 48_000,
+      },
+    ],
     ...overrides,
   };
 }
@@ -205,12 +225,33 @@ test("inspects an existing input without taking ownership of it", async () => {
 
   assert.equal(result.status, "ok");
   assert.deepEqual(result.metrics, qualityMetrics({
+    containerMimeType: null,
     averageBitrate: 7_500_000,
     averageFrameRate: 29.97,
     packetCount: 120,
     fileSizeBytes: null,
+    audioTrackPresent: false,
+    audioCodec: null,
+    audioCodecParameterString: null,
+    audioDurationSeconds: null,
+    audioChannels: null,
+    audioSampleRate: null,
+    audioRms: null,
+    audioPeak: null,
+    audioActivityRanges: null,
   }));
-  assert.deepEqual(result.unavailableMetrics, ["fileSizeBytes"]);
+  assert.deepEqual(result.unavailableMetrics, [
+    "containerMimeType",
+    "fileSizeBytes",
+    "audioCodec",
+    "audioCodecParameterString",
+    "audioDurationSeconds",
+    "audioChannels",
+    "audioSampleRate",
+    "audioRms",
+    "audioPeak",
+    "audioActivityRanges",
+  ]);
   assert.equal(disposed, false);
 });
 
@@ -336,6 +377,223 @@ test("provides app-facing inspection and exact-dimension assessment helpers", as
   assert.equal(inspection.status, "ok");
   assert.equal(assessment.verdict, "fail");
   assert.equal(assessment.meetsTargetResolution, false);
+});
+
+test("fails closed when a required audio track or audible signal is missing", () => {
+  const missingTrack = assessVideoExportQuality(
+    qualityMetrics({
+      audioTrackPresent: false,
+      audioCodec: null,
+      audioCodecParameterString: null,
+      audioDurationSeconds: null,
+      audioRms: null,
+      audioPeak: null,
+      audioActivityRanges: null,
+    }),
+    { requireAudio: true, expectedDurationSeconds: 10 },
+  );
+  assert.equal(missingTrack.verdict, "fail");
+  assert.ok(
+    missingTrack.issues.some((issue) => issue.code === "audio-track-missing"),
+  );
+
+  const silentTrack = assessVideoExportQuality(
+    qualityMetrics({ audioRms: 0.0001, audioPeak: 0.0005 }),
+    { requireAudio: true, expectedDurationSeconds: 10 },
+  );
+  assert.equal(silentTrack.verdict, "fail");
+  assert.ok(silentTrack.issues.some((issue) => issue.code === "audio-silent"));
+});
+
+test("requires AAC-compatible MP4 audio and matching audio/video duration", () => {
+  const assessment = assessVideoExportQuality(
+    qualityMetrics({
+      audioCodec: "pcm-s16",
+      audioCodecParameterString: "lpcm",
+      audioDurationSeconds: 7,
+    }),
+    { requireAudio: true, expectedDurationSeconds: 10 },
+  );
+
+  assert.equal(assessment.verdict, "fail");
+  assert.ok(
+    assessment.issues.some(
+      (issue) => issue.code === "audio-codec-compatibility",
+    ),
+  );
+  assert.ok(
+    assessment.issues.some(
+      (issue) => issue.code === "audio-duration-mismatch",
+    ),
+  );
+});
+
+test("detects a missing AI narration range after final encoding", () => {
+  const expectedNarrationRanges = [
+    { start: 0.5, end: 2.5 },
+    { start: 3, end: 5 },
+  ];
+  const assessment = assessVideoExportQuality(
+    qualityMetrics({
+      audioActivityRanges: [
+        {
+          start: 0.5,
+          end: 2.5,
+          rms: 0.08,
+          peak: 0.6,
+          activeRatio: 0.7,
+          sampledFrames: 20_000,
+        },
+        {
+          start: 3,
+          end: 5,
+          rms: 0.0002,
+          peak: 0.001,
+          activeRatio: 0,
+          sampledFrames: 20_000,
+        },
+      ],
+    }),
+    {
+      requireAudio: true,
+      expectedDurationSeconds: 10,
+      expectedNarrationRanges,
+    },
+  );
+
+  assert.equal(assessment.verdict, "fail");
+  assert.ok(
+    assessment.issues.some(
+      (issue) => issue.code === "narration-audio-missing",
+    ),
+  );
+});
+
+test("rejects truncated output and captions outside the finalized duration", () => {
+  const assessment = assessVideoExportQuality(
+    qualityMetrics({ durationSeconds: 8, audioDurationSeconds: 8 }),
+    {
+      expectedDurationSeconds: 10,
+      captionRanges: [{ start: 7.5, end: 9.5 }],
+    },
+  );
+
+  assert.equal(assessment.verdict, "fail");
+  assert.ok(
+    assessment.issues.some((issue) => issue.code === "duration-mismatch"),
+  );
+  assert.ok(
+    assessment.issues.some(
+      (issue) => issue.code === "caption-timing-outside-video",
+    ),
+  );
+});
+
+test("inspects audio metadata and supplied activity ranges", async () => {
+  const expectedNarrationRanges = [{ start: 1, end: 3 }];
+  const result = await inspectVideoExportQuality(
+    {
+      async canRead() {
+        return true;
+      },
+      async getPrimaryVideoTrack() {
+        return {
+          async getDisplayWidth() { return 1080; },
+          async getDisplayHeight() { return 1920; },
+          async getCodec() { return "avc"; },
+          async getCodecParameterString() { return "avc1.640028"; },
+          async getDurationFromMetadata() { return 10; },
+          async computeDuration() { return 10; },
+          async computePacketStats() {
+            return {
+              packetCount: 300,
+              averagePacketRate: 30,
+              averageBitrate: 8_000_000,
+            };
+          },
+        };
+      },
+      async getPrimaryAudioTrack() {
+        return {
+          async getCodec() { return "aac"; },
+          async getCodecParameterString() { return "mp4a.40.2"; },
+          async getDurationFromMetadata() { return 10; },
+          async computeDuration() { return 10; },
+          async getNumberOfChannels() { return 2; },
+          async getSampleRate() { return 48_000; },
+          async inspectActivityRanges(ranges) {
+            assert.deepEqual(ranges, expectedNarrationRanges);
+            return ranges.map((range) => ({
+              ...range,
+              rms: 0.07,
+              peak: 0.5,
+              activeRatio: 0.6,
+              sampledFrames: 24_000,
+            }));
+          },
+        };
+      },
+    },
+    { expectedNarrationRanges },
+  );
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.metrics?.audioTrackPresent, true);
+  assert.equal(result.metrics?.audioCodec, "aac");
+  assert.equal(result.metrics?.audioRms, 0.07);
+  assert.equal(result.metrics?.audioActivityRanges?.length, 1);
+});
+
+test("treats an unreadable completed container as a failed export", async () => {
+  const inspection = await inspectExportedVideoQuality({
+    async canRead() { return false; },
+    async getPrimaryVideoTrack() { return null; },
+  });
+  const assessment = assessExportedVideoQuality(inspection, {
+    width: 1080,
+    height: 1920,
+  });
+
+  assert.equal(assessment.verdict, "fail");
+  assert.equal(assessment.issues[0]?.severity, "error");
+});
+
+test("parses real AAC MOV metadata and rejects a real video without audio", async () => {
+  const fixtureRoot = new URL("./fixtures/media/", import.meta.url);
+  const aacBytes = await readFile(
+    new URL("synthetic-portrait-h264-aac.mov", fixtureRoot),
+  );
+  const aacInspection = await inspectExportedVideoQuality(
+    new Blob([aacBytes], { type: "video/quicktime" }),
+    { inspectAudioActivity: false },
+  );
+
+  assert.equal(aacInspection.status, "ok");
+  assert.equal(aacInspection.metrics?.containerMimeType, "video/quicktime");
+  assert.equal(aacInspection.metrics?.codec, "avc");
+  assert.equal(aacInspection.metrics?.audioTrackPresent, true);
+  assert.equal(aacInspection.metrics?.audioCodec, "aac");
+  assert.ok((aacInspection.metrics?.durationSeconds ?? 0) > 1.9);
+
+  const silentBytes = await readFile(
+    new URL("silent-portrait.mp4", fixtureRoot),
+  );
+  const silentInspection = await inspectExportedVideoQuality(
+    new Blob([silentBytes], { type: "video/mp4" }),
+    { inspectAudioActivity: false },
+  );
+  const silentAssessment = assessExportedVideoQuality(
+    silentInspection,
+    { width: 360, height: 640 },
+    { requireAudio: true },
+  );
+
+  assert.equal(silentAssessment.verdict, "fail");
+  assert.ok(
+    silentAssessment.issues.some(
+      (issue) => issue.code === "audio-track-missing",
+    ),
+  );
 });
 
 test("reports the actual output resolution when source and export meet the target", () => {

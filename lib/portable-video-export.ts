@@ -20,6 +20,86 @@ const PORTABLE_DUCK_ATTACK_SECONDS = 0.08;
 const PORTABLE_DUCK_RELEASE_SECONDS = 0.18;
 const PORTABLE_NARRATION_ACTIVITY_WINDOW_SECONDS = 0.02;
 export const MAX_SAFE_WHOLE_FILE_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
+const IOS_SAFE_EDITED_DURATION_SECONDS = 120;
+const LOW_MEMORY_SAFE_EDITED_DURATION_SECONDS = 150;
+
+export type PortableExportMemoryPreflight = Readonly<{
+  ok: boolean;
+  deviceClass: "ios" | "low-memory" | "standard";
+  editedDurationSeconds: number;
+  estimatedOutputBytes: number;
+  estimatedWorkingBytes: number;
+  maximumSafeDurationSeconds: number;
+  message: string | null;
+}>;
+
+export function getPortableExportMemoryPreflight({
+  editedDurationSeconds,
+  videoBitrate = HIGH_QUALITY_VIDEO_BITRATE,
+  audioBitrate = DEFAULT_AUDIO_BITRATE,
+  userAgent = "",
+  maximumTouchPoints = 0,
+  deviceMemoryGb = null,
+}: {
+  editedDurationSeconds: number;
+  videoBitrate?: number;
+  audioBitrate?: number;
+  userAgent?: string;
+  maximumTouchPoints?: number;
+  deviceMemoryGb?: number | null;
+}): PortableExportMemoryPreflight {
+  if (!Number.isFinite(editedDurationSeconds) || editedDurationSeconds <= 0) {
+    throw new RangeError("Edited duration must be a finite positive number.");
+  }
+  const normalizedVideoBitrate = Math.max(1, videoBitrate);
+  const normalizedAudioBitrate = Math.max(0, audioBitrate);
+  const estimatedOutputBytes = Math.ceil(
+    (editedDurationSeconds *
+      (normalizedVideoBitrate + normalizedAudioBitrate)) /
+      8,
+  );
+  const renderedAudioBytes = Math.ceil(
+    editedDurationSeconds * OUTPUT_SAMPLE_RATE * OUTPUT_CHANNELS * 4,
+  );
+  // Includes the encoded output, offline mixed audio, active decoder frames,
+  // canvases and muxing metadata. The estimate is intentionally conservative
+  // because iOS may terminate a tab instead of throwing a recoverable error.
+  const estimatedWorkingBytes = Math.ceil(
+    estimatedOutputBytes * 1.2 + renderedAudioBytes + 64 * 1024 * 1024,
+  );
+  const normalizedUserAgent = userAgent.toLowerCase();
+  const isIos =
+    /iphone|ipad|ipod/.test(normalizedUserAgent) ||
+    (/macintosh/.test(normalizedUserAgent) && maximumTouchPoints > 1);
+  const isLowMemory =
+    typeof deviceMemoryGb === "number" &&
+    Number.isFinite(deviceMemoryGb) &&
+    deviceMemoryGb > 0 &&
+    deviceMemoryGb <= 4;
+  const deviceClass = isIos
+    ? "ios"
+    : isLowMemory
+      ? "low-memory"
+      : "standard";
+  const maximumSafeDurationSeconds = isIos
+    ? IOS_SAFE_EDITED_DURATION_SECONDS
+    : isLowMemory
+      ? LOW_MEMORY_SAFE_EDITED_DURATION_SECONDS
+      : 300;
+  const ok = editedDurationSeconds <= maximumSafeDurationSeconds + 0.01;
+  const deviceLabel = isIos ? "このiPhone／iPad" : "この端末";
+  return {
+    ok,
+    deviceClass,
+    editedDurationSeconds,
+    estimatedOutputBytes,
+    estimatedWorkingBytes,
+    maximumSafeDurationSeconds,
+    message: ok
+      ? null
+      : `${deviceLabel}では、${maximumSafeDurationSeconds}秒を超える1080p動画を安全に書き出せません。編集する長さを${maximumSafeDurationSeconds}秒以内にするか、PC版Chromeで書き出してください。`,
+  };
+}
 
 let portableAacEncoderRegistration: Promise<void> | null = null;
 
@@ -1360,6 +1440,26 @@ export async function exportPortableVideoMp4(
     }
     const schedule = buildPortableFrameSchedule(ranges, frameRate);
     const editedDuration = getPortableEditedDuration(ranges);
+    const memoryPreflight = getPortableExportMemoryPreflight({
+      editedDurationSeconds: editedDuration,
+      videoBitrate,
+      audioBitrate,
+      userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+      maximumTouchPoints:
+        typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints,
+      deviceMemoryGb:
+        typeof navigator === "undefined"
+          ? null
+          : ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ??
+            null),
+    });
+    if (!memoryPreflight.ok) {
+      throw new PortableVideoExportUnsupportedError(
+        "browser",
+        memoryPreflight.message ??
+          "この端末では動画を安全に書き出せません。PC版Chromeでお試しください。",
+      );
+    }
     const sourceWidth = await videoTrack.getDisplayWidth();
     const sourceHeight = await videoTrack.getDisplayHeight();
     const dimensions = computePortableVideoDimensions(
@@ -1432,7 +1532,10 @@ export async function exportPortableVideoMp4(
 
     const target = new media.BufferTarget();
     output = new media.Output({
-      format: new media.Mp4OutputFormat({ fastStart: "in-memory" }),
+      // Metadata-at-end avoids keeping a second copy of every encoded packet
+      // until finalization. The resulting ordinary MP4 remains uploadable to
+      // iPhone Photos and social platforms while using substantially less RAM.
+      format: new media.Mp4OutputFormat({ fastStart: false }),
       target,
     });
     const videoSource = new media.CanvasSource(canvas, {

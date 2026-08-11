@@ -23,8 +23,10 @@ import {
   randomAccountToken,
 } from "./account-session";
 import {
+  bindTrialSessionToAccount,
   getRegisteredTrialSessionId,
   trialSessionPrincipalEmail,
+  unboundTrialSessionPrincipalEmail,
 } from "./trial-session-store";
 
 const CHALLENGE_LIFETIME_SECONDS = 5 * 60;
@@ -33,11 +35,13 @@ const AUTH_NAME = "撮るだけリール";
 const AUTH_RATE_WINDOW_SECONDS = 10 * 60;
 const AUTH_NETWORK_LIMIT = 30;
 const AUTH_GLOBAL_LIMIT = 3_000;
+const MAX_PASSKEYS_PER_ACCOUNT = 10;
 
 type D1Result = { meta?: { changes?: number } };
 type D1Statement = {
   bind: (...values: unknown[]) => D1Statement;
   first: <T>() => Promise<T | null>;
+  all: <T>() => Promise<{ results?: T[] }>;
   run: () => Promise<D1Result>;
 };
 type D1Database = {
@@ -96,50 +100,71 @@ export function isPasskeyAuthenticationConfigured() {
 
 export async function registrationOptions(request: Request) {
   const context = relyingPartyContext(request);
-  const sessionId = await getRegisteredTrialSessionId(request);
-  if (!sessionId) {
-    throw new AccountAuthError(
-      "trial_session_required",
-      409,
-      "無料体験の確認が必要です。ページを再読み込みしてお試しください。",
-    );
-  }
-
   const database = databaseOrThrow();
-  const email = await trialSessionPrincipalEmail(sessionId);
   const now = Math.floor(Date.now() / 1_000);
-  let user = await database
-    .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
-    .bind(email)
-    .first<{ id: string }>();
+  const authenticatedAccount = await getAccountIdentity(request);
+  let user: { id: string } | null = authenticatedAccount
+    ? { id: authenticatedAccount.id }
+    : null;
+
   if (!user) {
-    const userId = crypto.randomUUID();
-    await database
-      .prepare(`
-        INSERT INTO users (
-          id, email, billing_email, full_name, stripe_customer_id,
-          created_at, updated_at
-        ) VALUES (?, ?, NULL, NULL, NULL, ?, ?)
-        ON CONFLICT(email) DO NOTHING
-      `)
-      .bind(userId, email, now, now)
-      .run();
+    const sessionId = await getRegisteredTrialSessionId(request);
+    if (!sessionId) {
+      throw new AccountAuthError(
+        "trial_session_required",
+        409,
+        "無料体験の確認が必要です。ページを再読み込みしてお試しください。",
+      );
+    }
+
+    const email = await trialSessionPrincipalEmail(sessionId);
     user = await database
       .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
       .bind(email)
       .first<{ id: string }>();
+    if (!user) {
+      const userId = crypto.randomUUID();
+      await database
+        .prepare(`
+          INSERT INTO users (
+            id, email, billing_email, full_name, stripe_customer_id,
+            created_at, updated_at
+          ) VALUES (?, ?, NULL, NULL, NULL, ?, ?)
+          ON CONFLICT(email) DO NOTHING
+        `)
+        .bind(userId, email, now, now)
+        .run();
+      user = await database
+        .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
+        .bind(email)
+        .first<{ id: string }>();
+    }
   }
   if (!user) throw new Error("Passkey account could not be prepared.");
 
-  const existing = await database
-    .prepare("SELECT credential_id FROM account_passkeys WHERE user_id = ? LIMIT 1")
+  const existingPasskeys = await database
+    .prepare(`
+      SELECT credential_id, transports
+      FROM account_passkeys
+      WHERE user_id = ?
+      ORDER BY created_at ASC
+      LIMIT 11
+    `)
     .bind(user.id)
-    .first<{ credential_id: string }>();
-  if (existing) {
+    .all<{ credential_id: string; transports: string | null }>();
+  const existing = existingPasskeys.results ?? [];
+  if (existing.length > 0 && !authenticatedAccount) {
     throw new AccountAuthError(
       "account_already_registered",
       409,
       "この無料体験にはアカウントが登録済みです。「ログイン」を選んでください。",
+    );
+  }
+  if (existing.length >= MAX_PASSKEYS_PER_ACCOUNT) {
+    throw new AccountAuthError(
+      "passkey_limit_reached",
+      409,
+      "登録できるパスキーの上限に達しています。不要な端末の整理について運営へお問い合わせください。",
     );
   }
 
@@ -156,6 +181,10 @@ export async function registrationOptions(request: Request) {
       requireResidentKey: true,
       userVerification: "required",
     },
+    excludeCredentials: existing.map((credential) => ({
+      id: credential.credential_id,
+      transports: parseTransports(credential.transports),
+    })),
     supportedAlgorithmIDs: [-7, -257],
   });
   const challengeToken = await saveChallenge(request, database, {
@@ -177,6 +206,49 @@ export async function verifyRegistration(
 ) {
   const challenge = await consumeChallenge(request, "registration");
   if (!challenge.user_id) throw new Error("Registration user is missing.");
+  const authenticatedAccount = await getAccountIdentity(request);
+  let trialSessionId: string | null = null;
+  if (
+    authenticatedAccount &&
+    authenticatedAccount.id !== challenge.user_id
+  ) {
+    throw new AccountAuthError(
+      "registration_identity_changed",
+      401,
+      "本人確認を始めたアカウントと現在のアカウントが異なります。もう一度お試しください。",
+    );
+  }
+  if (!authenticatedAccount) {
+    trialSessionId = await getRegisteredTrialSessionId(request);
+    if (!trialSessionId) {
+      throw new AccountAuthError(
+        "registration_identity_changed",
+        401,
+        "登録を始めた本人確認情報を確認できませんでした。もう一度お試しください。",
+      );
+    }
+    const expectedEmail = await unboundTrialSessionPrincipalEmail(
+      trialSessionId,
+    );
+    if (!expectedEmail) {
+      throw new AccountAuthError(
+        "registration_identity_changed",
+        401,
+        "登録後のアカウントにはログインが必要です。ログインしてから、もう一度お試しください。",
+      );
+    }
+    const expectedUser = await databaseOrThrow()
+      .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
+      .bind(expectedEmail)
+      .first<{ id: string }>();
+    if (expectedUser?.id !== challenge.user_id) {
+      throw new AccountAuthError(
+        "registration_identity_changed",
+        401,
+        "登録を始めた本人確認情報を確認できませんでした。もう一度お試しください。",
+      );
+    }
+  }
   const verification = await verifyRegistrationResponse({
     response,
     expectedChallenge: challenge.challenge,
@@ -233,6 +305,25 @@ export async function verifyRegistration(
       "passkey_already_registered",
       409,
       "このパスキーは登録済みです。「ログイン」を選んでください。",
+    );
+  }
+
+  if (
+    trialSessionId &&
+    !(await bindTrialSessionToAccount(trialSessionId, challenge.user_id))
+  ) {
+    await database.batch([
+      database
+        .prepare("DELETE FROM account_passkeys WHERE credential_id = ? AND user_id = ?")
+        .bind(registrationInfo.credential.id, challenge.user_id),
+      database
+        .prepare("DELETE FROM account_sessions WHERE token_hash = ? AND user_id = ?")
+        .bind(sessionHash, challenge.user_id),
+    ]);
+    throw new AccountAuthError(
+      "registration_identity_changed",
+      409,
+      "アカウントと無料体験を安全に関連付けられませんでした。もう一度お試しください。",
     );
   }
 

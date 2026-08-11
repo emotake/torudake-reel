@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent,
 } from "react";
 import {
   disposePhotoAssets,
@@ -41,6 +42,7 @@ const MAX_PHOTO_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 250 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
 const MAX_AUDIO_DURATION_SECONDS = 90;
+const PHOTO_REEL_DURATIONS = [15, 30] as const;
 
 const TEMPLATE_OPTIONS: Array<{
   id: PhotoReelTemplateId;
@@ -79,6 +81,35 @@ const TEMPLATE_OPTIONS: Array<{
     detail: "横写真も切らずに、全体をすっきり表示",
   },
 ];
+
+const TEMPLATE_IDS = TEMPLATE_OPTIONS.map((option) => option.id);
+
+function moveRadioSelection<T>(
+  event: KeyboardEvent<HTMLButtonElement>,
+  options: readonly T[],
+  currentIndex: number,
+  onChange: (value: T) => void,
+) {
+  let nextIndex: number | null = null;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (currentIndex + 1) % options.length;
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (currentIndex - 1 + options.length) % options.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = options.length - 1;
+  }
+  if (nextIndex === null) return;
+
+  event.preventDefault();
+  onChange(options[nextIndex]);
+  const targetIndex = nextIndex;
+  const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+    '[role="radio"]:not(:disabled)',
+  );
+  window.requestAnimationFrame(() => radios?.[targetIndex]?.focus());
+}
 
 type ResultVideo = {
   blob: Blob;
@@ -985,7 +1016,7 @@ export default function PhotoReelClient() {
           </p>
         </div>
         <div className="photoReelTrust">
-          <span>追加API料金 0円</span>
+          <span>プレビュー中の変更は追加料金なし</span>
           <span>1080×1920 MP4</span>
           <span>横写真も切らずに対応</span>
         </div>
@@ -1166,15 +1197,24 @@ export default function PhotoReelClient() {
               </div>
             </div>
             <div className="photoReelSegmented" role="radiogroup" aria-label="動画の長さ">
-              {([15, 30] as const).map((seconds) => (
+              {PHOTO_REEL_DURATIONS.map((seconds, index) => (
                 <button
                   key={seconds}
                   type="button"
                   role="radio"
                   aria-checked={duration === seconds}
+                  tabIndex={duration === seconds ? 0 : -1}
                   className={duration === seconds ? "isActive" : ""}
                   disabled={isEditingLocked}
                   onClick={() => updateDuration(seconds)}
+                  onKeyDown={(event) =>
+                    moveRadioSelection(
+                      event,
+                      PHOTO_REEL_DURATIONS,
+                      index,
+                      updateDuration,
+                    )
+                  }
                 >
                   <strong>{seconds}秒</strong>
                   <small>{seconds === 15 ? "テンポよく" : "ゆったり見せる"}</small>
@@ -1188,20 +1228,29 @@ export default function PhotoReelClient() {
               <span>03</span>
               <div>
                 <h2>自動編集を選ぶ</h2>
-                <p>動きもテンポも異なる5パターンです。API料金は変わりません。</p>
+                <p>動きもテンポも異なる5パターンです。プレビュー中は何度選び直しても追加料金はかかりません。</p>
               </div>
             </div>
             <div className="photoReelTemplateGrid" role="radiogroup" aria-label="自動編集パターン">
-              {TEMPLATE_OPTIONS.map((option) => (
+              {TEMPLATE_OPTIONS.map((option, index) => (
                 <button
                   key={option.id}
                   type="button"
                   role="radio"
                   aria-checked={templateId === option.id}
+                  tabIndex={templateId === option.id ? 0 : -1}
                   data-template={option.id}
                   className={templateId === option.id ? "isActive" : ""}
                   disabled={isEditingLocked}
                   onClick={() => updateTemplate(option.id)}
+                  onKeyDown={(event) =>
+                    moveRadioSelection(
+                      event,
+                      TEMPLATE_IDS,
+                      index,
+                      updateTemplate,
+                    )
+                  }
                 >
                   <span className="photoReelTemplateVisual" aria-hidden="true">
                     <i />
@@ -1224,7 +1273,7 @@ export default function PhotoReelClient() {
               <span>04</span>
               <div>
                 <h2>文字と音を整える</h2>
-                <p>どちらも任意です。追加のAPI料金はかかりません。</p>
+                <p>どちらも任意です。プレビュー中に設定を変えても追加料金はかかりません。</p>
               </div>
             </div>
             <label className="photoReelField">
@@ -1316,7 +1365,7 @@ export default function PhotoReelClient() {
               <li>写真と音源は端末外へ送信しません</li>
               <li>無料体験は編集・プレビューまで利用できます</li>
               <li>有料枠は書き出し成功時だけ1本分使用します</li>
-              <li>OpenAI API料金は発生しません</li>
+              <li>プレビュー中の編集変更に追加料金はかかりません</li>
             </ul>
             <button
               className="photoReelExportButton"

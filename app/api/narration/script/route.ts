@@ -20,9 +20,16 @@ import {
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { isDurationWithinReservation } from "../../../../lib/usage-duration";
 import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
+import {
+  createUpstreamAbortSignal,
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
+const MAX_SCRIPT_REQUEST_BYTES = 6_500_000;
+const SCRIPT_REQUEST_TIMEOUT_MS = 45_000;
 const GOALS = new Set(["follow", "sales", "reach"]);
 const LENGTHS = new Set([30, 60, 90]);
 
@@ -134,6 +141,17 @@ export async function POST(request: Request) {
     );
   }
 
+  const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
+  const usagePrincipal = usageEnforcementEnabled
+    ? await getUsagePrincipal(request, { allowTrial: true })
+    : null;
+  if (usageEnforcementEnabled && !usagePrincipal?.currentUser) {
+    return Response.json(
+      { error: "続けるにはアカウントへのログインが必要です。" },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
   let meteredAuthorizationSettled = false;
 
@@ -154,8 +172,17 @@ export async function POST(request: Request) {
     previousScript?: unknown;
   };
   try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
+    payload = await parseJsonBodyWithLimit<typeof payload>(
+      request,
+      MAX_SCRIPT_REQUEST_BYTES,
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return Response.json(
+        { error: "送信データが大きすぎます。動画を選び直してください。" },
+        { status: 413 },
+      );
+    }
     return Response.json({ error: "動画の情報を読み取れませんでした。" }, { status: 400 });
   }
 
@@ -215,10 +242,8 @@ export async function POST(request: Request) {
   }
 
   let authorizedReservationDuration: number | null = null;
-  if (isUsageEnforcementEnabled()) {
-    const { currentUser } = await getUsagePrincipal(request, {
-      allowTrial: true,
-    });
+  if (usageEnforcementEnabled) {
+    const currentUser = usagePrincipal?.currentUser ?? null;
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId
@@ -406,13 +431,20 @@ export async function POST(request: Request) {
     })),
   ];
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const upstreamAbort = createUpstreamAbortSignal(
+    request.signal,
+    SCRIPT_REQUEST_TIMEOUT_MS,
+  );
+  let response: Response;
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: upstreamAbort.signal,
+      body: JSON.stringify({
       model: "gpt-5.6-luna",
       store: false,
       reasoning: { effort: "none" },
@@ -447,8 +479,27 @@ export async function POST(request: Request) {
           },
         },
       },
-    }),
-  });
+      }),
+    });
+  } catch (error) {
+    if (upstreamAbort.signal.aborted) {
+      return Response.json(
+        {
+          error: upstreamAbort.didTimeOut()
+            ? "AI台本の生成に時間がかかっています。少し待ってからもう一度お試しください。"
+            : "AI台本の生成を中止しました。",
+        },
+        { status: upstreamAbort.didTimeOut() ? 504 : 499 },
+      );
+    }
+    console.error("OpenAI narration script request failed", error);
+    return Response.json(
+      { error: "AI台本を生成できませんでした。もう一度お試しください。" },
+      { status: 502 },
+    );
+  } finally {
+    upstreamAbort.cleanup();
+  }
   const responsePayload = (await response.json().catch(() => ({}))) as OpenAIResponse;
   if (!response.ok) {
     console.error(

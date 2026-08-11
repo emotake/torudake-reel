@@ -77,6 +77,7 @@ export const TRANSCRIPTION_LEASE_TTL_SECONDS =
 type D1Statement = {
   bind: (...values: unknown[]) => D1Statement;
   first: <T>() => Promise<T | null>;
+  run: () => Promise<unknown>;
 };
 
 type D1Database = {
@@ -1206,8 +1207,9 @@ export async function releaseOrCompleteUsageReservation(
 }
 
 /**
- * Settles expired reservations without refunding work that was already
- * claimed. The two conditional updates are safe when requests race in D1.
+ * Releases expired, unsaved reservations while retaining their AI action
+ * rows. A paid video allowance is completed only by the explicit save/export
+ * confirmation; merely generating a preview must never consume it.
  */
 export async function settleExpiredUsageReservations(
   userId: string,
@@ -1216,57 +1218,21 @@ export async function settleExpiredUsageReservations(
   await ensureOperatorUsageSchema();
   const database = env.DB as unknown as D1Database;
 
-  await database.batch([
-    database
-      .prepare(`
-        UPDATE usage_reservations
-        SET status = 'completed', completed_at = ?
-        WHERE user_id = ?
-          AND status = 'reserved'
-          AND expires_at < ?
-          AND (
-            EXISTS (
-              SELECT 1
-              FROM operator_usage_operations
-              WHERE reservation_id = usage_reservations.id
-                AND successful_count > 0
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM metered_ai_actions
-              WHERE reservation_id = usage_reservations.id
-                AND status = 'succeeded'
-            )
-          )
-      `)
-      .bind(nowSeconds, userId, nowSeconds),
-    database
-      .prepare(`
-        UPDATE usage_reservations
-        SET status = 'released'
-        WHERE user_id = ?
-          AND status = 'reserved'
-          AND expires_at < ?
-          AND NOT EXISTS (
-            SELECT 1
-            FROM operator_usage_operations
-            WHERE reservation_id = usage_reservations.id
-              AND successful_count > 0
-          )
-          AND NOT EXISTS (
-            SELECT 1
-            FROM metered_ai_actions
-            WHERE reservation_id = usage_reservations.id
-              AND status = 'succeeded'
-          )
-          AND NOT EXISTS (
-            SELECT 1
-            FROM usage_operation_leases
-            WHERE reservation_id = usage_reservations.id
-              AND operation = 'metered_ai'
-              AND expires_at > ?
-          )
-      `)
-      .bind(userId, nowSeconds, nowSeconds),
-  ]);
+  await database
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'released'
+      WHERE user_id = ?
+        AND status = 'reserved'
+        AND expires_at < ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM usage_operation_leases
+          WHERE reservation_id = usage_reservations.id
+            AND operation = 'metered_ai'
+            AND expires_at > ?
+        )
+    `)
+    .bind(userId, nowSeconds, nowSeconds)
+    .run();
 }

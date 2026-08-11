@@ -46,7 +46,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (transfer.status !== "uploading" || transfer.expiresAt < Date.now()) {
       return jsonError("このアップロードは終了または期限切れです。", 410);
     }
-    if (isManagedUploadEnforcementEnabled() && transfer.ownerEmail) {
+    if (isManagedUploadEnforcementEnabled(request) && transfer.ownerEmail) {
       const { currentUser } = await getUsagePrincipal(request, {
         allowTrial: true,
       });

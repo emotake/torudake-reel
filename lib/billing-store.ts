@@ -47,6 +47,10 @@ import {
 const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
 const ACTIVE_USAGE_STATUSES = ["reserved", "completed"] as const;
 const RESERVATION_LIFETIME_SECONDS = 60 * 60;
+// Checkout sessions are explicitly limited to 30 minutes. Keep the database
+// lock one minute longer so an expiry webhook and a late browser retry cannot
+// overlap a still-completable Stripe session.
+const MONTHLY_CHECKOUT_LOCK_SECONDS = 32 * 60;
 
 type AtomicD1Result = {
   meta?: { changes?: number };
@@ -278,6 +282,99 @@ export async function getBillingStatusForUser(userId: string) {
       purchasedCredits - oneTimeUsage.length,
     ),
   };
+}
+
+export type MonthlyCheckoutLock = {
+  userId: string;
+  lockToken: string;
+  requestId: string;
+  planKey: "starter" | "standard";
+  expiresAt: number;
+};
+
+/**
+ * Serializes monthly Checkout creation for one account. The database-level
+ * primary key is the final guard against double clicks, parallel browser tabs,
+ * and two Worker invocations racing before a Stripe webhook arrives.
+ */
+export async function acquireMonthlyCheckoutLock(
+  userId: string,
+  requestId: string,
+  planKey: "starter" | "standard",
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const database = env.DB as unknown as AtomicD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Billing database binding is unavailable.");
+  }
+  await database
+    .prepare(`
+      DELETE FROM billing_checkout_locks
+      WHERE user_id = ? AND expires_at <= ?
+    `)
+    .bind(userId, nowSeconds)
+    .run();
+
+  const lock: MonthlyCheckoutLock = {
+    userId,
+    lockToken: crypto.randomUUID(),
+    requestId,
+    planKey,
+    expiresAt: nowSeconds + MONTHLY_CHECKOUT_LOCK_SECONDS,
+  };
+  const inserted = await database
+    .prepare(`
+      INSERT INTO billing_checkout_locks (
+        user_id, lock_token, request_id, plan_key, created_at, expires_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM billing_subscriptions
+        WHERE user_id = ?
+          AND status IN ('active', 'trialing')
+          AND current_period_end > ?
+          AND (
+            revoked_period_start IS NULL
+            OR revoked_period_start != current_period_start
+          )
+      )
+      ON CONFLICT(user_id) DO NOTHING
+    `)
+    .bind(
+      lock.userId,
+      lock.lockToken,
+      lock.requestId,
+      lock.planKey,
+      nowSeconds,
+      lock.expiresAt,
+      lock.userId,
+      nowSeconds,
+    )
+    .run();
+  return inserted.meta?.changes === 1 ? lock : null;
+}
+
+export async function releaseMonthlyCheckoutLock(
+  values: { userId: string; lockToken?: string | null },
+) {
+  const database = env.DB as unknown as AtomicD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Billing database binding is unavailable.");
+  }
+  const released = values.lockToken
+    ? await database
+        .prepare(`
+          DELETE FROM billing_checkout_locks
+          WHERE user_id = ? AND lock_token = ?
+        `)
+        .bind(values.userId, values.lockToken)
+        .run()
+    : await database
+        .prepare("DELETE FROM billing_checkout_locks WHERE user_id = ?")
+        .bind(values.userId)
+        .run();
+  return released.meta?.changes === 1;
 }
 
 export async function reserveUsage(
@@ -526,7 +623,48 @@ export async function findOwnedUsageReservation(
   ) {
     return null;
   }
+  if (
+    reservation.bucket === "subscription" &&
+    !(await subscriptionReservationHasActivePeriod(reservation))
+  ) {
+    return null;
+  }
   return reservation;
+}
+
+async function subscriptionReservationHasActivePeriod(reservation: {
+  userId: string;
+  createdAt: number;
+}) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const now = Math.floor(Date.now() / 1_000);
+  const result = await database
+    .prepare(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM billing_subscriptions
+        WHERE user_id = ?
+          AND status IN ('active', 'trialing')
+          AND current_period_start <= ?
+          AND current_period_end > ?
+          AND current_period_end > ?
+          AND (
+            revoked_period_start IS NULL
+            OR revoked_period_start != current_period_start
+          )
+      ) AS allowed
+    `)
+    .bind(
+      reservation.userId,
+      reservation.createdAt,
+      reservation.createdAt,
+      now,
+    )
+    .first<{ allowed: number }>();
+  return result?.allowed === 1;
 }
 
 async function oneTimeReservationHasActiveCredit(reservation: {
@@ -781,12 +919,33 @@ export async function releaseUsage(
     return false;
   }
 
-  return Boolean(
-    await releaseOrCompleteUsageReservation(
-      reservation.id,
-      reservation.userId,
-    ),
-  );
+  const now = Math.floor(Date.now() / 1_000);
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  // AI results remain in metered_ai_actions for abuse accounting and audit,
+  // but an unsaved video must not consume a paid save slot. Refuse only while
+  // an upstream AI request still owns the reservation lease.
+  const released = await database
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'released', expires_at = ?
+      WHERE id = ?
+        AND user_id = ?
+        AND status = 'reserved'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM usage_operation_leases
+          WHERE reservation_id = ?
+            AND operation = 'metered_ai'
+            AND expires_at > ?
+        )
+      RETURNING id
+    `)
+    .bind(now - 1, reservation.id, reservation.userId, reservation.id, now)
+    .first<{ id: string }>();
+  return Boolean(released?.id);
 }
 
 type StripeSubscriptionRecord = {
@@ -850,14 +1009,42 @@ export async function setSubscriptionPeriodRevocationState(
     throw new Error("Refunded subscription period is invalid.");
   }
   const db = getDb();
+  const rows = await db
+    .select({
+      userId: billingSubscriptions.userId,
+      currentPeriodStart: billingSubscriptions.currentPeriodStart,
+      currentPeriodEnd: billingSubscriptions.currentPeriodEnd,
+      revokedPeriodStart: billingSubscriptions.revokedPeriodStart,
+    })
+    .from(billingSubscriptions)
+    .where(eq(billingSubscriptions.id, subscriptionId))
+    .limit(1);
+  const subscription = rows[0];
+  if (!subscription) {
+    throw new Error("Refunded subscription was not found.");
+  }
+
+  // A refund for an older, already-ended period cannot restore current
+  // access, so it is safely recorded as historical. A future period is a
+  // malformed Stripe relationship and must be retried instead of ignored.
+  if (periodStart < subscription.currentPeriodStart) {
+    return "historical" as const;
+  }
+  if (periodStart >= subscription.currentPeriodEnd) {
+    throw new Error("Refunded subscription period does not match the current period.");
+  }
+
   if (blocked) {
     const updated = await db
       .update(billingSubscriptions)
-      .set({ revokedPeriodStart: periodStart })
+      .set({ revokedPeriodStart: subscription.currentPeriodStart })
       .where(
         and(
           eq(billingSubscriptions.id, subscriptionId),
-          eq(billingSubscriptions.currentPeriodStart, periodStart),
+          eq(
+            billingSubscriptions.currentPeriodStart,
+            subscription.currentPeriodStart,
+          ),
         ),
       )
       .returning({
@@ -865,37 +1052,63 @@ export async function setSubscriptionPeriodRevocationState(
         currentPeriodStart: billingSubscriptions.currentPeriodStart,
         currentPeriodEnd: billingSubscriptions.currentPeriodEnd,
       });
-    if (updated[0]) {
-      const reservations = await db
-        .select({ id: usageReservations.id })
-        .from(usageReservations)
-        .where(
-          and(
-            eq(usageReservations.userId, updated[0].userId),
-            eq(usageReservations.bucket, "subscription"),
-            eq(usageReservations.status, "reserved"),
-            gte(usageReservations.createdAt, periodStart),
-            lt(usageReservations.createdAt, updated[0].currentPeriodEnd),
-          ),
-        );
-      for (const reservation of reservations) {
-        await releaseOrCompleteUsageReservation(
-          reservation.id,
-          updated[0].userId,
-        );
-      }
+    if (!updated[0]) {
+      throw new Error("Subscription changed while its refund was being applied.");
     }
-    return;
+    const now = Math.floor(Date.now() / 1_000);
+    await db
+      .update(usageReservations)
+      .set({ expiresAt: now - 1 })
+      .where(
+        and(
+          eq(usageReservations.userId, updated[0].userId),
+          eq(usageReservations.bucket, "subscription"),
+          inArray(usageReservations.status, [...ACTIVE_USAGE_STATUSES]),
+          gte(
+            usageReservations.createdAt,
+            updated[0].currentPeriodStart,
+          ),
+          lt(usageReservations.createdAt, updated[0].currentPeriodEnd),
+        ),
+      );
+    await db
+      .update(usageReservations)
+      .set({ status: "released" })
+      .where(
+        and(
+          eq(usageReservations.userId, updated[0].userId),
+          eq(usageReservations.bucket, "subscription"),
+          eq(usageReservations.status, "reserved"),
+          gte(
+            usageReservations.createdAt,
+            updated[0].currentPeriodStart,
+          ),
+          lt(usageReservations.createdAt, updated[0].currentPeriodEnd),
+        ),
+      );
+    return "revoked" as const;
   }
-  await db
+  const restored = await db
     .update(billingSubscriptions)
     .set({ revokedPeriodStart: null })
     .where(
       and(
         eq(billingSubscriptions.id, subscriptionId),
-        eq(billingSubscriptions.revokedPeriodStart, periodStart),
+        eq(
+          billingSubscriptions.currentPeriodStart,
+          subscription.currentPeriodStart,
+        ),
+        eq(
+          billingSubscriptions.revokedPeriodStart,
+          subscription.currentPeriodStart,
+        ),
       ),
-    );
+    )
+    .returning({ id: billingSubscriptions.id });
+  if (!restored[0] && subscription.revokedPeriodStart !== null) {
+    throw new Error("Subscription changed while its refund was being cleared.");
+  }
+  return "restored" as const;
 }
 
 export async function recordOneTimePurchase(values: {

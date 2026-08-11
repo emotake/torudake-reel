@@ -13,6 +13,7 @@ import {
   computePortableVideoDrawRect,
   createPortableVideoEncodingSettings,
   getPortableAudioSlicePlacement,
+  getPortableExportMemoryPreflight,
   getPortableEqualPowerFadeGain,
   getPortableEditedDuration,
   getPreferredPortableInputAudioTrack,
@@ -273,6 +274,48 @@ test("preflights the exact frame rate with quality-focused VBR settings", () => 
 test("does not use the memory-heavy whole-file audio fallback for large videos", () => {
   assert.equal(canUseWholeFileAudioDecode(96 * 1024 * 1024), true);
   assert.equal(canUseWholeFileAudioDecode(96 * 1024 * 1024 + 1), false);
+});
+
+test("stops a five-minute 1080p export before iOS can terminate the tab", () => {
+  const preflight = getPortableExportMemoryPreflight({
+    editedDurationSeconds: 300,
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15",
+    maximumTouchPoints: 5,
+  });
+
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.deviceClass, "ios");
+  assert.equal(preflight.maximumSafeDurationSeconds, 120);
+  assert.ok(preflight.estimatedOutputBytes > 350 * 1024 * 1024);
+  assert.match(preflight.message, /120秒を超える1080p動画/);
+});
+
+test("allows normal reel lengths on iPhone and applies a low-memory device limit", () => {
+  assert.equal(
+    getPortableExportMemoryPreflight({
+      editedDurationSeconds: 90,
+      userAgent: "iPhone",
+    }).ok,
+    true,
+  );
+  const lowMemory = getPortableExportMemoryPreflight({
+    editedDurationSeconds: 180,
+    userAgent: "Android",
+    deviceMemoryGb: 4,
+  });
+  assert.equal(lowMemory.ok, false);
+  assert.equal(lowMemory.deviceClass, "low-memory");
+  assert.equal(lowMemory.maximumSafeDurationSeconds, 150);
+});
+
+test("uses the lower-memory ordinary MP4 finalization mode", async () => {
+  const source = await readFile(
+    new URL("../lib/portable-video-export.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /new media\.Mp4OutputFormat\(\{ fastStart: false \}\)/);
+  assert.doesNotMatch(source, /fastStart: "in-memory"/);
 });
 
 test("prefers a decodable AAC fallback over iPhone spatial primary audio", () => {

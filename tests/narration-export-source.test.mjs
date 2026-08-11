@@ -101,6 +101,54 @@ test("keeps preview and recorder fallback aligned with local loudness and duckin
   assert.match(exportFlow, /scheduleGainEnvelope\(/);
 });
 
+test("normalizes spoken preview audio and softens manual cut boundaries", () => {
+  const start = pageSource.indexOf("async function playPreviewFromEditedTime(");
+  const end = pageSource.indexOf("\n  function seekTo(", start);
+  const previewFlow = pageSource.slice(start, end);
+  const transitionStart = pageSource.indexOf(
+    "async function crossfadePreviewToSourceTime(",
+  );
+  const transitionEnd = pageSource.indexOf(
+    "\n  async function moveToNextKeptRange(",
+    transitionStart,
+  );
+  const transitionFlow = pageSource.slice(transitionStart, transitionEnd);
+
+  assert.match(
+    pageSource,
+    /return narrationPlan[\s\S]*originalAudioNormalizationGain/,
+  );
+  assert.match(
+    previewFlow,
+    /narrationPlan[\s\S]*ensurePreviewNarrationEngine\(true\)[\s\S]*ensureVideoAudioEngine\(true\)/,
+  );
+  assert.match(previewFlow, /resetPreviewOriginalGain\(engine\)/);
+  assert.match(transitionFlow, /PORTABLE_VIDEO_CROSSFADE_SECONDS/);
+  assert.match(transitionFlow, /gain\.linearRampToValueAtTime\(0/);
+  assert.match(transitionFlow, /seekVideoBeforePlayback\(video, targetTime\)/);
+  assert.match(transitionFlow, /getPreviewOriginalBaseGain\(\)/);
+});
+
+test("preflights long iPhone exports before starting either encoder", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const setupEnd = pageSource.indexOf("isExportingRef.current = true", start);
+  const preflightFlow = pageSource.slice(start, setupEnd);
+
+  assert.match(preflightFlow, /getPortableExportMemoryPreflight\(/);
+  assert.match(preflightFlow, /if \(!memoryPreflight\.ok\)/);
+  assert.match(preflightFlow, /PC版Chrome/);
+});
+
+test("makes the narration disclosure dialog keyboard-safe", () => {
+  assert.match(pageSource, /aria-describedby="disclosure-description"/);
+  assert.match(pageSource, /ref=\{disclosureDialogRef\}/);
+  assert.match(pageSource, /tabIndex=\{-1\}/);
+  assert.match(pageSource, /event\.key === "Escape"/);
+  assert.match(pageSource, /event\.key !== "Tab"/);
+  assert.match(pageSource, /disclosurePreviousFocusRef/);
+  assert.match(pageSource, /previous\?\.focus\(\)/);
+});
+
 test("keeps free users in editing and preview while paid buckets can export", () => {
   const exportStart = pageSource.indexOf("async function exportCaptionedVideo(");
   const exportEnd = pageSource.indexOf("\n  function requestVideoExport()", exportStart);
@@ -136,23 +184,43 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(pageSource, /completePendingExportReservation\(\)/);
 });
 
-test("requires confirmed usage before paid export and releases abandoned unlocks", () => {
-  const confirmedCompletions =
-    pageSource.match(
-      /const usageCompleted = await updateVideoUsage\(\s*"complete",\s*newlyReservedUsage,\s*\)/g,
-    ) ?? [];
-  const guardedPendingStates =
-    pageSource.match(
-      /!usageCompleted &&\s*isCurrent\(\) &&\s*usageReservationRef\.current === newlyReservedUsage/g,
-    ) ?? [];
-
-  assert.equal(confirmedCompletions.length, 2);
-  assert.equal(guardedPendingStates.length, 2);
+test("charges a paid video only after a validated export and releases abandoned unlocks", () => {
+  assert.doesNotMatch(
+    pageSource,
+    /updateVideoUsage\(\s*"complete",\s*newlyReservedUsage/,
+  );
+  assert.match(
+    pageSource,
+    /newlyReservedUsage &&[\s\S]*usageReservationPendingExportRef\.current = true/,
+  );
   assert.match(pageSource, /if \(!usageReservationPendingExport\) return/);
   assert.match(pageSource, /await updateVideoUsage\("complete", usageReservationId\)/);
   assert.match(pageSource, /window\.addEventListener\("pagehide"/);
   assert.match(pageSource, /if \(event\.persisted\) return/);
   assert.match(pageSource, /navigator\.sendBeacon\(/);
+});
+
+test("consumes a free preview after processing while keeping paid usage reversible until export", () => {
+  const start = pageSource.indexOf(
+    "async function settleVideoUsageAfterProcessing(",
+  );
+  const end = pageSource.indexOf(
+    "\n  function releasePendingExportReservation(",
+    start,
+  );
+  const settleFlow = pageSource.slice(start, end);
+
+  assert.match(settleFlow, /bucket === "free"/);
+  assert.match(settleFlow, /updateVideoUsage\("complete", reservationId\)/);
+  assert.match(
+    settleFlow,
+    /usageReservationPendingExportRef\.current = false/,
+  );
+  assert.match(settleFlow, /usageReservationPendingExportRef\.current = true/);
+  assert.match(
+    pageSource,
+    /await settleVideoUsageAfterProcessing\(\s*newlyReservedUsage,\s*newlyReservedBucket/,
+  );
 });
 
 test("discards a paid export reservation if the edited video changes", () => {
@@ -206,7 +274,11 @@ test("inspects the completed file from both export paths before offering it", ()
     exportFlow,
     /inspectCompletedVideoQuality\(\s*output,\s*sourceExportDimensions,\s*expectedExportDimensions/,
   );
-  assert.match(exportFlow, /portableQuality\.meetsTargetResolution === false/);
+  assert.match(exportFlow, /if \(!portableQuality\.accepted\)/);
+  assert.match(exportFlow, /if \(!fallbackQuality\.accepted\)/);
+  assert.match(exportFlow, /expectedDurationSeconds: editedDurationSeconds/);
+  assert.match(exportFlow, /expectedNarrationRanges/);
+  assert.match(exportFlow, /captionRanges/);
   assert.match(exportFlow, /setExportedVideoQualityMessage/);
   assert.match(pageSource, /exportedVideoQualityMessage \?\?/);
 });

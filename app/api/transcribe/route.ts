@@ -31,8 +31,17 @@ import {
 } from "../../../lib/operator-usage";
 import { getUsagePrincipal } from "../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
+import {
+  createUpstreamAbortSignal,
+  parseFormDataBodyWithLimit,
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../lib/request-safety";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+const MAX_TRANSCRIPTION_JSON_BYTES = 64 * 1024;
+const MAX_TRANSCRIPTION_MULTIPART_BYTES =
+  MAX_TRANSCRIPTION_BYTES + 512 * 1024;
 const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 45_000;
 const TRANSCRIPTION_RETRY_DELAY_MS = 350;
 
@@ -166,6 +175,7 @@ async function requestTranscription(
   apiKey: string,
   file: File,
   mode: "timed" | "timed-fallback" | "refine",
+  requestSignal: AbortSignal,
 ): Promise<TranscriptionCallResult> {
   const formData = new FormData();
   const isWhisperTimedPrimary = mode === "timed";
@@ -200,9 +210,8 @@ async function requestTranscription(
     formData.set("prompt", HIGH_ACCURACY_PROMPT);
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
+  const upstreamAbort = createUpstreamAbortSignal(
+    requestSignal,
     TRANSCRIPTION_REQUEST_TIMEOUT_MS,
   );
   let response: Response;
@@ -216,16 +225,20 @@ async function requestTranscription(
           Authorization: `Bearer ${apiKey}`,
         },
         body: formData,
-        signal: controller.signal,
+        signal: upstreamAbort.signal,
       },
     );
   } catch (error) {
     return {
       ok: false,
-      status: 504,
+      status: upstreamAbort.didTimeOut() ? 504 : requestSignal.aborted ? 499 : 502,
       requestId: null,
       error: {
-        code: controller.signal.aborted ? "request_timeout" : "request_failed",
+        code: upstreamAbort.didTimeOut()
+          ? "request_timeout"
+          : requestSignal.aborted
+            ? "request_aborted"
+            : "request_failed",
         type: "transcription_request_error",
         message:
           error instanceof Error
@@ -234,7 +247,7 @@ async function requestTranscription(
       },
     };
   } finally {
-    clearTimeout(timeout);
+    upstreamAbort.cleanup();
   }
 
   if (!response.ok) {
@@ -269,14 +282,28 @@ function shouldRetryTimedPrimary(result: TranscriptionCallResult) {
   return result.status === 502 || result.status === 503 || result.status === 504;
 }
 
-async function requestTimedTranscription(apiKey: string, file: File) {
-  let result = await requestTranscription(apiKey, file, "timed");
+async function requestTimedTranscription(
+  apiKey: string,
+  file: File,
+  requestSignal: AbortSignal,
+) {
+  let result = await requestTranscription(
+    apiKey,
+    file,
+    "timed",
+    requestSignal,
+  );
 
   if (shouldRetryTimedPrimary(result)) {
     await new Promise((resolve) =>
       setTimeout(resolve, TRANSCRIPTION_RETRY_DELAY_MS),
     );
-    result = await requestTranscription(apiKey, file, "timed");
+    result = await requestTranscription(
+      apiKey,
+      file,
+      "timed",
+      requestSignal,
+    );
   }
 
   if (canUseTimedFallback(result)) {
@@ -287,7 +314,12 @@ async function requestTimedTranscription(apiKey: string, file: File) {
       result.error?.code,
       result.error?.type,
     );
-    return requestTranscription(apiKey, file, "timed-fallback");
+    return requestTranscription(
+      apiKey,
+      file,
+      "timed-fallback",
+      requestSignal,
+    );
   }
 
   return result;
@@ -345,21 +377,41 @@ export async function POST(request: Request) {
       );
     }
 
+    const requestContentType =
+      request.headers.get("content-type")?.toLowerCase() ?? "";
+    const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
+    const usagePrincipal = usageEnforcementEnabled
+      ? await getUsagePrincipal(request, { allowTrial: true })
+      : null;
+    if (usageEnforcementEnabled && !usagePrincipal?.currentUser) {
+      return jsonError("続けるにはアカウントへのログインが必要です。", 401);
+    }
+
     let file: File | null = null;
     let requestHighAccuracy = false;
     let usageReservationId = "";
     let aiOperationId = "";
-    const requestContentType =
-      request.headers.get("content-type")?.toLowerCase() ?? "";
-
     if (requestContentType.includes("application/json")) {
-      const payload = (await request.json()) as {
+      let payload: {
         id?: string;
         code?: string;
         quality?: string;
         usageReservationId?: string;
         aiOperationId?: string;
       };
+      try {
+        payload = await parseJsonBodyWithLimit<typeof payload>(
+          request,
+          MAX_TRANSCRIPTION_JSON_BYTES,
+        );
+      } catch (error) {
+        return jsonError(
+          error instanceof RequestBodyTooLargeError
+            ? "送信データが大きすぎます。"
+            : "字幕生成用の動画情報を読み取れませんでした。",
+          error instanceof RequestBodyTooLargeError ? 413 : 400,
+        );
+      }
       requestHighAccuracy = payload.quality === "high";
       usageReservationId = payload.usageReservationId?.trim() ?? "";
       aiOperationId = payload.aiOperationId?.trim() ?? "";
@@ -418,7 +470,20 @@ export async function POST(request: Request) {
         type: transfer.contentType || "video/mp4",
       });
     } else {
-      const requestData = await request.formData();
+      let requestData: FormData;
+      try {
+        requestData = await parseFormDataBodyWithLimit(
+          request,
+          MAX_TRANSCRIPTION_MULTIPART_BYTES,
+        );
+      } catch (error) {
+        return jsonError(
+          error instanceof RequestBodyTooLargeError
+            ? "字幕生成用の動画は25MBまでです。動画を短くするか圧縮してください。"
+            : "動画の送信内容を読み取れませんでした。",
+          error instanceof RequestBodyTooLargeError ? 413 : 400,
+        );
+      }
       const uploadedFile = requestData.get("file");
       requestHighAccuracy = requestData.get("quality") === "high";
       usageReservationId = String(
@@ -443,10 +508,8 @@ export async function POST(request: Request) {
       return jsonError("対応している動画または音声ファイルを選んでください。");
     }
 
-    if (isUsageEnforcementEnabled()) {
-      const { currentUser } = await getUsagePrincipal(request, {
-        allowTrial: true,
-      });
+    if (usageEnforcementEnabled) {
+      const currentUser = usagePrincipal?.currentUser ?? null;
       if (!currentUser) {
         return jsonError("続けるにはアカウントへのログインが必要です。", 401);
       }
@@ -501,7 +564,11 @@ export async function POST(request: Request) {
       meteredAuthorization = authorization;
     }
 
-    const timedResult = await requestTimedTranscription(apiKey, file);
+    const timedResult = await requestTimedTranscription(
+      apiKey,
+      file,
+      request.signal,
+    );
     if (!timedResult.ok) {
       console.error(
         "OpenAI transcription failed",
@@ -551,7 +618,12 @@ export async function POST(request: Request) {
     let refined = false;
 
     if (shouldRefine) {
-      const refineResult = await requestTranscription(apiKey, file, "refine");
+      const refineResult = await requestTranscription(
+        apiKey,
+        file,
+        "refine",
+        request.signal,
+      );
       if (refineResult.ok) {
         const refinedText = refineResult.transcription.text?.trim() ?? "";
         const refinedTextIsComplete =

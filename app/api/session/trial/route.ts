@@ -2,7 +2,11 @@ import {
   issueOrRefreshTrialSession,
   TrialSessionIssueError,
 } from "../../../../lib/trial-session-store";
-import { trialSessionCookie } from "../../../../lib/trial-session";
+import {
+  getOrCreateTrialDeviceId,
+  trialDeviceCookie,
+  trialSessionCookie,
+} from "../../../../lib/trial-session";
 import { isSameOriginMutation } from "../../../../lib/operator-session";
 
 export async function POST(request: Request) {
@@ -13,8 +17,13 @@ export async function POST(request: Request) {
     );
   }
   let sessionId: string;
+  const device = getOrCreateTrialDeviceId(request);
   try {
-    sessionId = await issueOrRefreshTrialSession(request);
+    sessionId = await issueOrRefreshTrialSession(
+      request,
+      Math.floor(Date.now() / 1_000),
+      device.deviceId,
+    );
   } catch (error) {
     if (error instanceof TrialSessionIssueError) {
       return Response.json(
@@ -28,10 +37,17 @@ export async function POST(request: Request) {
     throw error;
   }
   const response = Response.json({ ready: true });
-  response.headers.set(
+  response.headers.append(
     "Set-Cookie",
     trialSessionCookie(
       sessionId,
+      new URL(request.url).protocol === "https:",
+    ),
+  );
+  response.headers.append(
+    "Set-Cookie",
+    trialDeviceCookie(
+      device.deviceId,
       new URL(request.url).protocol === "https:",
     ),
   );

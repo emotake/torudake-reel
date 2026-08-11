@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
   let currentUser = await getCurrentUser(request);
   let authorizedReservationId: string | null = null;
-  if (isUsageEnforcementEnabled()) {
+  if (isUsageEnforcementEnabled(request)) {
     const principal = await getUsagePrincipal(request, { allowTrial: true });
     currentUser = principal.currentUser;
     const reservationId =

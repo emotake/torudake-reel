@@ -51,5 +51,5 @@ test("discloses Google Analytics in the privacy policy", async () => {
 
   assert.match(privacySource, /Google Analytics/);
   assert.match(privacySource, /Googleへ送信される場合があります/);
-  assert.match(privacySource, /2026年8月9日/);
+  assert.match(privacySource, /2026年8月11日/);
 });

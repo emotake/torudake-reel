@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
     let ownerEmail: string | null = null;
     const usageReservationId = payload.usageReservationId?.trim() ?? "";
-    if (isManagedUploadEnforcementEnabled()) {
+    if (isManagedUploadEnforcementEnabled(request)) {
       const { currentUser, isOperator } = await getUsagePrincipal(request, {
         allowTrial: true,
       });

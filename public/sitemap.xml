@@ -3,35 +3,35 @@
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://torudake-reel.pages.dev/</loc>
-    <lastmod>2026-08-09</lastmod>
+    <lastmod>2026-08-11</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
-      <image:loc>https://torudake-reel.pages.dev/og.png</image:loc>
+      <image:loc>https://torudake-reel.pages.dev/og.png?v=20260811-accessibility</image:loc>
       <image:title>撮るだけリール</image:title>
     </image:image>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/photo-reel</loc>
-    <lastmod>2026-08-09</lastmod>
+    <lastmod>2026-08-11</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/privacy</loc>
-    <lastmod>2026-08-09</lastmod>
+    <lastmod>2026-08-11</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/terms</loc>
-    <lastmod>2026-08-05</lastmod>
+    <lastmod>2026-08-11</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/commercial-disclosure</loc>
-    <lastmod>2026-08-05</lastmod>
+    <lastmod>2026-08-11</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>

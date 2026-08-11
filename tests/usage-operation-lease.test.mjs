@@ -157,7 +157,7 @@ test("the transcribe route uses the shared AI lease before upstream work and set
 
   assert.ok(
     postSource.indexOf("authorizeMeteredAiOperation(") <
-      postSource.indexOf("requestTimedTranscription(apiKey, file)"),
+      postSource.indexOf("requestTimedTranscription("),
     "the upstream request must follow leased authorization",
   );
   assert.match(routeSource, /reason === "operation_in_progress"[\s\S]*409/);

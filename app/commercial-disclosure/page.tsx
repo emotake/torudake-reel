@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import {
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
+  FREE_SECONDS_LIMIT,
+  FREE_VIDEO_LIMIT,
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
   STARTER_MONTHLY_VIDEO_LIMIT,
@@ -18,7 +22,8 @@ export const metadata = buildPublicPageMetadata({
 });
 
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
-const LAST_UPDATED = "2026年8月10日";
+const LAST_UPDATED = "2026年8月11日";
+const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
 export default function CommercialDisclosurePage() {
   return (
@@ -77,7 +82,7 @@ export default function CommercialDisclosurePage() {
           </div>
         </dl>
         <p>
-          適用される税金がある場合は、注文確定前のStripe決済画面に最終的な支払額を表示します。
+          表示価格はすべて消費税込みです。注文確定前のStripe決済画面にも最終的な支払額を表示します。
         </p>
       </article>
 
@@ -89,11 +94,11 @@ export default function CommercialDisclosurePage() {
         <dl className="legalDetails">
           <div>
             <dt>無料体験</dt>
-            <dd>1動画あたり3回</dd>
+            <dd>1動画あたり{FREE_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
             <dt>1動画作成</dt>
-            <dd>1動画あたり5回</dd>
+            <dd>1動画あたり{ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
             <dt>Starter・Standard・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
@@ -131,7 +136,8 @@ export default function CommercialDisclosurePage() {
           Stripeでの決済完了を確認後、通常は直ちに利用枠へ反映します。通信状況などにより反映に時間がかかる場合があります。
         </p>
         <p>
-          無料体験は編集とプレビューまで利用でき、完成動画の保存には有料の利用枠が必要です。動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
+          無料体験は合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
+          動画までの範囲で、いずれかの上限に先に達するまで編集とプレビューを利用できます。完成動画の保存には有料の利用枠が必要です。動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
         </p>
       </article>
 
@@ -141,12 +147,14 @@ export default function CommercialDisclosurePage() {
           <li>
             月額プランはアカウント画面の「支払い方法・解約を管理」からいつでも解約できます。解約後も支払済み期間の終了までは利用でき、次回以降の請求は行いません。
           </li>
-          <li>月額料金の日割り返金は行いません。</li>
           <li>
-            デジタルサービスの性質上、提供開始後または利用済みの利用枠について、お客様都合による返品・返金は受け付けません。
+            月額プランを解約しても、支払済み期間の料金は日割りで返金しません。
           </li>
           <li>
-            二重請求、決済後に利用枠が反映されない場合、その他本サービス側の不具合がある場合は、上記メールアドレスへご連絡ください。
+            1動画作成を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。
+          </li>
+          <li>
+            法令上返金が必要な場合、二重請求、決済後に利用枠が反映されない場合、その他本サービス側の不具合がある場合は、上記メールアドレスへご連絡ください。
           </li>
         </ul>
       </article>

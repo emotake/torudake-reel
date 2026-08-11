@@ -11,7 +11,7 @@ import {
 } from "./operator-session";
 import {
   getRegisteredTrialSessionId,
-  trialSessionPrincipalEmail,
+  unboundTrialSessionPrincipalEmail,
 } from "./trial-session-store";
 export {
   clearOperatorSessionCookie,
@@ -271,7 +271,7 @@ export async function getUsagePrincipal(
     ? await getRegisteredTrialSessionId(request)
     : null;
   const trialPrincipalEmail = trialSessionId
-    ? await trialSessionPrincipalEmail(trialSessionId)
+    ? await unboundTrialSessionPrincipalEmail(trialSessionId)
     : null;
   return {
     currentUser: trialPrincipalEmail

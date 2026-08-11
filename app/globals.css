@@ -11180,3 +11180,236 @@ footer > small {
     min-height: 112px;
   }
 }
+
+/* Product-wide readability and touch targets. Keep body copy comfortable and
+   reserve 12px for short labels, badges, and helper text. */
+.workspace :is(p, li, label),
+.processingPage :is(p, li, label),
+.resultPage :is(p, li, label),
+.photoReelShell :is(p, li, label),
+.accountPage :is(p, li, label),
+.operatorAccessPage :is(p, li, label),
+.legalPage :is(p, li, dt, dd) {
+  font-size: 14px;
+}
+
+.workspace small,
+.processingPage small,
+.resultPage small,
+.photoReelShell small,
+.accountPage small,
+.operatorAccessPage small {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workspace :is(button, input, select, textarea),
+.processingPage :is(button, input, select, textarea),
+.resultPage :is(button, input, select, textarea),
+.photoReelShell :is(button, input, select, textarea),
+.accountPage :is(button, input, select, textarea),
+.operatorAccessPage :is(button, input, select, textarea) {
+  font-size: 14px;
+}
+
+.workspace :is(
+  .fileRow strong,
+  .autoTelopNote strong,
+  .optionCards button strong,
+  .tonePreview strong,
+  .originalLengthSelection strong,
+  .audioModeCards strong,
+  .narrationStyleCards strong,
+  .narrationChoiceCards strong,
+  .keepOriginalPromise strong,
+  .resultNarrationCutMode strong,
+  .resultNarrationCutActions strong
+),
+.processingPage .processingSteps strong,
+.resultPage :is(
+  .captionStylePickerHeading strong,
+  .captionStyleChoices > button > strong,
+  .captionIdentitySummary strong,
+  .voiceStylePicker strong,
+  .narrationGenerationQuota strong,
+  .fixedDisclosure strong,
+  .thumbnailControlLabel > strong,
+  .thumbnailThemeSummary strong,
+  .thumbnailCandidateCopy > span,
+  .thumbnailPreviewPlaceholder strong,
+  .deliverableCards strong,
+  .exportBar strong
+),
+.photoReelShell :is(
+  button strong,
+  .photoReelOutputFacts strong,
+  .photoReelPhotoInfo strong,
+  .photoReelField > span,
+  .photoReelAudioRow strong
+) {
+  font-size: 14px;
+}
+
+.workspace :is(
+  .workspaceHeading > span,
+  .fileRow button,
+  .autoTelopNote > span,
+  .optionCostNote,
+  .originalLengthSelection > span,
+  .editSummary span,
+  .narrationOptionLabel,
+  .narrationChoiceCards > button > span,
+  .resultNarrationCutMode > div:first-child > span
+),
+.processingPage :is(.processingSteps span, .timeSaved span),
+.resultPage :is(
+  .previewTop > span,
+  .editPanelHeading > span,
+  .captionStylePickerHeading span,
+  .captionIdentitySummary > i,
+  .identityControl > span,
+  .narrationVoicePreviewStatus,
+  .narrationGenerationQuota span,
+  .fixedDisclosure span,
+  .captionAccentStatus,
+  .cutSummary span,
+  .thumbnailMakerHeading > span,
+  .thumbnailCandidateList > button > span,
+  .intonationComparisonHeading span
+),
+.photoReelShell :is(
+  .photoReelEyebrow,
+  .photoReelTopbar nav a,
+  .photoReelPlayback > span,
+  .photoReelSectionNumber,
+  .photoReelTemplateBadge,
+  .photoReelHow article > span,
+  .photoReelFooter nav a
+),
+.accountPage :is(.accountUsageGrid p, .accountPlans article > p, .accountLegalLinks),
+.operatorAccessPage :is(.operatorAccessEyebrow, .operatorAccessNote) {
+  font-size: 12px;
+}
+
+.workspace :is(.sampleSource > span, .localNote),
+.resultPage :is(.captionStyleSample, .captionStyleSample.pop) {
+  font-size: 12px;
+}
+
+.resultPage .captionStyleChoices {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.resultPage .captionStyleSample {
+  min-height: 54px;
+}
+
+:is(.workspace, .resultPage) :is(
+  .narrationBrief > span,
+  .narrationScriptEditor label > span,
+  .postCaptionEditor label > span
+) {
+  font-size: 14px;
+}
+
+.resultPage :is(
+  .pronunciationQuickStart span,
+  .pronunciationEntryCount,
+  .intonationPresetPicker > span,
+  .timelineStatus,
+  .captionCutToolbar > span em,
+  .deliverableCards > button > i
+) {
+  font-size: 12px;
+}
+
+.disclosureModal > p:not(.eyebrow),
+.modalDisclosureText,
+.disclosureCheck span {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.legalBack {
+  font-size: 14px;
+}
+
+.legalPage header p,
+.legalPage article p,
+.legalPage article li,
+.legalDetails dt,
+.legalDetails dd {
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.accountHeaderActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.accountSignOut {
+  padding: 0 10px;
+}
+
+:is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage)
+  :is(button, select, textarea, summary, [role="button"]),
+:is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage)
+  input:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"]):not([type="color"]),
+:is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage)
+  label:has(input[type="radio"]),
+:is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage)
+  label:has(input[type="checkbox"]),
+.accountBrand,
+.accountSignOut,
+.accountRecoveryHelp a,
+.accountLegalLinks a,
+.legalBack,
+.legalPage article a,
+.disclosureCheck a,
+.photoReelTopbar a,
+.photoReelFooter nav a {
+  min-height: 44px;
+}
+
+.accountBrand,
+.accountRecoveryHelp a,
+.accountLegalLinks a,
+.legalBack,
+.legalPage article a,
+.disclosureCheck a,
+.photoReelTopbar a,
+.photoReelFooter nav a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.modalClose {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+}
+
+:is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage, .legalPage)
+  :is(button, a, input, select, textarea, summary, [role="button"]):focus-visible {
+  outline: 3px solid rgba(229, 82, 60, 0.42);
+  outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .resultPage .captionStyleChoices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .accountHeader {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .accountHeaderActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

@@ -3,7 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildSiteStructuredData } from "../lib/seo.ts";
-import { SITE_DESCRIPTION, SITE_ORIGIN } from "../lib/site.ts";
+import {
+  SITE_DESCRIPTION,
+  SITE_LAST_MODIFIED,
+  SITE_OG_IMAGE_PATH,
+  SITE_ORIGIN,
+  siteUrl,
+} from "../lib/site.ts";
 
 const readProjectFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -52,6 +58,15 @@ test("lists only canonical public pages in the sitemap", () => {
   ]);
   assert.ok(urls.every((url) => !url.includes("?")));
   assert.ok(urls.every((url) => !url.includes("/account")));
+  const lastModifiedValues = [
+    ...sitemapSource.matchAll(/<lastmod>([^<]+)<\/lastmod>/g),
+  ].map((match) => match[1]);
+  assert.equal(lastModifiedValues.length, urls.length);
+  assert.ok(lastModifiedValues.every((value) => value === SITE_LAST_MODIFIED));
+  assert.match(
+    sitemapSource,
+    /<image:loc>https:\/\/torudake-reel\.pages\.dev\/og\.png\?v=20260811-accessibility<\/image:loc>/,
+  );
 });
 
 test("uses a fixed public canonical instead of the request host", () => {
@@ -80,6 +95,9 @@ test("describes the real web application without invented ratings", () => {
   assert.ok(application);
   assert.equal(application.url, `${SITE_ORIGIN}/`);
   assert.equal(application.applicationCategory, "MultimediaApplication");
+  assert.equal(application.dateModified, SITE_LAST_MODIFIED);
+  assert.equal(application.image, siteUrl(SITE_OG_IMAGE_PATH));
+  assert.equal(application.termsOfService, `${SITE_ORIGIN}/terms`);
   assert.ok(application.featureList.includes("自動テロップ"));
   assert.ok(application.featureList.includes("AIナレーション"));
   assert.ok(
@@ -110,6 +128,8 @@ test("describes the real web application without invented ratings", () => {
     application.offers.some((offer) => offer.price === 1480),
     false,
   );
+  assert.match(application.offers[0].description, /合計3分以内・最大2動画/);
+  assert.ok(application.offers.slice(1).every((offer) => /税込/.test(offer.description)));
 });
 
 test("publishes a Japanese web app manifest", () => {
@@ -117,5 +137,8 @@ test("publishes a Japanese web app manifest", () => {
   assert.equal(value.start_url, "/");
   assert.equal(value.lang, "ja");
   assert.equal(value.icons[0].src, "/favicon.svg");
-  assert.match(value.description, /AIナレーションモードでは投稿文も作成/);
+  assert.equal(value.description, SITE_DESCRIPTION);
+  assert.equal(value.id, "/");
+  assert.equal(value.scope, "/");
+  assert.deepEqual(value.categories, ["photo", "video"]);
 });

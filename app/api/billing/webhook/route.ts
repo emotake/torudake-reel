@@ -5,6 +5,7 @@ import {
   getBillingUserById,
   getBillingUserByStripeCustomer,
   recordOneTimePurchase,
+  releaseMonthlyCheckoutLock,
   setStripeCustomerId,
   setStripeCustomerIdentity,
   setSubscriptionPeriodRevocationState,
@@ -106,6 +107,8 @@ export async function POST(request: Request) {
       event.type === "checkout.session.async_payment_succeeded"
     ) {
       await handleCheckoutCompleted(event.data.object);
+    } else if (event.type === "checkout.session.expired") {
+      await handleCheckoutExpired(event.data.object);
     } else if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
@@ -183,7 +186,14 @@ async function handleCheckoutCompleted(session: StripeObject) {
     if (actualPlan !== expectedPlan) {
       throw new Error("Checkout subscription does not match the selected plan.");
     }
-    await saveSubscription(user.id, subscription);
+    await persistSubscription(user.id, subscription);
+    const checkoutLockToken = metadataValue(session, "checkout_lock_token");
+    if (checkoutLockToken) {
+      await releaseMonthlyCheckoutLock({
+        userId: user.id,
+        lockToken: checkoutLockToken,
+      });
+    }
     return;
   }
 
@@ -207,6 +217,19 @@ async function handleCheckoutCompleted(session: StripeObject) {
     stripePriceId: expectedPriceId,
   });
   await reconcileOneTimePurchase(paymentIntentId);
+}
+
+async function handleCheckoutExpired(session: StripeObject) {
+  const plan = metadataValue(session, "plan");
+  if (plan !== "starter" && plan !== "standard" && plan !== "light") return;
+  const userId =
+    stringValue(session.client_reference_id) ??
+    metadataValue(session, "app_user_id");
+  const lockToken = metadataValue(session, "checkout_lock_token");
+  if (!userId || !lockToken) return;
+  const user = await getBillingUserById(userId);
+  if (!user) return;
+  await releaseMonthlyCheckoutLock({ userId: user.id, lockToken });
 }
 
 async function handlePurchaseStateChanged(
@@ -262,8 +285,7 @@ async function reconcileMonthlySubscriptionPaymentState(
     `/v1/invoices/${encodeURIComponent(invoiceId)}`,
   );
   const subscriptionId = subscriptionIdFromInvoice(invoice);
-  const periodStart = invoicePeriodStart(invoice);
-  if (!subscriptionId || !periodStart) return;
+  if (!subscriptionId) return;
 
   const subscription = await stripeGet<StripeObject>(
     `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
@@ -271,10 +293,19 @@ async function reconcileMonthlySubscriptionPaymentState(
   const item = firstSubscriptionItem(subscription);
   const priceId = item ? objectId(item.price) : null;
   if (!priceId || !stripeMonthlyPlanForPrice(priceId)) return;
+  const periodStart = await invoicePeriodStart(
+    invoiceId,
+    invoice,
+    subscriptionId,
+    priceId,
+  );
+  if (!periodStart) {
+    throw new Error("Subscription invoice has no matching billing period.");
+  }
 
   // Persist the latest Stripe subscription snapshot before changing the
   // period-specific entitlement flag.
-  await handleSubscriptionChanged(subscription);
+  await persistSubscriptionForResolvedUser(subscription);
   const [refunds, disputes] = await Promise.all([
     listStripePaymentObjects("/v1/refunds", paymentIntentId),
     listStripePaymentObjects("/v1/disputes", paymentIntentId),
@@ -322,10 +353,7 @@ async function listStripePaymentObjects(
 async function handleInvoiceChanged(invoice: StripeObject) {
   const subscriptionId = subscriptionIdFromInvoice(invoice);
   if (!subscriptionId) return;
-  const subscription = await stripeGet<StripeObject>(
-    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
-  );
-  await handleSubscriptionChanged(subscription);
+  await handleSubscriptionChanged({ id: subscriptionId });
 }
 
 function subscriptionIdFromInvoice(invoice: StripeObject) {
@@ -338,14 +366,89 @@ function subscriptionIdFromInvoice(invoice: StripeObject) {
   );
 }
 
-function invoicePeriodStart(invoice: StripeObject) {
-  const direct = numberValue(invoice.period_start);
-  if (direct) return direct;
-  const lines = recordValue(invoice.lines);
-  const firstLine = Array.isArray(lines?.data)
-    ? recordValue(lines.data[0])
-    : null;
-  return numberValue(recordValue(firstLine?.period)?.start);
+async function invoicePeriodStart(
+  invoiceId: string,
+  invoice: StripeObject,
+  subscriptionId: string,
+  priceId: string,
+) {
+  const lines = await listStripeInvoiceLines(invoiceId);
+  return selectSubscriptionInvoicePeriodStart(
+    lines,
+    subscriptionId,
+    priceId,
+    numberValue(invoice.period_start),
+  );
+}
+
+export function selectSubscriptionInvoicePeriodStart(
+  lines: StripeObject[],
+  subscriptionId: string,
+  priceId: string,
+  fallbackPeriodStart: number | null,
+) {
+  const ranked = lines
+    .map((line) => {
+      const periodStart = numberValue(recordValue(line.period)?.start);
+      if (!periodStart) return null;
+      const subscriptionMatches =
+        invoiceLineSubscriptionId(line) === subscriptionId;
+      const priceMatches = invoiceLinePriceId(line) === priceId;
+      if (!subscriptionMatches && !priceMatches) return null;
+      const score =
+        (subscriptionMatches ? 4 : 0) +
+        (priceMatches ? 2 : 0) +
+        (line.proration === true ? 0 : 1);
+      return { periodStart, score };
+    })
+    .filter(
+      (item): item is { periodStart: number; score: number } => item !== null,
+    )
+    .sort((left, right) => right.score - left.score);
+  return ranked[0]?.periodStart ?? fallbackPeriodStart;
+}
+
+async function listStripeInvoiceLines(invoiceId: string) {
+  const lines: StripeObject[] = [];
+  let startingAfter: string | null = null;
+  for (let page = 0; page < MAX_STRIPE_LIST_PAGES; page += 1) {
+    const parameters = new URLSearchParams({ limit: "100" });
+    if (startingAfter) parameters.set("starting_after", startingAfter);
+    const list = await stripeGet<{ data?: unknown[]; has_more?: boolean }>(
+      `/v1/invoices/${encodeURIComponent(invoiceId)}/lines?${parameters}`,
+    );
+    if (!Array.isArray(list.data) || typeof list.has_more !== "boolean") {
+      throw new Error("Stripe returned an invalid invoice-line list.");
+    }
+    const pageLines = list.data.map(recordValue);
+    if (pageLines.some((line) => line === null)) {
+      throw new Error("Stripe returned an invalid invoice line.");
+    }
+    lines.push(...(pageLines as StripeObject[]));
+    if (!list.has_more) return lines;
+    startingAfter = stringValue(pageLines.at(-1)?.id);
+    if (!startingAfter) {
+      throw new Error("Stripe invoice-line pagination has no cursor.");
+    }
+  }
+  throw new Error("Stripe invoice-line pagination exceeded its limit.");
+}
+
+function invoiceLineSubscriptionId(line: StripeObject) {
+  return (
+    objectId(line.subscription) ??
+    objectId(
+      recordValue(recordValue(line.parent)?.subscription_item_details)
+        ?.subscription,
+    )
+  );
+}
+
+function invoiceLinePriceId(line: StripeObject) {
+  return (
+    objectId(line.price) ??
+    objectId(recordValue(recordValue(line.pricing)?.price_details)?.price)
+  );
 }
 
 async function resolveCheckoutUser(
@@ -397,7 +500,16 @@ async function verifyCheckoutLineItem(
   }
 }
 
-async function handleSubscriptionChanged(subscription: StripeObject) {
+export async function handleSubscriptionChanged(subscription: StripeObject) {
+  const subscriptionId = stringValue(subscription.id);
+  if (!subscriptionId) throw new Error("Subscription has no Stripe ID.");
+  const latestSubscription = await stripeGet<StripeObject>(
+    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  await persistSubscriptionForResolvedUser(latestSubscription);
+}
+
+async function persistSubscriptionForResolvedUser(subscription: StripeObject) {
   const customerId = objectId(subscription.customer);
   const item = firstSubscriptionItem(subscription);
   const priceId = item ? objectId(item.price) : null;
@@ -419,10 +531,10 @@ async function handleSubscriptionChanged(subscription: StripeObject) {
   if (user.stripeCustomerId && user.stripeCustomerId !== customerId) {
     throw new Error("Subscription user belongs to another Stripe customer.");
   }
-  await saveSubscription(userId, subscription);
+  await persistSubscription(userId, subscription);
 }
 
-async function saveSubscription(userId: string, subscription: StripeObject) {
+async function persistSubscription(userId: string, subscription: StripeObject) {
   const subscriptionId = stringValue(subscription.id);
   const customerId = objectId(subscription.customer);
   const item = firstSubscriptionItem(subscription);
@@ -466,6 +578,13 @@ async function saveSubscription(userId: string, subscription: StripeObject) {
     currentPeriodEnd,
     cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
   });
+  const checkoutLockToken = metadataValue(
+    subscription,
+    "checkout_lock_token",
+  );
+  if (checkoutLockToken) {
+    await releaseMonthlyCheckoutLock({ userId, lockToken: checkoutLockToken });
+  }
 }
 
 function firstSubscriptionItem(subscription: StripeObject) {

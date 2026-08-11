@@ -4,7 +4,7 @@ import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 
 export async function POST(request: Request) {
-  if (!isUsageEnforcementEnabled()) {
+  if (!isUsageEnforcementEnabled(request)) {
     return Response.json({ released: true });
   }
   const { currentUser } = await getUsagePrincipal(request, {

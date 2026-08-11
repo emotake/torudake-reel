@@ -11,6 +11,8 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  FREE_SECONDS_LIMIT,
+  FREE_VIDEO_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
@@ -148,8 +150,11 @@ export default function AccountClient() {
     }
     setBusy("register");
     setError("");
+    const addingBackupPasskey = status?.authenticated === true;
     try {
-      await postJson<{ ready: boolean }>("/api/session/trial");
+      if (!addingBackupPasskey) {
+        await postJson<{ ready: boolean }>("/api/session/trial");
+      }
       const prepared = await postJson<
         AuthOptions<PublicKeyCredentialCreationOptionsJSON>
       >("/api/account/passkey/register/options");
@@ -161,10 +166,21 @@ export default function AccountClient() {
         "/api/account/passkey/register/verify",
         credential,
       );
-      setNotice("アカウントを作成しました。この端末の本人確認でログインできます。");
+      setNotice(
+        addingBackupPasskey
+          ? "予備のパスキーを追加しました。端末を変更したときのログインにも利用できます。"
+          : "アカウントを作成しました。この端末の本人確認でログインできます。",
+      );
       await loadStatus();
     } catch (authError) {
-      setError(authenticationMessage(authError, "アカウントを作成できませんでした。"));
+      setError(
+        authenticationMessage(
+          authError,
+          addingBackupPasskey
+            ? "予備のパスキーを追加できませんでした。"
+            : "アカウントを作成できませんでした。",
+        ),
+      );
     } finally {
       setBusy(null);
     }
@@ -410,9 +426,18 @@ export default function AccountClient() {
     <main className="accountPage">
       <header className="accountHeader">
         <Link className="accountBrand" href="/"><span>▶</span>撮るだけリール</Link>
-        <button className="accountSignOut" disabled={busy !== null} onClick={logout}>
-          {busy === "logout" ? "ログアウト中…" : "ログアウト"}
-        </button>
+        <div className="accountHeaderActions">
+          <button
+            className="accountSecondaryAction accountBackupPasskey"
+            disabled={busy !== null}
+            onClick={registerPasskey}
+          >
+            {busy === "register" ? "追加中…" : "予備パスキーを追加"}
+          </button>
+          <button className="accountSignOut" disabled={busy !== null} onClick={logout}>
+            {busy === "logout" ? "ログアウト中…" : "ログアウト"}
+          </button>
+        </div>
       </header>
 
       <section className="accountIntro">
@@ -443,14 +468,14 @@ export default function AccountClient() {
 
       {status && (
         <>
-          <section className="accountUsageGrid">
+          <section className="accountUsageGrid" aria-label="利用状況の概要">
             <article>
               <p>現在のプラン</p>
               <strong>{activeMonthlyPlanLabel(status)}</strong>
               <span>
                 {status.monthly?.active
                   ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
-                  : `残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒・AI処理は1動画あたり3回`}
+                  : `無料体験：残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒（最大${FREE_VIDEO_LIMIT}動画・合計${Math.floor(FREE_SECONDS_LIMIT / 60)}分のいずれか先に到達するまで）・AI処理は1動画あたり3回`}
               </span>
             </article>
             <article>
@@ -473,7 +498,9 @@ export default function AccountClient() {
             <header className="accountPlansIntro">
               <p className="eyebrow">SAVE PLAN</p>
               <h2 id="accountPlansTitle">保存するペースで選ぶ</h2>
-              <p>どのプランも編集とプレビューは同じ。違いは毎月保存できる本数です。</p>
+              <p>
+                編集・プレビュー機能は共通です。月額プランは毎月の保存本数、1動画作成は必要なときだけ1本を保存できます。AI処理の上限は各プラン内に表示しています。表示価格はすべて税込です。
+              </p>
             </header>
             <article className="accountPlanCard standardPlan featured">
               <span className="accountPlanRecommend">おすすめ</span>
@@ -528,7 +555,13 @@ export default function AccountClient() {
                 ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
                 <small> / 月</small>
               </strong>
-              <span className="accountPlanUnit">1本あたり約167円</span>
+              <span className="accountPlanUnit">
+                1本あたり約
+                {Math.round(
+                  STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
+                )}
+                円
+              </span>
               <ul>
                 <li>毎月{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存</li>
                 <li>

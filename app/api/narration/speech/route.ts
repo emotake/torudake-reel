@@ -17,6 +17,10 @@ import {
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { narrationScriptCharacterLimit } from "../../../../lib/usage-duration";
 import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
+import {
   decodeBase64Audio,
   pcm16ChunksToWav,
 } from "../../../../lib/realtime-audio";
@@ -39,6 +43,7 @@ const REALTIME_SAMPLE_RATE = 24_000;
 const REALTIME_TIMEOUT_MS = 150_000;
 const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
+const MAX_SPEECH_REQUEST_BYTES = 64 * 1024;
 const NARRATION_PROFILE_VERSION = "2026-08-10-continuity-v1";
 
 const VOICE_SETTINGS: Record<
@@ -606,6 +611,17 @@ export async function POST(request: Request) {
     );
   }
 
+  const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
+  const usagePrincipal = usageEnforcementEnabled
+    ? await getUsagePrincipal(request, { allowTrial: true })
+    : null;
+  if (usageEnforcementEnabled && !usagePrincipal?.currentUser) {
+    return Response.json(
+      { error: "続けるにはアカウントへのログインが必要です。" },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   let payload: {
     script?: unknown;
     style?: unknown;
@@ -620,8 +636,17 @@ export async function POST(request: Request) {
     expectedDurationSeconds?: unknown;
   };
   try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
+    payload = await parseJsonBodyWithLimit<typeof payload>(
+      request,
+      MAX_SPEECH_REQUEST_BYTES,
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return Response.json(
+        { error: "台本の送信サイズが大きすぎます。" },
+        { status: 413 },
+      );
+    }
     return Response.json({ error: "台本を読み取れませんでした。" }, { status: 400 });
   }
 
@@ -678,10 +703,8 @@ export async function POST(request: Request) {
 
   let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
   let meteredAuthorizationSettled = false;
-  if (isUsageEnforcementEnabled()) {
-    const { currentUser } = await getUsagePrincipal(request, {
-      allowTrial: true,
-    });
+  if (usageEnforcementEnabled) {
+    const currentUser = usagePrincipal?.currentUser ?? null;
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId

@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import { NARRATION_DISCLOSURE_TEXT } from "../../lib/narration";
 import {
-  NARRATION_DISCLOSURE_TEXT,
-  NARRATION_TERMS_VERSION,
-} from "../../lib/narration";
-import {
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
+  FREE_SECONDS_LIMIT,
+  FREE_VIDEO_LIMIT,
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
   ONE_TIME_PRICE_JPY,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
   STARTER_MONTHLY_VIDEO_LIMIT,
@@ -21,6 +22,11 @@ export const metadata = buildPublicPageMetadata({
   path: "/terms",
 });
 
+const TERMS_VERSION = "2026-08-11";
+const LAST_UPDATED = "2026年8月11日";
+const CONTACT_EMAIL = "torudake.reel@gmail.com";
+const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
+
 export default function TermsPage() {
   return (
     <main className="legalPage">
@@ -30,13 +36,20 @@ export default function TermsPage() {
       <header>
         <p className="eyebrow">TERMS OF SERVICE</p>
         <h1>利用規約</h1>
-        <p>規約バージョン：{NARRATION_TERMS_VERSION}</p>
+        <p>
+          規約バージョン：{TERMS_VERSION}／最終更新日：{LAST_UPDATED}
+        </p>
       </header>
 
       <article>
         <h2>1. 本サービスについて</h2>
         <p>
           撮るだけリールは、利用者が提供する動画・音声・補足情報をもとに、編集候補、字幕、投稿文、AIナレーション等を作成する支援サービスです。生成結果は公開前に利用者自身で確認してください。
+        </p>
+        <p>
+          本規約は、本サービスの運営者と利用者との間の利用条件を定めるものです。利用者は、本規約と
+          <Link href="/privacy">プライバシーポリシー</Link>
+          に同意したうえで本サービスを利用します。
         </p>
       </article>
 
@@ -82,13 +95,16 @@ export default function TermsPage() {
         <h2>5. 有料プランとお支払い</h2>
         <ul>
           <li>
-            無料体験は編集とプレビューまで利用でき、完成動画の保存には有料の利用枠が必要です。
+            無料体験は合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
+            動画までの範囲で、いずれかの上限に先に達するまで利用できます。編集とプレビューは無料ですが、完成動画の保存には有料の利用枠が必要です。
           </li>
           <li>
             AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本が正常に生成された時点で1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分を使用します。
           </li>
           <li>
-            AI処理の上限は1動画あたり、無料体験3回、1動画作成5回、月額プラン
+            AI処理の上限は1動画あたり、無料体験
+            {FREE_AI_OPERATION_SUCCESS_LIMIT}回、1動画作成
+            {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回、月額プラン
             {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
           </li>
           <li>
@@ -104,6 +120,7 @@ export default function TermsPage() {
           <li>
             1動画作成は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。
           </li>
+          <li>本ページおよび決済画面に表示する販売価格は、すべて消費税込みです。</li>
           <li>
             支払いと解約はStripeの決済画面およびアカウント画面から行います。月額プランを解約した場合、支払済み期間の終了時に月額利用枠が終了します。
           </li>
@@ -111,15 +128,70 @@ export default function TermsPage() {
             動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
           </li>
           <li>
-            デジタルサービスの性質上、利用済みの利用枠は、法令上必要な場合または本サービス側の不具合が認められる場合を除き返金対象外です。
+            月額プランを解約しても、支払済み期間の料金は日割りで返金しません。1動画作成を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。ただし、法令上必要な場合、二重請求、または本サービス側の不具合が認められる場合を除きます。
           </li>
         </ul>
       </article>
 
       <article>
-        <h2>6. 生成結果とサービス運営</h2>
+        <h2>6. 生成結果の確認</h2>
         <p>
           AIによる生成結果は常に正確または完全とは限りません。本サービスは、確認画面、開示文の自動追加、確認記録など、適切な利用を支える合理的な仕組みを継続して整備します。
+        </p>
+      </article>
+
+      <article>
+        <h2>7. 投稿素材と知的財産権</h2>
+        <p>
+          利用者が提供した動画、画像、音声、文章その他の素材に関する権利は、利用者または正当な権利者に留保されます。利用者は、本サービスの提供、障害調査および不正利用防止に必要な範囲で、運営者が当該素材を一時的に処理することを許諾します。
+        </p>
+        <p>
+          本サービスの画面、プログラム、名称、ロゴ、説明文その他の運営者が作成した内容に関する権利は、運営者または正当な権利者に帰属します。本規約は、これらの権利を利用者へ譲渡するものではありません。
+        </p>
+      </article>
+
+      <article>
+        <h2>8. 利用停止とサービスの変更</h2>
+        <p>
+          利用者が本規約に違反した場合、不正利用または第三者への被害のおそれがある場合、運営者は必要な範囲で機能制限、利用停止またはアカウントの停止を行うことがあります。
+        </p>
+        <p>
+          保守、障害、セキュリティ上の対応、外部サービスの停止、天災その他やむを得ない事情がある場合、事前の通知なく本サービスの全部または一部を一時停止することがあります。重要な機能変更またはサービス終了を行う場合は、合理的な範囲で事前に本サービス上で案内します。
+        </p>
+      </article>
+
+      <article>
+        <h2>9. 保証と責任の範囲</h2>
+        <p>
+          運営者は、本サービスが常に中断なく動作すること、すべての端末や素材で同じ結果になること、生成結果が利用者の目的に完全に適合することを保証しません。利用者は、公開前に生成結果、権利関係および投稿先の条件を確認してください。
+        </p>
+        <p>
+          運営者が本サービスに関して責任を負う場合、その範囲は、適用法令に反しない限り、通常かつ直接の損害に限られます。この制限は、運営者の故意または重大な過失がある場合には適用しません。
+        </p>
+      </article>
+
+      <article>
+        <h2>10. 本規約の変更</h2>
+        <p>
+          法令、料金、機能または運営方法の変更に応じて、本規約を変更することがあります。利用者への影響が大きい変更は、変更内容と適用日を本サービス上で事前に案内します。法令上、利用者の同意が必要な変更については、適切な方法で同意を取得します。
+        </p>
+      </article>
+
+      <article>
+        <h2>11. 準拠法と管轄</h2>
+        <p>
+          本規約は日本法に準拠します。本サービスに関する紛争については、法令に別段の定めがある場合を除き、東京地方裁判所または東京簡易裁判所を第一審の専属的合意管轄裁判所とします。
+        </p>
+      </article>
+
+      <article>
+        <h2>12. お問い合わせ</h2>
+        <p>
+          本規約、アカウント、決済またはサービス利用に関するお問い合わせは、
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+          までご連絡ください。販売事業者の表示事項は、
+          <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
+          から請求できます。
         </p>
       </article>
     </main>

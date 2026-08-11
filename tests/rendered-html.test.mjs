@@ -57,7 +57,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /AIが全部整える/);
   assert.match(html, /使い方に合う保存方法を。/);
   assert.match(html, /最大500MB/);
-  assert.match(html, /合計3分または2動画まで/);
+  assert.match(
+    html,
+    /合計3分以内・最大2動画まで（いずれか先に達するまで）/,
+  );
   assert.match(html, /編集・プレビューまで/);
   assert.match(html, /完成動画の保存は有料/);
   assert.match(html, /月7本で始める/);
@@ -89,7 +92,8 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(html, /エディトリアル/);
   assert.match(html, /ダイアリー/);
   assert.match(html, /クリーン/);
-  assert.match(html, /追加API料金 0円/);
+  assert.match(html, /プレビュー中の変更は追加料金なし/);
+  assert.doesNotMatch(html, /API料金/);
   assert.match(html, /1080×1920/);
   assert.match(html, /仕上がりプレビューは無料/);
   assert.match(html, /保存は1動画/);
@@ -181,6 +185,10 @@ test("publishes a privacy policy for uploaded media and external processors", as
   assert.match(html, /Stripe/);
   assert.match(html, /Google Analytics/);
   assert.match(html, /72時間/);
+  assert.match(html, /動画の静止画フレーム/);
+  assert.match(html, /torudake\.reel@gmail\.com/);
+  assert.match(html, /特定商取引法に基づく表記/);
+  assert.match(html, /請求手数料はかかりません/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/privacy"/,
@@ -213,15 +221,19 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /1動画作成/);
   assert.match(html, /Stripe/);
   assert.match(html, /最大500MB/);
-  assert.match(html, /無料体験は編集とプレビューまで/);
+  assert.match(html, /編集とプレビューを利用できます/);
   assert.match(html, /写真リールは書き出し成功時点/);
+  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
+  assert.match(html, /表示価格はすべて消費税込み/);
+  assert.match(html, /支払済み期間の料金は日割りで返金しません/);
+  assert.match(html, /注文確定後のお客様都合によるキャンセル・返品・返金/);
   assert.match(html, /AI処理の利用上限/);
   assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
   assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成などは正常に完了するごとに1回分/);
-  assert.match(html, /1動画あたり3回/);
-  assert.match(html, /1動画あたり5回/);
+  assert.match(html, /1動画あたり(?:<!-- -->)?3(?:<!-- -->)?回/);
+  assert.match(html, /1動画あたり(?:<!-- -->)?5(?:<!-- -->)?回/);
   assert.match(html, /1動画あたり(?:<!-- -->)?6(?:<!-- -->)?回/);
   assert.match(
     html,
@@ -237,7 +249,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
   assert.match(
     html,
-    /無料体験3回、1動画作成5回、月額プラン(?:<!-- -->)?6(?:<!-- -->)?回/,
+    /無料体験(?:<!-- -->)?3(?:<!-- -->)?回、1動画作成(?:<!-- -->)?5(?:<!-- -->)?回、月額プラン(?:<!-- -->)?6(?:<!-- -->)?回/,
   );
   assert.match(
     html,
@@ -250,4 +262,12 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分/);
+  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
+  assert.match(html, /すべて消費税込み/);
+  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-11/);
+  assert.match(html, /投稿素材と知的財産権/);
+  assert.match(html, /利用停止とサービスの変更/);
+  assert.match(html, /保証と責任の範囲/);
+  assert.match(html, /準拠法と管轄/);
+  assert.match(html, /torudake\.reel@gmail\.com/);
 });
