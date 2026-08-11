@@ -74,6 +74,14 @@ test("keeps mobile account access and accessible touch targets visible", () => {
     cssSource,
     /\.photoReelTopbar nav a\s*\{[\s\S]*?min-height:\s*44px/,
   );
+  assert.match(
+    cssSource,
+    /\.photoReelShell \.photoReelIntro > p,[\s\S]*?\.photoReelShell \.photoReelHow article > p\s*\{[\s\S]*?font-size:\s*14px/,
+  );
+  assert.match(
+    cssSource,
+    /\.photoReelShell \.photoReelTrust > span,[\s\S]*?\.photoReelShell \.photoReelExportCard > div:first-child small,[\s\S]*?\.photoReelShell \.photoReelExportCard li\s*\{[\s\S]*?font-size:\s*12px/,
+  );
   assert.match(cssSource, /\.accountHeaderActions\s*\{[\s\S]*?display:\s*flex/);
   assert.doesNotMatch(cssSource, /font-size:\s*max\(12px, 1em\)/);
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.mobilePriceLink\s*\{[\s\S]*?display:\s*none/);

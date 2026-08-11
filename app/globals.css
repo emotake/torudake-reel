@@ -11413,3 +11413,20 @@ footer > small {
     justify-content: space-between;
   }
 }
+
+.photoReelShell .photoReelIntro > p,
+.photoReelShell .photoReelHow article > p {
+  font-size: 14px;
+}
+
+.photoReelShell .photoReelTrust > span,
+.photoReelShell .photoReelOutputFacts > span,
+.photoReelShell .photoReelSectionHeading > span,
+.photoReelShell .photoReelTemplateGrid button > em,
+.photoReelShell .photoReelField small,
+.photoReelShell .photoReelExportIcon,
+.photoReelShell .photoReelExportCard > div:first-child small,
+.photoReelShell .photoReelExportCard ul,
+.photoReelShell .photoReelExportCard li {
+  font-size: 12px;
+}
