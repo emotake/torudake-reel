@@ -70,6 +70,10 @@ test("keeps mobile account access and accessible touch targets visible", () => {
     cssSource,
     /\.modalClose\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px/,
   );
+  assert.match(
+    cssSource,
+    /\.photoReelTopbar nav a\s*\{[\s\S]*?min-height:\s*44px/,
+  );
   assert.match(cssSource, /\.accountHeaderActions\s*\{[\s\S]*?display:\s*flex/);
   assert.doesNotMatch(cssSource, /font-size:\s*max\(12px, 1em\)/);
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.mobilePriceLink\s*\{[\s\S]*?display:\s*none/);
