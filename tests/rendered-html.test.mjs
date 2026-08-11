@@ -72,7 +72,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /1本あたり約167円/);
   assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
-  assert.match(html, /編集結果が完成した時点/);
+  assert.match(html, /無料体験は編集結果が完成した時点/);
+  assert.match(html, /月額プラン・1動画作成・写真リールは、書き出し成功時点/);
   assert.doesNotMatch(
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
