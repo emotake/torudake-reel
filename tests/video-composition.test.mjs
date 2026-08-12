@@ -6,6 +6,7 @@ import {
   VIDEO_COMPOSITION_MAX_SOURCES,
   buildVideoCompositionFrameSchedule,
   createVideoCompositionPlan,
+  getVideoCompositionTransitionVisual,
   normalizeVideoCompositionTransition,
 } from "../lib/video-composition.ts";
 
@@ -126,6 +127,10 @@ test("uses the specified global transition defaults", () => {
     crossfade: 0.3,
     "fade-black": 0.4,
     "fade-white": 0.4,
+    flash: 0.22,
+    "wipe-left": 0.38,
+    "slide-left": 0.42,
+    "zoom-dissolve": 0.45,
   });
   assert.deepEqual(normalizeVideoCompositionTransition("cut"), {
     type: "cut",
@@ -219,4 +224,74 @@ test("describes both halves of black and white fades", () => {
     );
     assert.deepEqual(phases, new Set(["fade-out", "fade-in"]));
   }
+});
+
+test("adds four premium transition schedules without changing order or duration", () => {
+  const expectations = new Map([
+    ["flash", new Set(["fade-out", "fade-in"])],
+    ["wipe-left", new Set(["wipe"])],
+    ["slide-left", new Set(["slide"])],
+    ["zoom-dissolve", new Set(["zoom-dissolve"])],
+  ]);
+
+  for (const [type, expectedPhases] of expectations) {
+    const plan = createVideoCompositionPlan({
+      sources: [
+        source("first", 8, [{ start: 1, end: 2 }]),
+        source("second", 8, [{ start: 4, end: 5 }]),
+      ],
+      transition: type,
+    });
+    const schedule = buildVideoCompositionFrameSchedule(plan);
+    const transitionFrames = schedule.filter(
+      (frame) => frame.transition?.type === type,
+    );
+
+    assert.ok(transitionFrames.length > 0);
+    assert.deepEqual(
+      new Set(transitionFrames.map((frame) => frame.transition.phase)),
+      expectedPhases,
+    );
+    assert.deepEqual(plan.sources.map((item) => item.id), ["first", "second"]);
+    assert.equal(plan.duration, 2);
+    assert.equal(
+      schedule.at(-1).editedTime + schedule.at(-1).duration,
+      plan.duration,
+    );
+    assert.ok(
+      transitionFrames.every((frame) => {
+        const values = Object.values(frame.transition.visual).filter(
+          (value) => typeof value === "number",
+        );
+        return values.every(Number.isFinite);
+      }),
+    );
+  }
+});
+
+test("exposes pure normalized visual metadata for preview/export parity", () => {
+  const wipe = getVideoCompositionTransitionVisual("wipe-left", "wipe", 0.5);
+  assert.ok(wipe.incomingReveal > 0 && wipe.incomingReveal < 1);
+  assert.equal(wipe.overlayColor, null);
+
+  const slide = getVideoCompositionTransitionVisual("slide-left", "slide", 0.5);
+  assert.ok(slide.incomingOffsetX > 0);
+  assert.ok(slide.outgoingOffsetX < 0);
+
+  const zoom = getVideoCompositionTransitionVisual(
+    "zoom-dissolve",
+    "zoom-dissolve",
+    0.5,
+  );
+  assert.ok(zoom.incomingOpacity > 0 && zoom.incomingOpacity < 1);
+  assert.ok(zoom.incomingScale > 1);
+  assert.ok(zoom.outgoingScale > 1);
+
+  const flashOut = getVideoCompositionTransitionVisual(
+    "flash",
+    "fade-out",
+    1,
+  );
+  assert.equal(flashOut.overlayColor, "#fff");
+  assert.equal(flashOut.overlayOpacity, 0.82);
 });

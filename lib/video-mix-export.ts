@@ -5,8 +5,11 @@ import {
   PortableVideoExportAbortedError,
   PortableVideoExportUnsupportedError,
   buildPortableAudioCrossfadePlan,
+  buildPortableDuckingEnvelope,
+  computePortableOriginalNormalizationGain,
   computePortableVideoDrawRect,
   createPortableVideoEncodingSettings,
+  detectPortableNarrationActivity,
   ensurePortableAacEncoding,
   getPortableAudioSlicePlacement,
   getPortableEqualPowerFadeGain,
@@ -85,6 +88,7 @@ export type VideoMixSourceAudioMetadata = Readonly<{
 
 export type VideoMixAudioOutputState =
   | "mixed"
+  | "narration-only"
   | "intentionally-muted"
   | "no-source-audio"
   | "source-audio-unavailable-in-selection";
@@ -103,6 +107,13 @@ export type VideoMixAudioExportMetadata = Readonly<{
   requireAudio: boolean;
   /** Safe value for an optional decoded-audio activity inspection. */
   inspectAudioActivity: boolean;
+  narration: Readonly<{
+    requested: boolean;
+    hasDecodedSamples: boolean;
+    hasActivity: boolean;
+    contributedToMix: boolean;
+    duckedSourceAudio: boolean;
+  }>;
   state: VideoMixAudioOutputState;
 }>;
 
@@ -113,6 +124,12 @@ export type VideoMixExportOptions = Readonly<{
     | Partial<VideoCompositionTransition>;
   /** Source-audio master gain. Defaults to 1. */
   audioGain?: number;
+  /** Optional narration audio, placed at 0s and clipped to the program. */
+  narrationAudio?: Blob;
+  /** Narration gain after conservative loudness normalization. Defaults to 1. */
+  narrationGain?: number;
+  /** Lowers source audio only while narration is active. Defaults to true. */
+  duckSourceAudioDuringNarration?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
   /** Exposes the exact deterministic plan used by both preview and export. */
@@ -161,6 +178,12 @@ type ScheduledMixAudio = {
 type RenderedVideoMixAudio = Readonly<{
   buffer: AudioBuffer | null;
   contributingSourceIndexes: ReadonlySet<number> | null;
+  narration: Readonly<{
+    hasDecodedSamples: boolean;
+    hasActivity: boolean;
+    contributedToMix: boolean;
+    duckedSourceAudio: boolean;
+  }>;
 }>;
 
 type VideoMixAudioMetadataSourceInput = Readonly<{
@@ -178,6 +201,13 @@ export function createVideoMixAudioExportMetadata(options: Readonly<{
   audioGain: number;
   contributingSourceIndexes: ReadonlySet<number> | null;
   outputHasAudioTrack: boolean;
+  narration?: Readonly<{
+    requested: boolean;
+    hasDecodedSamples: boolean;
+    hasActivity: boolean;
+    contributedToMix: boolean;
+    duckedSourceAudio: boolean;
+  }>;
 }>): VideoMixAudioExportMetadata {
   const hasSourceAudioTrack = options.sources.some(
     (source) => source.hasAudioTrack,
@@ -186,9 +216,19 @@ export function createVideoMixAudioExportMetadata(options: Readonly<{
   const hasSelectedAudioSamples = intentionallyMuted
     ? null
     : (options.contributingSourceIndexes?.size ?? 0) > 0;
-  const requireAudio = !intentionallyMuted && hasSourceAudioTrack;
+  const narration = options.narration ?? {
+    requested: false,
+    hasDecodedSamples: false,
+    hasActivity: false,
+    contributedToMix: false,
+    duckedSourceAudio: false,
+  };
+  const requireAudio =
+    narration.requested || (!intentionallyMuted && hasSourceAudioTrack);
   const state: VideoMixAudioOutputState = options.outputHasAudioTrack
-    ? "mixed"
+    ? narration.requested && !hasSelectedAudioSamples
+      ? "narration-only"
+      : "mixed"
     : intentionallyMuted
       ? "intentionally-muted"
       : !hasSourceAudioTrack
@@ -213,7 +253,10 @@ export function createVideoMixAudioExportMetadata(options: Readonly<{
     hasSelectedAudioSamples,
     outputHasAudioTrack: options.outputHasAudioTrack,
     requireAudio,
-    inspectAudioActivity: options.outputHasAudioTrack,
+    inspectAudioActivity:
+      options.outputHasAudioTrack &&
+      (hasSelectedAudioSamples === true || narration.hasActivity),
+    narration,
     state,
   };
 }
@@ -377,18 +420,41 @@ async function renderVideoMixAudio(
   media: typeof import("mediabunny"),
   prepared: readonly PreparedVideoMixSource[],
   plan: VideoCompositionPlan,
-  audioGain: number,
-  signal?: AbortSignal,
+  options: Readonly<{
+    audioGain: number;
+    narrationAudio: Blob | null;
+    narrationGain: number;
+    duckSourceAudioDuringNarration: boolean;
+    signal?: AbortSignal;
+  }>,
 ): Promise<RenderedVideoMixAudio> {
-  if (audioGain <= 0) {
-    return { buffer: null, contributingSourceIndexes: null };
+  const noNarration = {
+    hasDecodedSamples: false,
+    hasActivity: false,
+    contributedToMix: false,
+    duckedSourceAudio: false,
+  } as const;
+  if (options.audioGain <= 0 && !options.narrationAudio) {
+    return {
+      buffer: null,
+      contributingSourceIndexes: null,
+      narration: noNarration,
+    };
   }
-  const scheduled = await collectVideoMixAudio(media, prepared, plan, signal);
-  const contributingSourceIndexes = new Set(
-    scheduled.map((item) => item.sourceIndex),
-  );
-  if (scheduled.length === 0) {
-    return { buffer: null, contributingSourceIndexes };
+  const scheduled =
+    options.audioGain > 0
+      ? await collectVideoMixAudio(media, prepared, plan, options.signal)
+      : [];
+  const contributingSourceIndexes =
+    options.audioGain > 0
+      ? new Set(scheduled.map((item) => item.sourceIndex))
+      : null;
+  if (scheduled.length === 0 && !options.narrationAudio) {
+    return {
+      buffer: null,
+      contributingSourceIndexes,
+      narration: noNarration,
+    };
   }
 
   const OfflineAudioContextConstructor = getOfflineAudioContextConstructor();
@@ -403,8 +469,64 @@ async function renderVideoMixAudio(
     Math.max(1, Math.ceil(plan.duration * OUTPUT_AUDIO_SAMPLE_RATE)),
     OUTPUT_AUDIO_SAMPLE_RATE,
   );
+  let narrationBuffer: AudioBuffer | null = null;
+  if (options.narrationAudio) {
+    try {
+      const encodedNarration = await options.narrationAudio.arrayBuffer();
+      throwIfAborted(options.signal);
+      narrationBuffer = await context.decodeAudioData(encodedNarration);
+    } catch (error) {
+      if (error instanceof PortableVideoExportAbortedError) throw error;
+      throw new PortableVideoExportUnsupportedError(
+        "audio-decode",
+        "ナレーション音声を読み取れません。音声を作り直してから、もう一度お試しください。",
+        { cause: error },
+      );
+    }
+  }
+  const narrationDuration = narrationBuffer
+    ? Math.min(plan.duration, narrationBuffer.duration)
+    : 0;
+  const narrationChannels = narrationBuffer
+    ? Array.from(
+        { length: narrationBuffer.numberOfChannels },
+        (_, channel) => narrationBuffer!.getChannelData(channel),
+      )
+    : [];
+  const narrationActivity = narrationBuffer
+    ? detectPortableNarrationActivity(
+        narrationChannels,
+        narrationBuffer.sampleRate,
+        narrationDuration,
+      )
+    : [];
+  const narrationHasDecodedSamples =
+    narrationBuffer !== null && narrationDuration > TIME_EPSILON;
+  const narrationContributedToMix =
+    narrationHasDecodedSamples && options.narrationGain > 0;
+  const duckedSourceAudio =
+    options.duckSourceAudioDuringNarration &&
+    scheduled.length > 0 &&
+    narrationActivity.length > 0;
+
   const masterGain = context.createGain();
-  masterGain.gain.value = audioGain;
+  if (duckedSourceAudio) {
+    const envelope = buildPortableDuckingEnvelope(
+      narrationActivity,
+      options.audioGain,
+      plan.duration,
+    );
+    masterGain.gain.cancelScheduledValues(0);
+    envelope.forEach((point, index) => {
+      if (index === 0) {
+        masterGain.gain.setValueAtTime(point.gain, point.time);
+      } else {
+        masterGain.gain.linearRampToValueAtTime(point.gain, point.time);
+      }
+    });
+  } else {
+    masterGain.gain.value = options.audioGain;
+  }
   const limiter = context.createDynamicsCompressor();
   limiter.threshold.value = -1;
   limiter.knee.value = 0;
@@ -483,10 +605,59 @@ async function renderVideoMixAudio(
       item,
     ),
   );
-  throwIfAborted(signal);
+  if (narrationBuffer && narrationDuration > TIME_EPSILON) {
+    const narrationMeasurement = measureAudioLoudness(
+      narrationChannels,
+      narrationBuffer.sampleRate,
+      {
+        startFrame: 0,
+        endFrame: Math.min(
+          narrationBuffer.length,
+          Math.ceil(narrationDuration * narrationBuffer.sampleRate),
+        ),
+      },
+    );
+    const measuredNormalization = narrationMeasurement.integratedLufs === null
+      ? computePortableOriginalNormalizationGain(
+          Math.sqrt(Math.max(0, narrationMeasurement.ungatedMeanSquare)),
+          narrationMeasurement.samplePeak,
+        )
+      : computeLoudnessNormalizationGain(narrationMeasurement, {
+          targetLufs: -18,
+          truePeakLimitDbtp: -2,
+          minimumGain: 0.65,
+          maximumGain: 1.35,
+        });
+    const conservativeNormalization = Math.max(
+      0.65,
+      Math.min(1.35, measuredNormalization),
+    );
+    const narrationGainNode = context.createGain();
+    narrationGainNode.gain.value =
+      options.narrationGain * conservativeNormalization;
+    narrationGainNode.connect(limiter);
+    scheduleAudioBuffer(context, narrationGainNode, {
+      buffer: narrationBuffer,
+      sourceIndex: 0,
+      placement: {
+        when: 0,
+        offset: 0,
+        duration: narrationDuration,
+      },
+      fadeIn: true,
+      fadeOut: true,
+    });
+  }
+  throwIfAborted(options.signal);
   return {
     buffer: await context.startRendering(),
     contributingSourceIndexes,
+    narration: {
+      hasDecodedSamples: narrationHasDecodedSamples,
+      hasActivity: narrationActivity.length > 0,
+      contributedToMix: narrationContributedToMix,
+      duckedSourceAudio,
+    },
   };
 }
 
@@ -513,34 +684,75 @@ function drawFrameTransition(
 ) {
   const transition = frame.transition;
   if (!transition) return;
-  if (
-    transition.type === "crossfade" &&
-    transition.phase === "crossfade" &&
-    outgoingFrame
-  ) {
+  const visual = transition.visual;
+  if (outgoingFrame) {
     const currentFrame = document.createElement("canvas");
     currentFrame.width = context.canvas.width;
     currentFrame.height = context.canvas.height;
     copyCanvasFrame(context.canvas, currentFrame);
+
+    const drawLayer = (
+      image: CanvasImageSource,
+      opacity: number,
+      scale: number,
+      offsetX: number,
+      reveal: number,
+    ) => {
+      const width = context.canvas.width;
+      const height = context.canvas.height;
+      context.save();
+      context.globalAlpha = Math.max(0, Math.min(1, opacity));
+      if (reveal < 1) {
+        const visibleWidth = Math.max(0, width * reveal);
+        context.beginPath();
+        context.rect(width - visibleWidth, 0, visibleWidth, height);
+        context.clip();
+      }
+      context.translate(width / 2 + width * offsetX, height / 2);
+      context.scale(scale, scale);
+      context.translate(-width / 2, -height / 2);
+      context.drawImage(image, 0, 0);
+      context.restore();
+    };
+
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.globalAlpha = 1;
-    context.drawImage(outgoingFrame, 0, 0);
-    context.save();
-    context.globalAlpha = transition.progress;
-    context.drawImage(currentFrame, 0, 0);
-    context.restore();
-    return;
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, context.canvas.width, context.canvas.height);
+    drawLayer(
+      outgoingFrame,
+      visual.outgoingOpacity,
+      visual.outgoingScale,
+      visual.outgoingOffsetX,
+      1,
+    );
+    drawLayer(
+      currentFrame,
+      visual.incomingOpacity,
+      visual.incomingScale,
+      visual.incomingOffsetX,
+      visual.incomingReveal,
+    );
   }
-  if (transition.type === "fade-black" || transition.type === "fade-white") {
-    const opacity =
-      transition.phase === "fade-out"
-        ? transition.progress
-        : 1 - transition.progress;
+  if (visual.overlayColor && visual.overlayOpacity > 0) {
     context.save();
-    context.globalAlpha = Math.max(0, Math.min(1, opacity));
-    context.fillStyle = transition.type === "fade-white" ? "#fff" : "#000";
+    context.globalAlpha = Math.max(0, Math.min(1, visual.overlayOpacity));
+    context.fillStyle = visual.overlayColor;
     context.fillRect(0, 0, context.canvas.width, context.canvas.height);
     context.restore();
   }
+}
+
+function transitionUsesOutgoingFrame(
+  frame: VideoCompositionFrameScheduleEntry,
+) {
+  const type = frame.transition?.type;
+  return (
+    type === "crossfade" ||
+    type === "wipe-left" ||
+    type === "slide-left" ||
+    type === "zoom-dissolve"
+  );
 }
 
 /**
@@ -572,6 +784,16 @@ export async function exportVideoMixMp4(
   });
 
   const audioGain = normalizeAudioGain(options.audioGain);
+  const narrationAudio = options.narrationAudio ?? null;
+  if (
+    narrationAudio &&
+    (!(narrationAudio instanceof Blob) || narrationAudio.size <= 0)
+  ) {
+    throw new TypeError("narrationAudio must be a non-empty Blob.");
+  }
+  const narrationGain = normalizeAudioGain(options.narrationGain);
+  const duckSourceAudioDuringNarration =
+    options.duckSourceAudioDuringNarration ?? true;
   const media = await import("mediabunny");
   const prepared: PreparedVideoMixSource[] = [];
   let output: InstanceType<(typeof import("mediabunny"))["Output"]> | null =
@@ -700,8 +922,13 @@ export async function exportVideoMixMp4(
       media,
       prepared,
       plan,
-      audioGain,
-      options.signal,
+      {
+        audioGain,
+        narrationAudio,
+        narrationGain,
+        duckSourceAudioDuringNarration,
+        signal: options.signal,
+      },
     );
     const mixedAudio = renderedAudio.buffer;
     const audioMetadata = createVideoMixAudioExportMetadata({
@@ -712,6 +939,10 @@ export async function exportVideoMixMp4(
       audioGain,
       contributingSourceIndexes: renderedAudio.contributingSourceIndexes,
       outputHasAudioTrack: mixedAudio !== null,
+      narration: {
+        requested: narrationAudio !== null,
+        ...renderedAudio.narration,
+      },
     });
     if (
       mixedAudio &&
@@ -777,7 +1008,7 @@ export async function exportVideoMixMp4(
     const audioWrite = audioSource && mixedAudio
       ? audioSource.add(mixedAudio).then(() => audioSource.close())
       : Promise.resolve();
-    const crossfadeFrames = new Map<number, HTMLCanvasElement>();
+    const outgoingTransitionFrames = new Map<number, HTMLCanvasElement>();
     let emittedFrames = 0;
 
     try {
@@ -805,11 +1036,10 @@ export async function exportVideoMixMp4(
             );
 
             const transition = frame.transition;
-            if (
-              transition?.type === "crossfade" &&
-              transition.phase === "crossfade"
-            ) {
-              let outgoingFrame = crossfadeFrames.get(transition.boundaryIndex);
+            if (transition && transitionUsesOutgoingFrame(frame)) {
+              let outgoingFrame = outgoingTransitionFrames.get(
+                transition.boundaryIndex,
+              );
               if (!outgoingFrame) {
                 const fromSource = prepared[transition.from.sourceIndex];
                 const fromSample = await sinks[
@@ -845,7 +1075,10 @@ export async function exportVideoMixMp4(
                     fromSource.drawRect.height,
                   );
                   fromSample.close();
-                  crossfadeFrames.set(transition.boundaryIndex, outgoingFrame);
+                  outgoingTransitionFrames.set(
+                    transition.boundaryIndex,
+                    outgoingFrame,
+                  );
                 }
               }
               drawFrameTransition(context, frame, outgoingFrame ?? null);

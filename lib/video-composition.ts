@@ -14,13 +14,21 @@ export type VideoCompositionTransitionType =
   | "cut"
   | "crossfade"
   | "fade-black"
-  | "fade-white";
+  | "fade-white"
+  | "flash"
+  | "wipe-left"
+  | "slide-left"
+  | "zoom-dissolve";
 
 export const VIDEO_COMPOSITION_DEFAULT_TRANSITION_DURATIONS = {
   cut: 0,
   crossfade: 0.3,
   "fade-black": 0.4,
   "fade-white": 0.4,
+  flash: 0.22,
+  "wipe-left": 0.38,
+  "slide-left": 0.42,
+  "zoom-dissolve": 0.45,
 } as const satisfies Record<VideoCompositionTransitionType, number>;
 
 export type VideoCompositionClip = Readonly<{
@@ -81,18 +89,44 @@ export type VideoCompositionPlan = Readonly<{
   frameRate: typeof VIDEO_COMPOSITION_FRAME_RATE;
 }>;
 
+export type VideoCompositionFrameTransitionPhase =
+  | "crossfade"
+  | "fade-out"
+  | "fade-in"
+  | "wipe"
+  | "slide"
+  | "zoom-dissolve";
+
 export type VideoCompositionFrameTransition = Readonly<{
   boundaryIndex: number;
   type: Exclude<VideoCompositionTransitionType, "cut">;
-  phase: "crossfade" | "fade-out" | "fade-in";
+  phase: VideoCompositionFrameTransitionPhase;
   /** Linear progress from 0 to 1 within this phase. */
   progress: number;
+  /**
+   * Pure, normalized drawing metadata shared by the live preview and Canvas
+   * exporter. Horizontal offsets are expressed as a fraction of frame width.
+   */
+  visual: VideoCompositionTransitionVisual;
   from: Readonly<{
     sourceId: string;
     sourceIndex: number;
     clipIndex: number;
     sourceTime: number;
   }>;
+}>;
+
+export type VideoCompositionTransitionVisual = Readonly<{
+  incomingOpacity: number;
+  outgoingOpacity: number;
+  incomingScale: number;
+  outgoingScale: number;
+  incomingOffsetX: number;
+  outgoingOffsetX: number;
+  /** 0 means hidden and 1 means fully revealed from the right edge. */
+  incomingReveal: number;
+  overlayColor: "#000" | "#fff" | null;
+  overlayOpacity: number;
 }>;
 
 export type VideoCompositionFrameScheduleEntry = Readonly<{
@@ -296,6 +330,84 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
+function smoothstep(value: number) {
+  const progress = clamp01(value);
+  return progress * progress * (3 - 2 * progress);
+}
+
+/**
+ * Maps schedule progress to a renderer-independent visual recipe. Preview
+ * layers can apply these normalized values directly, while the exporter maps
+ * them to Canvas pixels. Keeping this pure prevents preview/export drift.
+ */
+export function getVideoCompositionTransitionVisual(
+  type: Exclude<VideoCompositionTransitionType, "cut">,
+  phase: VideoCompositionFrameTransitionPhase,
+  progress: number,
+): VideoCompositionTransitionVisual {
+  const eased = smoothstep(progress);
+  const base: VideoCompositionTransitionVisual = {
+    incomingOpacity: 1,
+    outgoingOpacity: 1,
+    incomingScale: 1,
+    outgoingScale: 1,
+    incomingOffsetX: 0,
+    outgoingOffsetX: 0,
+    incomingReveal: 1,
+    overlayColor: null,
+    overlayOpacity: 0,
+  };
+
+  if (type === "crossfade" && phase === "crossfade") {
+    return { ...base, incomingOpacity: eased };
+  }
+  if (type === "wipe-left" && phase === "wipe") {
+    return { ...base, incomingReveal: eased };
+  }
+  if (type === "slide-left" && phase === "slide") {
+    return {
+      ...base,
+      incomingOffsetX: 1 - eased,
+      outgoingOffsetX: -0.18 * eased,
+    };
+  }
+  if (type === "zoom-dissolve" && phase === "zoom-dissolve") {
+    return {
+      ...base,
+      incomingOpacity: eased,
+      incomingScale: 1.055 - 0.055 * eased,
+      outgoingOpacity: 1 - 0.28 * eased,
+      outgoingScale: 1 + 0.035 * eased,
+    };
+  }
+  if (
+    (type === "fade-black" || type === "fade-white" || type === "flash") &&
+    (phase === "fade-out" || phase === "fade-in")
+  ) {
+    const peakOpacity = type === "flash" ? 0.82 : 1;
+    return {
+      ...base,
+      overlayColor: type === "fade-black" ? "#000" : "#fff",
+      overlayOpacity:
+        peakOpacity * (phase === "fade-out" ? eased : 1 - eased),
+    };
+  }
+  return base;
+}
+
+function createFrameTransition(
+  options: Omit<VideoCompositionFrameTransition, "visual">,
+): VideoCompositionFrameTransition {
+  return {
+    ...options,
+    visual: getVideoCompositionTransitionVisual(
+      options.type,
+      options.phase,
+      options.progress,
+    ),
+  };
+}
+
 function transitionForFrame(
   plan: VideoCompositionPlan,
   clip: VideoCompositionPlannedClip,
@@ -305,18 +417,33 @@ function transitionForFrame(
   const incomingBoundary = plan.boundaries[clip.globalClipIndex - 1];
   const outgoingBoundary = plan.boundaries[clip.globalClipIndex];
 
+  const incomingBlendPhase = incomingBoundary
+    ? incomingBoundary.transition.type === "crossfade"
+      ? "crossfade"
+      : incomingBoundary.transition.type === "wipe-left"
+        ? "wipe"
+        : incomingBoundary.transition.type === "slide-left"
+          ? "slide"
+          : incomingBoundary.transition.type === "zoom-dissolve"
+            ? "zoom-dissolve"
+            : null
+    : null;
   if (
     incomingBoundary &&
-    incomingBoundary.transition.type === "crossfade" &&
+    incomingBlendPhase &&
     incomingBoundary.transition.duration > TIME_EPSILON
   ) {
     const localTime = editedTime - clip.editedStart;
     if (localTime < incomingBoundary.transition.duration - TIME_EPSILON) {
       const outgoing = plan.clips[incomingBoundary.outgoingClipIndex];
-      return {
+      return createFrameTransition({
         boundaryIndex: incomingBoundary.index,
-        type: "crossfade",
-        phase: "crossfade",
+        type: incomingBoundary.transition.type as
+          | "crossfade"
+          | "wipe-left"
+          | "slide-left"
+          | "zoom-dissolve",
+        phase: incomingBlendPhase,
         progress: clamp01(
           (localTime + frameDuration) / incomingBoundary.transition.duration,
         ),
@@ -329,20 +456,21 @@ function transitionForFrame(
             outgoing.end - frameDuration / 2,
           ),
         },
-      };
+      });
     }
   }
 
   if (
     outgoingBoundary &&
     (outgoingBoundary.transition.type === "fade-black" ||
-      outgoingBoundary.transition.type === "fade-white") &&
+      outgoingBoundary.transition.type === "fade-white" ||
+      outgoingBoundary.transition.type === "flash") &&
     outgoingBoundary.transition.duration > TIME_EPSILON
   ) {
     const halfDuration = outgoingBoundary.transition.duration / 2;
     const phaseStart = clip.editedEnd - halfDuration;
     if (editedTime + frameDuration > phaseStart + TIME_EPSILON) {
-      return {
+      return createFrameTransition({
         boundaryIndex: outgoingBoundary.index,
         type: outgoingBoundary.transition.type,
         phase: "fade-out",
@@ -355,21 +483,22 @@ function transitionForFrame(
           clipIndex: clip.clipIndex,
           sourceTime: Math.min(clip.end, clip.start + (editedTime - clip.editedStart)),
         },
-      };
+      });
     }
   }
 
   if (
     incomingBoundary &&
     (incomingBoundary.transition.type === "fade-black" ||
-      incomingBoundary.transition.type === "fade-white") &&
+      incomingBoundary.transition.type === "fade-white" ||
+      incomingBoundary.transition.type === "flash") &&
     incomingBoundary.transition.duration > TIME_EPSILON
   ) {
     const halfDuration = incomingBoundary.transition.duration / 2;
     const localTime = editedTime - clip.editedStart;
     if (localTime < halfDuration - TIME_EPSILON) {
       const outgoing = plan.clips[incomingBoundary.outgoingClipIndex];
-      return {
+      return createFrameTransition({
         boundaryIndex: incomingBoundary.index,
         type: incomingBoundary.transition.type,
         phase: "fade-in",
@@ -383,7 +512,7 @@ function transitionForFrame(
             outgoing.end - frameDuration / 2,
           ),
         },
-      };
+      });
     }
   }
 

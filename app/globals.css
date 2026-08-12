@@ -12211,6 +12211,19 @@ footer > small {
   pointer-events: none;
 }
 
+.videoMixCaptionCanvas {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.videoMixPhone > audio {
+  display: none;
+}
+
 .videoMixEmpty {
   display: grid;
   height: 100%;
@@ -12646,6 +12659,295 @@ footer > small {
   background: white;
 }
 
+.videoMixTransitionIcon.flash::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(105deg, transparent 24%, white 49%, transparent 74%);
+}
+
+.videoMixTransitionIcon.wipe-left i + i {
+  left: 30%;
+  border-left: 3px solid rgba(255, 255, 255, 0.9);
+}
+
+.videoMixTransitionIcon.slide-left i,
+.videoMixTransitionIcon.slide-left i + i {
+  transform: translateX(-7px);
+}
+
+.videoMixTransitionIcon.zoom-dissolve i {
+  right: 22%;
+  transform: scale(1.18);
+  opacity: 0.72;
+}
+
+.videoMixTransitionIcon.zoom-dissolve i + i {
+  left: 40%;
+  opacity: 0.72;
+}
+
+.videoMixNarrationSection {
+  background:
+    radial-gradient(circle at 92% 3%, rgba(185, 245, 208, 0.28), transparent 34%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.videoMixFinishMode,
+.videoMixVoiceOptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.videoMixFinishMode > button,
+.videoMixVoiceOptions > button {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 14px 15px;
+  border: 1px solid rgba(21, 32, 53, 0.11);
+  border-radius: 16px;
+  color: var(--mix-ink);
+  text-align: left;
+  background: #fffdf9;
+  cursor: pointer;
+}
+
+.videoMixFinishMode > button.isActive,
+.videoMixVoiceOptions > button.isActive,
+.videoMixGoalOptions > button.isActive {
+  border-color: var(--mix-coral);
+  background: rgba(239, 92, 66, 0.055);
+  box-shadow: 0 0 0 2px rgba(239, 92, 66, 0.11);
+}
+
+.videoMixFinishMode strong,
+.videoMixVoiceOptions strong {
+  font-size: 14px;
+}
+
+.videoMixFinishMode small,
+.videoMixVoiceOptions small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.videoMixNarrationSettings {
+  display: grid;
+  gap: 18px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(21, 32, 53, 0.08);
+}
+
+.videoMixGoalOptions,
+.videoMixVoiceOptions {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.videoMixGoalOptions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.videoMixGoalOptions legend,
+.videoMixVoiceOptions legend {
+  width: 100%;
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.videoMixGoalOptions button {
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 999px;
+  color: var(--mix-ink);
+  font-size: 12px;
+  font-weight: 800;
+  background: white;
+  cursor: pointer;
+}
+
+.videoMixNarrationBrief {
+  display: grid;
+  gap: 7px;
+}
+
+.videoMixNarrationBrief > span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.videoMixNarrationBrief > span small,
+.videoMixNarrationBrief > small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.videoMixNarrationBrief textarea {
+  width: 100%;
+  min-height: 94px;
+  resize: vertical;
+  padding: 13px 14px;
+  border: 1px solid rgba(21, 32, 53, 0.13);
+  border-radius: 14px;
+  color: var(--mix-ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  background: white;
+}
+
+.videoMixCaptionToggle,
+.videoMixDisclosureCheck {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  min-height: 54px;
+  padding: 13px 14px;
+  border: 1px solid rgba(33, 114, 81, 0.14);
+  border-radius: 14px;
+  background: rgba(185, 245, 208, 0.16);
+}
+
+.videoMixCaptionToggle input,
+.videoMixDisclosureCheck input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: #217251;
+}
+
+.videoMixCaptionToggle span,
+.videoMixDisclosureCheck span {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.videoMixCaptionToggle small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+}
+
+.videoMixNarrationAction {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.videoMixNarrationAction > button:first-child {
+  min-height: 54px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  color: white;
+  font-size: 14px;
+  font-weight: 900;
+  background: var(--mix-coral);
+  cursor: pointer;
+}
+
+.videoMixNarrationAction > span {
+  display: grid;
+  gap: 3px;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.videoMixNarrationAction > span small {
+  color: #217251;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixNarrationCancel {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 12px;
+  background: white;
+}
+
+.videoMixNarrationReady {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 13px;
+  padding: 17px;
+  border: 1px solid rgba(33, 114, 81, 0.18);
+  border-radius: 17px;
+  background: #f5fcf7;
+}
+
+.videoMixNarrationReady > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.videoMixNarrationReady > div:first-child span,
+.videoMixNarrationReady > div:first-child small {
+  color: #217251;
+  font-size: 12px;
+}
+
+.videoMixNarrationReady > button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(33, 114, 81, 0.2);
+  border-radius: 12px;
+  background: white;
+}
+
+.videoMixNarrationReady details,
+.videoMixDisclosureCheck {
+  grid-column: 1 / -1;
+}
+
+.videoMixNarrationReady summary {
+  min-height: 44px;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.videoMixNarrationReady details > p,
+.videoMixPostCaption p {
+  margin: 0;
+  color: #405066;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.videoMixPostCaption {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(21, 32, 53, 0.08);
+}
+
+.videoMixPostCaption button {
+  min-height: 44px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 12px;
+  background: white;
+}
+
 .videoMixExportCard {
   color: white;
   background:
@@ -12962,9 +13264,22 @@ footer > small {
   }
 
   .videoMixTransitionGrid,
+  .videoMixFinishMode,
+  .videoMixVoiceOptions,
   .videoMixPurchase > div,
   .videoMixFinalize {
     grid-template-columns: 1fr;
+  }
+
+  .videoMixNarrationAction,
+  .videoMixNarrationReady {
+    grid-template-columns: 1fr;
+  }
+
+  .videoMixNarrationReady > button,
+  .videoMixNarrationReady details,
+  .videoMixDisclosureCheck {
+    grid-column: 1;
   }
 
   .videoMixPurchase a {

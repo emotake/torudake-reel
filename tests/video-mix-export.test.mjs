@@ -28,6 +28,13 @@ test("reports mixed source audio for post-export quality inspection", () => {
   assert.equal(metadata.outputHasAudioTrack, true);
   assert.equal(metadata.requireAudio, true);
   assert.equal(metadata.inspectAudioActivity, true);
+  assert.deepEqual(metadata.narration, {
+    requested: false,
+    hasDecodedSamples: false,
+    hasActivity: false,
+    contributedToMix: false,
+    duckedSourceAudio: false,
+  });
   assert.deepEqual(metadata.sources, [
     {
       sourceId: "first",
@@ -84,6 +91,43 @@ test("distinguishes intentional mute from missing or unavailable audio", () => {
   assert.equal(unavailableInSelection.inspectAudioActivity, false);
 });
 
+test("requires and reports narration even when all source videos are silent", () => {
+  const narrationOnly = createVideoMixAudioExportMetadata({
+    sources: [{ sourceId: "silent-video", hasAudioTrack: false }],
+    audioGain: 1,
+    contributingSourceIndexes: new Set(),
+    outputHasAudioTrack: true,
+    narration: {
+      requested: true,
+      hasDecodedSamples: true,
+      hasActivity: true,
+      contributedToMix: true,
+      duckedSourceAudio: false,
+    },
+  });
+
+  assert.equal(narrationOnly.state, "narration-only");
+  assert.equal(narrationOnly.requireAudio, true);
+  assert.equal(narrationOnly.inspectAudioActivity, true);
+  assert.equal(narrationOnly.narration.contributedToMix, true);
+
+  const missingNarrationOutput = createVideoMixAudioExportMetadata({
+    sources: [{ sourceId: "silent-video", hasAudioTrack: false }],
+    audioGain: 0,
+    contributingSourceIndexes: null,
+    outputHasAudioTrack: false,
+    narration: {
+      requested: true,
+      hasDecodedSamples: false,
+      hasActivity: false,
+      contributedToMix: false,
+      duckedSourceAudio: false,
+    },
+  });
+  assert.equal(missingNarrationOutput.requireAudio, true);
+  assert.equal(missingNarrationOutput.outputHasAudioTrack, false);
+});
+
 test("keeps the multi exporter on the portable Mediabunny path", async () => {
   const source = await readFile(
     new URL("../lib/video-mix-export.ts", import.meta.url),
@@ -118,6 +162,24 @@ test("mixes all source audio and normalizes each source before the limiter", asy
   assert.match(source, /onAudioMetadata\?\./);
 });
 
+test("decodes, normalizes, clips and ducks for optional narration audio", async () => {
+  const source = await readFile(
+    new URL("../lib/video-mix-export.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /narrationAudio\?: Blob/);
+  assert.match(source, /narrationGain\?: number/);
+  assert.match(source, /duckSourceAudioDuringNarration\?: boolean/);
+  assert.match(source, /decodeAudioData\(encodedNarration\)/);
+  assert.match(source, /detectPortableNarrationActivity/);
+  assert.match(source, /buildPortableDuckingEnvelope/);
+  assert.match(source, /targetLufs: -18/);
+  assert.match(source, /maximumGain: 1\.35/);
+  assert.match(source, /Math\.min\(plan\.duration, narrationBuffer\.duration\)/);
+  assert.match(source, /narrationGainNode\.connect\(limiter\)/);
+});
+
 test("uses source-specific dimensions, HDR plans, progress and abort", async () => {
   const source = await readFile(
     new URL("../lib/video-mix-export.ts", import.meta.url),
@@ -132,6 +194,27 @@ test("uses source-specific dimensions, HDR plans, progress and abort", async () 
   assert.match(source, /onColorConversionPlans/);
   assert.match(source, /onProgress\?\./);
   assert.match(source, /throwIfAborted\(options\.signal\)/);
+});
+
+test("renders premium transition metadata on Canvas without retiming audio", async () => {
+  const source = await readFile(
+    new URL("../lib/video-mix-export.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /transitionUsesOutgoingFrame/);
+  assert.match(source, /type === "wipe-left"/);
+  assert.match(source, /type === "slide-left"/);
+  assert.match(source, /type === "zoom-dissolve"/);
+  assert.match(source, /visual\.incomingReveal/);
+  assert.match(source, /visual\.incomingOffsetX/);
+  assert.match(source, /visual\.incomingScale/);
+  assert.match(source, /visual\.overlayOpacity/);
+  assert.match(source, /context\.clip\(\)/);
+  assert.match(source, /context\.scale\(scale, scale\)/);
+  // Transition visuals remain a video-only concern. Existing source-audio
+  // placement and equal-power cut handling stay on the original path.
+  assert.match(source, /applyMixAudioCrossfades\(groups\)/);
 });
 
 test("does not change the established single-video exporter contract", async () => {
