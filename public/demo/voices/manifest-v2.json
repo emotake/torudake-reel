@@ -1,0 +1,74 @@
+{
+  "version": "2026-08-12-quality-v2",
+  "generatedAt": "2026-08-12T07:21:19Z",
+  "provider": "OpenAI",
+  "sampleModel": "gpt-4o-mini-tts",
+  "productionModel": "gpt-realtime-2.1-mini",
+  "purpose": "Static, no-cost voice previews for the four delivery templates",
+  "mastering": {
+    "sampleRateHz": 24000,
+    "channels": 1,
+    "codec": "pcm_s16le",
+    "targetIntegratedLufs": -19.5,
+    "maximumTruePeakDbtp": -2.0,
+    "notes": "Light high-pass filtering and compression, loudness matching, short edge fades, and preserved natural pauses. No noise gate or synthetic upsampling."
+  },
+  "samples": [
+    {
+      "id": "calm",
+      "label": "自然な男性",
+      "file": "calm-v2.wav",
+      "voice": "cedar",
+      "speed": 0.99,
+      "selectedTake": 2,
+      "script": "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
+      "durationSeconds": 9.208,
+      "integratedLufs": -19.7,
+      "truePeakDbtp": -3.5,
+      "bytes": 442074,
+      "sha256": "6d85b7b4bb69d8f516cc78fa06001dacd3c5d36ff202b3f627f242621f6e6d4d"
+    },
+    {
+      "id": "bright",
+      "label": "自然な女性",
+      "file": "bright-v2.wav",
+      "voice": "marin",
+      "speed": 1.0,
+      "selectedTake": 2,
+      "script": "休日に見つけた海辺のカフェは、窓から夕日が見えてクロワッサンも絶品でした。",
+      "durationSeconds": 7.44,
+      "integratedLufs": -19.8,
+      "truePeakDbtp": -6.1,
+      "bytes": 357198,
+      "sha256": "55b2dcae6b448293aa1dd53066d645f819bd66becaa22d46681418d81d4e3dc6"
+    },
+    {
+      "id": "comedy",
+      "label": "明るい男性",
+      "file": "comedy-v2.wav",
+      "voice": "cedar",
+      "speed": 1.03,
+      "selectedTake": 1,
+      "script": "週末のナイトマーケットは大盛況で、音楽もフードも最高、気づけば二周してました。",
+      "durationSeconds": 7.345,
+      "integratedLufs": -20.0,
+      "truePeakDbtp": -4.1,
+      "bytes": 352632,
+      "sha256": "f846073d1934658acd4d57d07888c5b92b6e9647aadd751d28a743f37f6fa0de"
+    },
+    {
+      "id": "party",
+      "label": "明るい女性",
+      "file": "party-v2.wav",
+      "voice": "marin",
+      "speed": 1.03,
+      "selectedTake": 2,
+      "script": "友だちと見つけた夜景スポットは雰囲気も最高で、写真も動画も盛れて今日は大当たりでした。",
+      "durationSeconds": 8.392,
+      "integratedLufs": -19.4,
+      "truePeakDbtp": -5.4,
+      "bytes": 402918,
+      "sha256": "53e972b46688e8ecd93dd31e95d0ddef6f984f40603543b67fa671a344600478"
+    }
+  ]
+}

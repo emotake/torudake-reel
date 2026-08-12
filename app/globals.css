@@ -11598,6 +11598,30 @@ footer > small {
   font-size: 12px;
 }
 
+.voiceSampleTypes .voiceSampleExample {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(46, 105, 72, 0.1);
+  border-radius: 10px;
+  background: #f7faf8;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.voiceSampleExample span {
+  color: var(--mint-dark);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.voiceSampleExample q {
+  quotes: "「" "」";
+}
+
 .voiceSampleTypes audio {
   width: 100%;
   min-height: 44px;

@@ -307,6 +307,16 @@ const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
 const SUPPORTED_VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm)$/i;
 const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
+const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string> = {
+  calm:
+    "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
+  bright:
+    "休日に見つけた海辺のカフェは、窓から夕日が見えてクロワッサンも絶品でした。",
+  comedy:
+    "週末のナイトマーケットは大盛況で、音楽もフードも最高、気づけば二周してました。",
+  party:
+    "友だちと見つけた夜景スポットは雰囲気も最高で、写真も動画も盛れて今日は大当たりでした。",
+};
 
 function readAiOperationQuota(response: Response): AiOperationQuotaResult {
   const parsedLimit = Number(
@@ -3761,29 +3771,37 @@ function Landing({
           <p className="eyebrow">AI VOICE PREVIEW</p>
           <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
           <p>
-            同じ短い文章を4つの声で聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。
+            それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。
           </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
-          {NARRATION_STYLES.map((style) => (
-            <article key={style.id}>
-              <div>
-                <strong>{style.label}</strong>
-                <small>{style.note}</small>
-              </div>
-              <audio
-                controls
-                preload="none"
-                src={`/demo/voices/${style.id}.wav`}
-                aria-label={`${style.label}の固定音声サンプル`}
-                onPlay={() =>
-                  trackClientEvent("voice_sample_played", {
-                    voice: style.id,
-                  })
-                }
-              />
-            </article>
-          ))}
+          {NARRATION_STYLES.map((style) => {
+            const exampleId = `voiceSampleExample-${style.id}`;
+            return (
+              <article key={style.id}>
+                <div>
+                  <strong>{style.label}</strong>
+                  <small>{style.note}</small>
+                </div>
+                <p className="voiceSampleExample" id={exampleId}>
+                  <span>試聴する例文</span>
+                  <q>{VOICE_SAMPLE_SCRIPTS[style.id]}</q>
+                </p>
+                <audio
+                  controls
+                  preload="none"
+                  src={`/demo/voices/${style.id}-v2.wav`}
+                  aria-label={`${style.label}の用途別固定音声サンプル`}
+                  aria-describedby={exampleId}
+                  onPlay={() =>
+                    trackClientEvent("voice_sample_played", {
+                      voice: style.id,
+                    })
+                  }
+                />
+              </article>
+            );
+          })}
         </div>
       </section>
 

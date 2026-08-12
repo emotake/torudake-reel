@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const [pageSource, cssSource, photoReelSource] = await Promise.all([
@@ -45,6 +45,41 @@ test("loads the sample as a real File and keeps the caption-synchronised demo fa
   assert.match(pageSource, /DEMO_CAPTIONS\.find/);
   assert.match(pageSource, /videoUnavailable/);
   assert.match(pageSource, /デモ動画を準備しています/);
+});
+
+test("presents four readable, no-cost AI voice examples for distinct use cases", async () => {
+  assert.match(pageSource, /const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string>/);
+  assert.match(pageSource, /朝七時に駅を出発して、海沿いのカフェで/);
+  assert.match(pageSource, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
+  assert.match(pageSource, /週末のナイトマーケットは大盛況で/);
+  assert.match(pageSource, /友だちと見つけた夜景スポットは雰囲気も最高で/);
+  assert.match(pageSource, /用途別の例文で、4つの話し方を聴き比べられます/);
+  assert.match(
+    pageSource,
+    /src=\{`\/demo\/voices\/\$\{style\.id\}-v2\.wav`\}/,
+  );
+  assert.match(pageSource, /aria-describedby=\{exampleId\}/);
+  assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
+  assert.doesNotMatch(pageSource, /同じ短い文章を4つの声で/);
+  assert.doesNotMatch(pageSource, /用途別の例文で、4つの声を/);
+  assert.match(
+    cssSource,
+    /\.voiceSampleTypes \.voiceSampleExample\s*\{[\s\S]*?font-size:\s*13px;[\s\S]*?line-height:\s*1\.65/,
+  );
+  assert.match(cssSource, /\.voiceSampleExample q\s*\{[\s\S]*?quotes:\s*"「" "」"/);
+  const voiceManifestUrl = new URL(
+    "../public/demo/voices/manifest-v2.json",
+    import.meta.url,
+  );
+  const voiceManifest = JSON.parse(await readFile(voiceManifestUrl, "utf8"));
+  assert.equal(voiceManifest.samples.length, 4);
+  assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
+  for (const sample of voiceManifest.samples) {
+    await access(new URL(`../public/demo/voices/${sample.file}`, import.meta.url));
+    assert.ok(sample.durationSeconds >= 7 && sample.durationSeconds <= 10);
+    assert.ok(sample.integratedLufs >= -20.2 && sample.integratedLufs <= -19.2);
+    assert.ok(sample.truePeakDbtp <= -2);
+  }
 });
 
 test("keeps mobile account access and accessible touch targets visible", () => {

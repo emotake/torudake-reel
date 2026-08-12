@@ -37,6 +37,16 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /再生すると音声付き1080p本編を読み込みます/);
   assert.match(html, /実際の動画・音声・テロップで確認/);
   assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
+  assert.match(html, /用途別の例文で、4つの話し方を聴き比べられます/);
+  assert.match(html, /朝七時に駅を出発して、海沿いのカフェで/);
+  assert.match(html, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
+  assert.match(html, /週末のナイトマーケットは大盛況で/);
+  assert.match(html, /友だちと見つけた夜景スポットは雰囲気も最高で/);
+  for (const voice of ["calm", "bright", "comedy", "party"]) {
+    assert.match(html, new RegExp(`/demo/voices/${voice}-v2\\.wav`));
+  }
+  assert.doesNotMatch(html, /同じ短い文章を4つの声で/);
+  assert.doesNotMatch(html, /用途別の例文で、4つの声を/);
   assert.match(html, /動画本体は通常、端末内で編集/);
   assert.doesNotMatch(html, /lifestyleGallery/);
   assert.doesNotMatch(html, /4工程|AUTO CUT/);
