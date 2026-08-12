@@ -6,6 +6,13 @@ export const VIDEO_COMPOSITION_MAX_OUTPUT_DURATION_SECONDS = 90;
 export const VIDEO_COMPOSITION_FRAME_RATE = 30;
 export const VIDEO_COMPOSITION_OUTPUT_WIDTH = 1080;
 export const VIDEO_COMPOSITION_OUTPUT_HEIGHT = 1920;
+/**
+ * Browser media metadata can round the duration up by a fraction of a frame
+ * compared with the packet-accurate duration used by the exporter. Only the
+ * last selected clip may use this tolerance; larger or interior overshoots
+ * remain invalid.
+ */
+export const VIDEO_COMPOSITION_SOURCE_END_TOLERANCE_SECONDS = 0.125;
 
 const TIME_EPSILON = 1e-7;
 const MAX_TRANSITION_DURATION_SECONDS = 1.5;
@@ -47,6 +54,15 @@ export type VideoCompositionTransition = Readonly<{
   type: VideoCompositionTransitionType;
   duration: number;
 }>;
+
+export type VideoCompositionTransitionInput =
+  | VideoCompositionTransitionType
+  | Partial<VideoCompositionTransition>;
+
+export type VideoCompositionBoundaryTransitionInput =
+  | VideoCompositionTransitionInput
+  | null
+  | undefined;
 
 export type VideoCompositionSource = Readonly<{
   id: string;
@@ -160,8 +176,7 @@ function roundTimelineSeconds(value: number) {
 
 export function normalizeVideoCompositionTransition(
   transition:
-    | VideoCompositionTransitionType
-    | Partial<VideoCompositionTransition>
+    | VideoCompositionTransitionInput
     | undefined = "cut",
 ): VideoCompositionTransition {
   const type = typeof transition === "string" ? transition : transition.type ?? "cut";
@@ -193,11 +208,16 @@ export function normalizeVideoCompositionTransition(
 export function createVideoCompositionPlan({
   sources,
   transition,
+  boundaryTransitions,
 }: {
   sources: readonly VideoCompositionSourceDescriptor[];
-  transition?:
-    | VideoCompositionTransitionType
-    | Partial<VideoCompositionTransition>;
+  transition?: VideoCompositionTransitionInput;
+  /**
+   * Optional overrides in finished-video boundary order. Missing entries use
+   * the global transition. Extra entries are rejected so a stale UI mapping
+   * cannot silently style the wrong boundary.
+   */
+  boundaryTransitions?: readonly VideoCompositionBoundaryTransitionInput[];
 }): VideoCompositionPlan {
   if (sources.length < 1 || sources.length > VIDEO_COMPOSITION_MAX_SOURCES) {
     throw new RangeError(
@@ -235,10 +255,19 @@ export function createVideoCompositionPlan({
     source.clips.forEach((clip, clipIndex) => {
       finiteNonNegative(clip.start, `Source ${sourceIndex + 1} clip start`);
       finitePositive(clip.end, `Source ${sourceIndex + 1} clip end`);
-      if (clip.end - clip.start <= TIME_EPSILON) {
+      const sourceEndOvershoot = clip.end - source.duration;
+      const isLastSelectedClip = clipIndex === source.clips.length - 1;
+      const reconciledEnd =
+        sourceEndOvershoot > TIME_EPSILON &&
+        isLastSelectedClip &&
+        sourceEndOvershoot <=
+          VIDEO_COMPOSITION_SOURCE_END_TOLERANCE_SECONDS + TIME_EPSILON
+          ? source.duration
+          : clip.end;
+      if (reconciledEnd - clip.start <= TIME_EPSILON) {
         throw new RangeError("Every video clip must have a positive duration.");
       }
-      if (clip.end > source.duration + 0.001) {
+      if (reconciledEnd > source.duration + TIME_EPSILON) {
         throw new RangeError("A video clip cannot extend beyond its source duration.");
       }
       if (clip.start < previousEnd - TIME_EPSILON) {
@@ -247,14 +276,14 @@ export function createVideoCompositionPlan({
         );
       }
 
-      const duration = roundTimelineSeconds(clip.end - clip.start);
+      const duration = roundTimelineSeconds(reconciledEnd - clip.start);
       const planned: VideoCompositionPlannedClip = {
         sourceId: id,
         sourceIndex,
         clipIndex,
         globalClipIndex: plannedClips.length,
         start: roundTimelineSeconds(clip.start),
-        end: roundTimelineSeconds(clip.end),
+        end: roundTimelineSeconds(reconciledEnd),
         duration,
         editedStart: roundTimelineSeconds(editedCursor),
         editedEnd: roundTimelineSeconds(editedCursor + duration),
@@ -262,7 +291,7 @@ export function createVideoCompositionPlan({
       clips.push(planned);
       plannedClips.push(planned);
       editedCursor += duration;
-      previousEnd = clip.end;
+      previousEnd = reconciledEnd;
     });
 
     totalSourceBytes += source.fileSize;
@@ -289,22 +318,40 @@ export function createVideoCompositionPlan({
     throw new RangeError("The edited video must be 90 seconds or less.");
   }
 
+  const boundaryCount = Math.max(0, plannedClips.length - 1);
+  if ((boundaryTransitions?.length ?? 0) > boundaryCount) {
+    throw new RangeError(
+      `Boundary transition overrides cannot exceed ${boundaryCount}.`,
+    );
+  }
+
   const boundaries: VideoCompositionBoundary[] = plannedClips
     .slice(1)
     .map((incoming, index) => {
       const outgoing = plannedClips[index];
+      const override = boundaryTransitions?.[index];
+      const boundaryTransition =
+        override === null || override === undefined
+          ? normalizedTransition
+          : normalizeVideoCompositionTransition(
+              typeof override === "string"
+                ? override
+                : override.type === undefined
+                  ? { ...normalizedTransition, ...override }
+                  : override,
+            );
       return {
         index,
         outgoingClipIndex: outgoing.globalClipIndex,
         incomingClipIndex: incoming.globalClipIndex,
         editedTime: incoming.editedStart,
         transition: {
-          type: normalizedTransition.type,
+          type: boundaryTransition.type,
           duration:
-            normalizedTransition.type === "cut"
+            boundaryTransition.type === "cut"
               ? 0
               : Math.min(
-                  normalizedTransition.duration,
+                  boundaryTransition.duration,
                   outgoing.duration,
                   incoming.duration,
                 ),
@@ -408,6 +455,18 @@ function createFrameTransition(
   };
 }
 
+function getLastScheduledSourceTime(
+  clip: VideoCompositionPlannedClip,
+  frameDuration: number,
+) {
+  const lastEditedFrameTime =
+    Math.floor((clip.editedEnd - TIME_EPSILON) / frameDuration) * frameDuration;
+  return Math.min(
+    clip.end,
+    clip.start + Math.max(0, lastEditedFrameTime - clip.editedStart),
+  );
+}
+
 function transitionForFrame(
   plan: VideoCompositionPlan,
   clip: VideoCompositionPlannedClip,
@@ -451,9 +510,9 @@ function transitionForFrame(
           sourceId: outgoing.sourceId,
           sourceIndex: outgoing.sourceIndex,
           clipIndex: outgoing.clipIndex,
-          sourceTime: Math.max(
-            outgoing.start,
-            outgoing.end - frameDuration / 2,
+          sourceTime: getLastScheduledSourceTime(
+            outgoing,
+            1 / plan.frameRate,
           ),
         },
       });
@@ -507,9 +566,9 @@ function transitionForFrame(
           sourceId: outgoing.sourceId,
           sourceIndex: outgoing.sourceIndex,
           clipIndex: outgoing.clipIndex,
-          sourceTime: Math.max(
-            outgoing.start,
-            outgoing.end - frameDuration / 2,
+          sourceTime: getLastScheduledSourceTime(
+            outgoing,
+            1 / plan.frameRate,
           ),
         },
       });

@@ -3,9 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  buildVideoMixFrameDecodeBatches,
   createVideoMixAudioExportMetadata,
   exportVideoMixMp4,
+  getVideoMixTransitionCanvasWorkingBytes,
 } from "../lib/video-mix-export.ts";
+import {
+  buildVideoCompositionFrameSchedule,
+  createVideoCompositionPlan,
+} from "../lib/video-composition.ts";
 
 test("exposes the browser-only multi-video MP4 exporter", () => {
   assert.equal(typeof exportVideoMixMp4, "function");
@@ -146,6 +152,155 @@ test("keeps the multi exporter on the portable Mediabunny path", async () => {
   assert.doesNotMatch(source, /captureStream/);
 });
 
+test("decodes a maximum composition in monotonic clip batches instead of per frame", () => {
+  const plan = createVideoCompositionPlan({
+    sources: Array.from({ length: 5 }, (_, sourceIndex) => ({
+      id: `source-${sourceIndex}`,
+      fileSize: 1,
+      duration: 20,
+      clips: [
+        { start: 0, end: 9 },
+        { start: 10, end: 19 },
+      ],
+    })),
+    transition: "zoom-dissolve",
+  });
+  const schedule = buildVideoCompositionFrameSchedule(plan);
+  const batches = buildVideoMixFrameDecodeBatches(plan, schedule);
+
+  assert.equal(schedule.length, 2_700);
+  assert.equal(batches.length, 10);
+  assert.equal(
+    batches.reduce((total, batch) => total + batch.frames.length, 0),
+    schedule.length,
+  );
+  assert.deepEqual(
+    batches.flatMap((batch) => batch.frames.map((frame) => frame.frameIndex)),
+    schedule.map((frame) => frame.frameIndex),
+  );
+  assert.equal(
+    batches.filter((batch) => batch.captureBoundaryIndex !== null).length,
+    9,
+  );
+  assert.ok(
+    batches.every((batch) =>
+      batch.frames.every(
+        (frame, index) =>
+          index === 0 ||
+          frame.sourceTime >= batch.frames[index - 1].sourceTime,
+      ),
+    ),
+  );
+});
+
+test("preserves consecutive premium boundaries around a 0.35s middle clip", async () => {
+  const plan = createVideoCompositionPlan({
+    sources: Array.from({ length: 3 }, (_, sourceIndex) => ({
+      id: `short-${sourceIndex}`,
+      fileSize: 1,
+      duration: 0.35,
+      clips: [{ start: 0, end: 0.35 }],
+    })),
+    transition: "cut",
+    boundaryTransitions: ["wipe-left", "slide-left"],
+  });
+  const schedule = buildVideoCompositionFrameSchedule(plan);
+  const batches = buildVideoMixFrameDecodeBatches(plan, schedule);
+  const middleBatch = batches[1];
+
+  assert.equal(middleBatch.captureBoundaryIndex, 1);
+  assert.equal(middleBatch.frames[0].transition?.boundaryIndex, 0);
+  assert.equal(middleBatch.frames.at(-1).transition?.boundaryIndex, 0);
+  assert.equal(middleBatch.frames.at(-1).transition?.type, "wipe-left");
+  assert.equal(batches[2].frames[0].transition?.boundaryIndex, 1);
+  assert.equal(batches[2].frames[0].transition?.type, "slide-left");
+
+  const source = await readFile(
+    new URL("../lib/video-mix-export.ts", import.meta.url),
+    "utf8",
+  );
+  const renderLoop = source.slice(
+    source.indexOf("for await (const sample"),
+    source.indexOf("if (emittedFrames !== schedule.length)"),
+  );
+  const captureRawIndex = renderLoop.indexOf(
+    "copyCanvasFrame(canvas, spareTransitionFrame)",
+  );
+  const renderCurrentBoundaryIndex = renderLoop.indexOf(
+    "drawFrameTransition(",
+    captureRawIndex,
+  );
+  const promoteSpareIndex = renderLoop.indexOf(
+    "outgoingTransitionFrame = promotedOutgoingFrame",
+  );
+
+  assert.ok(captureRawIndex >= 0);
+  assert.ok(renderCurrentBoundaryIndex > captureRawIndex);
+  assert.ok(promoteSpareIndex > renderCurrentBoundaryIndex);
+  assert.match(renderLoop, /incomingFrameAlreadyCaptured|promotedOutgoingFrame !== null/);
+});
+
+test("closes yielded samples on abort and releases transition backing stores", async () => {
+  const source = await readFile(
+    new URL("../lib/video-mix-export.ts", import.meta.url),
+    "utf8",
+  );
+  const renderLoop = source.slice(
+    source.indexOf("for await (const sample"),
+    source.indexOf("if (emittedFrames !== schedule.length)"),
+  );
+  const guardedWorkIndex = renderLoop.indexOf("try {");
+  const abortSafetyCommentIndex = renderLoop.indexOf(
+    "// A sample may arrive just as cancellation is requested.",
+  );
+  const abortIndex = renderLoop.indexOf("throwIfAborted(options.signal)");
+  const sampleCloseIndex = renderLoop.indexOf("sample.close()");
+
+  assert.ok(guardedWorkIndex >= 0);
+  assert.ok(abortSafetyCommentIndex > guardedWorkIndex);
+  assert.ok(abortIndex > abortSafetyCommentIndex);
+  assert.ok(sampleCloseIndex > abortIndex);
+  assert.match(renderLoop, /finally \{\s*sample\.close\(\);\s*\}/);
+  assert.match(source, /releaseVideoMixTransitionCanvas\(outgoingTransitionFrame\)/);
+  assert.match(source, /releaseVideoMixTransitionCanvas\(incomingTransitionFrame\)/);
+  assert.match(
+    source,
+    /function releaseVideoMixTransitionCanvas[\s\S]*canvas\.width = 0;[\s\S]*canvas\.height = 0;/,
+  );
+});
+
+test("accounts for two reusable transition canvases instead of one per boundary", () => {
+  const sources = Array.from({ length: 5 }, (_, sourceIndex) => ({
+    id: `source-${sourceIndex}`,
+    fileSize: 1,
+    duration: 20,
+    clips: [
+      { start: 0, end: 9 },
+      { start: 10, end: 19 },
+    ],
+  }));
+  const blended = createVideoCompositionPlan({
+    sources,
+    transition: "crossfade",
+  });
+  const cuts = createVideoCompositionPlan({ sources, transition: "cut" });
+  const mixed = createVideoCompositionPlan({
+    sources,
+    transition: "cut",
+    boundaryTransitions: ["crossfade"],
+  });
+
+  assert.equal(
+    getVideoMixTransitionCanvasWorkingBytes(blended),
+    2 * 1080 * 1920 * 4,
+  );
+  assert.equal(getVideoMixTransitionCanvasWorkingBytes(cuts), 0);
+  assert.equal(
+    getVideoMixTransitionCanvasWorkingBytes(mixed),
+    2 * 1080 * 1920 * 4,
+  );
+});
+
 test("mixes all source audio and normalizes each source before the limiter", async () => {
   const source = await readFile(
     new URL("../lib/video-mix-export.ts", import.meta.url),
@@ -194,6 +349,10 @@ test("uses source-specific dimensions, HDR plans, progress and abort", async () 
   assert.match(source, /onColorConversionPlans/);
   assert.match(source, /onProgress\?\./);
   assert.match(source, /throwIfAborted\(options\.signal\)/);
+  assert.match(source, /samplesAtTimestamps/);
+  assert.match(source, /abortAwareVideoMixTimestamps/);
+  assert.doesNotMatch(source, /\.getSample\(/);
+  assert.doesNotMatch(source, /outgoingTransitionFrames/);
 });
 
 test("renders premium transition metadata on Canvas without retiming audio", async () => {

@@ -2,7 +2,10 @@ import { getCaptionDisplayRange, type CaptionSegment } from "./captions";
 import { buildNarrationTimeline, type NarrationPlan } from "./narration";
 import { attachNarrationCaptionDisplayTiming } from "./narration-alignment";
 import { detectPortableNarrationActivity } from "./portable-video-export";
-import type { VideoCompositionClip } from "./video-composition";
+import {
+  VIDEO_COMPOSITION_MAX_SOURCES,
+  type VideoCompositionClip,
+} from "./video-composition";
 
 const FRAME_LONG_EDGE = 512;
 const FRAME_JPEG_QUALITY = 0.66;
@@ -30,7 +33,45 @@ function throwIfAborted(signal?: AbortSignal) {
   }
 }
 
+function waitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal) {
+  throwIfAborted(signal);
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("AIナレーションの作成を中止しました。", "AbortError"));
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+function releaseFrameVideo(video: HTMLVideoElement, url: string) {
+  try {
+    video.pause();
+  } catch {
+    // Cleanup must continue even if the media element is already unusable.
+  }
+  try {
+    video.removeAttribute("src");
+    video.load();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function waitForMetadata(video: HTMLVideoElement, signal?: AbortSignal) {
+  throwIfAborted(signal);
   return new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(
       () => finish(new Error("動画の場面を読み取れませんでした。")),
@@ -54,6 +95,7 @@ function waitForMetadata(video: HTMLVideoElement, signal?: AbortSignal) {
 }
 
 function seekVideo(video: HTMLVideoElement, time: number, signal?: AbortSignal) {
+  throwIfAborted(signal);
   return new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(
       () => finish(new Error("動画の場面の読み取りに時間がかかっています。")),
@@ -86,59 +128,79 @@ export async function extractVideoMixNarrationFrames(
   count = 6,
   signal?: AbortSignal,
 ) {
-  const requested = createVideoMixNarrationFrameRequests(sources, count);
+  throwIfAborted(signal);
+  if (sources.length > VIDEO_COMPOSITION_MAX_SOURCES) {
+    throw new RangeError(`動画は最大${VIDEO_COMPOSITION_MAX_SOURCES}本までです。`);
+  }
+  const requested = createVideoMixNarrationFrameRequests(sources, count, signal);
   if (requested.length === 0) return [];
 
-  const videos = new Map<number, { video: HTMLVideoElement; url: string }>();
   const frames: string[] = [];
-  try {
-    for (const request of requested) {
-      throwIfAborted(signal);
-      let prepared = videos.get(request.sourceIndex);
-      if (!prepared) {
-        const url = URL.createObjectURL(sources[request.sourceIndex].file);
-        const video = document.createElement("video");
-        video.preload = "auto";
-        video.muted = true;
-        video.playsInline = true;
-        video.src = url;
-        prepared = { video, url };
-        videos.set(request.sourceIndex, prepared);
-        await waitForMetadata(video, signal);
-      }
-      const { video } = prepared;
-      await seekVideo(video, request.sourceTime, signal);
-      throwIfAborted(signal);
-      const scale = Math.min(
-        1,
-        FRAME_LONG_EDGE / Math.max(video.videoWidth, video.videoHeight),
-      );
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("動画の場面を読み取れませんでした。");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY));
+  let requestIndex = 0;
+  while (requestIndex < requested.length) {
+    throwIfAborted(signal);
+    const sourceIndex = requested[requestIndex].sourceIndex;
+    const sourceRequests: VideoMixNarrationFrameRequest[] = [];
+    while (
+      requestIndex < requested.length &&
+      requested[requestIndex].sourceIndex === sourceIndex
+    ) {
+      sourceRequests.push(requested[requestIndex]);
+      requestIndex += 1;
     }
-    return frames;
-  } finally {
-    for (const { video, url } of videos.values()) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-      URL.revokeObjectURL(url);
+
+    const url = URL.createObjectURL(sources[sourceIndex].file);
+    let video: HTMLVideoElement | null = null;
+    try {
+      video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      video.playsInline = true;
+      video.src = url;
+      await waitForMetadata(video, signal);
+      throwIfAborted(signal);
+      for (const request of sourceRequests) {
+        throwIfAborted(signal);
+        await seekVideo(video, request.sourceTime, signal);
+        throwIfAborted(signal);
+        const scale = Math.min(
+          1,
+          FRAME_LONG_EDGE / Math.max(video.videoWidth, video.videoHeight),
+        );
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("動画の場面を読み取れませんでした。");
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        throwIfAborted(signal);
+        const frame = canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
+        throwIfAborted(signal);
+        frames.push(frame);
+      }
+    } finally {
+      if (video) releaseFrameVideo(video, url);
+      else URL.revokeObjectURL(url);
     }
   }
+  throwIfAborted(signal);
+  return frames;
 }
 
 export function createVideoMixNarrationFrameRequests(
   sources: readonly Pick<VideoMixNarrationFrameSource, "clips">[],
   count = 6,
+  signal?: AbortSignal,
 ): VideoMixNarrationFrameRequest[] {
+  throwIfAborted(signal);
+  if (sources.length > VIDEO_COMPOSITION_MAX_SOURCES) {
+    throw new RangeError(`動画は最大${VIDEO_COMPOSITION_MAX_SOURCES}本までです。`);
+  }
   let editedCursor = 0;
-  const orderedClips = sources.flatMap((source, sourceIndex) =>
-    source.clips.map((clip) => {
+  const orderedClips = sources.flatMap((source, sourceIndex) => {
+    throwIfAborted(signal);
+    return source.clips.map((clip) => {
+      throwIfAborted(signal);
       const duration = Math.max(0, clip.end - clip.start);
       const item = {
         sourceIndex,
@@ -149,8 +211,8 @@ export function createVideoMixNarrationFrameRequests(
       };
       editedCursor += duration;
       return item;
-    }),
-  );
+    });
+  });
   const totalDuration = orderedClips.reduce(
     (sum, item) => sum + item.duration,
     0,
@@ -180,6 +242,7 @@ export function createVideoMixNarrationFrameRequests(
   // Give every source one frame first so a short clip is never omitted from
   // the generated narration merely because a neighboring clip is longer.
   const selected = sources.flatMap((_, sourceIndex) => {
+    throwIfAborted(signal);
     const sourceClips = orderedClips.filter(
       (item) => item.sourceIndex === sourceIndex,
     );
@@ -190,6 +253,7 @@ export function createVideoMixNarrationFrameRequests(
     if (sourceDuration <= 0) return [];
     let remaining = sourceDuration / 2;
     for (const item of sourceClips) {
+      throwIfAborted(signal);
       if (remaining <= item.duration || item === sourceClips.at(-1)) {
         const editedTime = item.editedStart + Math.min(item.duration, remaining);
         const request = atEditedTime(editedTime);
@@ -208,9 +272,11 @@ export function createVideoMixNarrationFrameRequests(
       atEditedTime(((index + 0.5) / extraCandidateCount) * totalDuration),
   ).filter((item): item is NonNullable<typeof item> => item !== null);
   for (let index = 0; index < extraCount; index += 1) {
+    throwIfAborted(signal);
     let bestCandidate: (typeof extraCandidates)[number] | null = null;
     let bestDistance = -1;
     for (const candidate of extraCandidates) {
+      throwIfAborted(signal);
       const duplicate = selected.some(
         (item) =>
           item.sourceIndex === candidate.sourceIndex &&
@@ -239,7 +305,9 @@ export async function prepareVideoMixNarration(
   audio: Blob,
   plan: NarrationPlan,
   compositionDuration: number,
+  signal?: AbortSignal,
 ): Promise<PreparedVideoMixNarration> {
+  throwIfAborted(signal);
   const AudioContextConstructor =
     typeof AudioContext !== "undefined"
       ? AudioContext
@@ -252,19 +320,29 @@ export async function prepareVideoMixNarration(
   }
   const context = new AudioContextConstructor();
   try {
-    const decoded = await context.decodeAudioData(await audio.arrayBuffer());
+    const audioBytes = await waitWithAbort(audio.arrayBuffer(), signal);
+    throwIfAborted(signal);
+    const decoded = await waitWithAbort(
+      context.decodeAudioData(audioBytes),
+      signal,
+    );
+    throwIfAborted(signal);
     const maximumDuration = Math.max(
       0.1,
       Math.min(decoded.duration, compositionDuration),
     );
-    const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) =>
-      decoded.getChannelData(index),
-    );
+    const channels: Float32Array[] = [];
+    for (let index = 0; index < decoded.numberOfChannels; index += 1) {
+      throwIfAborted(signal);
+      channels.push(decoded.getChannelData(index));
+    }
+    throwIfAborted(signal);
     const activity = detectPortableNarrationActivity(
       channels,
       decoded.sampleRate,
       maximumDuration,
     );
+    throwIfAborted(signal);
     const timeline = buildNarrationTimeline(
       plan.segments,
       compositionDuration,
@@ -272,13 +350,16 @@ export async function prepareVideoMixNarration(
       maximumDuration,
       { autoCut: false },
     );
+    throwIfAborted(signal);
+    const captions = attachNarrationCaptionDisplayTiming(timeline, activity, {
+      maximumDurationSeconds: maximumDuration,
+    });
+    throwIfAborted(signal);
     return {
       decodedDuration: decoded.duration,
       audioDuration: maximumDuration,
       activity,
-      captions: attachNarrationCaptionDisplayTiming(timeline, activity, {
-        maximumDurationSeconds: maximumDuration,
-      }),
+      captions,
     };
   } finally {
     await context.close().catch(() => undefined);

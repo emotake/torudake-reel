@@ -32,6 +32,7 @@ import {
   type VideoCompositionClip,
   type VideoCompositionFrameScheduleEntry,
   type VideoCompositionPlan,
+  type VideoCompositionBoundaryTransitionInput,
   type VideoCompositionTransition,
   type VideoCompositionTransitionType,
 } from "./video-composition";
@@ -122,6 +123,8 @@ export type VideoMixExportOptions = Readonly<{
   transition?:
     | VideoCompositionTransitionType
     | Partial<VideoCompositionTransition>;
+  /** Overrides in finished-video boundary order; omitted entries inherit `transition`. */
+  boundaryTransitions?: readonly VideoCompositionBoundaryTransitionInput[];
   /** Source-audio master gain. Defaults to 1. */
   audioGain?: number;
   /** Optional narration audio, placed at 0s and clipped to the program. */
@@ -185,6 +188,73 @@ type RenderedVideoMixAudio = Readonly<{
     duckedSourceAudio: boolean;
   }>;
 }>;
+
+export type VideoMixFrameDecodeBatch = Readonly<{
+  sourceIndex: number;
+  globalClipIndex: number;
+  /** The outgoing source frame is captured once after this batch. */
+  captureBoundaryIndex: number | null;
+  frames: readonly VideoCompositionFrameScheduleEntry[];
+}>;
+
+const VIDEO_MIX_TRANSITION_CANVAS_BYTES =
+  VIDEO_COMPOSITION_OUTPUT_WIDTH * VIDEO_COMPOSITION_OUTPUT_HEIGHT * 4;
+
+function transitionTypeUsesOutgoingFrame(
+  type: VideoCompositionTransitionType,
+) {
+  return (
+    type === "crossfade" ||
+    type === "wipe-left" ||
+    type === "slide-left" ||
+    type === "zoom-dissolve"
+  );
+}
+
+/**
+ * Builds at most one monotonic decoder batch per selected clip. The previous
+ * implementation called `getSample()` once per output frame, which repeatedly
+ * created and flushed a decoder for long-GOP phone videos.
+ */
+export function buildVideoMixFrameDecodeBatches(
+  plan: VideoCompositionPlan,
+  schedule: readonly VideoCompositionFrameScheduleEntry[] =
+    buildVideoCompositionFrameSchedule(plan),
+): VideoMixFrameDecodeBatch[] {
+  const framesByClip = new Map<number, VideoCompositionFrameScheduleEntry[]>();
+  for (const frame of schedule) {
+    const frames = framesByClip.get(frame.globalClipIndex) ?? [];
+    frames.push(frame);
+    framesByClip.set(frame.globalClipIndex, frames);
+  }
+
+  return plan.clips.flatMap((clip) => {
+    const frames = framesByClip.get(clip.globalClipIndex) ?? [];
+    if (frames.length === 0) return [];
+    const outgoingBoundary = plan.boundaries[clip.globalClipIndex];
+    return [{
+      sourceIndex: clip.sourceIndex,
+      globalClipIndex: clip.globalClipIndex,
+      captureBoundaryIndex:
+        outgoingBoundary &&
+        transitionTypeUsesOutgoingFrame(outgoingBoundary.transition.type)
+          ? outgoingBoundary.index
+          : null,
+      frames,
+    }];
+  });
+}
+
+/** Two reusable 1080p canvases cover every outgoing-frame transition. */
+export function getVideoMixTransitionCanvasWorkingBytes(
+  plan: VideoCompositionPlan,
+) {
+  return plan.boundaries.some((boundary) =>
+    transitionTypeUsesOutgoingFrame(boundary.transition.type),
+  )
+    ? VIDEO_MIX_TRANSITION_CANVAS_BYTES * 2
+    : 0;
+}
 
 type VideoMixAudioMetadataSourceInput = Readonly<{
   sourceId: string;
@@ -263,6 +333,19 @@ export function createVideoMixAudioExportMetadata(options: Readonly<{
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new PortableVideoExportAbortedError();
+}
+
+async function* abortAwareVideoMixTimestamps(
+  frames: readonly VideoCompositionFrameScheduleEntry[],
+  signal?: AbortSignal,
+) {
+  for (const frame of frames) {
+    // End the producer cleanly instead of throwing through Mediabunny's
+    // decoder pump. The consumer checks the same signal on every yielded
+    // sample and its `for await` close then releases queued VideoSamples.
+    if (signal?.aborted) return;
+    yield frame.sourceTime;
+  }
 }
 
 function normalizeAudioGain(value = 1) {
@@ -677,19 +760,41 @@ function copyCanvasFrame(
   context.drawImage(source, 0, 0);
 }
 
+function releaseVideoMixTransitionCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 function drawFrameTransition(
   context: CanvasRenderingContext2D,
   frame: VideoCompositionFrameScheduleEntry,
   outgoingFrame: HTMLCanvasElement | null,
+  incomingFrame: HTMLCanvasElement | null,
+  incomingFrameAlreadyCaptured = false,
 ) {
   const transition = frame.transition;
   if (!transition) return;
   const visual = transition.visual;
+  if (
+    transitionTypeUsesOutgoingFrame(transition.type) &&
+    !outgoingFrame
+  ) {
+    throw new PortableVideoExportUnsupportedError(
+      "browser",
+      "動画の切り替え元フレームを準備できません。カットを少し長くして、もう一度お試しください。",
+    );
+  }
   if (outgoingFrame) {
-    const currentFrame = document.createElement("canvas");
-    currentFrame.width = context.canvas.width;
-    currentFrame.height = context.canvas.height;
-    copyCanvasFrame(context.canvas, currentFrame);
+    if (!incomingFrame) {
+      throw new PortableVideoExportUnsupportedError(
+        "browser",
+        "動画の切り替えフレームを準備できません。",
+      );
+    }
+    if (!incomingFrameAlreadyCaptured) {
+      copyCanvasFrame(context.canvas, incomingFrame);
+    }
 
     const drawLayer = (
       image: CanvasImageSource,
@@ -727,7 +832,7 @@ function drawFrameTransition(
       1,
     );
     drawLayer(
-      currentFrame,
+      incomingFrame,
       visual.incomingOpacity,
       visual.incomingScale,
       visual.incomingOffsetX,
@@ -747,12 +852,7 @@ function transitionUsesOutgoingFrame(
   frame: VideoCompositionFrameScheduleEntry,
 ) {
   const type = frame.transition?.type;
-  return (
-    type === "crossfade" ||
-    type === "wipe-left" ||
-    type === "slide-left" ||
-    type === "zoom-dissolve"
-  );
+  return type ? transitionTypeUsesOutgoingFrame(type) : false;
 }
 
 /**
@@ -875,8 +975,10 @@ export async function exportVideoMixMp4(
         clips: item.source.clips,
       })),
       transition: options.transition,
+      boundaryTransitions: options.boundaryTransitions,
     });
     const schedule = buildVideoCompositionFrameSchedule(plan);
+    const decodeBatches = buildVideoMixFrameDecodeBatches(plan, schedule);
     options.onPlan?.(plan);
     options.onColorConversionPlans?.(
       prepared.map((item, sourceIndex) => ({
@@ -898,10 +1000,21 @@ export async function exportVideoMixMp4(
           : ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ??
             null),
     });
-    if (!memory.ok) {
+    const transitionCanvasWorkingBytes =
+      getVideoMixTransitionCanvasWorkingBytes(plan);
+    const estimatedWorkingBytes =
+      memory.estimatedWorkingBytes + transitionCanvasWorkingBytes;
+    const maximumWorkingBytes =
+      memory.deviceClass === "ios"
+        ? 384 * 1024 * 1024
+        : memory.deviceClass === "low-memory"
+          ? 768 * 1024 * 1024
+          : Number.POSITIVE_INFINITY;
+    if (!memory.ok || estimatedWorkingBytes > maximumWorkingBytes) {
       throw new PortableVideoExportUnsupportedError(
         "browser",
-        memory.message ?? "この端末では複数動画を安全に書き出せません。",
+        memory.message ??
+          "この端末では切り替え効果を含む複数動画を安全に書き出せません。カットを短くするか、PC版Chromeでお試しください。",
       );
     }
 
@@ -1008,21 +1121,46 @@ export async function exportVideoMixMp4(
     const audioWrite = audioSource && mixedAudio
       ? audioSource.add(mixedAudio).then(() => audioSource.close())
       : Promise.resolve();
-    const outgoingTransitionFrames = new Map<number, HTMLCanvasElement>();
+    const usesOutgoingTransitionFrame = transitionCanvasWorkingBytes > 0;
+    let outgoingTransitionFrame = usesOutgoingTransitionFrame
+      ? document.createElement("canvas")
+      : null;
+    let incomingTransitionFrame = usesOutgoingTransitionFrame
+      ? document.createElement("canvas")
+      : null;
+    for (const transitionCanvas of [
+      outgoingTransitionFrame,
+      incomingTransitionFrame,
+    ]) {
+      if (!transitionCanvas) continue;
+      transitionCanvas.width = canvas.width;
+      transitionCanvas.height = canvas.height;
+    }
+    let outgoingTransitionBoundaryIndex: number | null = null;
     let emittedFrames = 0;
 
     try {
       const sinks = prepared.map(
         (item) => new media.VideoSampleSink(item.videoTrack),
       );
-      for (const frame of schedule) {
-          const item = prepared[frame.sourceIndex];
-          throwIfAborted(options.signal);
-          const sample = await sinks[frame.sourceIndex].getSample(frame.sourceTime);
+      for (const batch of decodeBatches) {
+        throwIfAborted(options.signal);
+        const item = prepared[batch.sourceIndex];
+        const sink = sinks[batch.sourceIndex];
+        let batchFrameIndex = 0;
+        for await (const sample of sink.samplesAtTimestamps(
+          abortAwareVideoMixTimestamps(batch.frames, options.signal),
+        )) {
+          const frame = batch.frames[batchFrameIndex];
+          batchFrameIndex += 1;
           if (!sample) {
             throw new Error(`「${item.source.file.name}」の映像フレームを読み取れませんでした。`);
           }
           try {
+            // A sample may arrive just as cancellation is requested. Keep the
+            // abort check inside this try so that every yielded VideoSample is
+            // closed before the abort is propagated.
+            throwIfAborted(options.signal);
             context.setTransform(1, 0, 0, 1, 0, 0);
             context.globalAlpha = 1;
             context.fillStyle = "#000";
@@ -1035,55 +1173,44 @@ export async function exportVideoMixMp4(
               item.drawRect.height,
             );
 
+            const captureBoundaryIndex =
+              batch.captureBoundaryIndex !== null &&
+              batchFrameIndex === batch.frames.length
+                ? batch.captureBoundaryIndex
+                : null;
+            const outgoingFrameForCurrentBoundary = outgoingTransitionFrame;
+            const spareTransitionFrame = incomingTransitionFrame;
+            let promotedOutgoingFrame: HTMLCanvasElement | null = null;
+            let recycledIncomingFrame: HTMLCanvasElement | null = null;
+            if (captureBoundaryIndex !== null) {
+              if (!outgoingFrameForCurrentBoundary || !spareTransitionFrame) {
+                throw new PortableVideoExportUnsupportedError(
+                  "browser",
+                  "動画の切り替え用フレームを準備できません。もう一度お試しください。",
+                );
+              }
+              // The last frame of a very short middle clip can still belong
+              // to its incoming transition while also becoming the outgoing
+              // frame for the next boundary. Preserve the raw sample in the
+              // spare canvas without replacing the current boundary's frame.
+              copyCanvasFrame(canvas, spareTransitionFrame);
+              promotedOutgoingFrame = spareTransitionFrame;
+              recycledIncomingFrame = outgoingFrameForCurrentBoundary;
+            }
+
             const transition = frame.transition;
             if (transition && transitionUsesOutgoingFrame(frame)) {
-              let outgoingFrame = outgoingTransitionFrames.get(
-                transition.boundaryIndex,
+              drawFrameTransition(
+                context,
+                frame,
+                outgoingTransitionBoundaryIndex === transition.boundaryIndex
+                  ? outgoingFrameForCurrentBoundary
+                  : null,
+                spareTransitionFrame,
+                promotedOutgoingFrame !== null,
               );
-              if (!outgoingFrame) {
-                const fromSource = prepared[transition.from.sourceIndex];
-                const fromSample = await sinks[
-                  transition.from.sourceIndex
-                ].getSample(transition.from.sourceTime);
-                if (fromSample) {
-                  outgoingFrame = document.createElement("canvas");
-                  outgoingFrame.width = canvas.width;
-                  outgoingFrame.height = canvas.height;
-                  const outgoingContext = outgoingFrame.getContext("2d", {
-                    alpha: false,
-                    colorSpace: "srgb",
-                  });
-                  if (!outgoingContext) {
-                    fromSample.close();
-                    throw new PortableVideoExportUnsupportedError(
-                      "browser",
-                      "動画の切り替えフレームを描画できません。",
-                    );
-                  }
-                  outgoingContext.fillStyle = "#000";
-                  outgoingContext.fillRect(
-                    0,
-                    0,
-                    outgoingFrame.width,
-                    outgoingFrame.height,
-                  );
-                  fromSample.draw(
-                    outgoingContext,
-                    fromSource.drawRect.x,
-                    fromSource.drawRect.y,
-                    fromSource.drawRect.width,
-                    fromSource.drawRect.height,
-                  );
-                  fromSample.close();
-                  outgoingTransitionFrames.set(
-                    transition.boundaryIndex,
-                    outgoingFrame,
-                  );
-                }
-              }
-              drawFrameTransition(context, frame, outgoingFrame ?? null);
             } else {
-              drawFrameTransition(context, frame, null);
+              drawFrameTransition(context, frame, null, null);
             }
             await options.drawOverlay?.({
               canvas,
@@ -1099,6 +1226,17 @@ export async function exportVideoMixMp4(
               duration: frame.duration,
             });
             await videoSource.add(frame.editedTime, frame.duration);
+            if (
+              captureBoundaryIndex !== null &&
+              promotedOutgoingFrame &&
+              recycledIncomingFrame
+            ) {
+              // Promote only after the current boundary has been rendered.
+              // The former outgoing canvas becomes the next scratch canvas.
+              outgoingTransitionFrame = promotedOutgoingFrame;
+              incomingTransitionFrame = recycledIncomingFrame;
+              outgoingTransitionBoundaryIndex = captureBoundaryIndex;
+            }
           } finally {
             sample.close();
           }
@@ -1106,6 +1244,11 @@ export async function exportVideoMixMp4(
           options.onProgress?.(
             0.16 + (emittedFrames / schedule.length) * 0.79,
           );
+        }
+        throwIfAborted(options.signal);
+        if (batchFrameIndex !== batch.frames.length) {
+          throw new Error(`「${item.source.file.name}」の映像を最後まで読み取れませんでした。`);
+        }
       }
       if (emittedFrames !== schedule.length) {
         throw new Error("複数動画を最後まで書き出せませんでした。");
@@ -1118,6 +1261,11 @@ export async function exportVideoMixMp4(
     } catch (error) {
       await Promise.allSettled([audioWrite]);
       throw error;
+    } finally {
+      // Setting both dimensions to zero releases the transition canvases'
+      // backing stores on success and on every cancellation/error path.
+      releaseVideoMixTransitionCanvas(outgoingTransitionFrame);
+      releaseVideoMixTransitionCanvas(incomingTransitionFrame);
     }
 
     if (!target.buffer || target.buffer.byteLength === 0) {

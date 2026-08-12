@@ -12616,6 +12616,145 @@ footer > small {
   background: var(--mix-coral);
 }
 
+.videoMixTransitionSummary {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 2px 0 10px;
+}
+
+.videoMixTransitionSummary strong {
+  font-size: 14px;
+}
+
+.videoMixTransitionSummary small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.videoMixBoundarySettings {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(21, 32, 53, 0.09);
+}
+
+.videoMixBoundaryHeading {
+  display: grid;
+  gap: 4px;
+}
+
+.videoMixBoundaryHeading strong {
+  font-size: 15px;
+}
+
+.videoMixBoundaryHeading small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.videoMixBoundaryList {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.videoMixBoundaryList > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(176px, 0.58fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(21, 32, 53, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 253, 249, 0.9);
+}
+
+.videoMixBoundaryFlow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.videoMixBoundaryFlow > span:first-child {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--mix-coral);
+}
+
+.videoMixBoundaryFlow > i {
+  color: var(--mix-coral);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.videoMixBoundaryClip {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.videoMixBoundaryClip strong,
+.videoMixBoundaryClip small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.videoMixBoundaryClip strong {
+  font-size: 12px;
+}
+
+.videoMixBoundaryClip small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+}
+
+.videoMixBoundaryChoice {
+  display: grid;
+  gap: 5px;
+}
+
+.videoMixBoundaryChoice > span {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixBoundaryChoice select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 38px 0 12px;
+  border: 1px solid rgba(21, 32, 53, 0.18);
+  border-radius: 12px;
+  color: var(--mix-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  background: #fff;
+}
+
+.videoMixBoundaryChoice select:focus-visible {
+  outline: 3px solid rgba(239, 92, 66, 0.22);
+  outline-offset: 2px;
+}
+
 .videoMixTransitionIcon {
   position: relative;
   display: block;
@@ -13263,12 +13402,43 @@ footer > small {
     width: 100%;
   }
 
-  .videoMixTransitionGrid,
   .videoMixFinishMode,
   .videoMixVoiceOptions,
   .videoMixPurchase > div,
   .videoMixFinalize {
     grid-template-columns: 1fr;
+  }
+
+  .videoMixTransitionGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .videoMixTransitionGrid > button {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 3px 8px;
+    min-height: 82px;
+    padding: 10px;
+  }
+
+  .videoMixTransitionGrid .videoMixTransitionIcon {
+    width: 44px;
+    height: 36px;
+  }
+
+  .videoMixTransitionSummary {
+    display: grid;
+  }
+
+  .videoMixTransitionSummary small {
+    text-align: left;
+  }
+
+  .videoMixBoundaryList > li {
+    grid-template-columns: 1fr;
+  }
+
+  .videoMixBoundaryChoice select {
+    font-size: 16px;
   }
 
   .videoMixNarrationAction,

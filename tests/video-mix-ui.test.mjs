@@ -51,6 +51,15 @@ test("offers eight no-cost transition styles shared with the exporter", () => {
   assert.match(clientSource, /何度変えても追加料金やAI処理回数は発生しません/);
   assert.match(clientSource, /exportVideoMixMp4\(\{/);
   assert.match(clientSource, /transition,/);
+  assert.match(clientSource, /boundaryTransitions: resolvedBoundaryTransitions/);
+  assert.match(clientSource, /切り目ごとに変更/);
+  assert.match(clientSource, /aria-label="切り目ごとのつなぎ方"/);
+  assert.match(clientSource, /setBoundaryTransitionPreferences/);
+  assert.match(
+    clientSource,
+    /setBoundaryTransitionPreferences\(\(currentPreferences\) =>\s*pruneVideoMixBoundaryTransitionPreferences\(next, currentPreferences\)/,
+  );
+  assert.match(clientSource, /動画とカットの順番は固定したまま/);
   assert.doesNotMatch(exporterSource, /openai|api\/transcribe|api\/narration/i);
 });
 
@@ -72,16 +81,90 @@ test("adds an optional metered AI narration with locally aligned captions", () =
 });
 
 test("reserves once for all sources and consumes one entitlement only after a verified export", () => {
-  assert.match(clientSource, /reserveMixUsage\(aggregateDuration, idempotencyKey\)/);
-  assert.match(clientSource, /ensureMixUsageReservation\(\)/);
+  assert.match(
+    clientSource,
+    /reserveMixUsage\([\s\S]*?requestedDuration,[\s\S]*?idempotencyKey,[\s\S]*?signal/,
+  );
+  assert.match(clientSource, /ensureMixUsageReservation\(controller\.signal\)/);
   assert.match(clientSource, /canSaveCompletedVideo\(reservation\.bucket\)/);
   assert.match(
     clientSource,
-    /exportVideoMixMp4\([\s\S]*?inspectMixOutput\([\s\S]*?blob,[\s\S]*?plan,[\s\S]*?audioMetadata,[\s\S]*?updateUsage\("complete", reservationId\)/,
+    /exportVideoMixMp4\([\s\S]*?onPlan:[\s\S]*?exportedPlan = actualPlan[\s\S]*?inspectMixOutput\([\s\S]*?blob,[\s\S]*?exportedPlan,[\s\S]*?audioMetadata,[\s\S]*?completeReservationUsage\(reservationId, reservation\.bucket\)/,
   );
   assert.match(clientSource, /updateUsage\("release", reservationId\)/);
   assert.match(clientSource, /caught instanceof VideoMixRequestError && caught\.status === 402/);
   assert.match(clientSource, /完成動画1本分の利用枠を使用/);
+});
+
+test("makes cancellation, reservation release, checkout return, and repeated actions deterministic", () => {
+  assert.match(clientSource, /const USAGE_RELEASE_RETRY_DELAYS_MS/);
+  assert.match(clientSource, /releaseUsageWithRetry\(reservationId\)/);
+  assert.match(
+    clientSource,
+    /const releaseActiveReservationForeground[\s\S]*?reservationReleasePromiseRef/,
+  );
+  assert.match(
+    clientSource,
+    /const releaseActiveReservationOnPageHide[\s\S]*?sendMixUsageReleaseBeacon/,
+  );
+  assert.match(
+    clientSource,
+    /pageHidingRef\.current = true;[\s\S]*?releaseActiveReservationOnPageHide\(\)/,
+  );
+  assert.match(
+    clientSource,
+    /if \(!pageHidingRef\.current\) \{[\s\S]*?releaseActiveReservationForeground\(\)/,
+  );
+  assert.match(clientSource, /window\.addEventListener\("pageshow"/);
+  assert.match(clientSource, /window\.addEventListener\("focus"/);
+  assert.match(clientSource, /document\.addEventListener\("visibilitychange"/);
+  assert.match(clientSource, /synchronizeBillingAndQuota/);
+  assert.match(clientSource, /narrationGeneratingRef\.current/);
+  assert.match(clientSource, /exportRunningRef\.current/);
+  assert.match(clientSource, /finalizeActionRef\.current/);
+  assert.match(clientSource, /prepareVideoMixNarration\([\s\S]*?controller\.signal/);
+  assert.match(clientSource, /recordMixNarrationDisclosure\(reservationId, controller\.signal\)/);
+  assert.match(clientSource, /disabled=\{finalizingUsage\}/);
+  assert.match(clientSource, /保存枠を確定中/);
+  assert.match(clientSource, /invalidateGeneratedNarration/);
+  assert.match(clientSource, /if \(added\.length > 0\) \{[\s\S]*?clearNarrationDraft\(\)/);
+});
+
+test("serializes usage leases and discards stale reservation responses", () => {
+  assert.match(clientSource, /const reservationMutexRef = useRef<Promise<void>>/);
+  assert.match(clientSource, /const withReservationLock = useCallback/);
+  assert.match(clientSource, /const releaseActiveReservationLocked = useCallback/);
+  assert.match(
+    clientSource,
+    /const ensureMixUsageReservation[\s\S]*?withReservationLock\(async \(\) =>/,
+  );
+  assert.match(
+    clientSource,
+    /sourceGenerationRef\.current !== requestGeneration[\s\S]*?releaseReturnedReservationLocked/,
+  );
+  assert.match(clientSource, /reservationDurationRef\.current \?\? currentDuration\(\)/);
+  assert.ok(
+    (clientSource.match(/sourceGenerationRef\.current \+= 1/g) ?? []).length >= 4,
+  );
+  assert.match(
+    clientSource,
+    /monthlyHasRoom[\s\S]*?videosUsed[\s\S]*?< Number\(billing\.monthly\.videoLimit\)/,
+  );
+  assert.match(clientSource, /const DEFAULT_AI_OPERATION_LIMIT = 3/);
+});
+
+test("detaches completion from pagehide and validates the actual export duration", () => {
+  assert.match(
+    clientSource,
+    /const completeReservationUsage[\s\S]*?activeReservationRef\.current = null;[\s\S]*?withReservationLock\(async \(\) =>[\s\S]*?updateUsage\("complete", reservationId\)[\s\S]*?catch[\s\S]*?activeReservationRef\.current = reservationId/,
+  );
+  assert.match(clientSource, /let exportedPlan: VideoCompositionPlan \| null = null/);
+  assert.match(clientSource, /onPlan: \(actualPlan\) => \{[\s\S]*?exportedPlan = actualPlan/);
+  assert.match(clientSource, /if \(!exportedPlan\)/);
+  assert.match(
+    clientSource,
+    /Math\.min\(plan\.duration, range\.start\)[\s\S]*?Math\.min\(plan\.duration, range\.end\)/,
+  );
 });
 
 test("fails closed when source audio disappears from the encoded MP4", () => {
@@ -129,6 +212,11 @@ test("ships accessible mobile controls and route metadata", () => {
   assert.match(pageSource, /各動画から1〜2カット/);
   assert.match(clientSource, /role="radiogroup"/);
   assert.match(clientSource, /role="radio"/);
+  assert.match(clientSource, /aria-label="すべての切り目のつなぎ方"/);
+  assert.match(clientSource, /tabIndex=\{transition === option\.id \? 0 : -1\}/);
+  assert.match(clientSource, /event\.key === "ArrowRight" \|\| event\.key === "ArrowDown"/);
+  assert.match(clientSource, /event\.key === "Home"/);
+  assert.match(clientSource, /event\.key === "End"/);
   assert.match(clientSource, /aria-live="polite"/);
   assert.match(clientSource, /role="alert"/);
   assert.match(
