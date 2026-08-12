@@ -126,7 +126,7 @@ function realtimeUpgrade(socket) {
   };
 }
 
-test("generates the four current realtime voices and wraps PCM output as WAV", async () => {
+test("generates four delivery templates with the recommended realtime voices", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
@@ -142,8 +142,8 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
   try {
     const worker = await loadWorker("narration-realtime-voices");
     const styles = ["calm", "bright", "comedy", "party"];
-    const voices = ["cedar", "marin", "ash", "coral"];
-    const speeds = [0.99, 1, 1.07, 1.07];
+    const voices = ["cedar", "marin", "cedar", "marin"];
+    const speeds = [0.99, 1, 1.03, 1.03];
 
     for (const [index, style] of styles.entries()) {
       const response = await worker.fetch(
@@ -167,7 +167,7 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
       assert.equal(response.headers.get("x-narration-voice"), voices[index]);
       assert.equal(
         response.headers.get("x-narration-profile"),
-        `2026-08-10-continuity-v1:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
+        `2026-08-12-quality-v2:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
       );
       const wav = new Uint8Array(await response.arrayBuffer());
       assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
@@ -193,7 +193,7 @@ test("generates the four current realtime voices and wraps PCM output as WAV", a
     );
     assert.equal(
       new Set(sessions.map((session) => session.audio.output.voice)).size,
-      4,
+      2,
     );
     assert.deepEqual(
       sessions.map((session) => session.audio.output.speed),
@@ -346,7 +346,7 @@ test("maps the retired pop voice to the bright female HD fallback", async () => 
     const fallbackBody = JSON.parse(requests[1].init.body);
     assert.equal(fallbackBody.model, "tts-1-hd");
     assert.equal(fallbackBody.voice, "shimmer");
-    assert.equal(fallbackBody.speed, 1.07);
+    assert.equal(fallbackBody.speed, 1.03);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -417,7 +417,7 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.equal(response.headers.get("x-narration-voice"), "marin");
     assert.equal(
       response.headers.get("x-narration-profile"),
-      "2026-08-10-continuity-v1:bright:gpt-realtime-2.1-mini:marin:1",
+      "2026-08-12-quality-v2:bright:gpt-realtime-2.1-mini:marin:1",
     );
     const session = socket.sent[0].session;
     assert.equal(session.audio.output.voice, "marin");

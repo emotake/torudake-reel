@@ -49,7 +49,7 @@ const REALTIME_TIMEOUT_MS = 150_000;
 const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
 const MAX_SPEECH_REQUEST_BYTES = 64 * 1024;
-const NARRATION_PROFILE_VERSION = "2026-08-10-continuity-v1";
+const NARRATION_PROFILE_VERSION = "2026-08-12-quality-v2";
 
 const VOICE_SETTINGS: Record<
   NarrationStyle,
@@ -78,20 +78,24 @@ const VOICE_SETTINGS: Record<
       "話者像: 穏やかで信頼感があり、丁寧に案内する自然な成人男性。\n声質とトーン: 聞き取りやすい中低音。近すぎない落ち着いた距離感を保ち、過度な低音演技、芝居がかったナレーター調、息の多い話し方を避ける。\n話速と間: 少しゆとりを持ち、結論の前後に短い間を置く。一定の一本調子にせず、重要語だけを控えめに立たせる。\n発音: 固有名詞と数字を明瞭にし、語尾まで自然に言い切る。",
   },
   comedy: {
-    realtimeVoice: "ash",
-    legacyVoice: "ash",
+    // Cedar is one of OpenAI's recommended high-quality Realtime voices.
+    // The brighter male template is differentiated by delivery rather than by
+    // switching to a rougher-sounding speaker.
+    realtimeVoice: "cedar",
+    legacyVoice: "cedar",
     fallbackVoice: "fable",
-    speed: 1.07,
+    speed: 1.03,
     instructions:
-      "話者像: 20代のクラブや音楽イベントに自然になじむ、社交的で自信のある成人男性。\n声質とトーン: 若々しく明るく、華やかで抜けのよい男性の声。笑顔が伝わる高揚感とノリのよさを出すが、酔った話し方、怒鳴り声、クラブMCの煽り、過度な巻き舌は避ける。\n話速と間: 軽快に進め、短い文の頭を明瞭に立ち上げる。意味のまとまりには短い間を置き、重要語へ自然にアクセントを置く。単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
+      "話者像: 20代のクラブや音楽イベントに自然になじむ、社交的で自信のある成人男性。\n声質とトーン: 若々しく明るく、華やかで抜けのよい男性の声。笑顔が伝わる高揚感とノリのよさを出すが、酔った話し方、怒鳴り声、クラブMCの煽り、過度な巻き舌は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。重要語へ自然にアクセントを置き、単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
   },
   party: {
-    realtimeVoice: "coral",
-    legacyVoice: "coral",
+    // Marin is one of OpenAI's recommended high-quality Realtime voices.
+    realtimeVoice: "marin",
+    legacyVoice: "marin",
     fallbackVoice: "shimmer",
-    speed: 1.07,
+    speed: 1.03,
     instructions:
-      "話者像: 20代のクラブや音楽イベントに自然になじむ、華やかで自信のある成人女性。ギャル系の親しみやすさとポジティブな勢いを感じさせる。\n声質とトーン: 若々しく明るく、きらびやかで抜けのよい女性の声。笑顔と高揚感が伝わる豊かな抑揚をつけるが、幼いアニメ声、鼻にかかった作り声、叫び声、過度なギャル語の演技は避ける。\n話速と間: 軽快に進め、語頭と重要語を気持ちよく立ち上げる。短い文ごとに自然な間を置き、語尾には軽い弾みをつけるが引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有のイントネーションを模倣しない。",
+      "話者像: 20代のクラブや音楽イベントに自然になじむ、華やかで自信のある成人女性。ギャル系の親しみやすさとポジティブな勢いを感じさせる。\n声質とトーン: 若々しく明るく、きらびやかで抜けのよい女性の声。笑顔と高揚感が伝わる豊かな抑揚をつけるが、幼いアニメ声、鼻にかかった作り声、叫び声、過度なギャル語の演技は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。語尾には軽い弾みをつけるが引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有のイントネーションを模倣しない。",
   },
 };
 
@@ -166,6 +170,8 @@ function realtimeNarrationInstructions(
     settings.instructions,
     "# Pacing",
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
+    "# Recording Quality",
+    "文中で声量、声の高さ、声質、マイクからの距離感を急に変えない。破裂音、歯擦音、息、かすれを誇張せず、語と語の間を完全な無音で不自然に切らない。自然な呼吸と滑らかなつながりを保つ。",
     "# Delivery Rules",
     DELIVERY_GUARD,
     deliveryInstruction ? "# Voice Continuity" : "",
