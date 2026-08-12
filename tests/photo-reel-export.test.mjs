@@ -47,6 +47,7 @@ test("uses the same deterministic canvas renderer for preview and MP4 export", a
   assert.match(source, /HIGH_QUALITY_VIDEO_BITRATE/);
   assert.match(source, /new media\.AudioBufferSource\(/);
   assert.match(source, /codec: "aac"/);
+  assert.match(source, /import\.meta[\s\S]*?env[\s\S]*?SSR/);
   assert.match(source, /import\("@mediabunny\/aac-encoder"\)/);
   assert.match(source, /registerAacEncoder\(\)/);
 });

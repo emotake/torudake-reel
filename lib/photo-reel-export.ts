@@ -182,6 +182,12 @@ function getMp4RecorderMimeType() {
 let packagedAacEncoderRegistration: Promise<void> | null = null;
 
 async function registerPackagedAacEncoder() {
+  // The extension contains a Node worker_threads fallback. Excluding it from
+  // the SSR graph keeps that fallback out of the Cloudflare Pages worker while
+  // still bundling it into the browser build where Web Workers are available.
+  if ((import.meta as ImportMeta & { env: { SSR: boolean } }).env.SSR) {
+    throw new Error("The packaged AAC encoder is browser-only.");
+  }
   packagedAacEncoderRegistration ??= import("@mediabunny/aac-encoder").then(
     ({ registerAacEncoder }) => registerAacEncoder(),
   );
