@@ -163,6 +163,12 @@ test("shows photo-reel preview and save pricing before editing", () => {
   assert.match(photoReelSource, /tabIndex=\{templateId === option\.id \? 0 : -1\}/);
 });
 
+test("publishes an explicit landing entry for the five-video editor", () => {
+  assert.match(pageSource, /href="\/video-mix"/);
+  assert.match(pageSource, /動画をつないで作る/);
+  assert.match(pageSource, /最大5本・素材の順番を保って1本に合成/);
+});
+
 test("wires local visual scoring into narration and cover selection", () => {
   assert.match(pageSource, /createRepresentativeFrameSampleTimes\(duration\)/);
   assert.match(pageSource, /selectRepresentativeVideoFrames\(candidates/);

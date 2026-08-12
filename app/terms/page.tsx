@@ -25,8 +25,8 @@ export const metadata = buildPublicPageMetadata({
   path: "/terms",
 });
 
-const TERMS_VERSION = "2026-08-12";
-const LAST_UPDATED = "2026年8月12日";
+const TERMS_VERSION = "2026-08-13";
+const LAST_UPDATED = "2026年8月13日";
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
 const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
@@ -100,6 +100,9 @@ export default function TermsPage() {
           <li>
             無料体験は合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
             動画までの範囲で、いずれかの上限に先に達するまで利用できます。編集とプレビューは無料ですが、完成動画の保存には有料の利用枠が必要です。
+          </li>
+          <li>
+            「動画をつないで作る」機能では、最大5本、全素材の合計500MB・5分まで選択できます。複数素材をつないだ完成動画も、書き出して保存する1本を動画1本分として扱います。
           </li>
           <li>
             AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本が正常に生成された時点で1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分を使用します。

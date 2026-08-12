@@ -899,7 +899,7 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new PortableVideoExportAbortedError();
 }
 
-async function ensurePortableAacEncoding(
+export async function ensurePortableAacEncoding(
   media: typeof import("mediabunny"),
   settings: {
     numberOfChannels: number;

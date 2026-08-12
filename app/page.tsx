@@ -3746,6 +3746,16 @@ function Landing({
               <i aria-hidden="true">→</i>
             </a>
           </div>
+          <Link className="photoReelEntry" href="/video-mix">
+            <span className="photoReelEntryMark" aria-hidden="true">
+              MIX
+            </span>
+            <span>
+              <strong>動画をつないで作る</strong>
+              <small>最大5本・素材の順番を保って1本に合成</small>
+            </span>
+            <i aria-hidden="true">→</i>
+          </Link>
           <Link className="photoReelEntry" href="/photo-reel">
             <span className="photoReelEntryMark" aria-hidden="true">
               PHOTO

@@ -54,6 +54,9 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /編集・プレビューは無料/);
   assert.match(html, /動画1本だけ保存/);
   assert.match(html, /料金を見る/);
+  assert.match(html, /href="\/video-mix"/);
+  assert.match(html, /動画をつないで作る/);
+  assert.match(html, /最大5本・素材の順番を保って1本に合成/);
   assert.match(html, /写真からリールを作る/);
   assert.match(html, /最大10枚・自動編集5パターン/);
   assert.match(html, /スマホであとから試したい方へ/);
@@ -123,6 +126,24 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/photo-reel"/,
+  );
+});
+
+test("renders the ordered five-video editor as a separate public route", async () => {
+  const response = await render("/video-mix");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /順番を守って/);
+  assert.match(html, /各動画から1〜2カット/);
+  assert.match(html, /最大5本・合計500MB・合計5分まで/);
+  assert.match(html, /自然なフェード/);
+  assert.match(html, /黒へフェード/);
+  assert.match(html, /白へフェード/);
+  assert.match(html, /保存時は完成動画1本分の利用枠を使用/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/video-mix"/,
   );
 });
 
@@ -285,7 +306,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
   assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
   assert.match(html, /すべて消費税込み/);
-  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-12/);
+  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-13/);
   assert.match(html, /投稿素材と知的財産権/);
   assert.match(html, /利用停止とサービスの変更/);
   assert.match(html, /保証と責任の範囲/);

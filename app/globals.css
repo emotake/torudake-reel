@@ -12003,3 +12003,981 @@ footer > small {
 .photoReelShell .photoReelExportCard li {
   font-size: 12px;
 }
+
+/* Ordered multi-video editor */
+.videoMixShell {
+  --mix-ink: #152035;
+  --mix-subtle: #667085;
+  --mix-paper: #fffdf8;
+  --mix-coral: #ef5c42;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--mix-ink);
+  background:
+    radial-gradient(circle at 8% 2%, rgba(185, 245, 208, 0.35), transparent 24rem),
+    radial-gradient(circle at 96% 13%, rgba(239, 92, 66, 0.12), transparent 28rem),
+    linear-gradient(180deg, #fffdf8 0%, #fff8ee 52%, #fffdf8 100%);
+}
+
+.videoMixShell button,
+.videoMixShell a,
+.videoMixShell input[type="range"] {
+  min-height: 44px;
+}
+
+.videoMixShell :is(button, a, input):focus-visible {
+  outline: 3px solid rgba(239, 92, 66, 0.38);
+  outline-offset: 3px;
+}
+
+.videoMixHeader {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 72px;
+  padding: 0 clamp(18px, 4vw, 64px);
+  border-bottom: 1px solid rgba(21, 32, 53, 0.08);
+  background: rgba(255, 253, 248, 0.9);
+  backdrop-filter: blur(18px);
+}
+
+.videoMixBrand,
+.videoMixHeader > a:last-child {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.videoMixHeader > a:last-child {
+  justify-self: end;
+}
+
+.videoMixHeader > div {
+  display: grid;
+  justify-items: center;
+}
+
+.videoMixHeader > div span {
+  color: var(--mix-coral);
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.videoMixHeader > div strong {
+  font-size: 13px;
+}
+
+.videoMixHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 350px);
+  gap: clamp(28px, 7vw, 110px);
+  align-items: end;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: clamp(58px, 8vw, 112px) clamp(20px, 5vw, 72px) clamp(46px, 6vw, 78px);
+}
+
+.videoMixEyebrow {
+  margin: 0 0 18px;
+  color: #217251;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.videoMixHero h1 {
+  max-width: 780px;
+  margin: 0;
+  font-size: clamp(38px, 6vw, 72px);
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 1.11;
+}
+
+.videoMixHero h1 em {
+  color: var(--mix-coral);
+  font-style: normal;
+}
+
+.videoMixHero > div > p:last-child {
+  max-width: 690px;
+  margin: 26px 0 0;
+  color: #4a566b;
+  font-size: clamp(15px, 1.5vw, 18px);
+  line-height: 1.95;
+}
+
+.videoMixHero aside {
+  display: grid;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid rgba(33, 114, 81, 0.16);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 22px 54px rgba(21, 32, 53, 0.07);
+}
+
+.videoMixHero aside strong {
+  font-size: 17px;
+}
+
+.videoMixHero aside span {
+  color: #455166;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.videoMixHero aside small {
+  color: #217251;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixWorkspace {
+  display: grid;
+  grid-template-columns: minmax(310px, 430px) minmax(0, 760px);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: start;
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 0 clamp(20px, 5vw, 72px) 100px;
+}
+
+.videoMixPreviewPanel {
+  position: sticky;
+  top: 96px;
+  display: grid;
+  gap: 15px;
+  justify-items: center;
+}
+
+.videoMixPreviewHeading,
+.videoMixPlayback,
+.videoMixFacts {
+  display: flex;
+  width: min(100%, 382px);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.videoMixPreviewHeading span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.videoMixPreviewHeading small,
+.videoMixPlayback span {
+  color: var(--mix-subtle);
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.videoMixPhone {
+  position: relative;
+  width: min(100%, 360px);
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border: 7px solid #172135;
+  border-radius: 35px;
+  background: #111827;
+  box-shadow: 0 34px 72px rgba(17, 24, 39, 0.25);
+}
+
+.videoMixPhone video,
+.videoMixTransitionOverlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.videoMixPhone video {
+  /* Match the exporter's contain-and-letterbox framing exactly. */
+  object-fit: contain;
+  object-position: center;
+  background: #0e1523;
+}
+
+.videoMixTransitionOverlay {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.videoMixEmpty {
+  display: grid;
+  height: 100%;
+  place-content: center;
+  gap: 12px;
+  padding: 34px;
+  color: white;
+  text-align: center;
+  background:
+    linear-gradient(150deg, rgba(239, 92, 66, 0.22), transparent 44%),
+    radial-gradient(circle at 70% 20%, rgba(185, 245, 208, 0.22), transparent 42%),
+    #172135;
+}
+
+.videoMixEmpty > span {
+  font-size: 42px;
+}
+
+.videoMixEmpty strong {
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.videoMixEmpty small {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+}
+
+.videoMixPlayback {
+  gap: 12px;
+}
+
+.videoMixPlayback button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: white;
+  background: var(--mix-coral);
+  cursor: pointer;
+}
+
+.videoMixPlayback input {
+  width: 100%;
+  accent-color: var(--mix-coral);
+}
+
+.videoMixPlayback span {
+  min-width: 86px;
+  text-align: right;
+}
+
+.videoMixFacts {
+  gap: 9px;
+}
+
+.videoMixFacts > span {
+  display: grid;
+  flex: 1;
+  min-height: 62px;
+  place-content: center;
+  border: 1px solid rgba(21, 32, 53, 0.08);
+  border-radius: 14px;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.videoMixFacts strong {
+  color: var(--mix-ink);
+  font-size: 13px;
+}
+
+.videoMixPreviewNote {
+  width: min(100%, 382px);
+  margin: -2px 0 0;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.videoMixControls {
+  display: grid;
+  gap: 20px;
+}
+
+.videoMixSection,
+.videoMixExportCard,
+.videoMixResult {
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid rgba(21, 32, 53, 0.09);
+  border-radius: 25px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 20px 56px rgba(21, 32, 53, 0.07);
+}
+
+.videoMixSectionTitle {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+.videoMixSectionTitle > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-content: center;
+  border-radius: 50%;
+  color: white;
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--mix-ink);
+}
+
+.videoMixSectionTitle h2,
+.videoMixSectionTitle p {
+  margin: 0;
+}
+
+.videoMixSectionTitle h2 {
+  font-size: 20px;
+}
+
+.videoMixSectionTitle p {
+  margin-top: 5px;
+  color: var(--mix-subtle);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.videoMixSectionTitle > strong {
+  color: var(--mix-coral);
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+}
+
+.videoMixAddButton {
+  display: flex;
+  width: 100%;
+  min-height: 78px !important;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 18px;
+  border: 1px dashed rgba(33, 114, 81, 0.42);
+  border-radius: 18px;
+  color: #1e684c;
+  background: rgba(185, 245, 208, 0.2);
+  cursor: pointer;
+}
+
+.videoMixAddButton > span:first-child {
+  font-size: 26px;
+}
+
+.videoMixAddButton > span:last-child {
+  display: grid;
+  justify-items: start;
+}
+
+.videoMixAddButton strong {
+  font-size: 15px;
+}
+
+.videoMixAddButton small {
+  font-size: 12px;
+}
+
+.videoMixAddButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.videoMixPreparing {
+  margin: 12px 0 0;
+  color: #217251;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.videoMixLimits {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.videoMixLimits span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #536075;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f4f2ed;
+}
+
+.videoMixSourceList {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.videoMixSourceList > li {
+  padding: 16px;
+  border: 1px solid rgba(21, 32, 53, 0.09);
+  border-radius: 19px;
+  background: #fffdf9;
+}
+
+.videoMixSourceSummary {
+  display: grid;
+  grid-template-columns: 32px 64px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.videoMixSourceSummary > span {
+  color: var(--mix-coral);
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.videoMixSourceSummary video {
+  width: 64px;
+  height: 76px;
+  border-radius: 11px;
+  object-fit: cover;
+  background: #111827;
+}
+
+.videoMixSourceSummary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.videoMixSourceSummary strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.videoMixSourceSummary small,
+.videoMixSourceSummary em {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.videoMixSourceSummary em {
+  color: #217251;
+  font-weight: 800;
+}
+
+.videoMixSourceSummary button,
+.videoMixClipCount button,
+.videoMixFinalize button,
+.videoMixCancel {
+  padding: 0 14px;
+  border: 1px solid rgba(21, 32, 53, 0.14);
+  border-radius: 12px;
+  background: white;
+  cursor: pointer;
+}
+
+.videoMixClipCount {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.videoMixClipCount legend {
+  float: left;
+  margin-right: 10px;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.videoMixClipCount button.isActive {
+  border-color: var(--mix-ink);
+  color: white;
+  background: var(--mix-ink);
+}
+
+.videoMixClipList {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.videoMixClipList fieldset {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 13px;
+  background: #f7f4ef;
+}
+
+.videoMixClipList legend {
+  width: 100%;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixClipList legend strong {
+  float: right;
+  color: #217251;
+  font-family: "DM Sans", sans-serif;
+}
+
+.videoMixClipList label {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 10px;
+  align-items: center;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.videoMixClipList input {
+  width: 100%;
+  accent-color: var(--mix-coral);
+}
+
+.videoMixTransitionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.videoMixTransitionGrid > button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 3px 12px;
+  align-items: center;
+  min-height: 94px;
+  padding: 14px;
+  border: 1px solid rgba(21, 32, 53, 0.11);
+  border-radius: 17px;
+  text-align: left;
+  background: #fffdf9;
+  cursor: pointer;
+}
+
+.videoMixTransitionGrid > button.isActive {
+  border-color: var(--mix-coral);
+  box-shadow: 0 0 0 2px rgba(239, 92, 66, 0.12);
+}
+
+.videoMixTransitionGrid strong {
+  font-size: 14px;
+}
+
+.videoMixTransitionGrid small {
+  grid-column: 2;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.videoMixTransitionGrid em {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  background: var(--mix-coral);
+}
+
+.videoMixTransitionIcon {
+  position: relative;
+  display: block;
+  width: 58px;
+  height: 43px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #e7dfd4;
+}
+
+.videoMixTransitionIcon i {
+  position: absolute;
+  inset: 0 50% 0 0;
+  background: #ef8c72;
+}
+
+.videoMixTransitionIcon i + i {
+  inset: 0 0 0 50%;
+  background: #8bc6ad;
+}
+
+.videoMixTransitionIcon.crossfade i {
+  right: 28%;
+  transform: skewX(-14deg);
+}
+
+.videoMixTransitionIcon.crossfade i + i {
+  left: 46%;
+  opacity: 0.78;
+}
+
+.videoMixTransitionIcon.fade-black::after,
+.videoMixTransitionIcon.fade-white::after {
+  position: absolute;
+  inset: 0 38%;
+  content: "";
+  background: #111827;
+}
+
+.videoMixTransitionIcon.fade-white::after {
+  background: white;
+}
+
+.videoMixExportCard {
+  color: white;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(185, 245, 208, 0.19), transparent 36%),
+    #172135;
+}
+
+.videoMixExportCard > div:first-child {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.videoMixExportCard > div:first-child > span {
+  display: grid;
+  min-width: 58px;
+  min-height: 58px;
+  place-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 15px;
+  font-family: "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixExportCard p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.videoMixExportCard p strong {
+  font-size: 18px;
+}
+
+.videoMixExportCard p small,
+.videoMixExportCard li {
+  color: rgba(255, 255, 255, 0.69);
+  font-size: 12px;
+}
+
+.videoMixExportCard ul {
+  display: grid;
+  gap: 7px;
+  margin: 20px 0;
+  padding-left: 20px;
+}
+
+.videoMixExportButton {
+  display: flex;
+  width: 100%;
+  min-height: 58px !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 15px;
+  color: #172135;
+  font-size: 15px;
+  font-weight: 900;
+  background: #b9f5d0;
+  cursor: pointer;
+}
+
+.videoMixExportButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.videoMixProgress {
+  height: 7px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.videoMixProgress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #b9f5d0;
+  transition: width 160ms ease;
+}
+
+.videoMixCancel {
+  width: 100%;
+  margin-top: 10px;
+  color: white;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: transparent;
+}
+
+.videoMixFinalize {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.videoMixFinalize button {
+  color: white;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.videoMixError,
+.videoMixMessage {
+  margin: 0;
+  padding: 13px 15px;
+  border-radius: 13px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.videoMixError {
+  color: #9e2f20;
+  background: #fff0ec;
+}
+
+.videoMixMessage {
+  color: #176744;
+  background: #e9faef;
+}
+
+.videoMixPurchase {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+  border: 1px solid rgba(239, 92, 66, 0.2);
+  border-radius: 20px;
+  background: white;
+}
+
+.videoMixPurchase > strong {
+  font-size: 17px;
+}
+
+.videoMixPurchase > small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.videoMixPurchase > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 8px;
+}
+
+.videoMixPurchase a {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 14px;
+  font-size: 12px;
+  background: #fffdf9;
+}
+
+.videoMixPurchase a.primary {
+  border-color: var(--mix-coral);
+  background: #fff2ed;
+}
+
+.videoMixPurchase a span,
+.videoMixPurchase a small {
+  color: var(--mix-subtle);
+  font-size: 12px;
+}
+
+.videoMixPurchase a strong {
+  font-size: 13px;
+}
+
+.videoMixResult {
+  display: grid;
+  gap: 14px;
+}
+
+.videoMixResult > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.videoMixResult > div span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #176744;
+  font-size: 12px;
+  font-weight: 800;
+  background: #e9faef;
+}
+
+.videoMixResult > div strong {
+  font-size: 13px;
+}
+
+.videoMixResult video {
+  width: min(100%, 360px);
+  max-height: 640px;
+  justify-self: center;
+  border-radius: 20px;
+  background: #111827;
+}
+
+.videoMixResult button {
+  min-height: 56px;
+  border: 0;
+  border-radius: 15px;
+  color: white;
+  font-weight: 900;
+  background: var(--mix-coral);
+  cursor: pointer;
+}
+
+.videoMixFooter {
+  display: flex;
+  min-height: 96px;
+  gap: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  border-top: 1px solid rgba(21, 32, 53, 0.08);
+  color: var(--mix-subtle);
+  font-size: 13px;
+}
+
+.videoMixFooter a {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-size: 13px;
+}
+
+@media (max-width: 880px) {
+  .videoMixHero,
+  .videoMixWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .videoMixHero {
+    gap: 28px;
+  }
+
+  .videoMixPreviewPanel {
+    position: static;
+  }
+
+  .videoMixPhone {
+    width: min(78vw, 340px);
+  }
+}
+
+@media (max-width: 620px) {
+  .videoMixHeader {
+    grid-template-columns: 1fr auto;
+    min-height: 64px;
+  }
+
+  .videoMixHeader > div {
+    display: none;
+  }
+
+  .videoMixHero {
+    padding-top: 46px;
+  }
+
+  .videoMixHero h1 {
+    font-size: clamp(35px, 11vw, 52px);
+  }
+
+  .videoMixWorkspace {
+    padding-inline: 14px;
+  }
+
+  .videoMixSection,
+  .videoMixExportCard,
+  .videoMixResult {
+    border-radius: 20px;
+  }
+
+  .videoMixSourceSummary {
+    grid-template-columns: 28px 56px minmax(0, 1fr);
+  }
+
+  .videoMixSourceSummary video {
+    width: 56px;
+    height: 68px;
+  }
+
+  .videoMixSourceSummary > button {
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+
+  .videoMixClipCount {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .videoMixClipCount legend {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .videoMixTransitionGrid,
+  .videoMixPurchase > div,
+  .videoMixFinalize {
+    grid-template-columns: 1fr;
+  }
+
+  .videoMixPurchase a {
+    min-height: 76px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .videoMixShell *,
+  .videoMixShell *::before,
+  .videoMixShell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
