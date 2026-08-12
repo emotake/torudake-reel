@@ -6,12 +6,15 @@ import {
   FREE_VIDEO_LIMIT,
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "../../lib/billing-policy";
 
@@ -22,7 +25,7 @@ export const metadata = buildPublicPageMetadata({
 });
 
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
-const LAST_UPDATED = "2026年8月11日";
+const LAST_UPDATED = "2026年8月12日";
 const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
 export default function CommercialDisclosurePage() {
@@ -63,16 +66,16 @@ export default function CommercialDisclosurePage() {
         <h2>販売価格</h2>
         <dl className="legalDetails">
           <div>
-            <dt>Starter（月{STARTER_MONTHLY_VIDEO_LIMIT}本）</dt>
-            <dd>月額{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+            <dt>{STARTER_MONTHLY_PLAN_LABEL}</dt>
+            <dd>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで・1か月{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
           </div>
           <div>
-            <dt>Standard（月{STANDARD_MONTHLY_VIDEO_LIMIT}本）</dt>
-            <dd>月額{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+            <dt>{STANDARD_MONTHLY_PLAN_LABEL}</dt>
+            <dd>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで・1か月{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
           </div>
           <div>
-            <dt>1動画作成</dt>
-            <dd>{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
+            <dt>{ONE_TIME_PLAN_LABEL}</dt>
+            <dd>1回の購入で動画1本まで・{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円</dd>
           </div>
           <div>
             <dt>旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン（新規申込終了）</dt>
@@ -97,11 +100,11 @@ export default function CommercialDisclosurePage() {
             <dd>1動画あたり{FREE_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
-            <dt>1動画作成</dt>
+            <dt>{ONE_TIME_PLAN_LABEL}</dt>
             <dd>1動画あたり{ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
-            <dt>Starter・Standard・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
+            <dt>月3本プラン・月7本プラン・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
             <dd>
               1動画あたり{SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
             </dd>
@@ -123,9 +126,9 @@ export default function CommercialDisclosurePage() {
         <h2>支払方法と支払時期</h2>
         <ul>
           <li>クレジットカード決済（決済処理はStripeが行います）</li>
-          <li>1動画作成は、注文確定時に支払いが確定します。</li>
+          <li>{ONE_TIME_PLAN_LABEL}は、注文確定時に1回分の支払いが確定します。</li>
           <li>
-            Starter、Standardおよび既存契約者向けの旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プランは、申込時または契約更新時に支払いが確定し、解約されるまで1か月ごとに自動更新されます。
+            月3本プラン、月7本プラン、および既存契約者向けの旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プランは、申込時または契約更新時に支払いが確定し、解約されるまで1か月ごとに自動更新されます。
           </li>
         </ul>
       </article>
@@ -137,7 +140,7 @@ export default function CommercialDisclosurePage() {
         </p>
         <p>
           無料体験は合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
-          動画までの範囲で、いずれかの上限に先に達するまで編集とプレビューを利用できます。完成動画の保存には有料の利用枠が必要です。動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
+          動画までの範囲で、いずれかの上限に先に達するまで編集とプレビューを利用できます。完成動画の保存には有料の利用枠が必要です。無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
         </p>
       </article>
 
@@ -145,13 +148,13 @@ export default function CommercialDisclosurePage() {
         <h2>キャンセル・解約・返金</h2>
         <ul>
           <li>
-            月額プランはアカウント画面の「支払い方法・解約を管理」からいつでも解約できます。解約後も支払済み期間の終了までは利用でき、次回以降の請求は行いません。
+            月3本・月7本プランは、アカウント画面の「支払い方法・解約を管理」からいつでも解約できます。解約後も支払済み期間の終了までは利用でき、次回以降の請求は行いません。
           </li>
           <li>
-            月額プランを解約しても、支払済み期間の料金は日割りで返金しません。
+            月3本・月7本プランを解約しても、支払済み期間の料金は日割りで返金しません。
           </li>
           <li>
-            1動画作成を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。
+            {ONE_TIME_PLAN_LABEL}を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。
           </li>
           <li>
             法令上返金が必要な場合、二重請求、決済後に利用枠が反映されない場合、その他本サービス側の不具合がある場合は、上記メールアドレスへご連絡ください。

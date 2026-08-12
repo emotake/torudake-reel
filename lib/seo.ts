@@ -1,10 +1,13 @@
 import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "./billing-policy";
 import {
@@ -68,16 +71,16 @@ export function buildSiteStructuredData() {
           },
           {
             "@type": "Offer",
-            name: "1動画作成",
-            description: "完成動画1本の保存枠。表示価格は税込です。",
+            name: ONE_TIME_PLAN_LABEL,
+            description: "1回の購入で完成動画を1本まで保存できます。月額料金はありません。表示価格は税込です。",
             price: ONE_TIME_PRICE_JPY,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",
           },
           {
             "@type": "Offer",
-            name: `Starter（月${STARTER_MONTHLY_VIDEO_LIMIT}本）`,
-            description: `毎月${STARTER_MONTHLY_VIDEO_LIMIT}本まで保存。表示価格は税込です。`,
+            name: STARTER_MONTHLY_PLAN_LABEL,
+            description: `1か月に動画${STARTER_MONTHLY_VIDEO_LIMIT}本まで保存できます。1か月ごとの自動更新です。表示価格は税込です。`,
             price: STARTER_MONTHLY_PRICE_JPY,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",
@@ -90,8 +93,8 @@ export function buildSiteStructuredData() {
           },
           {
             "@type": "Offer",
-            name: `Standard（月${STANDARD_MONTHLY_VIDEO_LIMIT}本）`,
-            description: `毎月${STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存。表示価格は税込です。`,
+            name: STANDARD_MONTHLY_PLAN_LABEL,
+            description: `1か月に動画${STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存できます。1か月ごとの自動更新です。表示価格は税込です。`,
             price: STANDARD_MONTHLY_PRICE_JPY,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",

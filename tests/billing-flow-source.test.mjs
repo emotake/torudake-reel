@@ -33,8 +33,11 @@ test("polls the authenticated account after Stripe redirects back", () => {
     /STANDARD_MONTHLY_PRICE_JPY\s*\/\s*STANDARD_MONTHLY_VIDEO_LIMIT/,
   );
   assert.doesNotMatch(accountSource, /125円|42円お得/);
-  assert.match(accountSource, /月額プランは毎月の保存本数/);
-  assert.match(accountSource, /1動画作成は必要なときだけ1本/);
+  assert.match(accountSource, /月3本プランは1か月に動画3本まで/);
+  assert.match(accountSource, /月7本プランは1か月に動画7本まで/);
+  assert.match(accountSource, /動画1本プランは、必要なときに動画1本だけ/);
+  assert.match(accountSource, /今月.*本保存済み・あと.*本保存できます/);
+  assert.match(accountSource, /買い切りで保存できる残り本数/);
   assert.match(accountSource, /表示価格はすべて税込/);
   assert.doesNotMatch(accountSource, /違いは毎月保存できる本数です/);
   assert.ok(
@@ -61,7 +64,7 @@ test("rejects Checkout and Portal calls from old deployment hosts", () => {
 });
 
 test("explains the per-video shared AI processing limits on the account screen", () => {
-  assert.match(accountSource, /月額プラン[\s\S]*SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT/);
+  assert.match(accountSource, /月3本・月7本プラン[\s\S]*SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT/);
   assert.match(accountSource, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
   assert.match(accountSource, /初回ナレーションは台本完成時に1回分/);
   assert.match(accountSource, /続く初回音声と内部の自動調整では追加回数を使用しません/);

@@ -28,10 +28,13 @@ import {
 import {
   canSaveCompletedVideo,
   isBillingBucket,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   type BillingBucket,
 } from "../../lib/billing-policy";
@@ -1007,11 +1010,12 @@ export default function PhotoReelClient() {
           <p>
             <strong>仕上がりプレビューは無料</strong>
             <small>
-              保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}、Starterは月
-              {STARTER_MONTHLY_VIDEO_LIMIT}本 ¥
-              {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}、Standardは月
-              {STANDARD_MONTHLY_VIDEO_LIMIT}本 ¥
-              {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+              {ONE_TIME_PLAN_LABEL}は1回の購入で動画1本まで・¥
+              {ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}。{STARTER_MONTHLY_PLAN_LABEL}は1か月に動画
+              {STARTER_MONTHLY_VIDEO_LIMIT}本まで・¥
+              {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}、{STANDARD_MONTHLY_PLAN_LABEL}は1か月に動画
+              {STANDARD_MONTHLY_VIDEO_LIMIT}本まで・¥
+              {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}です。表示価格はすべて税込です。
             </small>
           </p>
         </div>
@@ -1358,7 +1362,7 @@ export default function PhotoReelClient() {
               <span className="photoReelExportIcon" aria-hidden="true">MP4</span>
               <span>
                 <strong>高画質で書き出す</strong>
-                <small>1080×1920 · 1動画作成分</small>
+                <small>1080×1920 · 保存枠1本分</small>
               </span>
             </div>
             <ul>
@@ -1445,18 +1449,18 @@ export default function PhotoReelClient() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    <span>おすすめ · STANDARD</span>
+                    <span>おすすめ · 1か月ごと</span>
                     <strong>
-                      月{STANDARD_MONTHLY_VIDEO_LIMIT}本・¥
-                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                      {STANDARD_MONTHLY_PLAN_LABEL}・¥
+                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
                     </strong>
                     <small>
-                      1本あたり約
+                      1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで・1本あたり約
                       {Math.round(
                         STANDARD_MONTHLY_PRICE_JPY /
                           STANDARD_MONTHLY_VIDEO_LIMIT,
                       )}
-                      円
+                      円・1か月ごとの自動更新
                     </small>
                   </Link>
                   <Link
@@ -1465,12 +1469,12 @@ export default function PhotoReelClient() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    <span>STARTER</span>
+                    <span>1か月ごと</span>
                     <strong>
-                      月{STARTER_MONTHLY_VIDEO_LIMIT}本・¥
-                      {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                      {STARTER_MONTHLY_PLAN_LABEL}・¥
+                      {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
                     </strong>
-                    <small>月3本から始めたい方</small>
+                    <small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存・1か月ごとの自動更新</small>
                   </Link>
                   <Link
                     className="photoReelPurchaseLink oneTime"
@@ -1478,9 +1482,9 @@ export default function PhotoReelClient() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    <span>ONE TIME</span>
-                    <strong>1動画作成・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-                    <small>必要なときだけ・有効期限なし</small>
+                    <span>1回だけ</span>
+                    <strong>{ONE_TIME_PLAN_LABEL}・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}/1本（税込）</strong>
+                    <small>1回の購入で動画1本まで・自動更新なし・有効期限なし</small>
                   </Link>
                 </div>
               </div>

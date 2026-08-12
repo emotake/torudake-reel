@@ -9,11 +9,15 @@ import {
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
   MONTHLY_PLANS,
+  monthlyVideoAllowanceLabel,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   OPERATOR_DAILY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   startOfTokyoDaySeconds,
 } from "../lib/billing-policy.ts";
@@ -103,6 +107,14 @@ test("uses each plan's monthly allowance before one-time credits", () => {
     ),
     "one_time",
   );
+});
+
+test("keeps customer-facing plan labels comparable and explicit", () => {
+  assert.equal(STARTER_MONTHLY_PLAN_LABEL, "月3本プラン");
+  assert.equal(STANDARD_MONTHLY_PLAN_LABEL, "月7本プラン");
+  assert.equal(ONE_TIME_PLAN_LABEL, "動画1本プラン");
+  assert.equal(monthlyVideoAllowanceLabel(3), "1か月に動画3本まで保存できます");
+  assert.equal(monthlyVideoAllowanceLabel(7), "1か月に動画7本まで保存できます");
 });
 
 test("keeps Standard at seven videos and the grandfathered plan at eight", () => {

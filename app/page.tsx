@@ -51,13 +51,17 @@ import {
   canSaveCompletedVideo,
   FREE_AI_OPERATION_SUCCESS_LIMIT,
   isBillingBucket,
+  monthlyVideoAllowanceLabel,
   ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   type BillingBucket,
 } from "../lib/billing-policy";
@@ -277,9 +281,9 @@ function describeAiOperationQuota(
     case "free":
       return `無料利用では、この動画1本につき合計${limit}回まで利用できます。`;
     case "subscription":
-      return `月額プランでは、この動画1本につき合計${limit}回まで利用できます。`;
+      return `月3本・月7本プランでは、この動画1本につき合計${limit}回まで利用できます。`;
     case "one_time":
-      return `1動画作成では、この動画1本につき合計${limit}回まで利用できます。`;
+      return `${ONE_TIME_PLAN_LABEL}では、この動画1本につき合計${limit}回まで利用できます。`;
     case "operator":
       return `運営端末では、この動画1本につき合計${limit}回まで利用できます。`;
     default:
@@ -3639,9 +3643,9 @@ function Landing({
               <small>完成動画を保存するまでは料金がかかりません</small>
             </div>
             <div className="heroOfferPrice">
-              <strong>保存は1動画 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+              <strong>動画1本だけ保存 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
               <small>
-                または月{STARTER_MONTHLY_VIDEO_LIMIT}本 ¥
+                または{STARTER_MONTHLY_PLAN_LABEL} ¥
                 {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から
               </small>
             </div>
@@ -3808,14 +3812,14 @@ function Landing({
         <div className="priceGrid">
           <article className="featuredPrice subscriptionPrice">
             <span className="popular">おすすめ</span>
-            <p>STANDARD</p>
-            <h3>月{STANDARD_MONTHLY_VIDEO_LIMIT}本</h3>
+            <p>1か月ごと</p>
+            <h3>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h3>
             <strong>
               ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/月</small>
+              <small>/1か月・税込</small>
             </strong>
             <span>
-              1本あたり約
+              {monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}・1本あたり約
               {Math.round(
                 STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
               )}
@@ -3836,18 +3840,18 @@ function Landing({
             >
               {billingBusyPlan === "standard"
                 ? "決済画面を準備中…"
-                : `月${STANDARD_MONTHLY_VIDEO_LIMIT}本で始める`}
+                : `${STANDARD_MONTHLY_PLAN_LABEL}を始める`}
             </button>
           </article>
           <article className="subscriptionPrice">
-            <p>STARTER</p>
-            <h3>月{STARTER_MONTHLY_VIDEO_LIMIT}本</h3>
+            <p>1か月ごと</p>
+            <h3>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h3>
             <strong>
               ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/月</small>
+              <small>/1か月・税込</small>
             </strong>
             <span>
-              {`1本あたり約${Math.round(
+              {`${monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}・1本あたり約${Math.round(
                 STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
               )}円`}
             </span>
@@ -3866,14 +3870,17 @@ function Landing({
             >
               {billingBusyPlan === "starter"
                 ? "決済画面を準備中…"
-                : `月${STARTER_MONTHLY_VIDEO_LIMIT}本で始める`}
+                : `${STARTER_MONTHLY_PLAN_LABEL}を始める`}
             </button>
           </article>
           <article>
-            <p>ONE TIME</p>
-            <h3>1動画作成</h3>
-            <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-            <span>買い切り・サブスクなし</span>
+            <p>1回だけ</p>
+            <h3>動画1本だけ保存</h3>
+            <strong>
+              ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+              <small>/1本・税込</small>
+            </strong>
+            <span>動画1本だけ保存・月額料金なし</span>
             <ul>
               <li>✓ 90秒まで</li>
               <li>✓ AI処理は1動画につき5回</li>
@@ -3886,7 +3893,7 @@ function Landing({
             >
               {billingBusyPlan === "one_time"
                 ? "決済画面を準備中…"
-                : "この動画を保存する"}
+                : "動画1本分を購入する"}
             </button>
           </article>
         </div>
@@ -3899,7 +3906,10 @@ function Landing({
           決済はStripeの安全な画面で行います。カード情報は撮るだけリールに保存されません。
         </p>
         <p className="billingFootnote">
-          無料体験は編集結果が完成した時点で1本分を使用します。月額プラン・1動画作成・写真リールは、書き出し成功時点で1本分を使用します。
+          月3本・月7本プランは1か月ごとの自動更新です。未使用の保存本数は次の1か月へ繰り越されません。アカウント画面からいつでも解約できます。動画1本プランは1回払いで、自動更新はありません。
+        </p>
+        <p className="billingFootnote">
+          無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
         </p>
       </section>
 
@@ -9857,8 +9867,8 @@ function ResultWorkspace({
               <p>
                 <strong>完成動画を保存するにはプランを選択</strong>
                 <small>
-                  編集内容はプレビューで確認できます。保存は月3本・月
-                  {STANDARD_MONTHLY_VIDEO_LIMIT}本・1動画作成から選べます。
+                  編集内容はプレビューで確認できます。1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで、1か月に動画
+                  {STANDARD_MONTHLY_VIDEO_LIMIT}本まで、または1回払いで動画1本だけの3つから選べます。
                 </small>
               </p>
               <div>
@@ -9869,7 +9879,7 @@ function ResultWorkspace({
                   rel="noreferrer"
                 >
                   <span>
-                    {`月${STANDARD_MONTHLY_VIDEO_LIMIT}本・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
+                    {`${STANDARD_MONTHLY_PLAN_LABEL}・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
                   </span>
                   <i>→</i>
                 </Link>
@@ -9879,7 +9889,7 @@ function ResultWorkspace({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  {`月${STARTER_MONTHLY_VIDEO_LIMIT}本・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}`}
+                  {`${STARTER_MONTHLY_PLAN_LABEL}・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
                 </Link>
                 <Link
                   className="quietButton"
@@ -9887,11 +9897,12 @@ function ResultWorkspace({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  {`1動画作成・¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}`}
+                  {`${ONE_TIME_PLAN_LABEL}・¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}/1本（税込）`}
                 </Link>
               </div>
               <small className="freeExportReturnNote">
                 決済は別タブで開きます。購入後、この編集画面へ戻ってください。
+                月3本・月7本プランは1か月ごとの自動更新です。動画1本プランは1回払いです。
               </small>
               <button
                 className="freeExportRefreshButton"

@@ -7,12 +7,15 @@ import {
   FREE_VIDEO_LIMIT,
   LEGACY_MONTHLY_PRICE_JPY,
   LEGACY_MONTHLY_VIDEO_LIMIT,
+  ONE_TIME_PLAN_LABEL,
   ONE_TIME_PRICE_JPY,
   ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
 } from "../../lib/billing-policy";
 
@@ -22,8 +25,8 @@ export const metadata = buildPublicPageMetadata({
   path: "/terms",
 });
 
-const TERMS_VERSION = "2026-08-11";
-const LAST_UPDATED = "2026年8月11日";
+const TERMS_VERSION = "2026-08-12";
+const LAST_UPDATED = "2026年8月12日";
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
 const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
@@ -103,32 +106,32 @@ export default function TermsPage() {
           </li>
           <li>
             AI処理の上限は1動画あたり、無料体験
-            {FREE_AI_OPERATION_SUCCESS_LIMIT}回、1動画作成
-            {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回、月額プラン
+            {FREE_AI_OPERATION_SUCCESS_LIMIT}回、{ONE_TIME_PLAN_LABEL}
+            {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回、月3本・月7本プラン
             {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
           </li>
           <li>
-            Starterは月{STARTER_MONTHLY_VIDEO_LIMIT}本・月額
-            {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、Standardは月
-            {STANDARD_MONTHLY_VIDEO_LIMIT}本・月額
-            {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。解約するまで1か月ごとに自動更新されます。
+            {STARTER_MONTHLY_PLAN_LABEL}は、1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存でき、料金は1か月
+            {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。{STANDARD_MONTHLY_PLAN_LABEL}は、1か月に動画
+            {STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存でき、料金は1か月
+            {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円です。どちらも解約するまで1か月ごとに自動更新されます。
           </li>
           <li>
             旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン（月額
             {LEGACY_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円）は既存契約者専用で、新規申込は受け付けません。
           </li>
           <li>
-            1動画作成は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。購入した利用枠に有効期限はありません。
+            {ONE_TIME_PLAN_LABEL}は、1回の購入で完成動画を1本まで保存でき、料金は{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円です。月額料金と有効期限はありません。
           </li>
           <li>本ページおよび決済画面に表示する販売価格は、すべて消費税込みです。</li>
           <li>
-            支払いと解約はStripeの決済画面およびアカウント画面から行います。月額プランを解約した場合、支払済み期間の終了時に月額利用枠が終了します。
+            支払いと解約はStripeの決済画面およびアカウント画面から行います。月3本・月7本プランを解約した場合、支払済み期間の終了時に利用枠が終了します。
           </li>
           <li>
-            動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
+            無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
           </li>
           <li>
-            月額プランを解約しても、支払済み期間の料金は日割りで返金しません。1動画作成を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。ただし、法令上必要な場合、二重請求、または本サービス側の不具合が認められる場合を除きます。
+            月3本・月7本プランを解約しても、支払済み期間の料金は日割りで返金しません。{ONE_TIME_PLAN_LABEL}を含むデジタルサービスは、注文確定後のお客様都合によるキャンセル・返品・返金を受け付けません。ただし、法令上必要な場合、二重請求、または本サービス側の不具合が認められる場合を除きます。
           </li>
         </ul>
       </article>

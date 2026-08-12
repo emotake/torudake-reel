@@ -106,7 +106,7 @@ test("describes post copy only where AI narration provides it", () => {
 test("shows photo-reel preview and save pricing before editing", () => {
   assert.match(photoReelSource, /photoReelIntroOffer/);
   assert.match(photoReelSource, /仕上がりプレビューは無料/);
-  assert.match(photoReelSource, /保存は1動画/);
+  assert.match(photoReelSource, /ONE_TIME_PLAN_LABEL\}は1回の購入で動画1本まで/);
   assert.match(photoReelSource, /STARTER_MONTHLY_VIDEO_LIMIT/);
   assert.match(photoReelSource, /STANDARD_MONTHLY_VIDEO_LIMIT/);
   assert.match(photoReelSource, /checkout=starter/);

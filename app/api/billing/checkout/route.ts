@@ -135,7 +135,7 @@ export async function POST(request: Request) {
         return Response.json(
           {
             error:
-              "月額プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
+              "月3本または月7本プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
             code: "subscription_already_active",
           },
           { status: 409 },
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
         return Response.json(
           {
             error:
-              "月額プランの決済を別の画面で開始しています。決済画面を確認するか、30分ほど待ってからお試しください。",
+              "月3本または月7本プランの決済を別の画面で開始しています。決済画面を確認するか、30分ほど待ってからお試しください。",
             code: "subscription_checkout_in_progress",
           },
           { status: 409 },
@@ -211,7 +211,7 @@ export async function POST(request: Request) {
         return Response.json(
           {
             error:
-              "月額プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
+              "月3本または月7本プランはすでに利用中です。変更や解約はアカウント画面から行えます。",
             code: "subscription_already_active",
           },
           { status: 409 },

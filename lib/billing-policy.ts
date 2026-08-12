@@ -11,6 +11,9 @@ export const LEGACY_MONTHLY_PRICE_JPY = 1480;
 export const LIGHT_MONTHLY_VIDEO_LIMIT = STANDARD_MONTHLY_VIDEO_LIMIT;
 export const LIGHT_MONTHLY_PRICE_JPY = STANDARD_MONTHLY_PRICE_JPY;
 export const ONE_TIME_PRICE_JPY = 200;
+export const STARTER_MONTHLY_PLAN_LABEL = `月${STARTER_MONTHLY_VIDEO_LIMIT}本プラン`;
+export const STANDARD_MONTHLY_PLAN_LABEL = `月${STANDARD_MONTHLY_VIDEO_LIMIT}本プラン`;
+export const ONE_TIME_PLAN_LABEL = "動画1本プラン";
 export const OPERATOR_DAILY_VIDEO_LIMIT = 20;
 export const FREE_AI_OPERATION_SUCCESS_LIMIT = 3;
 export const SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT = 6;
@@ -18,6 +21,10 @@ export const ONE_TIME_AI_OPERATION_SUCCESS_LIMIT = 5;
 export const OPERATOR_AI_OPERATION_SUCCESS_LIMIT = 10;
 
 export type MonthlyPlanKey = "starter" | "standard" | "legacy_1480";
+
+export function monthlyVideoAllowanceLabel(videoLimit: number) {
+  return `1か月に動画${videoLimit}本まで保存できます`;
+}
 
 export const MONTHLY_PLANS = {
   starter: {

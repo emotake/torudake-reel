@@ -119,9 +119,9 @@ test("describes the real web application without invented ratings", () => {
     application.offers.map((offer) => offer.name),
     [
       "無料体験（編集・プレビュー）",
-      "1動画作成",
-      "Starter（月3本）",
-      "Standard（月7本）",
+      "動画1本プラン",
+      "月3本プラン",
+      "月7本プラン",
     ],
   );
   assert.equal(

@@ -81,7 +81,7 @@ type QueryD1Database = {
 export class UsageLimitError extends Error {
   constructor() {
     super(
-      "無料枠を使い切りました。月額プランまたは1動画作成を選んでください。",
+      "無料枠を使い切りました。月3本・月7本プラン、または動画1本プランを選んでください。",
     );
     this.name = "UsageLimitError";
   }

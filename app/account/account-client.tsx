@@ -13,9 +13,12 @@ import Link from "next/link";
 import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
+  monthlyVideoAllowanceLabel,
   STARTER_MONTHLY_PRICE_JPY,
+  STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_VIDEO_LIMIT,
   STANDARD_MONTHLY_PRICE_JPY,
+  STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   ONE_TIME_PRICE_JPY,
@@ -83,9 +86,9 @@ function activeMonthlyPlanLabel(status: BillingStatus) {
   const planKey = status.monthly?.planKey ?? status.plan;
   switch (planKey) {
     case "starter":
-      return `Starter・月${STARTER_MONTHLY_VIDEO_LIMIT}本`;
+      return STARTER_MONTHLY_PLAN_LABEL;
     case "standard":
-      return `Standard・月${STANDARD_MONTHLY_VIDEO_LIMIT}本`;
+      return STANDARD_MONTHLY_PLAN_LABEL;
     case "legacy_1480":
       return "旧月8本プラン（既存契約）";
     default:
@@ -474,12 +477,12 @@ export default function AccountClient() {
               <strong>{activeMonthlyPlanLabel(status)}</strong>
               <span>
                 {status.monthly?.active
-                  ? `${status.monthly.videosUsed} / ${status.monthly.videoLimit}本 使用・AI処理は1動画あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
+                  ? `今月${status.monthly.videosUsed}本保存済み・あと${Math.max(0, status.monthly.videoLimit - status.monthly.videosUsed)}本保存できます・AI処理は1動画あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
                   : `無料体験：残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒（最大${FREE_VIDEO_LIMIT}動画・合計${Math.floor(FREE_SECONDS_LIMIT / 60)}分のいずれか先に到達するまで）・AI処理は1動画あたり3回`}
               </span>
             </article>
             <article>
-              <p>購入済みの作成枠</p>
+              <p>買い切りで保存できる残り本数</p>
               <strong>{status.oneTimeCredits ?? 0}本</strong>
               <span>期限なしで利用できます</span>
             </article>
@@ -490,7 +493,7 @@ export default function AccountClient() {
                   ? new Date(status.monthly.renewsAt * 1000).toLocaleDateString("ja-JP")
                   : "—"}
               </strong>
-              <span>{status.monthly?.cancelAtPeriodEnd ? "期間終了後に解約" : "月額プラン利用時に表示"}</span>
+              <span>{status.monthly?.cancelAtPeriodEnd ? "期間終了後に解約" : "月3本・月7本プラン利用時に表示"}</span>
             </article>
           </section>
 
@@ -499,17 +502,17 @@ export default function AccountClient() {
               <p className="eyebrow">SAVE PLAN</p>
               <h2 id="accountPlansTitle">保存するペースで選ぶ</h2>
               <p>
-                編集・プレビュー機能は共通です。月額プランは毎月の保存本数、1動画作成は必要なときだけ1本を保存できます。AI処理の上限は各プラン内に表示しています。表示価格はすべて税込です。
+                編集・プレビュー機能は共通です。月3本プランは1か月に動画3本まで、月7本プランは1か月に動画7本まで保存できます。動画1本プランは、必要なときに動画1本だけ保存できます。表示価格はすべて税込です。
               </p>
             </header>
             <article className="accountPlanCard standardPlan featured">
               <span className="accountPlanRecommend">おすすめ</span>
               <span className="accountPlanFit">継続して投稿したい方</span>
-              <p>STANDARD</p>
-              <h2>スタンダード</h2>
+              <p>1か月ごと</p>
+              <h2>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h2>
               <strong>
                 ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small> / 月</small>
+                <small> / 1か月・税込</small>
               </strong>
               <span className="accountPlanUnit">
                 1本あたり約
@@ -519,13 +522,15 @@ export default function AccountClient() {
                 円
               </span>
               <ul>
-                <li>毎月{STANDARD_MONTHLY_VIDEO_LIMIT}本まで保存</li>
+                <li>{monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}</li>
                 <li>
                   AI処理は1動画あたり
                   {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
                 </li>
+                <li>解約するまで1か月ごとに自動更新</li>
+                <li>未使用の保存本数は翌月へ繰り越しなし</li>
                 <li>
-                  Starterより1本あたり約
+                  月3本プランより1本あたり約
                   {Math.round(
                     STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT -
                       STANDARD_MONTHLY_PRICE_JPY /
@@ -544,16 +549,16 @@ export default function AccountClient() {
                     : "変更は支払い管理から"
                   : busy === "standard"
                     ? "準備中…"
-                    : "Standardを始める"}
+                    : `${STANDARD_MONTHLY_PLAN_LABEL}を始める`}
               </button>
             </article>
             <article className="accountPlanCard starterPlan">
-              <span className="accountPlanFit">月3本から始めたい方</span>
-              <p>STARTER</p>
-              <h2>スターター</h2>
+              <span className="accountPlanFit">少ない本数から始めたい方</span>
+              <p>1か月ごと</p>
+              <h2>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h2>
               <strong>
                 ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small> / 月</small>
+                <small> / 1か月・税込</small>
               </strong>
               <span className="accountPlanUnit">
                 1本あたり約
@@ -563,12 +568,13 @@ export default function AccountClient() {
                 円
               </span>
               <ul>
-                <li>毎月{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存</li>
+                <li>{monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}</li>
                 <li>
                   AI処理は1動画あたり
                   {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
                 </li>
-                <li>いつでも解約可能</li>
+                <li>解約するまで1か月ごとに自動更新</li>
+                <li>未使用の保存本数は翌月へ繰り越しなし</li>
               </ul>
               <button
                 disabled={busy !== null || !status.configured || status.monthly?.active}
@@ -580,15 +586,18 @@ export default function AccountClient() {
                     : "変更は支払い管理から"
                   : busy === "starter"
                     ? "準備中…"
-                    : "Starterを始める"}
+                    : `${STARTER_MONTHLY_PLAN_LABEL}を始める`}
               </button>
             </article>
             <article className="accountPlanCard oneTimePlan">
               <span className="accountPlanFit">必要なときだけ保存</span>
-              <p>ONE TIME</p>
-              <h2>1動画作成</h2>
-              <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-              <span className="accountPlanUnit">月額料金なし・有効期限なし</span>
+              <p>1回だけ</p>
+              <h2>動画1本だけ保存</h2>
+              <strong>
+                ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+                <small> / 1本・税込</small>
+              </strong>
+              <span className="accountPlanUnit">動画1本だけ保存・月額料金なし・有効期限なし</span>
               <ul>
                 <li>完成動画を1本保存</li>
                 <li>AI処理はこの動画で5回</li>
@@ -598,7 +607,7 @@ export default function AccountClient() {
                 disabled={busy !== null || !status.configured}
                 onClick={() => startCheckout("one_time")}
               >
-                {busy === "one_time" ? "準備中…" : "1動画作成を購入する"}
+                {busy === "one_time" ? "準備中…" : "動画1本分を購入する"}
               </button>
             </article>
           </section>
@@ -616,10 +625,10 @@ export default function AccountClient() {
         カード番号はStripeが安全に管理し、撮るだけリールのデータベースには保存しません。
       </p>
       <p className="accountSecurity">
-        動画・AIナレーションは編集結果が完成した時点、写真リールは書き出し成功時点で1本分を使用します。
+        無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
       </p>
       <p className="accountSecurity">
-        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、1動画作成5回、月額プラン
+        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、動画1本プラン5回、月3本・月7本プラン
         {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。
       </p>
       <div className="accountLegalLinks">

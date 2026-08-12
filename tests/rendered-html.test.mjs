@@ -39,7 +39,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /4工程|AUTO CUT|AI VOICE/);
   assert.match(html, /動画を選んで無料で試す/);
   assert.match(html, /編集・プレビューは無料/);
-  assert.match(html, /保存は1動画/);
+  assert.match(html, /動画1本だけ保存/);
   assert.match(html, /料金を見る/);
   assert.match(html, /写真からリールを作る/);
   assert.match(html, /最大10枚・自動編集5パターン/);
@@ -63,8 +63,10 @@ test("renders the Torudake Reel product experience", async () => {
   );
   assert.match(html, /編集・プレビューまで/);
   assert.match(html, /完成動画の保存は有料/);
-  assert.match(html, /月7本で始める/);
-  assert.match(html, /月3本で始める/);
+  assert.match(html, /1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで/);
+  assert.match(html, /1か月に動画(?:<!-- -->)?3(?:<!-- -->)?本まで/);
+  assert.match(html, /月7本プランを始める/);
+  assert.match(html, /月3本プランを始める/);
   assert.match(
     html,
     /1本あたり約(?:<!-- -->)?143(?:<!-- -->)?円/,
@@ -73,7 +75,9 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /¥(?:<!-- -->)?200/);
   assert.match(html, /カード情報は撮るだけリールに保存されません/);
   assert.match(html, /無料体験は編集結果が完成した時点/);
-  assert.match(html, /月額プラン・1動画作成・写真リールは、書き出し成功時点/);
+  assert.match(html, /有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります/);
+  assert.match(html, /月3本・月7本プランは1か月ごとの自動更新/);
+  assert.match(html, /動画1本プランは1回払い/);
   assert.doesNotMatch(
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
@@ -97,12 +101,12 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.doesNotMatch(html, /API料金/);
   assert.match(html, /1080×1920/);
   assert.match(html, /仕上がりプレビューは無料/);
-  assert.match(html, /保存は1動画/);
-  assert.match(html, /Starter/);
-  assert.match(html, /Standard/);
+  assert.match(html, /動画1本プラン/);
+  assert.match(html, /月3本プラン/);
+  assert.match(html, /月7本プラン/);
   assert.match(html, /¥(?:<!-- -->)?500/);
   assert.match(html, /¥(?:<!-- -->)?1,000/);
-  assert.match(html, /月(?:<!-- -->)?7(?:<!-- -->)?本/);
+  assert.match(html, /1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/photo-reel"/,
@@ -208,22 +212,23 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /特定商取引法に基づく表記/);
   assert.match(html, /torudake\.reel@gmail\.com/);
   assert.match(html, /遅滞なく電子メールで開示/);
-  assert.match(html, /Starter/);
-  assert.match(html, /Standard/);
+  assert.match(html, /月3本プラン/);
+  assert.match(html, /月7本プラン/);
   assert.match(
     html,
-    /Standard（月(?:<!-- -->)?7(?:<!-- -->)?本）[\s\S]*月額(?:<!-- -->)?1,000(?:<!-- -->)?円/,
+    /月7本プラン[\s\S]*1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで・1か月(?:<!-- -->)?1,000(?:<!-- -->)?円/,
   );
   assert.match(
     html,
     /旧月(?:<!-- -->)?8(?:<!-- -->)?本プラン（新規申込終了）[\s\S]*月額(?:<!-- -->)?1,480(?:<!-- -->)?円・既存契約者のみ/,
   );
   assert.match(html, /新規申込終了/);
-  assert.match(html, /1動画作成/);
+  assert.match(html, /動画1本プラン/);
+  assert.match(html, /1回の購入で動画1本まで/);
   assert.match(html, /Stripe/);
   assert.match(html, /最大500MB/);
   assert.match(html, /編集とプレビューを利用できます/);
-  assert.match(html, /写真リールは書き出し成功時点/);
+  assert.match(html, /有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります/);
   assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
   assert.match(html, /表示価格はすべて消費税込み/);
   assert.match(html, /支払済み期間の料金は日割りで返金しません/);
@@ -250,11 +255,11 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /文字起こし、高精度再解析、AI台本の生成、AI音声の生成/);
   assert.match(
     html,
-    /無料体験(?:<!-- -->)?3(?:<!-- -->)?回、1動画作成(?:<!-- -->)?5(?:<!-- -->)?回、月額プラン(?:<!-- -->)?6(?:<!-- -->)?回/,
+    /無料体験(?:<!-- -->)?3(?:<!-- -->)?回、(?:<!-- -->)?動画1本プラン(?:<!-- -->)?5(?:<!-- -->)?回、月3本・月7本プラン(?:<!-- -->)?6(?:<!-- -->)?回/,
   );
   assert.match(
     html,
-    /Starterは月(?:<!-- -->)?3(?:<!-- -->)?本・月額(?:<!-- -->)?500(?:<!-- -->)?円、Standardは月(?:<!-- -->)?7(?:<!-- -->)?本・月額(?:<!-- -->)?1,000(?:<!-- -->)?円/,
+    /月3本プラン(?:<!-- -->)?は、1か月に動画(?:<!-- -->)?3(?:<!-- -->)?本まで保存でき、料金は1か月(?:<!-- -->)?500(?:<!-- -->)?円[\s\S]*月7本プラン(?:<!-- -->)?は、1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで保存でき、料金は1か月(?:<!-- -->)?1,000(?:<!-- -->)?円/,
   );
   assert.match(
     html,
@@ -265,7 +270,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分/);
   assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
   assert.match(html, /すべて消費税込み/);
-  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-11/);
+  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-12/);
   assert.match(html, /投稿素材と知的財産権/);
   assert.match(html, /利用停止とサービスの変更/);
   assert.match(html, /保証と責任の範囲/);

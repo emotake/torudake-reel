@@ -53,8 +53,8 @@ R2の `MEDIA` bindingは、公開導線のない開発用ファイル転送API�
 
 Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
 `STRIPE_PRICE_STARTER_MONTHLY`、`STRIPE_PRICE_STANDARD_MONTHLY`、
-`STRIPE_PRICE_ONE_TIME` が必要です。Starterは500円・月3本、Standardは
-1,000円・月7本、単品は200円・1動画としてStripe側の価格を検証し、金額、通貨、
+`STRIPE_PRICE_ONE_TIME` が必要です。月3本プランは1か月500円で動画3本まで、月7本プランは
+1か月1,000円で動画7本まで、動画1本プランは1回200円で動画1本までとしてStripe側の価格を検証し、金額、通貨、
 課金周期のいずれかが異なる場合はCheckoutを開始しません。
 
 旧1,480円・月8本プランは既存契約者だけに提供し、新規販売しません。既存契約を
