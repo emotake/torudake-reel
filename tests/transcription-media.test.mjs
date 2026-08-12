@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   DEFAULT_MAX_AUDIO_CHUNK_BYTES,
   MIN_AUDIO_CHUNK_BYTES,
+  OPENAI_TRANSCRIPTION_MAX_FILE_BYTES,
+  buildNormalizedAudioChunkWindows,
   getAudioCodecPriority,
   getDirectCopyAudioOutput,
+  getNormalizedAudioChunkSeconds,
   getSafeAudioChunkSeconds,
 } from "../lib/transcription-media.ts";
 
@@ -49,20 +52,21 @@ test("extracts iPhone uncompressed PCM audio into an uploadable WAVE file", () =
 });
 
 test("keeps direct-copy audio chunks below the upload limit", () => {
-  assert.equal(DEFAULT_MAX_AUDIO_CHUNK_BYTES, 768 * 1024);
-  assert.equal(MIN_AUDIO_CHUNK_BYTES, 192 * 1024);
+  assert.equal(DEFAULT_MAX_AUDIO_CHUNK_BYTES, 8 * 1024 * 1024);
+  assert.equal(MIN_AUDIO_CHUNK_BYTES, 2 * 1024 * 1024);
+  assert.equal(OPENAI_TRANSCRIPTION_MAX_FILE_BYTES, 25 * 1024 * 1024);
 
   const normalChunkSeconds = getSafeAudioChunkSeconds(128_000);
-  assert.ok(normalChunkSeconds < 60);
+  assert.equal(normalChunkSeconds, 150);
   assert.ok(
     (normalChunkSeconds * 128_000) / 8 <
       DEFAULT_MAX_AUDIO_CHUNK_BYTES,
   );
 
-  const highBitrateChunkSeconds = getSafeAudioChunkSeconds(320_000);
+  const highBitrateChunkSeconds = getSafeAudioChunkSeconds(1_536_000);
   assert.ok(highBitrateChunkSeconds < normalChunkSeconds);
   assert.ok(
-    (highBitrateChunkSeconds * 320_000) / 8 <
+    (highBitrateChunkSeconds * 1_536_000) / 8 <
       DEFAULT_MAX_AUDIO_CHUNK_BYTES,
   );
 
@@ -75,4 +79,17 @@ test("keeps direct-copy audio chunks below the upload limit", () => {
     (retryChunkSeconds * 128_000) / 8 < MIN_AUDIO_CHUNK_BYTES,
   );
   assert.equal(getSafeAudioChunkSeconds(null), 150);
+});
+
+test("plans a five-minute normalized iPhone recording as two bounded requests", () => {
+  assert.equal(getNormalizedAudioChunkSeconds(), 150);
+  assert.deepEqual(buildNormalizedAudioChunkWindows(300), [
+    { startSeconds: 0, durationSeconds: 150 },
+    { startSeconds: 150, durationSeconds: 150 },
+  ]);
+  for (const window of buildNormalizedAudioChunkWindows(300)) {
+    const wavBytes = 44 + window.durationSeconds * 16_000 * 2;
+    assert.ok(wavBytes < DEFAULT_MAX_AUDIO_CHUNK_BYTES);
+    assert.ok(wavBytes < OPENAI_TRANSCRIPTION_MAX_FILE_BYTES);
+  }
 });

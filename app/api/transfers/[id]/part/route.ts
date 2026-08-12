@@ -10,6 +10,10 @@ import {
 } from "../../../../../lib/transfers";
 import { getUsagePrincipal } from "../../../../../lib/operator-access";
 import { isManagedUploadEnforcementEnabled } from "../../../../../lib/usage-enforcement";
+import {
+  readRequestBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../../lib/request-safety";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -73,7 +77,20 @@ export async function PUT(request: Request, context: RouteContext) {
         : jsonError("同じ分割データを受信処理中です。", 409);
     }
 
-    const body = await request.arrayBuffer();
+    let body: Uint8Array;
+    try {
+      body = await readRequestBodyWithLimit(request, expectedBytes);
+    } catch (error) {
+      await releaseTransferPartClaim(transfer.id, partNumber).catch(
+        () => undefined,
+      );
+      return jsonError(
+        error instanceof RequestBodyTooLargeError
+          ? "動画の分割サイズが上限を超えました。"
+          : "動画データを受信できませんでした。",
+        error instanceof RequestBodyTooLargeError ? 413 : 400,
+      );
+    }
     if (body.byteLength !== expectedBytes) {
       await releaseTransferPartClaim(transfer.id, partNumber).catch(
         () => undefined,
@@ -83,9 +100,11 @@ export async function PUT(request: Request, context: RouteContext) {
 
     let uploadedPart: { partNumber: number; etag: string };
     try {
+      const uploadBody = new Uint8Array(body.byteLength);
+      uploadBody.set(body);
       uploadedPart = await getMediaBucket()
         .resumeMultipartUpload(transfer.objectKey, transfer.uploadId)
-        .uploadPart(partNumber, body);
+        .uploadPart(partNumber, uploadBody.buffer);
       await finishTransferPart(
         transfer.id,
         uploadedPart.partNumber,

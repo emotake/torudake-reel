@@ -283,6 +283,75 @@ export async function releaseUsageOperationLease(
 
 export type MeteredAiActionStatus = "pending" | "succeeded" | "failed";
 
+export type MeteredAiEntitlementScope = {
+  kind: "free" | "subscription" | "one_time" | "operator";
+  userId: string;
+  periodStart: number | null;
+  periodEnd: number | null;
+  purchaseId: string | null;
+  successfulLimit: number;
+};
+
+export async function getMeteredAiEntitlementUsage(
+  scope: MeteredAiEntitlementScope,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  await ensureOperatorUsageSchema();
+  const database = env.DB as unknown as D1Database;
+  const row = await database
+    .prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN action.status = 'succeeded' THEN 1 ELSE 0 END), 0)
+          AS successful_count,
+        COALESCE(SUM(CASE
+          WHEN action.status = 'pending' AND action.expires_at > ? THEN 1
+          ELSE 0
+        END), 0) AS pending_count
+      FROM metered_ai_actions AS action
+      INNER JOIN usage_reservations AS reservation
+        ON reservation.id = action.reservation_id
+      WHERE reservation.user_id = ?
+        AND (
+          (? = 'free' AND reservation.bucket = 'free')
+          OR (
+            ? = 'subscription'
+            AND reservation.bucket = 'subscription'
+            AND reservation.created_at >= ?
+            AND reservation.created_at < ?
+          )
+          OR (
+            ? = 'one_time'
+            AND reservation.bucket = 'one_time'
+            AND reservation.billing_purchase_id IS ?
+          )
+          OR (
+            ? = 'operator'
+            AND reservation.bucket = 'operator'
+            AND action.created_at >= ?
+            AND action.created_at < ?
+          )
+        )
+    `)
+    .bind(
+      nowSeconds,
+      scope.userId,
+      scope.kind,
+      scope.kind,
+      scope.periodStart ?? 0,
+      scope.periodEnd ?? 0,
+      scope.kind,
+      scope.purchaseId,
+      scope.kind,
+      scope.periodStart ?? 0,
+      scope.periodEnd ?? 0,
+    )
+    .first<{ successful_count: number; pending_count: number }>();
+  return {
+    successfulCount: Math.max(0, row?.successful_count ?? 0),
+    pendingCount: Math.max(0, row?.pending_count ?? 0),
+  };
+}
+
 export type MeteredAiAction = {
   id: string;
   reservationId: string;
@@ -455,6 +524,14 @@ export async function createMeteredAiAction(
   successfulLimit: number,
   lease: UsageOperationLease,
   nowSeconds = Math.floor(Date.now() / 1_000),
+  entitlementScope: MeteredAiEntitlementScope = {
+    kind: "free",
+    userId: "",
+    periodStart: null,
+    periodEnd: null,
+    purchaseId: null,
+    successfulLimit: Number.MAX_SAFE_INTEGER,
+  },
 ) {
   await ensureOperatorUsageSchema();
   if (
@@ -467,6 +544,60 @@ export async function createMeteredAiAction(
   const database = env.DB as unknown as D1Database;
   const id = meteredAiActionId(reservationId, actionId);
   const pendingExpiresAt = nowSeconds + METERED_AI_ACTION_PENDING_TTL_SECONDS;
+  const entitlementGuard = entitlementScope.userId
+    ? `
+        AND (
+          SELECT COUNT(*)
+          FROM metered_ai_actions AS entitlement_action
+          INNER JOIN usage_reservations AS entitlement_reservation
+            ON entitlement_reservation.id = entitlement_action.reservation_id
+          WHERE (
+            entitlement_action.status = 'succeeded'
+            OR (
+              entitlement_action.status = 'pending'
+              AND entitlement_action.expires_at > ?
+            )
+          )
+            AND entitlement_reservation.user_id = ?
+            AND (
+              (? = 'free' AND entitlement_reservation.bucket = 'free')
+              OR (
+                ? = 'subscription'
+                AND entitlement_reservation.bucket = 'subscription'
+                AND entitlement_reservation.created_at >= ?
+                AND entitlement_reservation.created_at < ?
+              )
+              OR (
+                ? = 'one_time'
+                AND entitlement_reservation.bucket = 'one_time'
+                AND entitlement_reservation.billing_purchase_id IS ?
+              )
+              OR (
+                ? = 'operator'
+                AND entitlement_reservation.bucket = 'operator'
+                AND entitlement_action.created_at >= ?
+                AND entitlement_action.created_at < ?
+              )
+            )
+        ) < ?
+      `
+    : "";
+  const entitlementBindings = entitlementScope.userId
+    ? [
+        nowSeconds,
+        entitlementScope.userId,
+        entitlementScope.kind,
+        entitlementScope.kind,
+        entitlementScope.periodStart ?? 0,
+        entitlementScope.periodEnd ?? 0,
+        entitlementScope.kind,
+        entitlementScope.purchaseId,
+        entitlementScope.kind,
+        entitlementScope.periodStart ?? 0,
+        entitlementScope.periodEnd ?? 0,
+        Math.max(1, Math.floor(entitlementScope.successfulLimit)),
+      ]
+    : [];
   const row = await database
     .prepare(`
       INSERT INTO metered_ai_actions (
@@ -520,6 +651,7 @@ export async function createMeteredAiAction(
               )
           )
         ) < ?
+        ${entitlementGuard}
         AND NOT EXISTS (
           SELECT 1
           FROM metered_ai_actions
@@ -542,6 +674,7 @@ export async function createMeteredAiAction(
       nowSeconds,
       nowSeconds,
       limit,
+      ...entitlementBindings,
       id,
     )
     .first<MeteredAiActionRow>();

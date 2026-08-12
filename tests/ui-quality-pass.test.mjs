@@ -155,3 +155,80 @@ test("rejects videos over five minutes before spending an API action", () => {
   assert.match(pageSource, /validateVideoInputDuration/);
   assert.match(pageSource, /notify\(durationResult\.message\)/);
 });
+
+test("restores paid export access safely after returning from checkout", () => {
+  assert.match(pageSource, /payload\.aiOperationsRemaining/);
+  assert.match(pageSource, /rememberReservationAiQuota\(reservation\)/);
+  assert.match(pageSource, /paidAccessCheckRef\.current/);
+  assert.match(pageSource, /window\.addEventListener\("focus", recheckAfterCheckout\)/);
+  assert.match(
+    pageSource,
+    /document\.addEventListener\("visibilitychange", recheckAfterCheckout\)/,
+  );
+  assert.match(pageSource, /onClick=\{markCheckoutStarted\}/);
+  assert.match(pageSource, /保存を有効にする（再確認）/);
+  assert.match(pageSource, /動画の書き出しを再開できます/);
+  assert.doesNotMatch(
+    pageSource,
+    /checkPaidExportAccess\([^)]*\)\.then\([^)]*requestVideoExport/,
+  );
+
+  assert.match(photoReelSource, /fetch\("\/api\/billing\/status"/);
+  assert.match(photoReelSource, /purchaseCheckRef\.current/);
+  assert.match(
+    photoReelSource,
+    /window\.addEventListener\("focus", recheckAfterCheckout\)/,
+  );
+  assert.match(photoReelSource, /上の「写真リールを書き出す」を押す/);
+  assert.doesNotMatch(
+    photoReelSource,
+    /checkPurchaseAfterReturn\([^)]*\)\.then\([^)]*startExport/,
+  );
+});
+
+test("keeps setup choices accessible and labels the actual video shape", () => {
+  assert.match(pageSource, /aria-pressed=\{goal === item\.id\}/);
+  assert.match(pageSource, /aria-pressed=\{length === item\}/);
+  assert.match(pageSource, /aria-pressed=\{spokenCaptionsEnabled\}/);
+  assert.match(pageSource, /aria-pressed=\{narrationCaptionsEnabled\}/);
+  assert.match(pageSource, /onLoadedMetadata=\{\(event\) =>/);
+  assert.match(pageSource, /ratio > 1\.08[\s\S]*?"横動画"/);
+  assert.match(pageSource, /ratio < 0\.92[\s\S]*?"縦動画"/);
+  assert.match(pageSource, /"正方形動画"/);
+  assert.match(pageSource, /5分までの縦・横・正方形動画/);
+  assert.doesNotMatch(pageSource, /MB`}・縦動画/);
+});
+
+test("keeps the built-in sample free of narration API use", () => {
+  assert.match(pageSource, /if \(options\.demo\) setAudioMode\("spoken"\)/);
+  assert.match(
+    pageSource,
+    /aria-describedby=\{isDemoSample \? "sampleNarrationNotice" : undefined\}/,
+  );
+  assert.match(pageSource, /disabled=\{isDemoSample\}/);
+  assert.match(pageSource, /if \(isDemoSample\) \{[\s\S]*?API利用や無料体験の回数を消費せず/);
+});
+
+test("explains that completed AI work is not restored when an edit is discarded", () => {
+  assert.match(pageSource, /正常に完了したAI処理の回数は、この編集を保存せず終了した場合も戻りません/);
+});
+
+test("removes the unreachable transfer UI while keeping export work serialized", () => {
+  assert.doesNotMatch(pageSource, /type Stage = [^;]*transfer/);
+  assert.doesNotMatch(pageSource, /function TransferPortal/);
+  assert.doesNotMatch(pageSource, /function uploadVideoInChunks/);
+  assert.match(
+    pageSource,
+    /const isMediaBusy =[\s\S]*?isAnalyzingThumbnailFrames/,
+  );
+  assert.match(pageSource, /addCutBoundaryFades\(/);
+  assert.match(pageSource, /PORTABLE_AUDIO_CUT_FADE_SECONDS/);
+});
+
+test("warns early about long iPhone exports and snaps narration captions locally", () => {
+  assert.match(pageSource, /selectedVideoDuration > 120 && keepsOriginalVideo/);
+  assert.match(pageSource, /iPhone・iPadでは120秒を超えるノーカット動画/);
+  assert.match(pageSource, /snapNarrationTimelineToAudioSilence/);
+  assert.match(pageSource, /resolveNarrationAudioBoundaries/);
+  assert.match(pageSource, /buildNarrationAudioSpans/);
+});

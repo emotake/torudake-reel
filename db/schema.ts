@@ -179,6 +179,24 @@ export const billingCheckoutLocks = sqliteTable(
   ],
 );
 
+export const billingSubscriptionSyncLeases = sqliteTable(
+  "billing_subscription_sync_leases",
+  {
+    subscriptionId: text("subscription_id").primaryKey(),
+    leaseToken: text("lease_token").notNull(),
+    acquiredAt: integer("acquired_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_subscription_sync_leases_token_unique").on(
+      table.leaseToken,
+    ),
+    index("billing_subscription_sync_leases_expires_at_idx").on(
+      table.expiresAt,
+    ),
+  ],
+);
+
 export const billingPurchases = sqliteTable(
   "billing_purchases",
   {

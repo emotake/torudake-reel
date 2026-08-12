@@ -1,4 +1,5 @@
 import {
+  acquireSubscriptionSyncLease,
   abandonStripeEvent,
   beginStripeEvent,
   finishStripeEvent,
@@ -6,6 +7,7 @@ import {
   getBillingUserByStripeCustomer,
   recordOneTimePurchase,
   releaseMonthlyCheckoutLock,
+  releaseSubscriptionSyncLease,
   setStripeCustomerId,
   setStripeCustomerIdentity,
   setSubscriptionPeriodRevocationState,
@@ -23,6 +25,10 @@ import {
   reconcileOneTimePurchase,
   summarizeStripePurchaseState,
 } from "../../../../lib/stripe-purchase-state";
+import {
+  readRequestBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
 
 type StripeObject = Record<string, unknown>;
 
@@ -36,6 +42,8 @@ type StripeEvent = {
 
 const MAX_WEBHOOK_BYTES = 1_000_000;
 const MAX_STRIPE_LIST_PAGES = 10;
+const SUBSCRIPTION_SYNC_WAIT_ATTEMPTS = 20;
+const SUBSCRIPTION_SYNC_WAIT_MS = 25;
 const PURCHASE_STATE_EVENT_TYPES = new Set([
   "refund.created",
   "refund.updated",
@@ -61,14 +69,20 @@ export async function POST(request: Request) {
     return Response.json({ error: "Stripe signature is missing." }, { status: 400 });
   }
 
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BYTES) {
-    return Response.json({ error: "Stripe payload is too large." }, { status: 413 });
-  }
-
-  const rawBody = await request.text();
-  if (new TextEncoder().encode(rawBody).byteLength > MAX_WEBHOOK_BYTES) {
-    return Response.json({ error: "Stripe payload is too large." }, { status: 413 });
+  let rawBody: string;
+  try {
+    const bytes = await readRequestBodyWithLimit(request, MAX_WEBHOOK_BYTES);
+    rawBody = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "Stripe payload is too large."
+            : "Invalid Stripe payload.",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
   }
   if (!(await verifyStripeSignature(rawBody, signature, webhookSecret))) {
     return Response.json({ error: "Invalid Stripe signature." }, { status: 400 });
@@ -172,21 +186,23 @@ async function handleCheckoutCompleted(session: StripeObject) {
     if (!subscriptionId) {
       throw new Error("Monthly checkout has no subscription.");
     }
-    const subscription = await stripeGet<StripeObject>(
-      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    );
-    if (objectId(subscription.customer) !== customerId) {
-      throw new Error("Checkout and subscription customers do not match.");
-    }
-    const item = firstSubscriptionItem(subscription);
-    const actualPlan = item
-      ? stripeMonthlyPlanForPrice(objectId(item.price) ?? "")
-      : null;
-    const expectedPlan = plan === "light" ? "legacy_1480" : plan;
-    if (actualPlan !== expectedPlan) {
-      throw new Error("Checkout subscription does not match the selected plan.");
-    }
-    await persistSubscription(user.id, subscription);
+    await withSubscriptionSyncLease(subscriptionId, async () => {
+      const subscription = await stripeGet<StripeObject>(
+        `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      );
+      if (objectId(subscription.customer) !== customerId) {
+        throw new Error("Checkout and subscription customers do not match.");
+      }
+      const item = firstSubscriptionItem(subscription);
+      const actualPlan = item
+        ? stripeMonthlyPlanForPrice(objectId(item.price) ?? "")
+        : null;
+      const expectedPlan = plan === "light" ? "legacy_1480" : plan;
+      if (actualPlan !== expectedPlan) {
+        throw new Error("Checkout subscription does not match the selected plan.");
+      }
+      await persistSubscription(user.id, subscription);
+    });
     const checkoutLockToken = metadataValue(session, "checkout_lock_token");
     if (checkoutLockToken) {
       await releaseMonthlyCheckoutLock({
@@ -287,35 +303,37 @@ async function reconcileMonthlySubscriptionPaymentState(
   const subscriptionId = subscriptionIdFromInvoice(invoice);
   if (!subscriptionId) return;
 
-  const subscription = await stripeGet<StripeObject>(
-    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
-  );
-  const item = firstSubscriptionItem(subscription);
-  const priceId = item ? objectId(item.price) : null;
-  if (!priceId || !stripeMonthlyPlanForPrice(priceId)) return;
-  const periodStart = await invoicePeriodStart(
-    invoiceId,
-    invoice,
-    subscriptionId,
-    priceId,
-  );
-  if (!periodStart) {
-    throw new Error("Subscription invoice has no matching billing period.");
-  }
+  await withSubscriptionSyncLease(subscriptionId, async () => {
+    const subscription = await stripeGet<StripeObject>(
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
+    const item = firstSubscriptionItem(subscription);
+    const priceId = item ? objectId(item.price) : null;
+    if (!priceId || !stripeMonthlyPlanForPrice(priceId)) return;
+    const periodStart = await invoicePeriodStart(
+      invoiceId,
+      invoice,
+      subscriptionId,
+      priceId,
+    );
+    if (!periodStart) {
+      throw new Error("Subscription invoice has no matching billing period.");
+    }
 
-  // Persist the latest Stripe subscription snapshot before changing the
-  // period-specific entitlement flag.
-  await persistSubscriptionForResolvedUser(subscription);
-  const [refunds, disputes] = await Promise.all([
-    listStripePaymentObjects("/v1/refunds", paymentIntentId),
-    listStripePaymentObjects("/v1/disputes", paymentIntentId),
-  ]);
-  const paymentState = summarizeStripePurchaseState(refunds, disputes);
-  await setSubscriptionPeriodRevocationState(
-    subscriptionId,
-    periodStart,
-    paymentState.blocked,
-  );
+    // Persist the latest Stripe subscription snapshot and its period-specific
+    // revocation while the same subscription lease is held.
+    await persistSubscriptionForResolvedUser(subscription);
+    const [refunds, disputes] = await Promise.all([
+      listStripePaymentObjects("/v1/refunds", paymentIntentId),
+      listStripePaymentObjects("/v1/disputes", paymentIntentId),
+    ]);
+    const paymentState = summarizeStripePurchaseState(refunds, disputes);
+    await setSubscriptionPeriodRevocationState(
+      subscriptionId,
+      periodStart,
+      paymentState.blocked,
+    );
+  });
 }
 
 async function listStripePaymentObjects(
@@ -503,10 +521,34 @@ async function verifyCheckoutLineItem(
 export async function handleSubscriptionChanged(subscription: StripeObject) {
   const subscriptionId = stringValue(subscription.id);
   if (!subscriptionId) throw new Error("Subscription has no Stripe ID.");
-  const latestSubscription = await stripeGet<StripeObject>(
-    `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
-  );
-  await persistSubscriptionForResolvedUser(latestSubscription);
+  await withSubscriptionSyncLease(subscriptionId, async () => {
+    const latestSubscription = await stripeGet<StripeObject>(
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
+    await persistSubscriptionForResolvedUser(latestSubscription);
+  });
+}
+
+export async function withSubscriptionSyncLease<T>(
+  subscriptionId: string,
+  work: () => Promise<T>,
+) {
+  for (let attempt = 0; attempt < SUBSCRIPTION_SYNC_WAIT_ATTEMPTS; attempt += 1) {
+    const lease = await acquireSubscriptionSyncLease(subscriptionId);
+    if (lease) {
+      try {
+        return await work();
+      } finally {
+        await releaseSubscriptionSyncLease(lease).catch(() => undefined);
+      }
+    }
+    if (attempt + 1 < SUBSCRIPTION_SYNC_WAIT_ATTEMPTS) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, SUBSCRIPTION_SYNC_WAIT_MS),
+      );
+    }
+  }
+  throw new Error("Stripe subscription reconciliation is already in progress.");
 }
 
 async function persistSubscriptionForResolvedUser(subscription: StripeObject) {

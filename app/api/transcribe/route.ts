@@ -519,6 +519,7 @@ export async function POST(request: Request) {
             usageReservationId,
             "transcribe",
             aiOperationId || crypto.randomUUID(),
+            { continuationMode: "transcription_chunk" },
           )
         : null;
       if (!authorization?.allowed) {
@@ -531,11 +532,14 @@ export async function POST(request: Request) {
         }
         const quotaReached =
           authorization?.reason === "operator_success_limit" ||
+          authorization?.reason === "entitlement_ai_limit" ||
           authorization?.reason === "operator_operation_limit" ||
           authorization?.reason === "action_attempt_limit";
         if (quotaReached) {
           return meteredJsonError(
-            authorization?.reason === "operator_success_limit"
+            authorization?.reason === "entitlement_ai_limit"
+              ? "この料金プラン・購入枠・無料体験で利用できるAI処理回数に達しました。現在の編集内容はそのまま利用できます。"
+              : authorization?.reason === "operator_success_limit"
               ? `この動画で利用できるAI処理の上限（${authorization.successfulLimit}回）に達しました。現在の編集内容はそのまま利用できます。`
               : "この動画でのAI処理回数が安全上限に達しました。新しい動画としてやり直してください。",
             429,
@@ -545,7 +549,8 @@ export async function POST(request: Request) {
         if (
           authorization?.reason === "action_conflict" ||
           authorization?.reason === "action_failed" ||
-          authorization?.reason === "action_expired"
+          authorization?.reason === "action_expired" ||
+          authorization?.reason === "action_already_succeeded"
         ) {
           return meteredJsonError(
             "このAI処理を再開できませんでした。もう一度操作してください。",
@@ -554,10 +559,16 @@ export async function POST(request: Request) {
           );
         }
         return meteredJsonError(
-          authorization?.reason === "ai_action_capacity"
-            ? "別のAI処理が進行中です。完了してからもう一度お試しください。"
+          authorization?.reason === "ai_action_capacity" ||
+            authorization?.reason === "entitlement_ai_capacity"
+            ? authorization?.reason === "entitlement_ai_capacity"
+              ? "この料金プラン・購入枠・無料体験のAI処理が別の動画で進行中です。完了してからもう一度お試しください。"
+              : "別のAI処理が進行中です。完了してからもう一度お試しください。"
             : "利用枠を確認できませんでした。動画を選び直してください。",
-          authorization?.reason === "ai_action_capacity" ? 409 : 402,
+          authorization?.reason === "ai_action_capacity" ||
+            authorization?.reason === "entitlement_ai_capacity"
+            ? 409
+            : 402,
           authorization,
         );
       }

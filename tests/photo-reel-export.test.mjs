@@ -47,6 +47,8 @@ test("uses the same deterministic canvas renderer for preview and MP4 export", a
   assert.match(source, /HIGH_QUALITY_VIDEO_BITRATE/);
   assert.match(source, /new media\.AudioBufferSource\(/);
   assert.match(source, /codec: "aac"/);
+  assert.match(source, /import\("@mediabunny\/aac-encoder"\)/);
+  assert.match(source, /registerAacEncoder\(\)/);
 });
 
 test("falls back to an MP4 canvas recorder when WebCodecs AVC is unavailable", async () => {
@@ -66,7 +68,7 @@ test("falls back to an MP4 canvas recorder when WebCodecs AVC is unavailable", a
   assert.match(source, /video\/mp4;codecs=avc1\.640028,mp4a\.40\.2/);
   assert.match(
     source,
-    /needsRecorderFallback\s*=\s*!canEncodeWithWebCodecs \|\| !canEncodeAudioWithWebCodecs/,
+    /needsRecorderFallback\s*=\s*!canEncodeWithWebCodecs \|\| !canEncodeAudio/,
   );
   assert.match(source, /let recorderStarted = false/);
   assert.match(source, /if \(recorderStarted\)/);
@@ -91,6 +93,9 @@ test("validates the completed MP4 before charging and aborts a backgrounded iPho
   assert.match(exportSource, /Math\.round\(width\) !== plan\.width/);
   assert.match(exportSource, /isAvcCodec\(codec, parameter\)/);
   assert.match(exportSource, /isAacCodec\(audioCodec, audioParameter\)/);
+  assert.match(exportSource, /videoStats\.averageBitrate/);
+  assert.match(exportSource, /measureDecodedAudioTrack\(media, audioTrack\)/);
+  assert.match(exportSource, /signal\.audibleSampleRatio/);
   assert.equal(
     exportSource.match(/await validatePhotoReelOutput\(/g)?.length,
     2,

@@ -372,7 +372,7 @@ export default function AccountClient() {
           <p className="eyebrow">ACCOUNT</p>
           <h1>本人確認して、利用枠とお支払いを管理</h1>
           <p>
-            Face ID・Touch ID・端末の画面ロックを使うパスキー認証です。パスワードを覚える必要はありません。
+            この端末で初めて使う方は「アカウントを作る」、ほかの端末ですでに登録した方は「ログイン」を選んでください。Face ID・Touch ID・端末の画面ロックを使うため、パスワードを覚える必要はありません。
           </p>
           {!status.authenticationAvailable ? (
             <p className="accountError" role="alert">アカウント認証を現在利用できません。</p>
@@ -629,7 +629,7 @@ export default function AccountClient() {
       </p>
       <p className="accountSecurity">
         AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、動画1本プラン5回、月3本・月7本プラン
-        {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。
+        {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。正常に完了したAI処理の回数は、動画を保存せず編集を終了した場合も戻りません。
       </p>
       <div className="accountLegalLinks">
         <Link href="/terms">利用規約</Link>

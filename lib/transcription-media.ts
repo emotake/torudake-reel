@@ -1,17 +1,18 @@
-const MAX_AUDIO_CHUNK_SECONDS = 150;
-export const DEFAULT_MAX_AUDIO_CHUNK_BYTES = 768 * 1024;
-export const MIN_AUDIO_CHUNK_BYTES = 192 * 1024;
+import {
+  TRANSCRIPTION_AUDIO_CHUNK_SECONDS,
+  TRANSCRIPTION_AUDIO_SAMPLE_RATE,
+  encodeNormalizedMonoWavSamples,
+} from "./audio";
+
+import type { AudioCodec, AudioSample, InputAudioTrack } from "mediabunny";
+
+const MAX_AUDIO_CHUNK_SECONDS = TRANSCRIPTION_AUDIO_CHUNK_SECONDS;
+const MAX_NORMALIZED_DECODE_DURATION_SECONDS = 5 * 60;
+export const OPENAI_TRANSCRIPTION_MAX_FILE_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_MAX_AUDIO_CHUNK_BYTES = 8 * 1024 * 1024;
+export const MIN_AUDIO_CHUNK_BYTES = 2 * 1024 * 1024;
 const TARGET_AUDIO_CHUNK_RATIO = 0.75;
 const MIN_AUDIO_CHUNK_SECONDS = 1;
-
-type DirectCopyAudioCodec =
-  | "aac"
-  | "mp3"
-  | "opus"
-  | "vorbis"
-  | "ac3"
-  | "eac3"
-  | "pcm-s16";
 
 export type TranscriptionAudioChunk = {
   file: File;
@@ -90,6 +91,42 @@ export function getSafeAudioChunkSeconds(
   );
 }
 
+export function getNormalizedAudioChunkSeconds(
+  maxChunkBytes = DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+) {
+  const safeBytes = Math.min(
+    OPENAI_TRANSCRIPTION_MAX_FILE_BYTES - 1024,
+    Math.max(MIN_AUDIO_CHUNK_BYTES, Math.floor(maxChunkBytes)) *
+      TARGET_AUDIO_CHUNK_RATIO,
+  );
+  const pcmBytesPerSecond = TRANSCRIPTION_AUDIO_SAMPLE_RATE * 2;
+  return Math.max(
+    MIN_AUDIO_CHUNK_SECONDS,
+    Math.min(
+      MAX_AUDIO_CHUNK_SECONDS,
+      Math.floor((safeBytes - 44) / pcmBytesPerSecond),
+    ),
+  );
+}
+
+export function buildNormalizedAudioChunkWindows(
+  durationSeconds: number,
+  maxChunkBytes = DEFAULT_MAX_AUDIO_CHUNK_BYTES,
+) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new RangeError("Audio duration must be a finite positive number.");
+  }
+  const chunkSeconds = getNormalizedAudioChunkSeconds(maxChunkBytes);
+  const windows: Array<{ startSeconds: number; durationSeconds: number }> = [];
+  for (let startSeconds = 0; startSeconds < durationSeconds; startSeconds += chunkSeconds) {
+    windows.push({
+      startSeconds,
+      durationSeconds: Math.min(chunkSeconds, durationSeconds - startSeconds),
+    });
+  }
+  return windows;
+}
+
 function safeBaseName(fileName: string) {
   return (
     fileName
@@ -97,6 +134,130 @@ function safeBaseName(fileName: string) {
       .replace(/[^\p{L}\p{N}_-]+/gu, "_")
       .slice(0, 80) || "video"
   );
+}
+
+type AudioSampleSinkLike = {
+  samples(
+    startTimestamp?: number,
+    endTimestamp?: number,
+  ): AsyncGenerator<AudioSample, void, unknown>;
+};
+
+function downmixFrame(channels: readonly Float32Array[], frame: number) {
+  if (channels.length === 1) return channels[0][frame] ?? 0;
+  if (channels.length === 2) {
+    return ((channels[0][frame] ?? 0) + (channels[1][frame] ?? 0)) / 2;
+  }
+
+  // Multichannel iPhone recordings normally place dialog in L/R/center.
+  // Giving those channels priority avoids rear ambience cancelling speech.
+  return (
+    (channels[0][frame] ?? 0) * 0.35 +
+    (channels[1][frame] ?? 0) * 0.35 +
+    (channels[2][frame] ?? 0) * 0.3
+  );
+}
+
+async function createNormalizedDecodedChunk(
+  sink: AudioSampleSinkLike,
+  startSeconds: number,
+  durationSeconds: number,
+) {
+  const outputLength = Math.max(
+    1,
+    Math.ceil(durationSeconds * TRANSCRIPTION_AUDIO_SAMPLE_RATE),
+  );
+  const mono = new Float32Array(outputLength);
+  let copiedFrames = 0;
+
+  for await (const sample of sink.samples(
+    startSeconds,
+    startSeconds + durationSeconds,
+  )) {
+    try {
+      const channels = Array.from(
+        { length: sample.numberOfChannels },
+        (_, channel) => {
+          const plane = new Float32Array(sample.numberOfFrames);
+          sample.copyTo(plane, {
+            planeIndex: channel,
+            format: "f32-planar",
+          });
+          return plane;
+        },
+      );
+      const sampleStart = sample.timestamp;
+      const sampleEnd = sample.timestamp + sample.duration;
+      const outputStart = Math.max(
+        0,
+        Math.ceil(
+          (sampleStart - startSeconds) * TRANSCRIPTION_AUDIO_SAMPLE_RATE,
+        ),
+      );
+      const outputEnd = Math.min(
+        outputLength,
+        Math.ceil(
+          (sampleEnd - startSeconds) * TRANSCRIPTION_AUDIO_SAMPLE_RATE,
+        ),
+      );
+
+      for (let outputIndex = outputStart; outputIndex < outputEnd; outputIndex += 1) {
+        const outputTime =
+          startSeconds + outputIndex / TRANSCRIPTION_AUDIO_SAMPLE_RATE;
+        const sourcePosition = (outputTime - sampleStart) * sample.sampleRate;
+        if (sourcePosition < 0 || sourcePosition >= sample.numberOfFrames) continue;
+        const left = Math.floor(sourcePosition);
+        const right = Math.min(sample.numberOfFrames - 1, left + 1);
+        const mix = sourcePosition - left;
+        const leftValue = downmixFrame(channels, left);
+        const rightValue = downmixFrame(channels, right);
+        mono[outputIndex] = leftValue + (rightValue - leftValue) * mix;
+        copiedFrames += 1;
+      }
+    } finally {
+      sample.close();
+    }
+  }
+
+  if (copiedFrames === 0) {
+    throw new Error("動画の音声トラックをデコードできませんでした。");
+  }
+  return encodeNormalizedMonoWavSamples(mono);
+}
+
+async function collectNormalizedDecodedChunks(
+  audioTrack: InputAudioTrack,
+  duration: number,
+  maxChunkBytes: number,
+  baseName: string,
+  AudioSampleSink: new (track: InputAudioTrack) => AudioSampleSinkLike,
+) {
+  if (duration > MAX_NORMALIZED_DECODE_DURATION_SECONDS) return null;
+  const sink = new AudioSampleSink(audioTrack);
+  const chunks: TranscriptionAudioChunk[] = [];
+
+  for (const [index, window] of buildNormalizedAudioChunkWindows(
+    duration,
+    maxChunkBytes,
+  ).entries()) {
+    const wav = await createNormalizedDecodedChunk(
+      sink,
+      window.startSeconds,
+      window.durationSeconds,
+    );
+    if (wav.byteLength > maxChunkBytes) {
+      throw new Error("正規化した音声データが送信上限を超えました。");
+    }
+    chunks.push({
+      file: new File(
+        [wav],
+        `${baseName}-audio-${String(index + 1).padStart(2, "0")}.wav`,
+        { type: "audio/wav" },
+      ),
+      startSeconds: window.startSeconds,
+    });
+  }
+  return chunks;
 }
 
 export async function* extractTranscriptionAudioChunks(
@@ -108,6 +269,7 @@ export async function* extractTranscriptionAudioChunks(
     BufferTarget,
     EncodedAudioPacketSource,
     EncodedPacketSink,
+    AudioSampleSink,
     Input,
     MP4,
     Mp4OutputFormat,
@@ -134,19 +296,32 @@ export async function* extractTranscriptionAudioChunks(
     }
 
     const audioCandidates = await Promise.all(
-      audioTracks.map(async (track) => ({
-        codec: (await track
+      audioTracks.map(async (track) => {
+        const codec = (await track
           .getCodec()
-          .catch(() => null)) as DirectCopyAudioCodec | null,
-        track,
-      })),
+          .catch(() => null)) as AudioCodec | null;
+        return {
+          canDecode: await track.canDecode().catch(() => false),
+          codec,
+          track,
+        };
+      }),
     );
     const selectedAudio = audioCandidates
-      .filter((candidate) => getDirectCopyAudioOutput(candidate.codec))
+      .filter(
+        (candidate) =>
+          candidate.canDecode || getDirectCopyAudioOutput(candidate.codec),
+      )
       .sort(
-        (left, right) =>
-          getAudioCodecPriority(left.codec) -
-          getAudioCodecPriority(right.codec),
+        (left, right) => {
+          if (left.canDecode !== right.canDecode) {
+            return left.canDecode ? -1 : 1;
+          }
+          return (
+            getAudioCodecPriority(left.codec) -
+            getAudioCodecPriority(right.codec)
+          );
+        },
       )[0];
     if (!selectedAudio) {
       throw new Error(
@@ -154,17 +329,46 @@ export async function* extractTranscriptionAudioChunks(
       );
     }
 
-    const { codec, track: audioTrack } = selectedAudio;
-    const outputSpec = getDirectCopyAudioOutput(codec);
-    if (!outputSpec || !codec) {
-      throw new Error("動画の音声形式を直接取り出せませんでした。");
-    }
-
+    const { canDecode, codec, track: audioTrack } = selectedAudio;
     const duration =
       (await audioTrack.getDurationFromMetadata()) ??
       (await audioTrack.computeDuration());
     if (!Number.isFinite(duration) || duration <= 0) {
       throw new Error("動画に音声が見つかりませんでした。");
+    }
+
+    const maxChunkBytes = Math.max(
+      MIN_AUDIO_CHUNK_BYTES,
+      Math.floor(options.maxChunkBytes ?? DEFAULT_MAX_AUDIO_CHUNK_BYTES),
+    );
+    const baseName = safeBaseName(sourceFile.name);
+
+    if (canDecode) {
+      try {
+        const normalizedChunks = await collectNormalizedDecodedChunks(
+          audioTrack,
+          duration,
+          maxChunkBytes,
+          baseName,
+          AudioSampleSink,
+        );
+        if (normalizedChunks?.length) {
+          for (const chunk of normalizedChunks) yield chunk;
+          return;
+        }
+      } catch (error) {
+        // No request has been sent yet: all normalized chunks are prepared
+        // before yielding, so direct-copy fallback cannot duplicate billing.
+        console.warn(
+          "Local audio normalization failed; using a larger direct-copy chunk.",
+          error,
+        );
+      }
+    }
+
+    const outputSpec = getDirectCopyAudioOutput(codec);
+    if (!outputSpec || !codec) {
+      throw new Error("動画の音声形式を直接取り出せませんでした。");
     }
 
     const bitrate =
@@ -176,14 +380,9 @@ export async function* extractTranscriptionAudioChunks(
     }
 
     const packetSink = new EncodedPacketSink(audioTrack);
-    const maxChunkBytes = Math.max(
-      MIN_AUDIO_CHUNK_BYTES,
-      Math.floor(options.maxChunkBytes ?? DEFAULT_MAX_AUDIO_CHUNK_BYTES),
-    );
     let chunkSeconds = getSafeAudioChunkSeconds(bitrate, maxChunkBytes);
     let chunkStart = 0;
     let chunkNumber = 1;
-    const baseName = safeBaseName(sourceFile.name);
 
     while (chunkStart < duration) {
       const chunkEnd = Math.min(duration, chunkStart + chunkSeconds);

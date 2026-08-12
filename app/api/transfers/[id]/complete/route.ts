@@ -13,6 +13,12 @@ import {
   type UploadedPartReceipt,
 } from "../../../../../lib/transfers";
 import { isManagedUploadEnforcementEnabled } from "../../../../../lib/usage-enforcement";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../../lib/request-safety";
+
+const MAX_TRANSFER_COMPLETE_REQUEST_BYTES = 64 * 1024;
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -21,11 +27,29 @@ type RouteContext = {
 export async function POST(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const payload = (await request.json()) as {
+    const managedUploadEnforcementEnabled =
+      isManagedUploadEnforcementEnabled(request);
+    const usagePrincipal = managedUploadEnforcementEnabled
+      ? await getUsagePrincipal(request, { allowTrial: true })
+      : null;
+    let payload: {
       code?: string;
       uploadId?: string;
       parts?: { partNumber?: number; etag?: string }[];
     };
+    try {
+      payload = await parseJsonBodyWithLimit<typeof payload>(
+        request,
+        MAX_TRANSFER_COMPLETE_REQUEST_BYTES,
+      );
+    } catch (error) {
+      return jsonError(
+        error instanceof RequestBodyTooLargeError
+          ? "完了情報が大きすぎます。"
+          : "完了情報を確認できませんでした。",
+        error instanceof RequestBodyTooLargeError ? 413 : 400,
+      );
+    }
     const code = payload.code ?? "";
     const uploadId = payload.uploadId ?? "";
     const rawParts = Array.isArray(payload.parts) ? payload.parts : [];
@@ -46,10 +70,8 @@ export async function POST(request: Request, context: RouteContext) {
     if (transfer.status !== "uploading" || transfer.expiresAt < Date.now()) {
       return jsonError("このアップロードは終了または期限切れです。", 410);
     }
-    if (isManagedUploadEnforcementEnabled(request) && transfer.ownerEmail) {
-      const { currentUser } = await getUsagePrincipal(request, {
-        allowTrial: true,
-      });
+    if (managedUploadEnforcementEnabled && transfer.ownerEmail) {
+      const currentUser = usagePrincipal?.currentUser ?? null;
       if (
         !currentUser ||
         currentUser.email.toLowerCase() !== transfer.ownerEmail.toLowerCase()

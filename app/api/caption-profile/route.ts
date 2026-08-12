@@ -7,6 +7,12 @@ import {
   authenticationRequired,
   getCurrentUser,
 } from "../../../lib/current-user";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../lib/request-safety";
+
+const MAX_CAPTION_PROFILE_REQUEST_BYTES = 16 * 1024;
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +39,19 @@ export async function PUT(request: Request) {
 
   let payload: unknown;
   try {
-    payload = await request.json();
-  } catch {
+    payload = await parseJsonBodyWithLimit<unknown>(
+      request,
+      MAX_CAPTION_PROFILE_REQUEST_BYTES,
+    );
+  } catch (error) {
     return Response.json(
-      { error: "テロップ設定を確認できませんでした。" },
-      { status: 400 },
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "テロップ設定の送信サイズが大きすぎます。"
+            : "テロップ設定を確認できませんでした。",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
     );
   }
 

@@ -121,7 +121,7 @@ import {
   spliceNarrationAudioSegment,
 } from "../lib/narration-audio-edit";
 
-type Stage = "start" | "setup" | "processing" | "result" | "transfer";
+type Stage = "start" | "setup" | "processing" | "result";
 
 type BrowserFaceDetector = {
   detect(
@@ -141,7 +141,6 @@ type PreviewTransportState =
   | "playing"
   | "seeking"
   | "ended";
-type TransferStatus = "idle" | "uploading" | "done" | "error";
 
 const PARTIAL_NARRATION_MODEL = "gpt-realtime-2.1-mini";
 
@@ -170,17 +169,6 @@ type ThumbnailFrameAnalysis = {
   choices: ThumbnailFrameChoice[];
   faceDetectionSupported: boolean;
   detectedFaceCount: number;
-};
-
-type UploadedPart = {
-  partNumber: number;
-  etag: string;
-};
-
-type TransferReceipt = {
-  id: string;
-  code: string;
-  expiresAt: number;
 };
 
 type TranscriptLine = CaptionSegment;
@@ -226,6 +214,34 @@ type AiOperationQuotaResult = {
   aiOperationLimit: number | null;
   aiOperationsRemaining: number | null;
 };
+
+function addCutBoundaryFades(
+  envelope: ReadonlyArray<{ time: number; gain: number }>,
+  duration: number,
+) {
+  if (!Number.isFinite(duration) || duration <= 0 || envelope.length === 0) {
+    return envelope;
+  }
+  const fade = Math.min(PORTABLE_AUDIO_CUT_FADE_SECONDS, duration / 2);
+  if (fade <= 0) return envelope;
+  const gainAt = (time: number) => {
+    let gain = envelope[0]?.gain ?? 1;
+    for (const point of envelope) {
+      if (point.time > time) break;
+      gain = point.gain;
+    }
+    return gain;
+  };
+  return [
+    { time: 0, gain: 0 },
+    { time: fade, gain: gainAt(fade) },
+    ...envelope.filter(
+      (point) => point.time > fade && point.time < duration - fade,
+    ),
+    { time: Math.max(fade, duration - fade), gain: gainAt(duration - fade) },
+    { time: duration, gain: 0 },
+  ];
+}
 
 class ApiRequestError extends Error {
   constructor(
@@ -279,7 +295,7 @@ function describeAiOperationQuota(
 ) {
   switch (usageBucket) {
     case "free":
-      return `無料利用では、この動画1本につき合計${limit}回まで利用できます。`;
+      return `無料体験では、この動画1本につき合計${limit}回まで利用できます。`;
     case "subscription":
       return `月3本・月7本プランでは、この動画1本につき合計${limit}回まで利用できます。`;
     case "one_time":
@@ -541,133 +557,6 @@ async function readApiResponse<T extends ApiPayload>(
     );
   }
   return payload;
-}
-
-async function uploadVideoInChunks(
-  selectedFile: File,
-  controller: AbortController,
-  onProgress: (progress: number) => void,
-  usageReservationId: string | null = null,
-) {
-  let activeReceipt: TransferReceipt | null = null;
-
-  try {
-    const initResponse = await fetch("/api/transfers/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fileName: selectedFile.name,
-        contentType: selectedFile.type || "video/mp4",
-        size: selectedFile.size,
-        usageReservationId,
-      }),
-      signal: controller.signal,
-    });
-    const initData = await readApiResponse<
-      ApiPayload & {
-        id?: string;
-        code?: string;
-        uploadId?: string;
-        chunkSize?: number;
-        expiresAt?: number;
-      }
-    >(initResponse, "アップロードを開始できませんでした。");
-
-    if (
-      !initData.id ||
-      !initData.code ||
-      !initData.uploadId ||
-      !initData.chunkSize ||
-      !initData.expiresAt
-    ) {
-      throw new Error("アップロードの準備情報が正しくありません。");
-    }
-
-    activeReceipt = {
-      id: initData.id,
-      code: initData.code,
-      expiresAt: initData.expiresAt,
-    };
-
-    const partCount = Math.ceil(selectedFile.size / initData.chunkSize);
-    const uploadedParts: UploadedPart[] = [];
-    let uploadedBytes = 0;
-
-    for (let startPart = 1; startPart <= partCount; startPart += 3) {
-      const batch = Array.from(
-        { length: Math.min(3, partCount - startPart + 1) },
-        (_, index) => startPart + index,
-      );
-
-      const results = await Promise.all(
-        batch.map(async (partNumber) => {
-          const start = (partNumber - 1) * initData.chunkSize!;
-          const end = Math.min(start + initData.chunkSize!, selectedFile.size);
-          const response = await fetch(
-            `/api/transfers/${encodeURIComponent(initData.id!)}/part?partNumber=${partNumber}&uploadId=${encodeURIComponent(initData.uploadId!)}&code=${encodeURIComponent(initData.code!)}`,
-            {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/octet-stream",
-                "Content-Length": String(end - start),
-              },
-              body: selectedFile.slice(start, end),
-              signal: controller.signal,
-            },
-          );
-          const data = await readApiResponse<
-            ApiPayload & {
-              partNumber?: number;
-              etag?: string;
-            }
-          >(response, "動画の送信中にエラーが発生しました。");
-          if (!data.partNumber || !data.etag) {
-            throw new Error("アップロード結果が正しくありません。");
-          }
-          return {
-            part: { partNumber: data.partNumber, etag: data.etag },
-            bytes: end - start,
-          };
-        }),
-      );
-
-      results.forEach((result) => {
-        uploadedParts.push(result.part);
-        uploadedBytes += result.bytes;
-      });
-      onProgress(
-        Math.min(96, Math.round((uploadedBytes / selectedFile.size) * 95)),
-      );
-    }
-
-    const completeResponse = await fetch(
-      `/api/transfers/${encodeURIComponent(initData.id)}/complete`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: initData.code,
-          uploadId: initData.uploadId,
-          parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
-        }),
-        signal: controller.signal,
-      },
-    );
-    await readApiResponse<ApiPayload>(
-      completeResponse,
-      "アップロードを確定できませんでした。",
-    );
-    onProgress(100);
-    return activeReceipt;
-  } catch (error) {
-    if (activeReceipt) {
-      await fetch(
-        `/api/transfers/${encodeURIComponent(activeReceipt.id)}?code=${encodeURIComponent(activeReceipt.code)}`,
-        { method: "DELETE" },
-      ).catch(() => undefined);
-    }
-    throw error;
-  }
 }
 
 async function transcribeMediaFile(
@@ -1505,7 +1394,9 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
       required?: boolean;
       reservationId?: string;
       aiOperationLimit?: number;
+      aiOperationsRemaining?: number;
       narrationGenerationLimit?: number;
+      narrationGenerationsRemaining?: number;
     }
   >(response, "利用枠を確認できませんでした。");
   const rawAiOperationLimit =
@@ -1514,6 +1405,13 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
     Number.isInteger(rawAiOperationLimit) && Number(rawAiOperationLimit) > 0
       ? Math.min(MAX_AI_OPERATION_LIMIT, Number(rawAiOperationLimit))
       : MAX_AI_OPERATION_LIMIT;
+  const rawAiOperationsRemaining =
+    payload.aiOperationsRemaining ?? payload.narrationGenerationsRemaining;
+  const aiOperationsRemaining =
+    Number.isInteger(rawAiOperationsRemaining) &&
+    Number(rawAiOperationsRemaining) >= 0
+      ? Math.min(aiOperationLimit, Number(rawAiOperationsRemaining))
+      : aiOperationLimit;
   const bucket = payload.required
     ? isBillingBucket(payload.bucket)
       ? payload.bucket
@@ -1526,6 +1424,7 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
     reservationId: payload.required ? (payload.reservationId ?? null) : null,
     bucket,
     aiOperationLimit,
+    aiOperationsRemaining,
   };
 }
 
@@ -1678,6 +1577,70 @@ async function getNarrationAudioDuration(audio: Blob) {
   } finally {
     player.removeAttribute("src");
     URL.revokeObjectURL(url);
+  }
+}
+
+async function snapNarrationTimelineToAudioSilence(
+  audio: Blob,
+  segments: NarrationPlan["segments"],
+  timeline: TranscriptLine[],
+  sourceDuration: number,
+  autoCut: boolean,
+  signal?: AbortSignal,
+) {
+  if (timeline.length < 2) return timeline;
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) return timeline;
+  const context = new AudioContextConstructor();
+  try {
+    throwIfProcessingAborted(signal);
+    const decoded = await context.decodeAudioData(await audio.arrayBuffer());
+    throwIfProcessingAborted(signal);
+    const spans = buildNarrationAudioSpans(segments, decoded.duration);
+    if (spans.length !== timeline.length) return timeline;
+    const sourceGap =
+      autoCut && timeline.length > 1
+        ? Math.max(0, sourceDuration - decoded.duration) / (timeline.length - 1)
+        : 0;
+    const aligned: TranscriptLine[] = [];
+    for (let index = 0; index < timeline.length; index += 1) {
+      const line = timeline[index];
+      const span = spans[index];
+      if (!line || !span) return timeline;
+      let boundary;
+      try {
+        boundary = resolveNarrationAudioBoundaries(
+          decoded,
+          span.start,
+          span.end,
+        );
+      } catch {
+        boundary = {
+          originalStart: span.start,
+          originalEnd: span.end,
+        };
+      }
+      const gapOffset = sourceGap * index;
+      const start = Math.max(
+        aligned.at(-1)?.end ?? 0,
+        Math.min(sourceDuration, boundary.originalStart + gapOffset),
+      );
+      const end = Math.min(
+        sourceDuration,
+        Math.max(start + 0.2, boundary.originalEnd + gapOffset),
+      );
+      aligned.push({
+        ...line,
+        start: Math.round(start * 1_000) / 1_000,
+        end: Math.round(end * 1_000) / 1_000,
+      });
+    }
+    return aligned;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    return timeline;
+  } finally {
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -1852,13 +1815,16 @@ function useCaptionProfileSync() {
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
-  const transferInputRef = useRef<HTMLInputElement>(null);
-  const transferAbortRef = useRef<AbortController | null>(null);
   const editAbortRef = useRef<AbortController | null>(null);
   const editGenerationRef = useRef(0);
   const usageReservationRef = useRef<string | null>(null);
   const usageReservationPendingExportRef = useRef(false);
   const narrationRegenerationAbortRef = useRef<AbortController | null>(null);
+  const paidAccessCheckRef = useRef(false);
+  const paidAccessCheckCallbackRef = useRef<() => Promise<boolean>>(
+    async () => false,
+  );
+  const checkoutReturnPendingRef = useRef(false);
   const aiOperationsRemainingRef = useRef(MAX_AI_OPERATION_LIMIT);
   const aiOperationLimitRef = useRef(MAX_AI_OPERATION_LIMIT);
   const [usageReservationId, setUsageReservationId] = useState<string | null>(
@@ -1911,6 +1877,7 @@ export default function Home() {
     MAX_AI_OPERATION_LIMIT,
   );
   const [file, setFile] = useState<File | null>(null);
+  const [selectedVideoDuration, setSelectedVideoDuration] = useState(0);
   const [isDemoSample, setIsDemoSample] = useState(false);
   const [isSampleLoading, setIsSampleLoading] = useState(false);
   const videoUrl = useMemo(
@@ -1926,17 +1893,11 @@ export default function Home() {
   const [isHighAccuracyRun, setIsHighAccuracyRun] = useState(false);
   const [usedHighAccuracy, setUsedHighAccuracy] = useState(false);
   const [toast, setToast] = useState("");
-  const [transferFile, setTransferFile] = useState<File | null>(null);
-  const [transferStatus, setTransferStatus] =
-    useState<TransferStatus>("idle");
-  const [transferProgress, setTransferProgress] = useState(0);
-  const [transferReceipt, setTransferReceipt] =
-    useState<TransferReceipt | null>(null);
-  const [transferError, setTransferError] = useState("");
   const [billingBusyPlan, setBillingBusyPlan] = useState<
     "starter" | "standard" | "one_time" | null
   >(null);
   const [billingError, setBillingError] = useState("");
+  const [checkoutReturnMessage, setCheckoutReturnMessage] = useState("");
 
   function rememberUsageReservation(
     nextReservationId: string | null,
@@ -2005,6 +1966,14 @@ export default function Home() {
     rememberAiOperationsRemaining(MAX_AI_OPERATION_LIMIT);
   }
 
+  function rememberReservationAiQuota(reservation: {
+    aiOperationLimit: number;
+    aiOperationsRemaining: number;
+  }) {
+    rememberAiOperationLimit(reservation.aiOperationLimit);
+    rememberAiOperationsRemaining(reservation.aiOperationsRemaining);
+  }
+
   function recordAiOperationResult(result: AiOperationQuotaResult) {
     if (result.aiOperationLimit !== null) {
       rememberAiOperationLimit(result.aiOperationLimit);
@@ -2024,7 +1993,6 @@ export default function Home() {
     () => () => {
       editAbortRef.current?.abort();
       narrationRegenerationAbortRef.current?.abort();
-      transferAbortRef.current?.abort();
     },
     [],
   );
@@ -2087,6 +2055,7 @@ export default function Home() {
         notify(durationResult.message);
         return false;
       }
+      setSelectedVideoDuration(durationResult.durationSeconds);
     } catch {
       notify("動画の長さを確認できませんでした。動画を選び直してください");
       return false;
@@ -2099,6 +2068,7 @@ export default function Home() {
     releasePendingExportReservation();
     setFile(selected);
     setIsDemoSample(Boolean(options.demo));
+    if (options.demo) setAudioMode("spoken");
     setEditError("");
     setSilentFallback(false);
     setUsedHighAccuracy(false);
@@ -2189,8 +2159,7 @@ export default function Home() {
         newlyReservedBucket = reservation.bucket;
         throwIfProcessingAborted(controller.signal);
         rememberUsageReservation(newlyReservedUsage, reservation.bucket);
-        rememberAiOperationLimit(reservation.aiOperationLimit);
-        rememberAiOperationsRemaining(reservation.aiOperationLimit);
+        rememberReservationAiQuota(reservation);
       }
       const usageReservationId = usageReservationRef.current;
 
@@ -2356,6 +2325,13 @@ export default function Home() {
   }
 
   async function startNarrationEditing() {
+    if (isDemoSample) {
+      setAudioMode("spoken");
+      setEditError(
+        "サンプルは元音声モードで、API利用や無料体験の回数を消費せずに確認できます。AIナレーションはご自身の動画でお試しください。",
+      );
+      return;
+    }
     if (!file) {
       setEditError(
         "AIナレーションは実際の動画から場面を読み取って作ります。動画を選んでください。",
@@ -2388,8 +2364,7 @@ export default function Home() {
       newlyReservedBucket = reservation.bucket;
       throwIfProcessingAborted(controller.signal);
       rememberUsageReservation(newlyReservedUsage, reservation.bucket);
-      rememberAiOperationLimit(reservation.aiOperationLimit);
-      rememberAiOperationsRemaining(reservation.aiOperationLimit);
+      rememberReservationAiQuota(reservation);
       updateProgress(14);
       const extracted = await extractNarrationFrames(file, 6, controller.signal);
       throwIfProcessingAborted(controller.signal);
@@ -2479,12 +2454,20 @@ export default function Home() {
       }
       throwIfProcessingAborted(controller.signal);
       updateProgress(90);
-      const timeline = buildNarrationTimeline(
+      let timeline = buildNarrationTimeline(
         nextPlan.segments,
         extracted.duration,
         narrationTargetDuration,
         audioDuration,
         { autoCut: narrationAutoCutEnabled },
+      );
+      timeline = await snapNarrationTimelineToAudioSilence(
+        audio,
+        nextPlan.segments,
+        timeline,
+        extracted.duration,
+        narrationAutoCutEnabled,
+        controller.signal,
       );
       if (!timeline.length) {
         throw new Error("AIナレーションを動画へ同期できませんでした。");
@@ -2630,15 +2613,23 @@ export default function Home() {
       }
       setNarrationStyle(style);
       setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
+      const baseTimeline = buildNarrationTimeline(
+        segments,
+        duration,
+        maximumDuration,
+        audioDuration,
+        {
+          autoCut: narrationAutoCutEnabled,
+        },
+      );
       setTranscript(
-        buildNarrationTimeline(
+        await snapNarrationTimelineToAudioSilence(
+          audio,
           segments,
+          baseTimeline,
           duration,
-          maximumDuration,
-          audioDuration,
-          {
-            autoCut: narrationAutoCutEnabled,
-          },
+          narrationAutoCutEnabled,
+          controller.signal,
         ),
       );
       setNarrationAudioUrl(URL.createObjectURL(audio));
@@ -2875,12 +2866,19 @@ export default function Home() {
       getNarrationAudioDuration(narrationBlob),
       getVideoDurationSeconds(file),
     ]);
-    const timeline = buildNarrationTimeline(
+    let timeline = buildNarrationTimeline(
       narrationPlan.segments,
       sourceDuration,
       length,
       audioDuration,
       { autoCut },
+    );
+    timeline = await snapNarrationTimelineToAudioSilence(
+      narrationBlob,
+      narrationPlan.segments,
+      timeline,
+      sourceDuration,
+      autoCut,
     );
     if (!timeline.length) {
       throw new Error("映像の仕上げ方を変更できませんでした。");
@@ -2890,8 +2888,6 @@ export default function Home() {
   }
 
   function reset() {
-    transferAbortRef.current?.abort();
-    transferAbortRef.current = null;
     editAbortRef.current?.abort();
     editAbortRef.current = null;
     narrationRegenerationAbortRef.current?.abort();
@@ -2899,6 +2895,7 @@ export default function Home() {
     editGenerationRef.current += 1;
     releasePendingExportReservation();
     setFile(null);
+    setSelectedVideoDuration(0);
     setIsDemoSample(false);
     setStage("start");
     setProgress(0);
@@ -2921,21 +2918,32 @@ export default function Home() {
     setNarrationAudioProfile("");
     resetAiOperationQuota();
     rememberUsageReservation(null);
+    checkoutReturnPendingRef.current = false;
+    setCheckoutReturnMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function markCheckoutStarted() {
+    checkoutReturnPendingRef.current = true;
+    setCheckoutReturnMessage(
+      "別タブで決済を完了してください。この画面へ戻ると購入状況を自動で確認します。",
+    );
+  }
+
   async function checkPaidExportAccess() {
-    if (!file || isCheckingPaidExportAccess) return;
+    if (!file || paidAccessCheckRef.current) return false;
     const accessGeneration = editGenerationRef.current;
     const accessFile = file;
+    paidAccessCheckRef.current = true;
     setIsCheckingPaidExportAccess(true);
+    setCheckoutReturnMessage("購入状況を確認しています…");
     try {
       const reservation = await reserveVideoUsage(accessFile);
       if (editGenerationRef.current !== accessGeneration) {
         if (reservation.reservationId) {
           await releaseVideoUsageBestEffort(reservation.reservationId);
         }
-        return;
+        return false;
       }
       if (
         !reservation.reservationId ||
@@ -2953,20 +2961,33 @@ export default function Home() {
         reservation.bucket,
         true,
       );
-      notify("購入済みの利用枠を確認しました。完成動画を保存できます");
+      rememberReservationAiQuota(reservation);
+      checkoutReturnPendingRef.current = false;
+      setCheckoutReturnMessage(
+        "購入済みの利用枠を確認しました。下の「動画を書き出す」から保存を再開できます。",
+      );
+      notify("購入済みの利用枠を確認しました。動画の書き出しを再開できます");
+      return true;
     } catch (error) {
-      if (editGenerationRef.current !== accessGeneration) return;
-      notify(
+      if (editGenerationRef.current !== accessGeneration) return false;
+      const message =
         error instanceof ApiRequestError && error.status === 402
-          ? "購入済みの利用枠をまだ確認できませんでした。決済完了後、少し待ってからもう一度お試しください。"
+          ? "購入済みの利用枠をまだ確認できませんでした。決済完了後、少し待ってから「購入状況を再確認」を押してください。"
           : error instanceof Error
             ? error.message
-            : "購入状況を確認できませんでした。",
-      );
+            : "購入状況を確認できませんでした。";
+      checkoutReturnPendingRef.current = false;
+      setCheckoutReturnMessage(message);
+      notify(message);
+      return false;
     } finally {
+      paidAccessCheckRef.current = false;
       setIsCheckingPaidExportAccess(false);
     }
   }
+  useEffect(() => {
+    paidAccessCheckCallbackRef.current = checkPaidExportAccess;
+  });
 
   async function startCheckout(
     plan: "starter" | "standard" | "one_time",
@@ -3005,72 +3026,25 @@ export default function Home() {
     }
   }
 
-  function chooseTransferFile(selected?: File) {
-    if (!selected) return;
-    if (!isSupportedVideoFile(selected)) {
-      setTransferError("MP4・MOV・M4V・WebMの動画を選んでください。");
-      return;
-    }
-    if (selected.size > 1024 * 1024 * 1024) {
-      setTransferError("動画は1GB以下にしてください。");
-      return;
-    }
-    setTransferFile(selected);
-    setTransferStatus("idle");
-    setTransferProgress(0);
-    setTransferReceipt(null);
-    setTransferError("");
-  }
-
-  async function startTransfer() {
-    if (!transferFile || transferStatus === "uploading") return;
-
-    const controller = new AbortController();
-    transferAbortRef.current = controller;
-    setTransferStatus("uploading");
-    setTransferProgress(1);
-    setTransferError("");
-    setTransferReceipt(null);
-
-    try {
-      const receipt = await uploadVideoInChunks(
-        transferFile,
-        controller,
-        setTransferProgress,
-      );
-      setTransferReceipt(receipt);
-      setTransferStatus("done");
-    } catch (error) {
-      const message =
-        error instanceof DOMException && error.name === "AbortError"
-          ? "アップロードを中止しました。"
-          : error instanceof Error
-            ? error.message
-            : "アップロードに失敗しました。";
-      setTransferError(message);
-      setTransferStatus("error");
-      setTransferReceipt(null);
-    } finally {
-      transferAbortRef.current = null;
-    }
-  }
-
-  async function deleteTransfer() {
-    if (!transferReceipt) return;
-    const response = await fetch(
-      `/api/transfers/${encodeURIComponent(transferReceipt.id)}?code=${encodeURIComponent(transferReceipt.code)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      setTransferError("動画を削除できませんでした。");
-      return;
-    }
-    setTransferFile(null);
-    setTransferReceipt(null);
-    setTransferProgress(0);
-    setTransferStatus("idle");
-    notify("動画を削除しました");
-  }
+  useEffect(() => {
+    const recheckAfterCheckout = () => {
+      if (
+        stage !== "result" ||
+        document.visibilityState !== "visible" ||
+        !checkoutReturnPendingRef.current ||
+        paidAccessCheckRef.current
+      ) {
+        return;
+      }
+      void paidAccessCheckCallbackRef.current();
+    };
+    window.addEventListener("focus", recheckAfterCheckout);
+    document.addEventListener("visibilitychange", recheckAfterCheckout);
+    return () => {
+      window.removeEventListener("focus", recheckAfterCheckout);
+      document.removeEventListener("visibilitychange", recheckAfterCheckout);
+    };
+  }, [file, stage]);
 
   return (
     <main className="siteShell" data-build="20260809-refined-luxury">
@@ -3108,19 +3082,17 @@ export default function Home() {
           <a className="accountButton" href="/account">
             アカウント
           </a>
-          {stage !== "start" && stage !== "transfer" && (
+          {stage !== "start" && (
             <button className="quietButton" onClick={reset}>
               新しく作る
             </button>
           )}
-          {(stage === "start" || stage === "transfer") && (
+          {stage === "start" && (
             <button
               className="trialButton"
-              onClick={() =>
-                stage === "start" ? inputRef.current?.click() : reset()
-              }
+              onClick={() => inputRef.current?.click()}
             >
-              {stage === "transfer" ? "サービスを見る" : "無料で試す"}
+              無料で試す
             </button>
           )}
         </div>
@@ -3133,14 +3105,6 @@ export default function Home() {
         accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
         onChange={(event) => void chooseFile(event.target.files?.[0])}
       />
-      <input
-        ref={transferInputRef}
-        className="visuallyHidden"
-        type="file"
-        accept="video/mp4,video/quicktime,video/x-m4v,video/webm,video/*"
-        onChange={(event) => chooseTransferFile(event.target.files?.[0])}
-      />
-
       {stage === "start" && (
         <Landing
           openPicker={() => inputRef.current?.click()}
@@ -3152,25 +3116,11 @@ export default function Home() {
         />
       )}
 
-      {stage === "transfer" && (
-        <TransferPortal
-          file={transferFile}
-          status={transferStatus}
-          progress={transferProgress}
-          receipt={transferReceipt}
-          error={transferError}
-          chooseFile={chooseTransferFile}
-          openPicker={() => transferInputRef.current?.click()}
-          startUpload={startTransfer}
-          cancelUpload={() => transferAbortRef.current?.abort()}
-          deleteUpload={deleteTransfer}
-          notify={notify}
-        />
-      )}
-
       {stage === "setup" && (
         <SetupWorkspace
           file={file}
+          isDemoSample={isDemoSample}
+          selectedVideoDuration={selectedVideoDuration}
           videoUrl={videoUrl}
           goal={goal}
           setGoal={setGoal}
@@ -3268,6 +3218,8 @@ export default function Home() {
           applyNarrationSegmentCorrection={applyNarrationSegmentCorrection}
           checkPaidExportAccess={checkPaidExportAccess}
           isCheckingPaidExportAccess={isCheckingPaidExportAccess}
+          markCheckoutStarted={markCheckoutStarted}
+          checkoutReturnMessage={checkoutReturnMessage}
           markExportReservationCompleted={() => {
             usageReservationPendingExportRef.current = false;
             setUsageReservationPendingExport(false);
@@ -3297,218 +3249,6 @@ export default function Home() {
         </div>
       )}
     </main>
-  );
-}
-
-function TransferPortal({
-  file,
-  status,
-  progress,
-  receipt,
-  error,
-  chooseFile,
-  openPicker,
-  startUpload,
-  cancelUpload,
-  deleteUpload,
-  notify,
-}: {
-  file: File | null;
-  status: TransferStatus;
-  progress: number;
-  receipt: TransferReceipt | null;
-  error: string;
-  chooseFile: (file?: File) => void;
-  openPicker: () => void;
-  startUpload: () => void;
-  cancelUpload: () => void;
-  deleteUpload: () => void;
-  notify: (message: string) => void;
-}) {
-  const expiresLabel = receipt
-    ? new Intl.DateTimeFormat("ja-JP", {
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(receipt.expiresAt)
-    : "";
-
-  async function copyCode() {
-    if (!receipt) return;
-    await navigator.clipboard.writeText(receipt.code);
-    notify("受け渡しコードをコピーしました");
-  }
-
-  return (
-    <section className="transferPage">
-      <div className="transferHeading">
-        <div>
-          <p className="eyebrow">PRIVATE VIDEO TRANSFER</p>
-          <h1>
-            テスト動画を、
-            <br />
-            <em>安全に受け渡す。</em>
-          </h1>
-          <p>
-            この限定ページから動画を預けて、表示されたコードをCodexのチャットへ送ってください。
-          </p>
-        </div>
-        <div className="transferSecurity">
-          <span>●</span>
-          <p>
-            <strong>限定公開ページ</strong>
-            受け取り確認後すぐ削除・最長72時間
-          </p>
-        </div>
-      </div>
-
-      <div className="transferLayout">
-        <div className="transferCard">
-          {status === "done" && receipt ? (
-            <div className="transferComplete">
-              <span className="completeMark">✓</span>
-              <p className="eyebrow">UPLOAD COMPLETE</p>
-              <h2>動画をお預かりしました</h2>
-              <p className="completeLead">
-                下のコードをコピーし、このCodexチャットにそのまま貼り付けてください。
-              </p>
-              <button className="receiptCode" onClick={copyCode}>
-                <span>受け渡しコード</span>
-                <strong>{receipt.code}</strong>
-                <i>コピー</i>
-              </button>
-              <div className="nextStep">
-                <span>1</span>
-                コードをコピー
-                <i>→</i>
-                <span>2</span>
-                チャットへ貼り付け
-                <i>→</i>
-                <span>3</span>
-                こちらで動画を確認
-              </div>
-              <div className="receiptMeta">
-                <span>ファイル</span>
-                <strong>{file?.name}</strong>
-                <span>保管期限</span>
-                <strong>{expiresLabel}</strong>
-              </div>
-              <button className="deleteTransfer" onClick={deleteUpload}>
-                今すぐ動画を削除する
-              </button>
-            </div>
-          ) : (
-            <>
-              <div
-                className={`transferDropzone ${file ? "hasFile" : ""} ${status === "uploading" ? "isUploading" : ""}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (status !== "uploading") {
-                    void chooseFile(event.dataTransfer.files?.[0]);
-                  }
-                }}
-              >
-                {file ? (
-                  <>
-                    <span className="videoFileIcon">▶</span>
-                    <div className="chosenTransferFile">
-                      <strong>{file.name}</strong>
-                      <span>
-                        {(file.size / 1024 / 1024).toFixed(1)} MB・
-                        {file.type || "動画"}
-                      </span>
-                    </div>
-                    {status !== "uploading" && (
-                      <button onClick={openPicker}>変更</button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <span className="uploadCloud">↑</span>
-                    <h2>ここに動画をドロップ</h2>
-                    <p>または、端末から動画ファイルを選択</p>
-                    <button onClick={openPicker}>動画を選ぶ</button>
-                    <small>MP4・MOV・M4V・WebM / 最大1GB</small>
-                  </>
-                )}
-              </div>
-
-              {status === "uploading" && (
-                <div className="realUploadProgress" aria-live="polite">
-                  <div>
-                    <span>暗号化して送信中</span>
-                    <strong>{progress}%</strong>
-                  </div>
-                  <div className="realProgressTrack">
-                    <i style={{ width: `${progress}%` }} />
-                  </div>
-                  <p>画面を閉じずにお待ちください。大きな動画は数分かかります。</p>
-                  <button onClick={cancelUpload}>アップロードを中止</button>
-                </div>
-              )}
-
-              {error && (
-                <div className="transferError" role="alert">
-                  <span>!</span>
-                  <p>
-                    <strong>送信できませんでした</strong>
-                    {error}
-                  </p>
-                </div>
-              )}
-
-              {status !== "uploading" && (
-                <button
-                  className="sendVideoButton"
-                  disabled={!file}
-                  onClick={startUpload}
-                >
-                  <span>この動画を安全に送る</span>
-                  <i>→</i>
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        <aside className="transferGuide">
-          <p className="eyebrow">HOW TO SEND</p>
-          <h2>受け渡しは3ステップ</h2>
-          <ol>
-            <li>
-              <span>01</span>
-              <p>
-                <strong>動画を選んで送信</strong>
-                分割して送るため、大きなファイルにも対応します。
-              </p>
-            </li>
-            <li>
-              <span>02</span>
-              <p>
-                <strong>表示されたコードをコピー</strong>
-                動画そのものをチャットへ添付する必要はありません。
-              </p>
-            </li>
-            <li>
-              <span>03</span>
-              <p>
-                <strong>このチャットにコードを貼る</strong>
-                こちらで受け取り、編集テストに使用します。
-              </p>
-            </li>
-          </ol>
-          <div className="privacyNote">
-            <span>🔒</span>
-            <p>
-              <strong>動画の取り扱い</strong>
-              サービス開発の編集テスト以外には使用しません。受け取り後に削除し、未受け取りでも最長72時間で期限切れになります。
-            </p>
-          </div>
-        </aside>
-      </div>
-    </section>
   );
 }
 
@@ -3711,7 +3451,7 @@ function Landing({
             <span className="stepNo">01</span>
             <div className="stepIcon uploadIcon">↑</div>
             <h3>撮った動画を送る</h3>
-            <p>5分までの縦動画をそのままアップロード。</p>
+            <p>5分までの縦・横・正方形動画をそのままアップロード。</p>
             <small>MP4・MOV・スマホ対応 / 最大500MB</small>
           </article>
           <article>
@@ -4109,6 +3849,8 @@ function CaptionStylePicker({
 
 function SetupWorkspace({
   file,
+  isDemoSample,
+  selectedVideoDuration,
   videoUrl,
   goal,
   setGoal,
@@ -4139,6 +3881,8 @@ function SetupWorkspace({
   error,
 }: {
   file: File | null;
+  isDemoSample: boolean;
+  selectedVideoDuration: number;
   videoUrl: string;
   goal: Goal;
   setGoal: (goal: Goal) => void;
@@ -4170,6 +3914,11 @@ function SetupWorkspace({
   startEditing: () => Promise<void>;
   error: string;
 }) {
+  const [sourceOrientation, setSourceOrientation] = useState("動画");
+  const isIosDevice =
+    typeof navigator !== "undefined" &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   const keepsOriginalVideo =
     audioMode === "narration"
       ? !narrationAutoCutEnabled
@@ -4202,7 +3951,23 @@ function SetupWorkspace({
         <aside className="sourceCard">
           <div className="sourcePreview">
             {videoUrl ? (
-              <video src={videoUrl} controls muted playsInline />
+              <video
+                src={videoUrl}
+                controls
+                muted
+                playsInline
+                onLoadedMetadata={(event) => {
+                  const { videoWidth, videoHeight } = event.currentTarget;
+                  const ratio = videoWidth / Math.max(1, videoHeight);
+                  setSourceOrientation(
+                    ratio > 1.08
+                      ? "横動画"
+                      : ratio < 0.92
+                        ? "縦動画"
+                        : "正方形動画",
+                  );
+                }}
+              />
             ) : (
               <div className="sampleSource">
                 <video
@@ -4230,7 +3995,7 @@ function SetupWorkspace({
             <p>
               <strong>{file?.name ?? "sample_reel_video.mp4"}</strong>
               <small>
-                {file ? `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB` : "18.4 MB"}・縦動画
+                {file ? `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB` : "18.4 MB"}・{sourceOrientation}
               </small>
             </p>
             <button onClick={chooseAnother}>変更</button>
@@ -4297,6 +4062,8 @@ function SetupWorkspace({
                 type="button"
                 className={audioMode === "narration" ? "selected" : ""}
                 aria-pressed={audioMode === "narration"}
+                aria-describedby={isDemoSample ? "sampleNarrationNotice" : undefined}
+                disabled={isDemoSample}
                 onClick={() => setAudioMode("narration")}
               >
                 <i aria-hidden="true">AI</i>
@@ -4305,6 +4072,11 @@ function SetupWorkspace({
                 <b>{audioMode === "narration" ? "✓" : ""}</b>
               </button>
             </div>
+            {isDemoSample && (
+              <p id="sampleNarrationNotice" className="optionCostNote" role="status">
+                サンプルは元音声モードのみです。API利用や無料体験の回数を消費せずに仕上がりを確認できます。
+              </p>
+            )}
           </fieldset>
 
             <div className="recommendedPreset" role="status">
@@ -4339,7 +4111,9 @@ function SetupWorkspace({
               {goals.map((item) => (
                 <button
                   key={item.id}
+                  type="button"
                   className={goal === item.id ? "selected" : ""}
+                  aria-pressed={goal === item.id}
                   onClick={() => setGoal(item.id)}
                 >
                   <i>{item.icon}</i>
@@ -4370,7 +4144,9 @@ function SetupWorkspace({
                 {[30, 60, 90].map((item) => (
                   <button
                     key={item}
+                    type="button"
                     className={length === item ? "selected" : ""}
+                    aria-pressed={length === item}
                     onClick={() => setLength(item)}
                   >
                     <strong>{item}</strong>
@@ -4622,6 +4398,12 @@ function SetupWorkspace({
           </details>
 
           <div className="editSummary">
+            {isIosDevice && selectedVideoDuration > 120 && keepsOriginalVideo && (
+              <p className="editError" role="status">
+                <span>!</span>
+                iPhone・iPadでは120秒を超えるノーカット動画の書き出しが端末のメモリ不足で止まることがあります。「おまかせ編集」または「AIで短く編集」で90秒以内にすると安定します。
+              </p>
+            )}
             <div>
               <span>今回の編集方針</span>
               <p>
@@ -4641,6 +4423,7 @@ function SetupWorkspace({
               {audioMode === "narration"
                 ? "初回のAI台本とAI音声は、まとめてAI処理を1回使用します。内部の自動調整では追加消費しません。"
                 : "この編集では、文字起こしにAI処理を1回使用します。動画を分割して処理しても追加消費しません。"}
+              正常に完了したAI処理の回数は、この編集を保存せず終了した場合も戻りません。
             </p>
             <button className="mainCta" onClick={startEditing}>
               <span>
@@ -4857,6 +4640,8 @@ function ResultWorkspace({
   applyNarrationSegmentCorrection,
   checkPaidExportAccess,
   isCheckingPaidExportAccess,
+  markCheckoutStarted,
+  checkoutReturnMessage,
   markExportReservationCompleted,
 }: {
   file: File | null;
@@ -4907,8 +4692,10 @@ function ResultWorkspace({
   applyNarrationSegmentCorrection: (
     correction: NarrationSegmentCorrectionResult,
   ) => void;
-  checkPaidExportAccess: () => Promise<void>;
+  checkPaidExportAccess: () => Promise<boolean>;
   isCheckingPaidExportAccess: boolean;
+  markCheckoutStarted: () => void;
+  checkoutReturnMessage: string;
   markExportReservationCompleted: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -5129,6 +4916,7 @@ function ResultWorkspace({
   const isMediaBusy =
     isExporting ||
     isGeneratingThumbnail ||
+    isAnalyzingThumbnailFrames ||
     isRegeneratingNarration ||
     isGeneratingNarrationCorrection ||
     isUpdatingNarrationCutMode ||
@@ -8117,7 +7905,10 @@ function ResultWorkspace({
             : [];
           scheduleGainEnvelope(
             exportOriginalGain.gain,
-            buildPortableDuckingEnvelope(activity, baseGain, rangeDuration),
+            addCutBoundaryFades(
+              buildPortableDuckingEnvelope(activity, baseGain, rangeDuration),
+              rangeDuration,
+            ),
             exportAudioContext.currentTime,
           );
         }
@@ -9862,6 +9653,11 @@ function ResultWorkspace({
                 : "高精度で再生成（AI処理1回）"}
             </button>
           )}
+          {checkoutReturnMessage && (
+            <p className="freeExportReturnNote" role="status">
+              {checkoutReturnMessage}
+            </p>
+          )}
           {file && !completedVideoSaveAllowed ? (
             <div className="freeExportGate" id="free-export-plans">
               <p>
@@ -9877,6 +9673,7 @@ function ResultWorkspace({
                   href="/account?checkout=standard"
                   target="_blank"
                   rel="noreferrer"
+                  onClick={markCheckoutStarted}
                 >
                   <span>
                     {`${STANDARD_MONTHLY_PLAN_LABEL}・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
@@ -9888,6 +9685,7 @@ function ResultWorkspace({
                   href="/account?checkout=starter"
                   target="_blank"
                   rel="noreferrer"
+                  onClick={markCheckoutStarted}
                 >
                   {`${STARTER_MONTHLY_PLAN_LABEL}・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
                 </Link>
@@ -9896,6 +9694,7 @@ function ResultWorkspace({
                   href="/account?checkout=one_time"
                   target="_blank"
                   rel="noreferrer"
+                  onClick={markCheckoutStarted}
                 >
                   {`${ONE_TIME_PLAN_LABEL}・¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}/1本（税込）`}
                 </Link>
@@ -9912,7 +9711,7 @@ function ResultWorkspace({
               >
                 {isCheckingPaidExportAccess
                   ? "購入状況を確認中…"
-                  : "購入済みの方：保存を有効にする"}
+                  : "購入済みの方：保存を有効にする（再確認）"}
               </button>
             </div>
           ) : file ? (

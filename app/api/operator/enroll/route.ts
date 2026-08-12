@@ -13,6 +13,18 @@ import {
   isOperatorEnrollmentBlocked,
   recordOperatorEnrollmentFailure,
 } from "../../../../lib/operator-enrollment-throttle";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
+
+const MAX_OPERATOR_ENROLLMENT_BYTES = 8 * 1024;
+
+type OperatorEnrollmentPayload = {
+  code?: unknown;
+  label?: unknown;
+  replaceOldest?: unknown;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +51,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const payload = (await request.json().catch(() => null)) as {
-    code?: unknown;
-    label?: unknown;
-    replaceOldest?: unknown;
-  } | null;
+  let payload: OperatorEnrollmentPayload | null = null;
+  try {
+    payload = await parseJsonBodyWithLimit<OperatorEnrollmentPayload>(
+      request,
+      MAX_OPERATOR_ENROLLMENT_BYTES,
+    );
+  } catch (error) {
+    return privateJson(
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "登録データが大きすぎます。"
+            : "登録情報を確認できませんでした。",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   if (
     !payload ||
     typeof payload.code !== "string" ||

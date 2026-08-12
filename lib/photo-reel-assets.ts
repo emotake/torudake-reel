@@ -143,12 +143,19 @@ function getNormalizedPhotoDimensions(width: number, height: number) {
   const layout = computePhotoReelImageLayout(width, height);
   const target =
     layout.mode === "blur-fit" ? layout.foreground : layout.background;
-  const motionScale =
-    layout.mode === "blur-fit" ? PHOTO_REEL_MAX_MOTION_SCALE : 1;
-  const requiredScale = Math.min(
-    (target.width * motionScale) / width,
-    (target.height * motionScale) / height,
-  );
+  // Keep enough real source pixels for the largest Ken Burns zoom. Without
+  // this cover photos were first reduced to exactly 1080x1920 and then scaled
+  // up again during motion, making otherwise sharp iPhone photos look soft.
+  const requiredScale =
+    layout.mode === "blur-fit"
+      ? Math.min(
+          (target.width * PHOTO_REEL_MAX_MOTION_SCALE) / width,
+          (target.height * PHOTO_REEL_MAX_MOTION_SCALE) / height,
+        )
+      : Math.max(
+          (target.width * PHOTO_REEL_MAX_MOTION_SCALE) / width,
+          (target.height * PHOTO_REEL_MAX_MOTION_SCALE) / height,
+        );
   const scale = Math.min(1, requiredScale);
   return {
     width: Math.max(1, Math.round(width * scale)),

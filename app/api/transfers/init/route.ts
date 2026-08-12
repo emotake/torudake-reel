@@ -19,6 +19,12 @@ import {
   UPLOAD_CHUNK_BYTES,
 } from "../../../../lib/transfers";
 import { isManagedUploadEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
+
+const MAX_TRANSFER_INIT_REQUEST_BYTES = 16 * 1024;
 
 export async function POST(request: Request) {
   let upload:
@@ -29,12 +35,34 @@ export async function POST(request: Request) {
     | undefined;
 
   try {
-    const payload = (await request.json()) as {
+    const managedUploadEnforcementEnabled =
+      isManagedUploadEnforcementEnabled(request);
+    const usagePrincipal = managedUploadEnforcementEnabled
+      ? await getUsagePrincipal(request, { allowTrial: true })
+      : null;
+    if (managedUploadEnforcementEnabled && !usagePrincipal?.currentUser) {
+      return authenticationRequired();
+    }
+
+    let payload: {
       fileName?: string;
       contentType?: string;
       size?: number;
       usageReservationId?: string;
     };
+    try {
+      payload = await parseJsonBodyWithLimit<typeof payload>(
+        request,
+        MAX_TRANSFER_INIT_REQUEST_BYTES,
+      );
+    } catch (error) {
+      return jsonError(
+        error instanceof RequestBodyTooLargeError
+          ? "アップロード情報が大きすぎます。"
+          : "動画ファイルの情報を確認できませんでした。",
+        error instanceof RequestBodyTooLargeError ? 413 : 400,
+      );
+    }
     const fileName = payload.fileName?.trim() ?? "";
     const contentType = payload.contentType?.trim() || "video/mp4";
     const size = Number(payload.size);
@@ -59,10 +87,9 @@ export async function POST(request: Request) {
 
     let ownerEmail: string | null = null;
     const usageReservationId = payload.usageReservationId?.trim() ?? "";
-    if (isManagedUploadEnforcementEnabled(request)) {
-      const { currentUser, isOperator } = await getUsagePrincipal(request, {
-        allowTrial: true,
-      });
+    if (managedUploadEnforcementEnabled) {
+      const currentUser = usagePrincipal?.currentUser ?? null;
+      const isOperator = usagePrincipal?.isOperator ?? false;
       if (!currentUser) return authenticationRequired();
       ownerEmail = currentUser.email;
 

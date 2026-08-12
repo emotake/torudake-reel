@@ -25,6 +25,12 @@ import {
   type StripePlan,
 } from "../../../../lib/stripe";
 import { isSameOriginMutation } from "../../../../lib/operator-session";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
+
+const MAX_CHECKOUT_REQUEST_BYTES = 16 * 1024;
 
 type StripeCustomer = {
   id: string;
@@ -98,9 +104,20 @@ export async function POST(request: Request) {
 
   let payload: { plan?: unknown; requestId?: unknown };
   try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return Response.json({ error: "料金プランを選び直してください。" }, { status: 400 });
+    payload = await parseJsonBodyWithLimit<typeof payload>(
+      request,
+      MAX_CHECKOUT_REQUEST_BYTES,
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "送信データが大きすぎます。"
+            : "料金プランを選び直してください。",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
   }
   if (!isStripePlan(payload.plan)) {
     return Response.json({ error: "料金プランを選び直してください。" }, { status: 400 });

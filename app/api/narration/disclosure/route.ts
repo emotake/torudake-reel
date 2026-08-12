@@ -6,8 +6,13 @@ import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { markOperatorUsageOperationSucceeded } from "../../../../lib/operator-usage";
 import { isSameOriginMutation } from "../../../../lib/operator-session";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{8,100}$/;
+const MAX_DISCLOSURE_REQUEST_BYTES = 16 * 1024;
 
 export async function POST(request: Request) {
   if (!isSameOriginMutation(request)) {
@@ -17,6 +22,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
+  const usagePrincipal = usageEnforcementEnabled
+    ? await getUsagePrincipal(request, { allowTrial: true })
+    : null;
+  const currentUser = usageEnforcementEnabled
+    ? usagePrincipal?.currentUser ?? null
+    : await getCurrentUser(request);
+
   let payload: {
     confirmationId?: unknown;
     clientSessionId?: unknown;
@@ -25,9 +38,20 @@ export async function POST(request: Request) {
     usageReservationId?: unknown;
   };
   try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return Response.json({ error: "確認内容を読み取れませんでした。" }, { status: 400 });
+    payload = await parseJsonBodyWithLimit<typeof payload>(
+      request,
+      MAX_DISCLOSURE_REQUEST_BYTES,
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "確認内容の送信サイズが大きすぎます。"
+            : "確認内容を読み取れませんでした。",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
   }
 
   if (
@@ -41,11 +65,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "確認内容が正しくありません。" }, { status: 400 });
   }
 
-  let currentUser = await getCurrentUser(request);
   let authorizedReservationId: string | null = null;
-  if (isUsageEnforcementEnabled(request)) {
-    const principal = await getUsagePrincipal(request, { allowTrial: true });
-    currentUser = principal.currentUser;
+  if (usageEnforcementEnabled) {
     const reservationId =
       typeof payload.usageReservationId === "string"
         ? payload.usageReservationId.trim()

@@ -347,6 +347,8 @@ export default function PhotoReelClient() {
   const audioValidationRef = useRef(0);
   const audioPreparingRef = useRef(false);
   const finalizingUsageRef = useRef(false);
+  const purchaseCheckRef = useRef(false);
+  const purchaseReturnPendingRef = useRef(false);
   const previewTimeRef = useRef(0);
   const reservationAttemptRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -373,6 +375,7 @@ export default function PhotoReelClient() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showPurchase, setShowPurchase] = useState(false);
+  const [purchaseChecking, setPurchaseChecking] = useState(false);
   const isEditingLocked =
     preparing ||
     exporting ||
@@ -441,6 +444,90 @@ export default function PhotoReelClient() {
     query.addEventListener?.("change", update);
     return () => query.removeEventListener?.("change", update);
   }, []);
+
+  const checkPurchaseAfterReturn = useCallback(async () => {
+    if (purchaseCheckRef.current) return false;
+    purchaseCheckRef.current = true;
+    setPurchaseChecking(true);
+    setError("");
+    setMessage("購入状況を確認しています…");
+    try {
+      const response = await fetch("/api/billing/status", {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            authenticated?: boolean;
+            monthly?: { active?: boolean; accessRevoked?: boolean };
+            oneTimeCredits?: number;
+            error?: string;
+          }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "購入状況を確認できませんでした。");
+      }
+      const canExport =
+        (payload?.monthly?.active === true &&
+          payload.monthly.accessRevoked !== true) ||
+        (payload?.oneTimeCredits ?? 0) > 0;
+      purchaseReturnPendingRef.current = false;
+      if (!canExport) {
+        setShowPurchase(true);
+        setMessage(
+          payload?.authenticated === false
+            ? "決済に使ったアカウントでログイン後、「購入状況を再確認」を押してください。"
+            : "購入済みの利用枠をまだ確認できません。決済完了後、少し待ってから再確認してください。",
+        );
+        return false;
+      }
+      setShowPurchase(false);
+      setMessage(
+        "購入済みの利用枠を確認しました。上の「写真リールを書き出す」を押すと、編集内容を保ったまま再開できます。",
+      );
+      return true;
+    } catch (caught) {
+      purchaseReturnPendingRef.current = false;
+      setShowPurchase(true);
+      setMessage("");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "購入状況を確認できませんでした。",
+      );
+      return false;
+    } finally {
+      purchaseCheckRef.current = false;
+      setPurchaseChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const recheckAfterCheckout = () => {
+      if (
+        document.visibilityState !== "visible" ||
+        !showPurchase ||
+        !purchaseReturnPendingRef.current ||
+        purchaseCheckRef.current
+      ) {
+        return;
+      }
+      void checkPurchaseAfterReturn();
+    };
+    window.addEventListener("focus", recheckAfterCheckout);
+    document.addEventListener("visibilitychange", recheckAfterCheckout);
+    return () => {
+      window.removeEventListener("focus", recheckAfterCheckout);
+      document.removeEventListener("visibilitychange", recheckAfterCheckout);
+    };
+  }, [checkPurchaseAfterReturn, showPurchase]);
+
+  const markCheckoutStarted = () => {
+    purchaseReturnPendingRef.current = true;
+    setMessage(
+      "別タブで決済を完了してください。この画面へ戻ると購入状況を自動で確認します。",
+    );
+  };
 
   useEffect(() => {
     // React Strict Mode replays effects in development, so reset this on each
@@ -1448,6 +1535,7 @@ export default function PhotoReelClient() {
                     href="/account?checkout=standard"
                     target="_blank"
                     rel="noreferrer"
+                    onClick={markCheckoutStarted}
                   >
                     <span>おすすめ · 1か月ごと</span>
                     <strong>
@@ -1468,6 +1556,7 @@ export default function PhotoReelClient() {
                     href="/account?checkout=starter"
                     target="_blank"
                     rel="noreferrer"
+                    onClick={markCheckoutStarted}
                   >
                     <span>1か月ごと</span>
                     <strong>
@@ -1481,12 +1570,21 @@ export default function PhotoReelClient() {
                     href="/account?checkout=one_time"
                     target="_blank"
                     rel="noreferrer"
+                    onClick={markCheckoutStarted}
                   >
                     <span>1回だけ</span>
                     <strong>{ONE_TIME_PLAN_LABEL}・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}/1本（税込）</strong>
                     <small>1回の購入で動画1本まで・自動更新なし・有効期限なし</small>
                   </Link>
                 </div>
+                <button
+                  className="photoReelRetryButton"
+                  type="button"
+                  onClick={() => void checkPurchaseAfterReturn()}
+                  disabled={purchaseChecking || exporting || finalizingUsage}
+                >
+                  {purchaseChecking ? "購入状況を確認中…" : "購入状況を再確認"}
+                </button>
               </div>
             ) : null}
             {message ? <p className="photoReelMessage">{message}</p> : null}

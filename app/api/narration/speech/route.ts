@@ -780,19 +780,24 @@ export async function POST(request: Request) {
       initialNarration
         ? {
             allowCreate: false,
+            continuationMode: "narration_bundle_phase",
             continueFromAttemptCounts: [bundleClaims?.n ?? -1],
           }
         : undefined,
     );
     if (!authorization?.allowed) {
       const hitGenerationLimit =
-        authorization?.reason === "operator_success_limit";
+        authorization?.reason === "operator_success_limit" ||
+        authorization?.reason === "entitlement_ai_limit";
       const hitAttemptLimit =
         authorization?.reason === "operator_operation_limit" ||
         authorization?.reason === "action_attempt_limit";
       const alreadyProcessing =
         authorization?.reason === "operation_in_progress" ||
-        authorization?.reason === "ai_action_capacity";
+        authorization?.reason === "ai_action_capacity" ||
+        authorization?.reason === "entitlement_ai_capacity";
+      const actionAlreadySucceeded =
+        authorization?.reason === "action_already_succeeded";
       const invalidInitialSequence =
         authorization?.reason === "action_not_found" ||
         authorization?.reason === "action_phase_mismatch" ||
@@ -810,11 +815,17 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error: hitGenerationLimit
-            ? `この動画で利用できるAI処理の上限（${aiOperationLimit}回）に達しました。現在の編集内容はそのままプレビュー・書き出しできます。`
+            ? authorization?.reason === "entitlement_ai_limit"
+              ? "この料金プラン・購入枠・無料体験で利用できるAI処理回数に達しました。現在の編集内容はそのままプレビュー・書き出しできます。"
+              : `この動画で利用できるAI処理の上限（${aiOperationLimit}回）に達しました。現在の編集内容はそのままプレビュー・書き出しできます。`
             : hitAttemptLimit
               ? "この動画でのAI処理回数が安全上限に達しました。現在の編集内容で仕上げるか、新しい動画として開始してください。"
               : alreadyProcessing
-                ? "別のAI処理が進行中です。完了するまで少しお待ちください。"
+                ? authorization?.reason === "entitlement_ai_capacity"
+                  ? "この料金プラン・購入枠・無料体験のAI処理が別の動画で進行中です。完了するまで少しお待ちください。"
+                  : "別のAI処理が進行中です。完了するまで少しお待ちください。"
+                : actionAlreadySucceeded
+                  ? "このAI処理はすでに完了しています。もう一度生成する場合は、生成ボタンを押し直してください。"
                 : invalidInitialSequence
                   ? "初回ナレーションの処理順を確認できませんでした。もう一度最初からお試しください。"
                 : "利用枠を確認できませんでした。動画を選び直してください。",
@@ -824,6 +835,8 @@ export async function POST(request: Request) {
             ? 429
             : alreadyProcessing
               ? 409
+              : actionAlreadySucceeded
+                ? 409
               : invalidInitialSequence
                 ? 409
               : 402,

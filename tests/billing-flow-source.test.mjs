@@ -69,6 +69,7 @@ test("explains the per-video shared AI processing limits on the account screen",
   assert.match(accountSource, /初回ナレーションは台本完成時に1回分/);
   assert.match(accountSource, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(accountSource, /作成後の再生成などは正常に完了するごとに1回分/);
+  assert.match(accountSource, /動画を保存せず編集を終了した場合も戻りません/);
 });
 
 test("shows a billing-management notice only when monthly access was revoked", () => {

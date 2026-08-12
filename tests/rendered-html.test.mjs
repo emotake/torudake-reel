@@ -238,6 +238,7 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成などは正常に完了するごとに1回分/);
+  assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
   assert.match(html, /1動画あたり(?:<!-- -->)?3(?:<!-- -->)?回/);
   assert.match(html, /1動画あたり(?:<!-- -->)?5(?:<!-- -->)?回/);
   assert.match(html, /1動画あたり(?:<!-- -->)?6(?:<!-- -->)?回/);
@@ -268,6 +269,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /初回ナレーションは台本が正常に生成された時点で1回分/);
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分/);
+  assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
   assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
   assert.match(html, /すべて消費税込み/);
   assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-12/);

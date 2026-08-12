@@ -1,5 +1,6 @@
 import {
   OperatorUsageLimitError,
+  getAiEntitlementBudgetForReservation,
   reserveUsage,
   UsageLimitError,
 } from "../../../../lib/billing-store";
@@ -8,6 +9,12 @@ import { authenticationRequired } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "../../../../lib/request-safety";
+
+const MAX_USAGE_REQUEST_BYTES = 8 * 1024;
 
 export async function POST(request: Request) {
   if (!isUsageEnforcementEnabled(request)) {
@@ -23,9 +30,20 @@ export async function POST(request: Request) {
     idempotencyKey?: unknown;
   };
   try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return Response.json({ error: "動画の長さを確認できませんでした。" }, { status: 400 });
+    payload = await parseJsonBodyWithLimit<typeof payload>(
+      request,
+      MAX_USAGE_REQUEST_BYTES,
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "送信データが大きすぎます。"
+            : "動画の長さを確認できませんでした。",
+      },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
   }
 
   const durationResult = validateVideoInputDuration(
@@ -56,13 +74,20 @@ export async function POST(request: Request) {
       payload.idempotencyKey,
       { operator: isOperator },
     );
+    const perVideoLimit = getAiOperationSuccessLimit(reservation.bucket);
+    const entitlementBudget = await getAiEntitlementBudgetForReservation(
+      reservation,
+    );
+    const remaining = Math.min(perVideoLimit, entitlementBudget.remaining);
     return Response.json({
       required: true,
       reservationId: reservation.id,
       bucket: reservation.bucket,
       aiOperationLimit: getAiOperationSuccessLimit(reservation.bucket),
+      aiOperationsRemaining: remaining,
       // Compatibility for an editor tab opened before this deployment.
-      narrationGenerationLimit: getAiOperationSuccessLimit(reservation.bucket),
+      narrationGenerationLimit: perVideoLimit,
+      narrationGenerationsRemaining: remaining,
     });
   } catch (error) {
     if (error instanceof OperatorUsageLimitError) {

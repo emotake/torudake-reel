@@ -114,3 +114,46 @@ test("returns a lightweight thumbnail URL and revokes the original decode URL", 
   assert.equal(asset.source.width, 1);
   assert.equal(asset.source.height, 1);
 });
+
+test("keeps overscan pixels when a cover photo will zoom during motion", async (t) => {
+  const restoreDocument = replaceGlobal("document", {
+    createElement() {
+      const canvas = {
+        width: 1,
+        height: 1,
+        getContext() {
+          return {
+            canvas,
+            imageSmoothingEnabled: false,
+            imageSmoothingQuality: "low",
+            fillStyle: "",
+            filter: "none",
+            save() {},
+            restore() {},
+            fillRect() {},
+            drawImage() {},
+          };
+        },
+        toBlob(callback, type) {
+          callback(new Blob(["thumbnail"], { type }));
+        },
+      };
+      return canvas;
+    },
+  });
+  const restoreCreateImageBitmap = replaceGlobal(
+    "createImageBitmap",
+    async () => ({ width: 2160, height: 3840, close() {} }),
+  );
+  t.after(restoreDocument);
+  t.after(restoreCreateImageBitmap);
+  t.mock.method(URL, "createObjectURL", () => "blob:test");
+  t.mock.method(URL, "revokeObjectURL", () => undefined);
+
+  const [asset] = await preparePhotoAssets([
+    new File(["photo"], "portrait.jpg", { type: "image/jpeg" }),
+  ]);
+  assert.equal(asset.source.width, 1188);
+  assert.equal(asset.source.height, 2112);
+  disposePhotoAssets([asset]);
+});

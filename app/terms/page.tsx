@@ -108,7 +108,7 @@ export default function TermsPage() {
             AI処理の上限は1動画あたり、無料体験
             {FREE_AI_OPERATION_SUCCESS_LIMIT}回、{ONE_TIME_PLAN_LABEL}
             {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回、月3本・月7本プラン
-            {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。
+            {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。処理に失敗した場合や、同じ処理内で行われる分割処理・自動調整では追加回数を使用しません。正常に完了したAI処理の回数は、動画を保存せず編集を終了した場合も戻りません。
           </li>
           <li>
             {STARTER_MONTHLY_PLAN_LABEL}は、1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存でき、料金は1か月

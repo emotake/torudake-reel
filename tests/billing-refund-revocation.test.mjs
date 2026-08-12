@@ -133,14 +133,14 @@ test("excludes revoked purchases in the atomic one-time reservation decision", (
   );
 });
 
-test("stops an in-flight refunded credit without erasing completed work", () => {
+test("atomically stops an in-flight refunded credit without erasing completed work", () => {
   assert.match(
     billingStoreSource,
     /reservation\.bucket === "one_time"[\s\S]{0,200}oneTimeReservationHasActiveCredit/,
   );
   assert.match(
     billingStoreSource,
-    /stopOneTimeReservationsForPurchase[\s\S]*releaseOrCompleteUsageReservation\(reservation\.id, userId\)/,
+    /stopOneTimeReservationsForPurchase[\s\S]*UPDATE usage_reservations[\s\S]*billing_purchase_id = \?[\s\S]*status = 'reserved'/,
   );
   assert.match(
     billingStoreSource,

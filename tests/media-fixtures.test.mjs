@@ -128,8 +128,8 @@ test("extracts the real iPhone PCM track to an API-compatible WAV without an API
   assert.equal(chunks[0].startSeconds, 0);
   assert.equal(chunks[0].file.type, "audio/wav");
   assert.match(chunks[0].file.name, /-audio-01\.wav$/);
-  assert.ok(chunks[0].file.size > 250_000);
-  assert.ok(chunks[0].file.size < 300_000);
+  assert.ok(chunks[0].file.size > 80_000);
+  assert.ok(chunks[0].file.size < 100_000);
 
   const extractedInput = new Input({
     source: new BlobSource(chunks[0].file),
@@ -140,6 +140,7 @@ test("extracts the real iPhone PCM track to an API-compatible WAV without an API
     const extractedAudio = await extractedInput.getPrimaryAudioTrack();
     assert.ok(extractedAudio);
     assert.equal(await extractedAudio.getCodec(), "pcm-s16");
+    assert.equal(await extractedAudio.getSampleRate(), 16_000);
     assert.ok((await extractedAudio.computeDuration()) >= 2.9);
   } finally {
     extractedInput.dispose();

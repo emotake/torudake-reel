@@ -11,13 +11,18 @@ import {
 import {
   type BillingBucket,
   chooseBillingBucket,
+  FREE_AI_OPERATION_SUCCESS_LIMIT,
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
   getAiOperationSuccessLimit,
+  isMonthlyPlanKey,
   monthlyPlanVideoLimit,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   type MonthlyPlanKey,
+  OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
   OPERATOR_DAILY_VIDEO_LIMIT,
   startOfTokyoDaySeconds,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
 } from "./billing-policy";
 import type { CurrentUser } from "./current-user";
 import {
@@ -27,6 +32,7 @@ import {
   createMeteredAiAction,
   getMeteredAiAction,
   getMeteredAiActionByOperation,
+  getMeteredAiEntitlementUsage,
   getMeteredAiUsageCounts,
   getOperatorUsageOperationCounts,
   isValidMeteredAiActionId,
@@ -35,10 +41,10 @@ import {
   markMeteredAiActionSucceeded,
   METERED_AI_LEASE_SCOPE,
   releaseUsageOperationLease,
-  releaseOrCompleteUsageReservation,
   settleExpiredUsageReservations,
   TRANSCRIPTION_LEASE_TTL_SECONDS,
   type MeteredAiAction,
+  type MeteredAiEntitlementScope,
   type MeteredAiOperation,
   type OperatorUsageOperation,
   type UsageOperationLease,
@@ -51,6 +57,7 @@ const RESERVATION_LIFETIME_SECONDS = 60 * 60;
 // lock one minute longer so an expiry webhook and a late browser retry cannot
 // overlap a still-completable Stripe session.
 const MONTHLY_CHECKOUT_LOCK_SECONDS = 32 * 60;
+const SUBSCRIPTION_SYNC_LEASE_SECONDS = 2 * 60;
 
 type AtomicD1Result = {
   meta?: { changes?: number };
@@ -292,6 +299,69 @@ export type MonthlyCheckoutLock = {
   expiresAt: number;
 };
 
+export type SubscriptionSyncLease = {
+  subscriptionId: string;
+  token: string;
+  expiresAt: number;
+};
+
+/**
+ * Serializes every Stripe refresh for one subscription. The lease covers the
+ * remote read and the following D1 write, preventing a slower stale refresh
+ * from committing after a newer cancellation or payment-failure refresh.
+ */
+export async function acquireSubscriptionSyncLease(
+  subscriptionId: string,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  if (!/^[A-Za-z0-9_-]{5,255}$/.test(subscriptionId)) {
+    throw new Error("Stripe subscription ID is invalid.");
+  }
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Billing database binding is unavailable.");
+  }
+  const token = crypto.randomUUID();
+  const expiresAt = nowSeconds + SUBSCRIPTION_SYNC_LEASE_SECONDS;
+  const row = await database
+    .prepare(`
+      INSERT INTO billing_subscription_sync_leases (
+        subscription_id, lease_token, acquired_at, expires_at
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(subscription_id) DO UPDATE SET
+        lease_token = excluded.lease_token,
+        acquired_at = excluded.acquired_at,
+        expires_at = excluded.expires_at
+      WHERE billing_subscription_sync_leases.expires_at <= ?
+      RETURNING lease_token, expires_at
+    `)
+    .bind(subscriptionId, token, nowSeconds, expiresAt, nowSeconds)
+    .first<{ lease_token: string; expires_at: number }>();
+  if (!row || row.lease_token !== token) return null;
+  return {
+    subscriptionId,
+    token,
+    expiresAt: row.expires_at,
+  } satisfies SubscriptionSyncLease;
+}
+
+export async function releaseSubscriptionSyncLease(
+  lease: SubscriptionSyncLease,
+) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Billing database binding is unavailable.");
+  }
+  const released = await database
+    .prepare(`
+      DELETE FROM billing_subscription_sync_leases
+      WHERE subscription_id = ? AND lease_token = ?
+    `)
+    .bind(lease.subscriptionId, lease.token)
+    .run();
+  return released.meta?.changes === 1;
+}
+
 /**
  * Serializes monthly Checkout creation for one account. The database-level
  * primary key is the final guard against double clicks, parallel browser tabs,
@@ -419,7 +489,15 @@ export async function reserveUsage(
       completedAt: null,
     };
     if (await insertUsageReservationAtomically(reservation, status)) {
-      return reservation;
+      const inserted = await db
+        .select()
+        .from(usageReservations)
+        .where(eq(usageReservations.id, reservation.id))
+        .limit(1);
+      if (!inserted[0]) {
+        throw new Error("Reserved usage could not be reloaded.");
+      }
+      return inserted[0];
     }
 
     const concurrent = await db
@@ -874,21 +952,85 @@ export async function completeUsage(
   currentUser: CurrentUser,
   reservationId: string,
 ) {
-  const reservation = await findOwnedUsageReservation(
-    currentUser,
-    reservationId,
-  );
-  if (!reservation) return false;
-  if (reservation.status === "completed") return true;
+  const user = await getOrCreateBillingUser(currentUser);
+  const now = Math.floor(Date.now() / 1_000);
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
 
-  await getDb()
-    .update(usageReservations)
-    .set({
-      status: "completed",
-      completedAt: Math.floor(Date.now() / 1000),
-    })
-    .where(eq(usageReservations.id, reservation.id));
-  return true;
+  // The entitlement check and state transition intentionally live in one
+  // SQLite statement. A refund, subscription revocation, explicit release, or
+  // expiry that wins first makes this UPDATE affect zero rows.
+  const completed = await database
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'completed', completed_at = COALESCE(completed_at, ?)
+      WHERE id = ?
+        AND user_id = ?
+        AND status IN ('reserved', 'completed')
+        AND expires_at >= ?
+        AND (
+          bucket IN ('free', 'operator')
+          OR (
+            bucket = 'subscription'
+            AND EXISTS (
+              SELECT 1
+              FROM billing_subscriptions
+              WHERE user_id = usage_reservations.user_id
+                AND status IN ('active', 'trialing')
+                AND current_period_start <= usage_reservations.created_at
+                AND current_period_end > usage_reservations.created_at
+                AND current_period_end > ?
+                AND (
+                  revoked_period_start IS NULL
+                  OR revoked_period_start != current_period_start
+                )
+            )
+          )
+          OR (
+            bucket = 'one_time'
+            AND (
+              (
+                billing_purchase_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM billing_purchases
+                  WHERE id = usage_reservations.billing_purchase_id
+                    AND user_id = usage_reservations.user_id
+                    AND revoked_at IS NULL
+                )
+              )
+              OR (
+                billing_purchase_id IS NULL
+                AND (
+                  SELECT COALESCE(SUM(credits), 0)
+                  FROM billing_purchases
+                  WHERE user_id = usage_reservations.user_id
+                    AND revoked_at IS NULL
+                ) >= (
+                  SELECT COUNT(*)
+                  FROM usage_reservations AS ranked_reservation
+                  WHERE ranked_reservation.user_id = usage_reservations.user_id
+                    AND ranked_reservation.bucket = 'one_time'
+                    AND ranked_reservation.status IN ('reserved', 'completed')
+                    AND (
+                      ranked_reservation.created_at < usage_reservations.created_at
+                      OR (
+                        ranked_reservation.created_at = usage_reservations.created_at
+                        AND ranked_reservation.id <= usage_reservations.id
+                      )
+                    )
+                )
+              )
+            )
+          )
+        )
+      RETURNING id
+    `)
+    .bind(now, reservationId, user.id, now, now)
+    .first<{ id: string }>();
+  return Boolean(completed?.id);
 }
 
 export async function releaseUsage(
@@ -899,26 +1041,6 @@ export async function releaseUsage(
   // already-released reservation as success so the browser can safely retry
   // without leaving its editor locked or reusing a dead reservation.
   const user = await getOrCreateBillingUser(currentUser);
-  const rows = await getDb()
-    .select()
-    .from(usageReservations)
-    .where(
-      and(
-        eq(usageReservations.id, reservationId),
-        eq(usageReservations.userId, user.id),
-      ),
-    )
-    .limit(1);
-  const reservation = rows[0];
-  if (!reservation) return false;
-  if (reservation.status === "released") return true;
-  if (
-    reservation.status !== "reserved" ||
-    reservation.expiresAt < Math.floor(Date.now() / 1000)
-  ) {
-    return false;
-  }
-
   const now = Math.floor(Date.now() / 1_000);
   const database = env.DB as unknown as QueryD1Database | undefined;
   if (!database?.prepare) {
@@ -943,9 +1065,19 @@ export async function releaseUsage(
         )
       RETURNING id
     `)
-    .bind(now - 1, reservation.id, reservation.userId, reservation.id, now)
+    .bind(now - 1, reservationId, user.id, reservationId, now)
     .first<{ id: string }>();
-  return Boolean(released?.id);
+  if (released?.id) return true;
+  const existing = await database
+    .prepare(`
+      SELECT status
+      FROM usage_reservations
+      WHERE id = ? AND user_id = ?
+      LIMIT 1
+    `)
+    .bind(reservationId, user.id)
+    .first<{ status: string }>();
+  return existing?.status === "released";
 }
 
 type StripeSubscriptionRecord = {
@@ -1247,6 +1379,11 @@ export type MeteredAiAuthorizationResult =
       successfulLimit: number;
       successfulCount: number;
       remaining: number;
+      entitlementLimit?: number;
+      entitlementSuccessfulCount?: number;
+      entitlementPendingCount?: number;
+      entitlementRemaining?: number;
+      entitlementScope?: MeteredAiEntitlementScope;
       alreadySucceeded: boolean;
     }
   | {
@@ -1261,10 +1398,13 @@ export type MeteredAiAuthorizationResult =
         | "action_phase_mismatch"
         | "action_failed"
         | "action_expired"
+        | "action_already_succeeded"
         | "action_attempt_limit"
         | "initial_action_used"
         | "operator_success_limit"
         | "ai_action_capacity"
+        | "entitlement_ai_limit"
+        | "entitlement_ai_capacity"
         | "operator_operation_limit";
       reservation: OwnedUsageReservation | null;
       lease: null;
@@ -1272,6 +1412,10 @@ export type MeteredAiAuthorizationResult =
       successfulLimit: number;
       successfulCount: number;
       remaining: number;
+      entitlementLimit?: number;
+      entitlementSuccessfulCount?: number;
+      entitlementPendingCount?: number;
+      entitlementRemaining?: number;
     };
 
 export type MeteredAiAuthorizationOptions = {
@@ -1279,7 +1423,144 @@ export type MeteredAiAuthorizationOptions = {
   allowCreate?: boolean;
   /** Existing attempt counts from which this request is allowed to continue. */
   continueFromAttemptCounts?: readonly number[];
+  /**
+   * Explicitly permits the only two multi-request action protocols. Ordinary
+   * script and speech actions may never reuse a succeeded action ID.
+   */
+  continuationMode?: "transcription_chunk" | "narration_bundle_phase";
 };
+
+type AiBudgetReservation = {
+  id: string;
+  userId: string;
+  bucket: BillingBucket;
+  createdAt: number;
+  billingPurchaseId: string | null;
+};
+
+async function meteredAiEntitlementScope(
+  reservation: AiBudgetReservation,
+  nowSeconds: number,
+): Promise<MeteredAiEntitlementScope> {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  if (reservation.bucket === "free") {
+    return {
+      kind: "free",
+      userId: reservation.userId,
+      periodStart: null,
+      periodEnd: null,
+      purchaseId: null,
+      successfulLimit: FREE_VIDEO_LIMIT * FREE_AI_OPERATION_SUCCESS_LIMIT,
+    };
+  }
+  if (reservation.bucket === "operator") {
+    const periodStart = startOfTokyoDaySeconds(nowSeconds);
+    return {
+      kind: "operator",
+      userId: reservation.userId,
+      periodStart,
+      periodEnd: periodStart + 24 * 60 * 60,
+      purchaseId: null,
+      successfulLimit:
+        OPERATOR_DAILY_VIDEO_LIMIT * OPERATOR_AI_OPERATION_SUCCESS_LIMIT,
+    };
+  }
+  if (reservation.bucket === "one_time") {
+    let credits = 1;
+    if (reservation.billingPurchaseId) {
+      const purchase = await database
+        .prepare(`
+          SELECT credits
+          FROM billing_purchases
+          WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+          LIMIT 1
+        `)
+        .bind(reservation.billingPurchaseId, reservation.userId)
+        .first<{ credits: number }>();
+      credits = Math.max(1, Math.floor(purchase?.credits ?? 1));
+    } else {
+      const purchases = await database
+        .prepare(`
+          SELECT COALESCE(SUM(credits), 0) AS credits
+          FROM billing_purchases
+          WHERE user_id = ? AND revoked_at IS NULL
+        `)
+        .bind(reservation.userId)
+        .first<{ credits: number }>();
+      credits = Math.max(1, Math.floor(purchases?.credits ?? 1));
+    }
+    return {
+      kind: "one_time",
+      userId: reservation.userId,
+      periodStart: null,
+      periodEnd: null,
+      purchaseId: reservation.billingPurchaseId,
+      successfulLimit: credits * ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
+    };
+  }
+
+  const subscription = await database
+    .prepare(`
+      SELECT plan_key, current_period_start, current_period_end
+      FROM billing_subscriptions
+      WHERE user_id = ?
+        AND status IN ('active', 'trialing')
+        AND current_period_start <= ?
+        AND current_period_end > ?
+        AND current_period_end > ?
+        AND (
+          revoked_period_start IS NULL
+          OR revoked_period_start != current_period_start
+        )
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `)
+    .bind(
+      reservation.userId,
+      reservation.createdAt,
+      reservation.createdAt,
+      nowSeconds,
+    )
+    .first<{
+      plan_key: string;
+      current_period_start: number;
+      current_period_end: number;
+    }>();
+  if (!subscription || !isMonthlyPlanKey(subscription.plan_key)) {
+    throw new Error("Subscription AI entitlement is unavailable.");
+  }
+  return {
+    kind: "subscription",
+    userId: reservation.userId,
+    periodStart: subscription.current_period_start,
+    periodEnd: subscription.current_period_end,
+    purchaseId: null,
+    successfulLimit:
+      monthlyPlanVideoLimit(subscription.plan_key) *
+      SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
+  };
+}
+
+export async function getAiEntitlementBudgetForReservation(
+  reservation: AiBudgetReservation,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const scope = await meteredAiEntitlementScope(reservation, nowSeconds);
+  const usage = await getMeteredAiEntitlementUsage(scope, nowSeconds);
+  return {
+    scope,
+    successfulLimit: scope.successfulLimit,
+    successfulCount: usage.successfulCount,
+    pendingCount: usage.pendingCount,
+    remaining: Math.max(
+      0,
+      scope.successfulLimit - usage.successfulCount - usage.pendingCount,
+    ),
+  };
+}
 
 export async function authorizeMeteredAiOperation(
   currentUser: CurrentUser,
@@ -1318,6 +1599,17 @@ export async function authorizeMeteredAiOperation(
     } as const;
   }
   const successfulLimit = getAiOperationSuccessLimit(reservation.bucket);
+  const initialEntitlement = await getAiEntitlementBudgetForReservation(
+    reservation,
+  );
+  const initialEntitlementFields = {
+    entitlementLimit: initialEntitlement.successfulLimit,
+    entitlementSuccessfulCount: initialEntitlement.successfulCount,
+    entitlementPendingCount: initialEntitlement.pendingCount,
+    entitlementRemaining: initialEntitlement.remaining,
+  };
+  const entitlementAwareRemaining = (perVideoRemaining: number) =>
+    Math.min(perVideoRemaining, initialEntitlement.remaining);
   if (await isObservedDurationBlocked(reservation.id)) {
     const usage = await getMeteredAiUsageCounts(reservation.id);
     return {
@@ -1328,7 +1620,10 @@ export async function authorizeMeteredAiOperation(
       action: null,
       successfulLimit,
       successfulCount: usage.successfulCount,
-      remaining: Math.max(0, successfulLimit - usage.successfulCount),
+      remaining: entitlementAwareRemaining(
+        Math.max(0, successfulLimit - usage.successfulCount),
+      ),
+      ...initialEntitlementFields,
     } as const;
   }
 
@@ -1347,7 +1642,10 @@ export async function authorizeMeteredAiOperation(
       action: null,
       successfulLimit,
       successfulCount: usage.successfulCount,
-      remaining: Math.max(0, successfulLimit - usage.successfulCount),
+      remaining: entitlementAwareRemaining(
+        Math.max(0, successfulLimit - usage.successfulCount),
+      ),
+      ...initialEntitlementFields,
     } as const;
   }
 
@@ -1363,7 +1661,10 @@ export async function authorizeMeteredAiOperation(
         action: null,
         successfulLimit,
         successfulCount: usage.successfulCount,
-        remaining: Math.max(0, successfulLimit - usage.successfulCount),
+        remaining: entitlementAwareRemaining(
+          Math.max(0, successfulLimit - usage.successfulCount),
+        ),
+        ...initialEntitlementFields,
       } as const;
     }
 
@@ -1372,9 +1673,8 @@ export async function authorizeMeteredAiOperation(
       actionId,
     );
     const usageBefore = await getMeteredAiUsageCounts(reservation.id);
-    const remainingBefore = Math.max(
-      0,
-      successfulLimit - usageBefore.successfulCount,
+    const remainingBefore = entitlementAwareRemaining(
+      Math.max(0, successfulLimit - usageBefore.successfulCount),
     );
 
     if (existingAction) {
@@ -1396,6 +1696,28 @@ export async function authorizeMeteredAiOperation(
         return {
           allowed: false,
           reason: "action_failed",
+          reservation,
+          lease: null,
+          action: existingAction,
+          successfulLimit,
+          successfulCount: usageBefore.successfulCount,
+          remaining: remainingBefore,
+        } as const;
+      }
+      if (
+        existingAction.status === "succeeded" &&
+        !(
+          (operation === "transcribe" &&
+            options.continuationMode === "transcription_chunk") ||
+          (operation === "narration_initial" &&
+            options.continuationMode === "narration_bundle_phase" &&
+            options.continueFromAttemptCounts !== undefined)
+        )
+      ) {
+        await releaseUsageOperationLease(lease);
+        return {
+          allowed: false,
+          reason: "action_already_succeeded",
           reservation,
           lease: null,
           action: existingAction,
@@ -1460,6 +1782,8 @@ export async function authorizeMeteredAiOperation(
         successfulLimit,
         successfulCount: usageBefore.successfulCount,
         remaining: remainingBefore,
+        ...initialEntitlementFields,
+        entitlementScope: initialEntitlement.scope,
         alreadySucceeded: existingAction.status === "succeeded",
       } as const;
     }
@@ -1525,6 +1849,46 @@ export async function authorizeMeteredAiOperation(
       } as const;
     }
 
+    const entitlementBefore = await getAiEntitlementBudgetForReservation(
+      reservation,
+    );
+    const entitlementFields = {
+      entitlementLimit: entitlementBefore.successfulLimit,
+      entitlementSuccessfulCount: entitlementBefore.successfulCount,
+      entitlementPendingCount: entitlementBefore.pendingCount,
+      entitlementRemaining: entitlementBefore.remaining,
+    };
+    if (
+      entitlementBefore.successfulCount >= entitlementBefore.successfulLimit
+    ) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "entitlement_ai_limit",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: 0,
+        ...entitlementFields,
+      } as const;
+    }
+    if (entitlementBefore.remaining <= 0) {
+      await releaseUsageOperationLease(lease);
+      return {
+        allowed: false,
+        reason: "entitlement_ai_capacity",
+        reservation,
+        lease: null,
+        action: null,
+        successfulLimit,
+        successfulCount: usageBefore.successfulCount,
+        remaining: 0,
+        ...entitlementFields,
+      } as const;
+    }
+
     // The legacy per-operation count remains a second, deliberately stricter
     // abuse ceiling. It is consumed once per logical action, never per chunk.
     if (!(await consumeOperatorUsageOperation(reservation.id, operation))) {
@@ -1547,14 +1911,26 @@ export async function authorizeMeteredAiOperation(
       operation,
       successfulLimit,
       lease,
+      undefined,
+      entitlementBefore.scope,
     );
     if (!action) {
       const usageAfter = await getMeteredAiUsageCounts(reservation.id);
+      const entitlementAfter = await getAiEntitlementBudgetForReservation(
+        reservation,
+      );
       await releaseUsageOperationLease(lease);
+      const entitlementExhausted =
+        entitlementAfter.successfulCount >= entitlementAfter.successfulLimit;
+      const entitlementAtCapacity = entitlementAfter.remaining <= 0;
       return {
         allowed: false,
         reason:
-          usageAfter.successfulCount >= successfulLimit
+          entitlementExhausted
+            ? "entitlement_ai_limit"
+            : entitlementAtCapacity
+              ? "entitlement_ai_capacity"
+          : usageAfter.successfulCount >= successfulLimit
             ? "operator_success_limit"
             : "ai_action_capacity",
         reservation,
@@ -1562,10 +1938,14 @@ export async function authorizeMeteredAiOperation(
         action: null,
         successfulLimit,
         successfulCount: usageAfter.successfulCount,
-        remaining: Math.max(
-          0,
-          successfulLimit - usageAfter.successfulCount,
+        remaining: Math.min(
+          Math.max(0, successfulLimit - usageAfter.successfulCount),
+          entitlementAfter.remaining,
         ),
+        entitlementLimit: entitlementAfter.successfulLimit,
+        entitlementSuccessfulCount: entitlementAfter.successfulCount,
+        entitlementPendingCount: entitlementAfter.pendingCount,
+        entitlementRemaining: entitlementAfter.remaining,
       } as const;
     }
 
@@ -1577,7 +1957,15 @@ export async function authorizeMeteredAiOperation(
       action,
       successfulLimit,
       successfulCount: usageBefore.successfulCount,
-      remaining: remainingBefore,
+      remaining: Math.min(
+        remainingBefore,
+        Math.max(0, entitlementBefore.remaining - 1),
+      ),
+      entitlementLimit: entitlementBefore.successfulLimit,
+      entitlementSuccessfulCount: entitlementBefore.successfulCount,
+      entitlementPendingCount: entitlementBefore.pendingCount + 1,
+      entitlementRemaining: Math.max(0, entitlementBefore.remaining - 1),
+      entitlementScope: entitlementBefore.scope,
       alreadySucceeded: false,
     } as const;
   } catch (error) {
@@ -1611,12 +1999,22 @@ export async function completeMeteredAiOperation(
     const usage = await getMeteredAiUsageCounts(
       authorization.reservation.id,
     );
+    const entitlement = authorization.entitlementScope
+      ? await getMeteredAiEntitlementUsage(authorization.entitlementScope)
+      : null;
     return {
       completed: true,
       successfulCount: usage.successfulCount,
       remaining: Math.max(
         0,
-        authorization.successfulLimit - usage.successfulCount,
+        Math.min(
+          authorization.successfulLimit - usage.successfulCount,
+          entitlement
+            ? authorization.entitlementScope!.successfulLimit -
+                entitlement.successfulCount -
+                entitlement.pendingCount
+            : authorization.successfulLimit - usage.successfulCount,
+        ),
       ),
     } as const;
   } finally {
@@ -1670,30 +2068,25 @@ async function stopOneTimeReservationsForPurchase(
   userId: string,
   purchaseId: string,
 ) {
-  const db = getDb();
-  const activeUsage = await db
-    .select({
-      id: usageReservations.id,
-      status: usageReservations.status,
-    })
-    .from(usageReservations)
-    .where(
-      and(
-        eq(usageReservations.userId, userId),
-        eq(usageReservations.billingPurchaseId, purchaseId),
-        eq(usageReservations.bucket, "one_time"),
-        eq(usageReservations.status, "reserved"),
-      ),
-    )
-    .orderBy(desc(usageReservations.createdAt));
-
-  // Stop only work assigned to the refunded purchase. Work that already
-  // produced a usable upstream result is completed instead of refunded, and
-  // the per-operation purchase check above prevents that reservation
-  // from continuing while the Stripe payment remains revoked.
-  for (const reservation of activeUsage) {
-    await releaseOrCompleteUsageReservation(reservation.id, userId);
+  const database = env.DB as unknown as AtomicD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
   }
+  const now = Math.floor(Date.now() / 1_000);
+  // A paid save slot is consumed only by explicit export completion. A refund
+  // therefore releases every still-previewing reservation in one statement,
+  // even when AI preview work had already succeeded.
+  await database
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'released', expires_at = ?
+      WHERE user_id = ?
+        AND billing_purchase_id = ?
+        AND bucket = 'one_time'
+        AND status = 'reserved'
+    `)
+    .bind(now - 1, userId, purchaseId)
+    .run();
 }
 
 export async function beginStripeEvent(eventId: string, eventType: string) {

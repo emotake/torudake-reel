@@ -1,4 +1,8 @@
 import { AccountAuthError } from "./account-auth";
+import {
+  parseJsonBodyWithLimit,
+  RequestBodyTooLargeError,
+} from "./request-safety";
 
 export const MAX_AUTH_BODY_BYTES = 64 * 1024;
 
@@ -20,32 +24,23 @@ export function accountAuthErrorResponse(error: unknown) {
 }
 
 export async function readAuthJson(request: Request) {
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > MAX_AUTH_BODY_BYTES
-  ) {
-    throw new AccountAuthError(
-      "authentication_payload_too_large",
-      413,
-      "認証データが大きすぎます。もう一度お試しください。",
-    );
-  }
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_AUTH_BODY_BYTES) {
-    throw new AccountAuthError(
-      "authentication_payload_too_large",
-      413,
-      "認証データが大きすぎます。もう一度お試しください。",
-    );
-  }
   try {
-    const value = JSON.parse(raw) as unknown;
+    const value = await parseJsonBodyWithLimit<unknown>(
+      request,
+      MAX_AUTH_BODY_BYTES,
+    );
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("invalid body");
     }
     return value;
-  } catch {
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      throw new AccountAuthError(
+        "authentication_payload_too_large",
+        413,
+        "認証データが大きすぎます。もう一度お試しください。",
+      );
+    }
     throw new AccountAuthError(
       "invalid_authentication_payload",
       400,

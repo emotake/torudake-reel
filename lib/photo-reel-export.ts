@@ -1,4 +1,9 @@
 import {
+  AUDIBLE_AUDIO_PEAK_THRESHOLD,
+  AUDIBLE_AUDIO_RMS_THRESHOLD,
+  measureAudioSignal,
+} from "./audio";
+import {
   HIGH_QUALITY_VIDEO_BITRATE,
   createPortableVideoEncodingSettings,
 } from "./portable-video-export";
@@ -16,11 +21,15 @@ import {
   type PreparedPhotoAsset,
 } from "./photo-reel";
 
+import type { InputAudioTrack } from "mediabunny";
+
 const PHOTO_REEL_AUDIO_BITRATE = 192_000;
 const PHOTO_REEL_AUDIO_SAMPLE_RATE = 48_000;
 const PHOTO_REEL_AUDIO_CHANNELS = 2;
 const PHOTO_REEL_OUTPUT_DURATION_TOLERANCE_SECONDS = 0.6;
 const PHOTO_REEL_MINIMUM_PACKET_RATE = 10;
+const PHOTO_REEL_MINIMUM_VIDEO_BITRATE = 1_500_000;
+const PHOTO_REEL_MINIMUM_AUDIBLE_SAMPLE_RATIO = 0.002;
 
 export type PhotoReelExportFrameContext = Readonly<{
   canvas: HTMLCanvasElement;
@@ -170,6 +179,15 @@ function getMp4RecorderMimeType() {
   );
 }
 
+let packagedAacEncoderRegistration: Promise<void> | null = null;
+
+async function registerPackagedAacEncoder() {
+  packagedAacEncoderRegistration ??= import("@mediabunny/aac-encoder").then(
+    ({ registerAacEncoder }) => registerAacEncoder(),
+  );
+  return packagedAacEncoderRegistration;
+}
+
 async function resolvePhotoReelExportCapability(
   media: typeof import("mediabunny"),
   hasAudio: boolean,
@@ -184,15 +202,24 @@ async function resolvePhotoReelExportCapability(
     "avc",
     encodingSettings,
   );
-  const canEncodeAudioWithWebCodecs = hasAudio
-    ? await media.canEncodeAudio("aac", {
-        numberOfChannels: PHOTO_REEL_AUDIO_CHANNELS,
-        sampleRate: PHOTO_REEL_AUDIO_SAMPLE_RATE,
-        bitrate: PHOTO_REEL_AUDIO_BITRATE,
-      })
+  const audioEncodingOptions = {
+    numberOfChannels: PHOTO_REEL_AUDIO_CHANNELS,
+    sampleRate: PHOTO_REEL_AUDIO_SAMPLE_RATE,
+    bitrate: PHOTO_REEL_AUDIO_BITRATE,
+  };
+  let canEncodeAudio = hasAudio
+    ? await media.canEncodeAudio("aac", audioEncodingOptions)
     : true;
+  if (hasAudio && !canEncodeAudio) {
+    try {
+      await registerPackagedAacEncoder();
+      canEncodeAudio = await media.canEncodeAudio("aac", audioEncodingOptions);
+    } catch (error) {
+      console.warn("The packaged AAC encoder could not be loaded.", error);
+    }
+  }
   const needsRecorderFallback =
-    !canEncodeWithWebCodecs || !canEncodeAudioWithWebCodecs;
+    !canEncodeWithWebCodecs || !canEncodeAudio;
   const canUseRecorderFallback = Boolean(
     getMp4RecorderMimeType() &&
       typeof HTMLCanvasElement !== "undefined" &&
@@ -302,6 +329,65 @@ function isAacCodec(codec: string | null, parameter: string | null) {
   return /(?:^|\s)aac(?:\s|$)|mp4a[.]40/.test(description);
 }
 
+async function measureDecodedAudioTrack(
+  media: typeof import("mediabunny"),
+  audioTrack: InputAudioTrack,
+) {
+  if (!(await audioTrack.canDecode())) {
+    throw new PhotoReelOutputValidationError(
+      "完成動画のBGM音量を確認できませんでした。最新版のSafariまたはChromeで、もう一度お試しください。",
+    );
+  }
+
+  const sink = new media.AudioSampleSink(audioTrack);
+  let squaredTotal = 0;
+  let peak = 0;
+  let audibleSamples = 0;
+  let sampleCount = 0;
+  for await (const sample of sink.samples()) {
+    try {
+      // Measuring at up to 12 kHz is sufficient to detect an accidentally
+      // silent AAC track without adding noticeable export verification time.
+      const stride = Math.max(1, Math.floor(sample.sampleRate / 12_000));
+      const channels = Array.from(
+        { length: sample.numberOfChannels },
+        (_, channel) => {
+          const plane = new Float32Array(sample.numberOfFrames);
+          sample.copyTo(plane, {
+            planeIndex: channel,
+            format: "f32-planar",
+          });
+          return plane;
+        },
+      );
+      const mono = new Float32Array(Math.ceil(sample.numberOfFrames / stride));
+      for (
+        let frame = 0, outputIndex = 0;
+        frame < sample.numberOfFrames;
+        frame += stride, outputIndex += 1
+      ) {
+        let value = 0;
+        for (const channel of channels) value += channel[frame] ?? 0;
+        mono[outputIndex] = value / channels.length;
+      }
+      const metrics = measureAudioSignal(mono);
+      squaredTotal += metrics.rms * metrics.rms * metrics.sampleCount;
+      peak = Math.max(peak, metrics.peak);
+      audibleSamples += metrics.audibleSampleRatio * metrics.sampleCount;
+      sampleCount += metrics.sampleCount;
+    } finally {
+      sample.close();
+    }
+  }
+
+  return {
+    rms: sampleCount > 0 ? Math.sqrt(squaredTotal / sampleCount) : 0,
+    peak,
+    audibleSampleRatio: sampleCount > 0 ? audibleSamples / sampleCount : 0,
+    sampleCount,
+  };
+}
+
 async function validatePhotoReelOutput(
   output: Blob,
   plan: PhotoReelPlan,
@@ -377,6 +463,14 @@ async function validatePhotoReelOutput(
         "完成動画の動きが正しく記録されませんでした。画面を開いたまま、もう一度書き出してください。",
       );
     }
+    if (
+      !Number.isFinite(videoStats.averageBitrate) ||
+      videoStats.averageBitrate < PHOTO_REEL_MINIMUM_VIDEO_BITRATE
+    ) {
+      throw new PhotoReelOutputValidationError(
+        "完成動画の画質が1080pの保存基準に届きませんでした。画面を開いたまま、もう一度書き出してください。",
+      );
+    }
 
     if (expectsAudio) {
       if (!audioTrack) {
@@ -401,6 +495,17 @@ async function validatePhotoReelOutput(
       ) {
         throw new PhotoReelOutputValidationError(
           "完成動画のBGMと映像の長さが一致しませんでした。もう一度書き出してください。",
+        );
+      }
+      const signal = await measureDecodedAudioTrack(media, audioTrack);
+      if (
+        signal.sampleCount === 0 ||
+        signal.rms < AUDIBLE_AUDIO_RMS_THRESHOLD ||
+        signal.peak < AUDIBLE_AUDIO_PEAK_THRESHOLD ||
+        signal.audibleSampleRatio < PHOTO_REEL_MINIMUM_AUDIBLE_SAMPLE_RATIO
+      ) {
+        throw new PhotoReelOutputValidationError(
+          "完成動画のBGMが聞こえる音量で入りませんでした。音量を確認して、もう一度書き出してください。",
         );
       }
     }

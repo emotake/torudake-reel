@@ -181,7 +181,10 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(pageSource, /編集・プレビューまで/);
   assert.match(pageSource, /完成動画の保存は有料/);
   assert.match(pageSource, /target="_blank"/);
-  assert.match(pageSource, /購入済みの方：保存を有効にする/);
+  assert.match(pageSource, /購入済みの方：保存を有効にする（再確認）/);
+  assert.match(pageSource, /動画の書き出しを再開できます/);
+  assert.match(pageSource, /window\.addEventListener\("focus", recheckAfterCheckout\)/);
+  assert.match(pageSource, /document\.addEventListener\("visibilitychange", recheckAfterCheckout\)/);
   assert.match(pageSource, /usageReservationPendingExport/);
   assert.match(pageSource, /completePendingExportReservation\(\)/);
 });
@@ -227,7 +230,10 @@ test("consumes a free preview after processing while keeping paid usage reversib
 
 test("discards a paid export reservation if the edited video changes", () => {
   const start = pageSource.indexOf("async function checkPaidExportAccess()");
-  const end = pageSource.indexOf("\n  async function startCheckout", start);
+  const end = pageSource.indexOf(
+    "\n  useEffect(() => {\n    paidAccessCheckCallbackRef.current",
+    start,
+  );
   const accessFlow = pageSource.slice(start, end);
 
   assert.match(accessFlow, /const accessGeneration = editGenerationRef\.current/);
