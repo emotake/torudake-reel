@@ -120,6 +120,13 @@
       "when": 1786508207506,
       "tag": "0016_elite_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1786512297962,
+      "tag": "0017_zippy_vermin",
+      "breakpoints": true
     }
   ]
 }

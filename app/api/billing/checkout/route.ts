@@ -29,6 +29,7 @@ import {
   parseJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "../../../../lib/request-safety";
+import { recordServerProductEvent } from "../../../../lib/product-analytics";
 
 const MAX_CHECKOUT_REQUEST_BYTES = 16 * 1024;
 
@@ -297,6 +298,11 @@ export async function POST(request: Request) {
     checkoutSessionCreated = true;
     if (!session.url) throw new Error("Stripe Checkout URL was missing.");
 
+    await recordServerProductEvent(request, "checkout_session_created", {
+      plan: payload.plan,
+      outcome: "created",
+    });
+
     return Response.json({ url: session.url });
   } catch (error) {
     if (monthlyCheckoutLock && !checkoutSessionCreated) {
@@ -306,6 +312,11 @@ export async function POST(request: Request) {
       }).catch(() => undefined);
     }
     console.error("checkout session creation failed", error);
+    await recordServerProductEvent(request, "checkout_session_failed", {
+      plan: isStripePlan(payload.plan) ? payload.plan : "unknown",
+      outcome: "failed",
+      error_code: "stripe_checkout_failed",
+    });
     return Response.json(
       { error: "決済画面を開けませんでした。少し待ってからお試しください。" },
       { status: 502 },

@@ -28,3 +28,5 @@ The existing Japanese narration WAV under `scripts/demo-composition/assets/narra
 - 1080 × 1920, 30 fps, H.264 High Profile + AAC-LC
 - 10.4 seconds, BT.709 SDR, fast-start MP4
 - Final audio target: -14 LUFS integrated, -1.5 dBTP
+- Lightweight landing preview: `public/demo/torudake-demo-lite.mp4`, derived from the final media at 720 × 1280 with no audio. It is used only to reduce initial mobile transfer size; the full demo remains the source for the interactive sample.
+- Poster: `public/demo/torudake-demo-poster.jpg`, a frame extracted from the final media for reduced-motion and tap-to-play states.

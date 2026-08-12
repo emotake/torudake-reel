@@ -24,6 +24,11 @@ import {
   decodeBase64Audio,
   pcm16ChunksToWav,
 } from "../../../../lib/realtime-audio";
+import {
+  productDurationBucket,
+  productUpstreamErrorCode,
+  recordServerProductEvent,
+} from "../../../../lib/product-analytics";
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
@@ -911,6 +916,11 @@ export async function POST(request: Request) {
         errorPayload.error?.code,
         errorPayload.error?.type,
       );
+      await recordServerProductEvent(request, "ai_operation_failed", {
+        operation: "narration_speech",
+        outcome: "failed",
+        error_code: productUpstreamErrorCode(response.status),
+      });
       return Response.json(
         { error: speechError(response.status, errorPayload) },
         {
@@ -963,6 +973,12 @@ export async function POST(request: Request) {
         completion.remaining,
       );
     }
+    await recordServerProductEvent(request, "ai_operation_succeeded", {
+      operation: "narration_speech",
+      outcome: "completed",
+      voice: style,
+      duration_bucket: productDurationBucket(targetDurationSeconds),
+    });
     return new Response(audio, {
       headers: {
         "Content-Type":

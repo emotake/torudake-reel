@@ -32,11 +32,14 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集の手間を、もっと軽く。/);
   assert.match(html, /class="heroVisual realDemo"/);
-  assert.match(html, /src="\/demo\/torudake-demo\.mp4"/);
-  assert.match(html, /音声・字幕つきデモ動画/);
+  assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);
+  assert.match(html, /poster="\/demo\/torudake-demo-poster\.jpg"/);
+  assert.match(html, /再生すると音声付き1080p本編を読み込みます/);
   assert.match(html, /実際の動画・音声・テロップで確認/);
+  assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
+  assert.match(html, /動画本体は通常、端末内で編集/);
   assert.doesNotMatch(html, /lifestyleGallery/);
-  assert.doesNotMatch(html, /4工程|AUTO CUT|AI VOICE/);
+  assert.doesNotMatch(html, /4工程|AUTO CUT/);
   assert.match(html, /動画を選んで無料で試す/);
   assert.match(html, /編集・プレビューは無料/);
   assert.match(html, /動画1本だけ保存/);

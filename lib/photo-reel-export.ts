@@ -22,6 +22,10 @@ import {
 } from "./photo-reel";
 
 import type { InputAudioTrack } from "mediabunny";
+import {
+  detectPhotoReelBeatCandidates,
+  snapPhotoReelPlanToBeats,
+} from "./photo-reel-beats";
 
 const PHOTO_REEL_AUDIO_BITRATE = 192_000;
 const PHOTO_REEL_AUDIO_SAMPLE_RATE = 48_000;
@@ -44,6 +48,11 @@ export type PhotoReelExportFrameContext = Readonly<{
 export type PhotoReelExportCallbacks = Readonly<{
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
+  /** Reports local BGM analysis without exposing audio or using an API. */
+  onBeatSync?: (result: Readonly<{
+    detectedBeatCount: number;
+    transitionTimes: readonly number[];
+  }>) => void;
   /** Optional convenience override for editors that keep audio outside settings. */
   audioFile?: File | null;
   audioFit?: PhotoReelAudioFit;
@@ -759,8 +768,7 @@ export async function exportPhotoReel(
       "写真リールの書き出しはブラウザ上でのみ利用できます。",
     );
   }
-  const plan = createPhotoReelPlan(assets, settings);
-  const schedule = buildPhotoReelFrameSchedule(plan);
+  const basePlan = createPhotoReelPlan(assets, settings);
   const media = await import("mediabunny");
   const audioFile = callbacks.audioFile ?? settings.audioFile;
   const { encodingSettings, needsRecorderFallback } =
@@ -774,12 +782,33 @@ export async function exportPhotoReel(
   const audio = audioFile
     ? await renderPhotoReelAudio(
         audioFile,
-        plan.duration,
+        basePlan.duration,
         callbacks.audioFit ?? settings.audioFit ?? "loop",
         audioGain,
         callbacks.signal,
       )
     : null;
+  const beatCandidatesWereProvided = settings.beatCandidates !== undefined;
+  const beatCandidates = beatCandidatesWereProvided
+    ? settings.beatCandidates ?? []
+    : audio
+      ? detectPhotoReelBeatCandidates(
+        Array.from(
+          { length: audio.numberOfChannels },
+          (_, channel) => audio.getChannelData(channel),
+        ),
+        audio.sampleRate,
+        basePlan.duration,
+      )
+      : [];
+  const plan = beatCandidatesWereProvided
+    ? basePlan
+    : snapPhotoReelPlanToBeats(basePlan, beatCandidates);
+  const schedule = buildPhotoReelFrameSchedule(plan);
+  callbacks.onBeatSync?.({
+    detectedBeatCount: beatCandidates.length,
+    transitionTimes: plan.slides.slice(1).map((slide) => slide.start),
+  });
   throwIfAborted(callbacks.signal);
   callbacks.onProgress?.(audio ? 0.09 : 0.05);
 

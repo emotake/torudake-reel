@@ -28,7 +28,26 @@ export type CaptionSegment = RawCaptionSegment & {
   wordTimings?: CaptionWordTiming[];
   localSilenceStart?: boolean;
   localSilenceEnd?: boolean;
+  /**
+   * Optional source-clock window used only for showing this caption. The
+   * wider start/end range remains the video edit range, so pauses in an AI
+   * narration are never removed merely to align caption visibility.
+   */
+  displayStart?: number;
+  displayEnd?: number;
 };
+
+export function getCaptionDisplayRange(
+  caption: Pick<CaptionSegment, "start" | "end" | "displayStart" | "displayEnd">,
+) {
+  const start = Number.isFinite(caption.displayStart)
+    ? Math.max(0, caption.displayStart ?? caption.start)
+    : caption.start;
+  const end = Number.isFinite(caption.displayEnd)
+    ? Math.max(0, caption.displayEnd ?? caption.end)
+    : caption.end;
+  return end > start ? { start, end } : { start: caption.start, end: caption.end };
+}
 
 const DEFAULT_MAX_CAPTION_CHARS = 16;
 const IDEAL_CAPTION_CHARS = 12;

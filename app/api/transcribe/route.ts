@@ -37,6 +37,15 @@ import {
   parseJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "../../../lib/request-safety";
+import {
+  productDurationBucket,
+  productUpstreamErrorCode,
+  recordServerProductEvent,
+} from "../../../lib/product-analytics";
+import {
+  buildAsrVocabularyPrompt,
+  sanitizeAsrUserDictionary,
+} from "../../../lib/asr-user-dictionary";
 
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 const MAX_TRANSCRIPTION_JSON_BYTES = 64 * 1024;
@@ -176,6 +185,7 @@ async function requestTranscription(
   file: File,
   mode: "timed" | "timed-fallback" | "refine",
   requestSignal: AbortSignal,
+  asrDictionary: readonly string[] = [],
 ): Promise<TranscriptionCallResult> {
   const formData = new FormData();
   const isWhisperTimedPrimary = mode === "timed";
@@ -206,8 +216,12 @@ async function requestTranscription(
   if (isDiarizedTimedFallback) {
     formData.set("chunking_strategy", "auto");
   }
-  if (mode === "refine") {
-    formData.set("prompt", HIGH_ACCURACY_PROMPT);
+  if (!isDiarizedTimedFallback) {
+    const prompt = buildAsrVocabularyPrompt(
+      mode === "refine" ? HIGH_ACCURACY_PROMPT : null,
+      asrDictionary,
+    );
+    if (prompt) formData.set("prompt", prompt);
   }
 
   const upstreamAbort = createUpstreamAbortSignal(
@@ -286,12 +300,14 @@ async function requestTimedTranscription(
   apiKey: string,
   file: File,
   requestSignal: AbortSignal,
+  asrDictionary: readonly string[] = [],
 ) {
   let result = await requestTranscription(
     apiKey,
     file,
     "timed",
     requestSignal,
+    asrDictionary,
   );
 
   if (shouldRetryTimedPrimary(result)) {
@@ -303,6 +319,7 @@ async function requestTimedTranscription(
       file,
       "timed",
       requestSignal,
+      asrDictionary,
     );
   }
 
@@ -319,6 +336,7 @@ async function requestTimedTranscription(
       file,
       "timed-fallback",
       requestSignal,
+      asrDictionary,
     );
   }
 
@@ -389,6 +407,7 @@ export async function POST(request: Request) {
 
     let file: File | null = null;
     let requestHighAccuracy = false;
+    let asrDictionary: string[] = [];
     let usageReservationId = "";
     let aiOperationId = "";
     if (requestContentType.includes("application/json")) {
@@ -396,6 +415,7 @@ export async function POST(request: Request) {
         id?: string;
         code?: string;
         quality?: string;
+        asrDictionary?: unknown;
         usageReservationId?: string;
         aiOperationId?: string;
       };
@@ -413,6 +433,7 @@ export async function POST(request: Request) {
         );
       }
       requestHighAccuracy = payload.quality === "high";
+      asrDictionary = sanitizeAsrUserDictionary(payload.asrDictionary);
       usageReservationId = payload.usageReservationId?.trim() ?? "";
       aiOperationId = payload.aiOperationId?.trim() ?? "";
       const id = payload.id?.trim() ?? "";
@@ -486,6 +507,9 @@ export async function POST(request: Request) {
       }
       const uploadedFile = requestData.get("file");
       requestHighAccuracy = requestData.get("quality") === "high";
+      asrDictionary = sanitizeAsrUserDictionary(
+        requestData.get("asrDictionary"),
+      );
       usageReservationId = String(
         requestData.get("usageReservationId") ?? "",
       ).trim();
@@ -579,6 +603,7 @@ export async function POST(request: Request) {
       apiKey,
       file,
       request.signal,
+      asrDictionary,
     );
     if (!timedResult.ok) {
       console.error(
@@ -588,6 +613,11 @@ export async function POST(request: Request) {
         timedResult.error?.code,
         timedResult.error?.type,
       );
+      await recordServerProductEvent(request, "ai_operation_failed", {
+        operation: "transcribe",
+        outcome: "failed",
+        error_code: productUpstreamErrorCode(timedResult.status),
+      });
       return jsonError(
         transcriptionError(timedResult.status, timedResult.error),
         timedResult.status,
@@ -634,6 +664,7 @@ export async function POST(request: Request) {
         file,
         "refine",
         request.signal,
+        asrDictionary,
       );
       if (refineResult.ok) {
         const refinedText = refineResult.transcription.text?.trim() ?? "";
@@ -687,6 +718,11 @@ export async function POST(request: Request) {
       );
     }
 
+    await recordServerProductEvent(request, "ai_operation_succeeded", {
+      operation: "transcribe",
+      outcome: segments.length === 0 ? "silent" : "completed",
+      duration_bucket: productDurationBucket(transcriptionDuration),
+    });
     if (segments.length === 0) {
       return Response.json(
         {

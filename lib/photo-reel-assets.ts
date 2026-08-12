@@ -7,6 +7,13 @@ import {
   computePhotoReelImageLayout,
   type PreparedPhotoAsset,
 } from "./photo-reel";
+import {
+  estimatePhotoReelSubject,
+  getDefaultPhotoReelFocusPoint,
+  normalizePhotoReelFocusPoint,
+  type PhotoReelFocusPoint,
+} from "./photo-reel-subject";
+import type { NormalizedFace } from "./video-frame-analysis";
 
 let photoAssetSequence = 0;
 export const PHOTO_REEL_THUMBNAIL_MAX_EDGE = 192;
@@ -41,12 +48,102 @@ function createCanvas(width: number, height: number) {
   return canvas;
 }
 
-function getCanvasContext(canvas: HTMLCanvasElement) {
-  const context = canvas.getContext("2d", { alpha: false });
+function getCanvasContext(
+  canvas: HTMLCanvasElement,
+  options: CanvasRenderingContext2DSettings = {},
+) {
+  const context = canvas.getContext("2d", { alpha: false, ...options });
   if (!context) throw new Error("The browser could not prepare a photo canvas.");
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   return context;
+}
+
+type LocalFaceDetector = Readonly<{
+  detect(source: CanvasImageSource): Promise<
+    readonly {
+      boundingBox: Readonly<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }>;
+      confidence?: number;
+    }[]
+  >;
+}>;
+
+type LocalFaceDetectorConstructor = new (options?: {
+  fastMode?: boolean;
+  maxDetectedFaces?: number;
+}) => LocalFaceDetector;
+
+async function detectPhotoReelFocusPoint(source: HTMLCanvasElement) {
+  try {
+    const FaceDetectorConstructor = (
+      globalThis as typeof globalThis & {
+        FaceDetector?: LocalFaceDetectorConstructor;
+      }
+    ).FaceDetector;
+    if (FaceDetectorConstructor) {
+      const detector = new FaceDetectorConstructor({
+        fastMode: true,
+        maxDetectedFaces: 8,
+      });
+      const detections = await detector.detect(source);
+      const faces: NormalizedFace[] = detections.map((detection) => ({
+        x: detection.boundingBox.x / source.width,
+        y: detection.boundingBox.y / source.height,
+        width: detection.boundingBox.width / source.width,
+        height: detection.boundingBox.height / source.height,
+        confidence: detection.confidence,
+      }));
+      if (faces.length > 0) {
+        return estimatePhotoReelSubject(
+          { data: [], width: 1, height: 1 },
+          faces,
+        );
+      }
+    }
+  } catch {
+    // FaceDetector is optional and still unavailable in several Safari builds.
+  }
+
+  const dimensions = computePhotoReelThumbnailDimensions(
+    source.width,
+    source.height,
+    96,
+  );
+  const analysis = createCanvas(dimensions.width, dimensions.height);
+  try {
+    const context = getCanvasContext(analysis, { willReadFrequently: true });
+    context.drawImage(source, 0, 0, analysis.width, analysis.height);
+    if (typeof context.getImageData !== "function") {
+      return getDefaultPhotoReelFocusPoint();
+    }
+    return estimatePhotoReelSubject(
+      context.getImageData(0, 0, analysis.width, analysis.height),
+    );
+  } catch {
+    return getDefaultPhotoReelFocusPoint();
+  } finally {
+    analysis.width = 1;
+    analysis.height = 1;
+  }
+}
+
+export function withPhotoReelManualFocus(
+  asset: PreparedPhotoAsset,
+  point: Pick<PhotoReelFocusPoint, "x" | "y">,
+): PreparedPhotoAsset {
+  return {
+    ...asset,
+    focusPoint: normalizePhotoReelFocusPoint({
+      ...point,
+      confidence: 1,
+      source: "manual",
+    }),
+  };
 }
 
 async function loadImageElement(url: string) {
@@ -167,6 +264,7 @@ function createBlurredBackground(
   source: HTMLCanvasElement,
   sourceWidth: number,
   sourceHeight: number,
+  focusPoint?: PhotoReelFocusPoint,
 ) {
   const width = PHOTO_REEL_OUTPUT_WIDTH / 4;
   const height = PHOTO_REEL_OUTPUT_HEIGHT / 4;
@@ -177,6 +275,7 @@ function createBlurredBackground(
     sourceHeight,
     width,
     height,
+    focusPoint,
   );
   const overscan = 20;
   context.fillStyle = "#07101f";
@@ -224,10 +323,12 @@ async function prepareSinglePhoto(
       context.fillStyle = "#07101f";
       context.fillRect(0, 0, source.width, source.height);
       context.drawImage(decoded.source, 0, 0, source.width, source.height);
+      const focusPoint = await detectPhotoReelFocusPoint(source);
       blurredBackground = createBlurredBackground(
         source,
         decoded.width,
         decoded.height,
+        focusPoint,
       );
       previewUrl = await createThumbnailUrl(source);
       return {
@@ -239,6 +340,7 @@ async function prepareSinglePhoto(
         height: decoded.height,
         source,
         blurredBackground,
+        focusPoint,
       };
     } finally {
       decoded.dispose();

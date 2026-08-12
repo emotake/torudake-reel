@@ -1,4 +1,4 @@
-import type { CaptionSegment } from "./captions";
+import { getCaptionDisplayRange, type CaptionSegment } from "./captions";
 
 export type EditGoal = "follow" | "sales" | "reach";
 
@@ -18,6 +18,20 @@ export type CaptionCutUpdate<T extends CaptionSegment> = {
   changed: boolean;
   blockedReason?: "would-remove-all" | "not-found";
 };
+
+export type EditPlanVisualEvidence = Readonly<{
+  time: number;
+  qualityScore?: number;
+  sceneChangeScore?: number;
+  faceScore?: number;
+}>;
+
+export type NaturalEditOptions = Readonly<{
+  /** Locally measured frame evidence. Supplying it never triggers an API call. */
+  visualEvidence?: readonly EditPlanVisualEvidence[];
+  /** Maximum point bonus contributed by visual evidence. Defaults to 3.2. */
+  visualInfluence?: number;
+}>;
 
 const MAX_JOIN_GAP_SECONDS = 0.42;
 const MAX_SENTENCE_GAP_SECONDS = 0.78;
@@ -393,20 +407,13 @@ export function remapCaptionsToEditedTimeline(
   return captions
     .filter((caption) => !caption.removed && caption.text.trim())
     .map((caption, index) => {
-      const range = ranges.find(
-        (candidate) =>
-          caption.start >= candidate.start - 0.001 &&
-          caption.start < candidate.end,
-      );
-      const clippedEnd = range
-        ? Math.min(caption.end, range.end)
-        : caption.end;
+      const displayRange = getCaptionDisplayRange(caption);
       return {
         ...caption,
         id: index + 1,
         removed: false,
-        start: sourceTimeToEditedTime(ranges, caption.start),
-        end: sourceTimeToEditedTime(ranges, clippedEnd),
+        start: sourceTimeToEditedTime(ranges, displayRange.start),
+        end: sourceTimeToEditedTime(ranges, displayRange.end),
       };
     })
     .filter((caption) => caption.end > caption.start);
@@ -454,7 +461,53 @@ type EditUnit = SentenceBlock & {
   phase: 0 | 1 | 2;
 };
 
-function scoreEditUnit(unit: EditUnit, goal: EditGoal, sourceEnd: number) {
+function clamp01(value: number | undefined) {
+  return Math.min(
+    1,
+    Math.max(0, Number.isFinite(value) ? (value ?? 0) : 0),
+  );
+}
+
+/**
+ * Summarizes local frame quality inside one candidate edit unit. Missing
+ * evidence is neutral (zero), preserving the selection made by old callers.
+ */
+export function scoreEditPlanVisualEvidence(
+  start: number,
+  end: number,
+  evidence: readonly EditPlanVisualEvidence[] = [],
+) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0;
+  }
+  const relevant = evidence.filter(
+    (item) =>
+      Number.isFinite(item.time) &&
+      item.time >= start - 0.001 &&
+      item.time <= end + 0.001,
+  );
+  if (relevant.length === 0) return 0;
+
+  const quality =
+    relevant.reduce(
+      (total, item) => total + clamp01(item.qualityScore),
+      0,
+    ) / relevant.length;
+  const sceneChange = Math.max(
+    ...relevant.map((item) => clamp01(item.sceneChangeScore)),
+  );
+  const face = Math.max(
+    ...relevant.map((item) => clamp01(item.faceScore)),
+  );
+  return quality * 0.64 + sceneChange * 0.22 + face * 0.14;
+}
+
+function scoreEditUnit(
+  unit: EditUnit,
+  goal: EditGoal,
+  sourceEnd: number,
+  options: NaturalEditOptions,
+) {
   const duration = unit.end - unit.start;
   const text = unit.text;
   const goalHits = text.match(GOAL_KEYWORDS[goal])?.length ?? 0;
@@ -479,6 +532,16 @@ function scoreEditUnit(unit: EditUnit, goal: EditGoal, sourceEnd: number) {
   if (unit.end >= sourceEnd * 0.78) {
     score += goal === "sales" ? 2.4 : 0.7;
   }
+
+  const visualInfluence = Number.isFinite(options.visualInfluence)
+    ? Math.max(0, Math.min(8, options.visualInfluence ?? 3.2))
+    : 3.2;
+  score +=
+    scoreEditPlanVisualEvidence(
+      unit.start,
+      unit.end,
+      options.visualEvidence,
+    ) * visualInfluence;
 
   return score;
 }
@@ -687,6 +750,7 @@ export function createNaturalEdit(
   captions: CaptionSegment[],
   targetDuration: number,
   goal: EditGoal,
+  options: NaturalEditOptions = {},
 ) {
   const safeTarget = Math.max(1, targetDuration);
   const sorted = captions
@@ -766,7 +830,7 @@ export function createNaturalEdit(
       );
       const durationTicks = Math.ceil(duration * 10);
       if (durationTicks > capacity) return;
-      const unitScore = scoreEditUnit(unit, goal, sourceEnd);
+      const unitScore = scoreEditUnit(unit, goal, sourceEnd, options);
       const snapshot = [...states.values()];
       const nextStates = new Map(states);
       snapshot.forEach((state) => {
@@ -828,8 +892,8 @@ export function createNaturalEdit(
             0;
           if (leftMissing !== rightMissing) return leftMissing ? -1 : 1;
           return (
-            scoreEditUnit(right.unit, goal, sourceEnd) -
-            scoreEditUnit(left.unit, goal, sourceEnd)
+            scoreEditUnit(right.unit, goal, sourceEnd, options) -
+            scoreEditUnit(left.unit, goal, sourceEnd, options)
           );
         });
 

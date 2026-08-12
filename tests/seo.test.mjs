@@ -52,6 +52,9 @@ test("lists only canonical public pages in the sitemap", () => {
   assert.deepEqual(urls, [
     `${SITE_ORIGIN}/`,
     `${SITE_ORIGIN}/photo-reel`,
+    `${SITE_ORIGIN}/guide/iphone-mov-reel`,
+    `${SITE_ORIGIN}/guide/silent-video-narration`,
+    `${SITE_ORIGIN}/guide/japanese-reading`,
     `${SITE_ORIGIN}/privacy`,
     `${SITE_ORIGIN}/terms`,
     `${SITE_ORIGIN}/commercial-disclosure`,
@@ -130,6 +133,27 @@ test("describes the real web application without invented ratings", () => {
   );
   assert.match(application.offers[0].description, /合計3分以内・最大2動画/);
   assert.ok(application.offers.slice(1).every((offer) => /税込/.test(offer.description)));
+});
+
+test("publishes a real product demo as VideoObject", () => {
+  const value = buildSiteStructuredData();
+  const video = value["@graph"].find((entry) => entry["@type"] === "VideoObject");
+  assert.ok(video);
+  assert.equal(video.contentUrl, `${SITE_ORIGIN}/demo/torudake-demo-lite.mp4`);
+  assert.equal(video.thumbnailUrl, `${SITE_ORIGIN}/demo/torudake-demo-poster.jpg`);
+  assert.equal(video.uploadDate, "2026-08-12");
+});
+
+test("publishes useful, canonical guides without invented capability claims", async () => {
+  const guides = await Promise.all([
+    readProjectFile("app/guide/iphone-mov-reel/page.tsx"),
+    readProjectFile("app/guide/silent-video-narration/page.tsx"),
+    readProjectFile("app/guide/japanese-reading/page.tsx"),
+  ]);
+  assert.match(guides[0], /path: "\/guide\/iphone-mov-reel"/);
+  assert.match(guides[1], /元の映像をそのまま使う/);
+  assert.match(guides[2], /画面に出す文字と、声の読み方を分けて/);
+  assert.ok(guides.every((source) => !/完全無料|無制限|必ず/.test(source)));
 });
 
 test("publishes a Japanese web app manifest", () => {

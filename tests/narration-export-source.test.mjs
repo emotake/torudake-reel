@@ -10,6 +10,10 @@ const globalCssSource = await readFile(
   new URL("../app/globals.css", import.meta.url),
   "utf8",
 );
+const portableSource = await readFile(
+  new URL("../lib/portable-video-export.ts", import.meta.url),
+  "utf8",
+);
 
 test("prepares the narration audio context before recording disclosure", () => {
   const start = pageSource.indexOf("async function confirmNarrationExport()");
@@ -175,7 +179,7 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(pageSource, /STANDARD_MONTHLY_PLAN_LABEL.*STANDARD_MONTHLY_PRICE_JPY/);
   assert.match(pageSource, /STARTER_MONTHLY_PLAN_LABEL.*STARTER_MONTHLY_PRICE_JPY/);
   assert.doesNotMatch(pageSource, /月3本・月8本・1動画作成/);
-  assert.match(pageSource, /ONE_TIME_PLAN_LABEL.*ONE_TIME_PRICE_JPY/);
+  assert.match(pageSource, /この動画1本を¥\{ONE_TIME_PRICE_JPY/);
   assert.match(pageSource, /1か月に動画\{STARTER_MONTHLY_VIDEO_LIMIT\}本まで/);
   assert.match(pageSource, /1回払いで動画1本だけ/);
   assert.match(pageSource, /編集・プレビューまで/);
@@ -675,4 +679,36 @@ test("renders the Vlog simple caption consistently in preview and video export",
   assert.match(overlayFlow, /canvas\.height \* 0\.43/);
   assert.match(globalCssSource, /\.resultCaption\.vlog\s*\{/);
   assert.match(globalCssSource, /\.captionStyleSample\.vlog\s*\{/);
+});
+
+test("uses the final renderer and local quality evidence before export", () => {
+  assert.match(pageSource, /className="resultCaptionCanvas"/);
+  assert.match(pageSource, /drawCaptionOverlayRef\.current\(/);
+  assert.match(pageSource, /drawCaptionOverlay\(context, canvas, sourceTime\)/);
+  assert.match(pageSource, /getCaptionSafeArea\(canvas\.width, canvas\.height\)/);
+  assert.match(pageSource, /attachNarrationCaptionDisplayTiming\(/);
+  assert.match(pageSource, /analyzeVideoForNaturalEdit\(file, controller\.signal\)/);
+  assert.match(pageSource, /createNaturalEdit\([\s\S]*visualEvidence/);
+  assert.match(pageSource, /onColorConversionPlan:/);
+  assert.match(pageSource, /HDR・広色域の色をSNS互換のSDR色へ調整しました/);
+});
+
+test("keeps the complete narration buffer in both portable and fallback exports", () => {
+  assert.match(
+    pageSource,
+    /attachNarrationCaptionDisplayTiming\([\s\S]*timeline,[\s\S]*activityRanges/,
+  );
+  assert.match(
+    portableSource,
+    /Math\.min\([\s\S]*options\.editedDuration,[\s\S]*options\.narrationBuffer\.duration/,
+  );
+  assert.match(pageSource, /narrationElapsed \+= rangeDuration/);
+  assert.doesNotMatch(pageSource, /return alignedToSpeech\.map/);
+});
+
+test("lazy-loads the real audio-equipped 1080p demo after the light source", () => {
+  assert.match(pageSource, /torudake-demo-lite\.mp4/);
+  assert.match(pageSource, /video\.src = "\/demo\/torudake-demo\.mp4"/);
+  assert.match(pageSource, /video\.muted = false/);
+  assert.match(pageSource, /再生すると音声付き1080p本編を読み込みます/);
 });

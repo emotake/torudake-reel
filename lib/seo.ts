@@ -107,6 +107,18 @@ export function buildSiteStructuredData() {
           },
         ],
       },
+      {
+        "@type": "VideoObject",
+        "@id": `${SITE_ORIGIN}/#product-demo`,
+        name: "撮るだけリール 編集後デモ",
+        description:
+          "風景動画に自動編集とテロップを加えた、撮るだけリールの仕上がり例です。",
+        thumbnailUrl: siteUrl("/demo/torudake-demo-poster.jpg"),
+        uploadDate: "2026-08-12",
+        duration: "PT10.4S",
+        contentUrl: siteUrl("/demo/torudake-demo-lite.mp4"),
+        inLanguage: "ja-JP",
+      },
     ],
   };
 }

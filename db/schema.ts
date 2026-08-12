@@ -462,3 +462,54 @@ export const aiDisclosureConfirmations = sqliteTable(
     index("ai_disclosure_created_at_idx").on(table.createdAt),
   ],
 );
+
+/**
+ * Privacy-safe product telemetry. `actor_hash` is an application-scoped hash
+ * used only for abuse prevention and aggregate funnels; raw IP addresses,
+ * email addresses, filenames, transcripts and scripts are never stored here.
+ */
+export const productEvents = sqliteTable(
+  "product_events",
+  {
+    id: text("id").primaryKey(),
+    eventName: text("event_name").notNull(),
+    actorHash: text("actor_hash"),
+    source: text("source", { enum: ["browser", "server"] }).notNull(),
+    properties: text("properties").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("product_events_name_created_idx").on(
+      table.eventName,
+      table.createdAt,
+    ),
+    index("product_events_actor_created_idx").on(
+      table.actorHash,
+      table.createdAt,
+    ),
+    index("product_events_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export const productFeedback = sqliteTable(
+  "product_feedback",
+  {
+    id: text("id").primaryKey(),
+    actorHash: text("actor_hash").notNull(),
+    rating: text("rating", { enum: ["helpful", "needs_work"] }).notNull(),
+    context: text("context", {
+      enum: ["preview", "export", "checkout", "general"],
+    })
+      .notNull()
+      .default("general"),
+    tags: text("tags").notNull().default("[]"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("product_feedback_created_at_idx").on(table.createdAt),
+    index("product_feedback_actor_created_idx").on(
+      table.actorHash,
+      table.createdAt,
+    ),
+  ],
+);

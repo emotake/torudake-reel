@@ -26,6 +26,11 @@ import {
   preparePhotoReelAudioContext,
 } from "../../lib/photo-reel-export";
 import {
+  analyzePhotoReelAudioFileBeats,
+  repeatPhotoReelBeatCandidates,
+  type PhotoReelAudioBeatAnalysis,
+} from "../../lib/photo-reel-beats";
+import {
   canSaveCompletedVideo,
   isBillingBucket,
   ONE_TIME_PLAN_LABEL,
@@ -360,6 +365,8 @@ export default function PhotoReelClient() {
   const [title, setTitle] = useState("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
+  const [audioBeatAnalysis, setAudioBeatAnalysis] =
+    useState<PhotoReelAudioBeatAnalysis | null>(null);
   const [audioPreparing, setAudioPreparing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [prepareProgress, setPrepareProgress] = useState(0);
@@ -383,13 +390,28 @@ export default function PhotoReelClient() {
     finalizingUsage ||
     Boolean(pendingFinalize);
 
+  const repeatedBeatCandidates = useMemo(
+    () =>
+      audioFile && audioBeatAnalysis
+        ? repeatPhotoReelBeatCandidates(
+            audioBeatAnalysis.beats,
+            audioBeatAnalysis.duration,
+            duration,
+          )
+        : undefined,
+    [audioBeatAnalysis, audioFile, duration],
+  );
+
   const settings = useMemo<PhotoReelSettings>(
     () => ({
       duration,
       templateId,
       title: title.trim() || undefined,
+      ...(repeatedBeatCandidates !== undefined
+        ? { beatCandidates: repeatedBeatCandidates }
+        : {}),
     }),
-    [duration, templateId, title],
+    [duration, repeatedBeatCandidates, templateId, title],
   );
 
   const lowResolutionCount = useMemo(
@@ -781,6 +803,9 @@ export default function PhotoReelClient() {
     }
     audioPreparingRef.current = true;
     setAudioPreparing(true);
+    // Keep preview/export on the established plan while a replacement BGM is
+    // being inspected. A failed inspection therefore never leaves stale beats.
+    setAudioBeatAnalysis({ duration: 1, beats: [] });
     setError("");
     const nextPreviewUrl = URL.createObjectURL(file);
     let ownsPreviewUrl = true;
@@ -806,9 +831,24 @@ export default function PhotoReelClient() {
         );
         return;
       }
+      const beatAnalysis = await analyzePhotoReelAudioFileBeats(
+        file,
+        audioDuration,
+      );
+      if (
+        !mountedRef.current ||
+        audioValidationRef.current !== validation ||
+        pendingFinalizeRef.current
+      ) {
+        revokeNextPreview();
+        return;
+      }
       setIsPlaying(false);
       audioPreviewRef.current?.pause();
       setAudioFile(file);
+      setAudioBeatAnalysis(
+        beatAnalysis ?? { duration: audioDuration, beats: [] },
+      );
       setAudioPreviewUrl(nextPreviewUrl);
       ownsPreviewUrl = false;
       setShowPurchase(false);
@@ -1420,6 +1460,7 @@ export default function PhotoReelClient() {
                   onClick={() => {
                     audioValidationRef.current += 1;
                     setAudioFile(null);
+                    setAudioBeatAnalysis(null);
                     setAudioPreviewUrl("");
                     audioPreviewRef.current?.pause();
                     setIsPlaying(false);
@@ -1531,25 +1572,15 @@ export default function PhotoReelClient() {
                 </small>
                 <div className="photoReelPurchaseGrid">
                   <Link
-                    className="photoReelPurchaseLink standard"
-                    href="/account?checkout=standard"
+                    className="photoReelPurchaseLink oneTime primary"
+                    href="/account?checkout=one_time"
                     target="_blank"
                     rel="noreferrer"
                     onClick={markCheckoutStarted}
                   >
-                    <span>おすすめ · 1か月ごと</span>
-                    <strong>
-                      {STANDARD_MONTHLY_PLAN_LABEL}・¥
-                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
-                    </strong>
-                    <small>
-                      1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで・1本あたり約
-                      {Math.round(
-                        STANDARD_MONTHLY_PRICE_JPY /
-                          STANDARD_MONTHLY_VIDEO_LIMIT,
-                      )}
-                      円・1か月ごとの自動更新
-                    </small>
+                    <span>初めての保存におすすめ · 1回だけ</span>
+                    <strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存（税込）</strong>
+                    <small>自動更新なし・有効期限なし</small>
                   </Link>
                   <Link
                     className="photoReelPurchaseLink starter"
@@ -1566,15 +1597,25 @@ export default function PhotoReelClient() {
                     <small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存・1か月ごとの自動更新</small>
                   </Link>
                   <Link
-                    className="photoReelPurchaseLink oneTime"
-                    href="/account?checkout=one_time"
+                    className="photoReelPurchaseLink standard"
+                    href="/account?checkout=standard"
                     target="_blank"
                     rel="noreferrer"
                     onClick={markCheckoutStarted}
                   >
-                    <span>1回だけ</span>
-                    <strong>{ONE_TIME_PLAN_LABEL}・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}/1本（税込）</strong>
-                    <small>1回の購入で動画1本まで・自動更新なし・有効期限なし</small>
+                    <span>1か月ごと</span>
+                    <strong>
+                      {STANDARD_MONTHLY_PLAN_LABEL}・¥
+                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
+                    </strong>
+                    <small>
+                      1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで・1本あたり約
+                      {Math.round(
+                        STANDARD_MONTHLY_PRICE_JPY /
+                          STANDARD_MONTHLY_VIDEO_LIMIT,
+                      )}
+                      円・1か月ごとの自動更新
+                    </small>
                   </Link>
                 </div>
                 <button

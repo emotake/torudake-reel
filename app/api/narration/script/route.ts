@@ -25,6 +25,11 @@ import {
   parseJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "../../../../lib/request-safety";
+import {
+  productDurationBucket,
+  productUpstreamErrorCode,
+  recordServerProductEvent,
+} from "../../../../lib/product-analytics";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
@@ -525,6 +530,11 @@ export async function POST(request: Request) {
       responsePayload.error?.code,
       responsePayload.error?.type,
     );
+    await recordServerProductEvent(request, "ai_operation_failed", {
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      outcome: "failed",
+      error_code: productUpstreamErrorCode(response.status),
+    });
     return Response.json(
       { error: apiError(response.status, responsePayload) },
       { status: response.status },
@@ -582,6 +592,12 @@ export async function POST(request: Request) {
         completion.remaining,
       );
     }
+    await recordServerProductEvent(request, "ai_operation_succeeded", {
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      outcome: "completed",
+      voice: style,
+      duration_bucket: productDurationBucket(Math.min(length, sourceDuration)),
+    });
     return Response.json(
       responseNarrationBundleToken
         ? { ...plan, narrationBundleToken: responseNarrationBundleToken }

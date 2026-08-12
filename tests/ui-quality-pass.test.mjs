@@ -32,7 +32,9 @@ test("keeps the recommended setup short and moves free caption styling to result
 });
 
 test("loads the sample as a real File and keeps the caption-synchronised demo fallback", () => {
-  assert.match(pageSource, /src="\/demo\/torudake-demo\.mp4"/);
+  assert.match(pageSource, /fullDemoRequested[\s\S]*?\/demo\/torudake-demo\.mp4[\s\S]*?\/demo\/torudake-demo-lite\.mp4/);
+  assert.match(pageSource, /muted=\{!fullDemoRequested\}/);
+  assert.match(pageSource, /poster="\/demo\/torudake-demo-poster\.jpg"/);
   assert.match(pageSource, /fetch\("\/demo\/torudake-demo\.mp4"/);
   assert.match(pageSource, /new File\(\[blob\], "torudake-demo\.mp4"/);
   assert.match(pageSource, /chooseFile\(sampleFile, \{ demo: true \}\)/);
@@ -116,7 +118,7 @@ test("shows photo-reel preview and save pricing before editing", () => {
   assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*?\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
   assert.match(cssSource, /\.accountPlans\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/);
   assert.ok(
-    photoReelSource.indexOf('checkout=standard') <
+    photoReelSource.indexOf('checkout=one_time') <
       photoReelSource.indexOf('checkout=starter'),
   );
   assert.match(photoReelSource, /function moveRadioSelection/);

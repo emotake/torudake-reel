@@ -1,3 +1,9 @@
+import type { PhotoReelFocusPoint } from "./photo-reel-subject";
+import {
+  snapPhotoReelPlanToBeats,
+  type PhotoReelBeatCandidate,
+} from "./photo-reel-beats";
+
 export const PHOTO_REEL_MIN_PHOTOS = 2;
 export const PHOTO_REEL_MAX_PHOTOS = 10;
 export const PHOTO_REEL_OUTPUT_WIDTH = 1080;
@@ -83,6 +89,8 @@ export type PhotoReelSettings = Readonly<{
   audioFile?: File | null;
   audioFit?: PhotoReelAudioFit;
   audioGain?: number;
+  /** Optional local BGM onset analysis. An empty array explicitly keeps old timing. */
+  beatCandidates?: readonly PhotoReelBeatCandidate[];
 }>;
 
 export type PhotoReelAssetDescriptor = Readonly<{
@@ -98,6 +106,8 @@ export type PreparedPhotoAsset = PhotoReelAssetDescriptor &
     previewUrl: string;
     source: HTMLCanvasElement;
     blurredBackground: HTMLCanvasElement | null;
+    /** Local face/saliency result. Consumers may replace it with a manual point. */
+    focusPoint?: PhotoReelFocusPoint;
   }>;
 
 export type PhotoReelSlide = Readonly<{
@@ -275,7 +285,7 @@ function createPhotoReelPlanWithMinimum(
     };
   });
 
-  return {
+  const plan: PhotoReelPlan = {
     duration: settings.duration,
     frameRate: PHOTO_REEL_FRAME_RATE,
     width: PHOTO_REEL_OUTPUT_WIDTH,
@@ -284,6 +294,9 @@ function createPhotoReelPlanWithMinimum(
     title: normalizeTitle(settings.title),
     slides,
   };
+  return settings.beatCandidates
+    ? snapPhotoReelPlanToBeats(plan, settings.beatCandidates)
+    : plan;
 }
 
 export function createPhotoReelPlan(
@@ -527,11 +540,56 @@ function computeCoverRect(
   };
 }
 
+export function computePhotoReelSubjectAwareCoverRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  focusPoint?: Pick<PhotoReelFocusPoint, "x" | "y" | "confidence"> | null,
+) {
+  const centered = computeCoverRect(
+    sourceWidth,
+    sourceHeight,
+    outputWidth,
+    outputHeight,
+  );
+  if (
+    !focusPoint ||
+    !Number.isFinite(focusPoint.x) ||
+    !Number.isFinite(focusPoint.y) ||
+    (focusPoint.confidence ?? 0) <= 0.02
+  ) {
+    return centered;
+  }
+  const focusX = clamp(focusPoint.x, 0.05, 0.95);
+  const focusY = clamp(focusPoint.y, 0.05, 0.95);
+  const influence = clamp(focusPoint.confidence ?? 0);
+  const minimumX = Math.min(0, outputWidth - centered.width);
+  const minimumY = Math.min(0, outputHeight - centered.height);
+  // Faces and salient objects sit slightly above center, away from reel UI.
+  const desiredX = clamp(
+    outputWidth * 0.5 - focusX * centered.width,
+    minimumX,
+    0,
+  );
+  const desiredY = clamp(
+    outputHeight * 0.44 - focusY * centered.height,
+    minimumY,
+    0,
+  );
+  // Weak saliency should only nudge the old composition. Face/manual evidence
+  // receives enough confidence to make the full subject-aware correction.
+  const x = centered.x + (desiredX - centered.x) * influence;
+  const y = centered.y + (desiredY - centered.y) * influence;
+  return { ...centered, x, y };
+}
+
 export function computePhotoReelImageLayout(
   sourceWidth: number,
   sourceHeight: number,
   outputWidth = PHOTO_REEL_OUTPUT_WIDTH,
   outputHeight = PHOTO_REEL_OUTPUT_HEIGHT,
+  focusPoint?: Pick<PhotoReelFocusPoint, "x" | "y" | "confidence"> | null,
 ): PhotoReelImageLayout {
   if (
     !Number.isFinite(sourceWidth) ||
@@ -568,17 +626,19 @@ export function computePhotoReelImageLayout(
             width: safeForeground.width,
             height: safeForeground.height,
           }
-        : computeCoverRect(
+        : computePhotoReelSubjectAwareCoverRect(
             sourceWidth,
             sourceHeight,
             outputWidth,
             outputHeight,
+            focusPoint,
           ),
-    background: computeCoverRect(
+    background: computePhotoReelSubjectAwareCoverRect(
       sourceWidth,
       sourceHeight,
       outputWidth,
       outputHeight,
+      focusPoint,
     ),
   };
 }
@@ -699,6 +759,7 @@ function drawPhotoAsset(
     asset.height,
     context.canvas.width,
     context.canvas.height,
+    asset.focusPoint,
   );
   const gallery = templateId === "gallery";
   if (layout.mode === "blur-fit" || gallery) {

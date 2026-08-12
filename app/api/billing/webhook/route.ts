@@ -29,6 +29,8 @@ import {
   readRequestBodyWithLimit,
   RequestBodyTooLargeError,
 } from "../../../../lib/request-safety";
+import { recordServerProductEvent } from "../../../../lib/product-analytics";
+import { describeStripeProductTelemetry } from "../../../../lib/stripe-product-analytics";
 
 type StripeObject = Record<string, unknown>;
 
@@ -139,6 +141,7 @@ export async function POST(request: Request) {
     }
 
     await finishStripeEvent(event.id);
+    await recordStripeProductEvent(request, event);
     return Response.json({ received: true });
   } catch (error) {
     await abandonStripeEvent(event.id).catch(() => undefined);
@@ -233,6 +236,19 @@ async function handleCheckoutCompleted(session: StripeObject) {
     stripePriceId: expectedPriceId,
   });
   await reconcileOneTimePurchase(paymentIntentId);
+}
+
+async function recordStripeProductEvent(request: Request, event: StripeEvent) {
+  const descriptor = describeStripeProductTelemetry(
+    event.type,
+    event.data.object,
+  );
+  if (!descriptor) return;
+  await recordServerProductEvent(
+    request,
+    descriptor.eventName,
+    descriptor.properties,
+  );
 }
 
 async function handleCheckoutExpired(session: StripeObject) {

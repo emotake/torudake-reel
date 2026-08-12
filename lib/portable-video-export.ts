@@ -1,5 +1,15 @@
 import type { InputAudioTrack } from "mediabunny";
 import { getAudioCodecPriority } from "./transcription-media";
+import {
+  createPortableVideoColorConversionPlan,
+  type PortableVideoColorConversionPlan,
+} from "./video-color-space";
+import {
+  combineAudioLoudnessMeasurements,
+  computeLoudnessNormalizationGain,
+  measureAudioLoudness,
+  type AudioLoudnessMeasurement,
+} from "./audio-loudness";
 
 const DEFAULT_FRAME_RATE = 30;
 const MAX_FRAME_RATE = 30;
@@ -555,6 +565,8 @@ export type PortableVideoExportOptions = Readonly<{
   signal?: AbortSignal;
   /** Receives a monotonically increasing value from 0 through 1. */
   onProgress?: (progress: number) => void;
+  /** Reports whether the browser will color-convert a wide-gamut/HDR source. */
+  onColorConversionPlan?: (plan: PortableVideoColorConversionPlan) => void;
 }>;
 
 export type PortableVideoExportUnsupportedReason =
@@ -1144,9 +1156,38 @@ function measureScheduledOriginalAudio(items: ScheduledAudioBuffer[]) {
     }
   }
 
-  return {
+  const rmsMeasurement = {
     rms: sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0,
     peak,
+  };
+  const loudnessMeasurements: AudioLoudnessMeasurement[] = [];
+  for (const item of items) {
+    const startFrame = Math.max(
+      0,
+      Math.floor(item.placement.offset * item.buffer.sampleRate),
+    );
+    const endFrame = Math.min(
+      item.buffer.length,
+      Math.ceil(
+        (item.placement.offset + item.placement.duration) *
+          item.buffer.sampleRate,
+      ),
+    );
+    if (endFrame <= startFrame) continue;
+    loudnessMeasurements.push(
+      measureAudioLoudness(
+        Array.from(
+          { length: item.buffer.numberOfChannels },
+          (_, channel) => item.buffer.getChannelData(channel),
+        ),
+        item.buffer.sampleRate,
+        { startFrame, endFrame },
+      ),
+    );
+  }
+  return {
+    ...rmsMeasurement,
+    loudness: combineAudioLoudnessMeasurements(loudnessMeasurements),
   };
 }
 
@@ -1187,7 +1228,9 @@ export async function measurePortableOriginalAudioNormalization(
     );
     if (decoded.length === 0) return 1;
     const level = measureScheduledOriginalAudio(decoded);
-    return computePortableOriginalNormalizationGain(level.rms, level.peak);
+    return level.loudness.integratedLufs === null
+      ? computePortableOriginalNormalizationGain(level.rms, level.peak)
+      : computeLoudnessNormalizationGain(level.loudness);
   } catch (error) {
     if (error instanceof PortableVideoExportAbortedError) throw error;
     return 1;
@@ -1314,10 +1357,13 @@ async function renderMixedAudio(
 
     const originalGainNode = context.createGain();
     const originalLevel = measureScheduledOriginalAudio(originalAudio);
-    const normalizationGain = computePortableOriginalNormalizationGain(
-      originalLevel.rms,
-      originalLevel.peak,
-    );
+    const normalizationGain =
+      originalLevel.loudness.integratedLufs === null
+        ? computePortableOriginalNormalizationGain(
+            originalLevel.rms,
+            originalLevel.peak,
+          )
+        : computeLoudnessNormalizationGain(originalLevel.loudness);
     // The user's 8% / 12% choice remains the base proportion. Local
     // normalization makes source loudness consistent, and narration activity
     // temporarily ducks that base without changing the selected setting.
@@ -1460,8 +1506,18 @@ export async function exportPortableVideoMp4(
           "この端末では動画を安全に書き出せません。PC版Chromeでお試しください。",
       );
     }
-    const sourceWidth = await videoTrack.getDisplayWidth();
-    const sourceHeight = await videoTrack.getDisplayHeight();
+    const [sourceWidth, sourceHeight, sourceColorSpace, sourceHasHdr] =
+      await Promise.all([
+        videoTrack.getDisplayWidth(),
+        videoTrack.getDisplayHeight(),
+        videoTrack.getColorSpace().catch(() => ({})),
+        videoTrack.hasHighDynamicRange().catch(() => false),
+      ]);
+    const colorConversionPlan = createPortableVideoColorConversionPlan({
+      colorSpace: sourceColorSpace,
+      hasHighDynamicRange: sourceHasHdr,
+    });
+    options.onColorConversionPlan?.(colorConversionPlan);
     const dimensions = computePortableVideoDimensions(
       sourceWidth,
       sourceHeight,
@@ -1520,7 +1576,13 @@ export async function exportPortableVideoMp4(
     const canvas = document.createElement("canvas");
     canvas.width = dimensions.width;
     canvas.height = dimensions.height;
-    const context = canvas.getContext("2d", { alpha: false });
+    // A fixed sRGB backing canvas gives Canvas2D/WebCodecs one explicit SDR
+    // destination. Wide-gamut and HDR samples are color-managed before the
+    // portable H.264 encode instead of inheriting ambiguous source metadata.
+    const context = canvas.getContext("2d", {
+      alpha: false,
+      colorSpace: colorConversionPlan.outputCanvasColorSpace,
+    });
     if (!context) {
       throw new PortableVideoExportUnsupportedError(
         "browser",
