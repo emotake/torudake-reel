@@ -686,6 +686,14 @@ test("uses the final renderer and local quality evidence before export", () => {
   assert.match(pageSource, /drawCaptionOverlayRef\.current\(/);
   assert.match(pageSource, /drawCaptionOverlay\(context, canvas, sourceTime\)/);
   assert.match(pageSource, /getCaptionSafeArea\(canvas\.width, canvas\.height\)/);
+  assert.match(
+    pageSource,
+    /const displayRange = getCaptionDisplayRange\(caption\);[\s\S]*getCaptionEntranceProgress\(sourceTime, displayRange\.start\)/,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /getCaptionEntranceProgress\(sourceTime, caption\.start\)/,
+  );
   assert.match(pageSource, /attachNarrationCaptionDisplayTiming\(/);
   assert.match(pageSource, /analyzeVideoForNaturalEdit\(file, controller\.signal\)/);
   assert.match(pageSource, /createNaturalEdit\([\s\S]*visualEvidence/);

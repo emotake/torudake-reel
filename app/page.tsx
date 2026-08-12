@@ -7567,6 +7567,7 @@ function ResultWorkspace({
 
     if (!caption) return;
 
+    const displayRange = getCaptionDisplayRange(caption);
     const keptIndex = keptLines.findIndex((line) => line.id === caption.id);
     const presentation = getCaptionPresentation(
       caption,
@@ -7630,7 +7631,7 @@ function ResultWorkspace({
       Math.max(safeArea.y, preferredBoxY),
     );
     const boxRadius = Math.max(0, fontSize * frame.cornerRadius);
-    const entrance = getCaptionEntranceProgress(sourceTime, caption.start);
+    const entrance = getCaptionEntranceProgress(sourceTime, displayRange.start);
     context.save();
     context.globalAlpha = 0.35 + entrance * 0.65;
     context.translate(
