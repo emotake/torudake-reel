@@ -43,6 +43,7 @@ import {
   STANDARD_MONTHLY_VIDEO_LIMIT,
   type BillingBucket,
 } from "../../lib/billing-policy";
+import { trackClientEvent } from "../../lib/client-analytics";
 
 const MAX_PHOTOS = 10;
 const MIN_PHOTOS = 2;
@@ -544,7 +545,10 @@ export default function PhotoReelClient() {
     };
   }, [checkPurchaseAfterReturn, showPurchase]);
 
-  const markCheckoutStarted = () => {
+  const markCheckoutStarted = (
+    plan: "starter" | "standard" | "one_time",
+  ) => {
+    trackClientEvent("checkout_started", { plan, source: "result" });
     purchaseReturnPendingRef.current = true;
     setMessage(
       "別タブで決済を完了してください。この画面へ戻ると購入状況を自動で確認します。",
@@ -1121,7 +1125,7 @@ export default function PhotoReelClient() {
       </header>
 
       <section className="photoReelIntro">
-        <p className="photoReelEyebrow">PHOTO TO REEL · 端末内編集</p>
+        <p className="photoReelEyebrow">写真からリールへ · 端末内編集</p>
         <h1>
           写真を選ぶだけ。
           <br />
@@ -1132,17 +1136,28 @@ export default function PhotoReelClient() {
           <br />
           写真そのものは送信せず、スマホやパソコンの中でリール動画にします。
         </p>
+        {photos.length === 0 ? (
+          <button
+            className="photoReelHeroCta"
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={preparing || isEditingLocked}
+          >
+            <strong>写真を選んで無料でプレビュー</strong>
+            <small>無料体験はサービス共通で合計3分以内・最大2動画まで</small>
+          </button>
+        ) : null}
         <div className="photoReelIntroOffer" aria-label="写真リールの料金">
           <span aria-hidden="true">¥0</span>
           <p>
-            <strong>仕上がりプレビューは無料</strong>
+            <strong>仕上がりプレビューは無料体験の範囲内</strong>
             <small>
               {ONE_TIME_PLAN_LABEL}は1回の購入で動画1本まで・¥
               {ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}。{STARTER_MONTHLY_PLAN_LABEL}は1か月に動画
               {STARTER_MONTHLY_VIDEO_LIMIT}本まで・¥
               {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}、{STANDARD_MONTHLY_PLAN_LABEL}は1か月に動画
               {STANDARD_MONTHLY_VIDEO_LIMIT}本まで・¥
-              {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}です。表示価格はすべて税込です。
+              {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}です。表示価格はすべて税込で、購入手続き完了時に決済されます。
             </small>
           </p>
         </div>
@@ -1576,7 +1591,7 @@ export default function PhotoReelClient() {
                     href="/account?checkout=one_time"
                     target="_blank"
                     rel="noreferrer"
-                    onClick={markCheckoutStarted}
+                    onClick={() => markCheckoutStarted("one_time")}
                   >
                     <span>初めての保存におすすめ · 1回だけ</span>
                     <strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存（税込）</strong>
@@ -1587,7 +1602,7 @@ export default function PhotoReelClient() {
                     href="/account?checkout=starter"
                     target="_blank"
                     rel="noreferrer"
-                    onClick={markCheckoutStarted}
+                    onClick={() => markCheckoutStarted("starter")}
                   >
                     <span>1か月ごと</span>
                     <strong>
@@ -1601,7 +1616,7 @@ export default function PhotoReelClient() {
                     href="/account?checkout=standard"
                     target="_blank"
                     rel="noreferrer"
-                    onClick={markCheckoutStarted}
+                    onClick={() => markCheckoutStarted("standard")}
                   >
                     <span>1か月ごと</span>
                     <strong>
@@ -1652,7 +1667,7 @@ export default function PhotoReelClient() {
       </section>
 
       <section className="photoReelHow">
-        <p className="photoReelEyebrow">HOW IT WORKS</p>
+        <p className="photoReelEyebrow">かんたん3ステップ</p>
         <h2>写真の魅力を残したまま、動画らしい動きを。</h2>
         <div>
           <article>
@@ -1681,6 +1696,7 @@ export default function PhotoReelClient() {
           <Link href="/privacy">プライバシー</Link>
           <Link href="/terms">利用規約</Link>
           <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
+          <Link href="/support">よくある質問・お問い合わせ</Link>
         </nav>
       </footer>
     </main>

@@ -3303,7 +3303,7 @@ export default function VideoMixClient() {
       <header className="videoMixHeader">
         <Link href="/" className="videoMixBrand" target="_blank" rel="noreferrer">撮るだけリール</Link>
         <div>
-          <span>VIDEO MIX</span>
+          <span>複数動画編集</span>
           <strong>複数動画をつなぐ</strong>
         </div>
         <Link href="/account" target="_blank" rel="noreferrer">アカウント</Link>
@@ -3314,11 +3314,22 @@ export default function VideoMixClient() {
           <p className="videoMixEyebrow">最大5本の動画から、流れのある1本へ</p>
           <h1>順番を守って、<br /><em>いい場面だけをつなぐ。</em></h1>
           <p>各動画から1〜2カットを選び、素材を選んだ順につなぎます。途中で前の動画へ戻る編集や、逆再生は行いません。つないだ後は、AIナレーションと発話に合うテロップも追加できます。</p>
+          {sources.length === 0 ? (
+            <button
+              className="videoMixHeroCta"
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={editingLocked}
+            >
+              <strong>動画を選んで無料でプレビュー</strong>
+              <small>無料体験はサービス共通で合計3分以内・最大2動画まで</small>
+            </button>
+          ) : null}
         </div>
         <aside>
           <strong>つなぎ方の変更は追加料金なし</strong>
           <span>カット範囲と8種類の場面転換は端末内で処理。AI音声を作る場合だけ、AI処理を1回使用します。</span>
-          <small>保存時は完成動画1本分の利用枠を使用</small>
+          <small>プラン購入時に決済・書き出し成功時に完成動画1本分の利用枠を使用</small>
         </aside>
       </section>
 
@@ -3918,9 +3929,9 @@ export default function VideoMixClient() {
                 <strong>完成動画を保存するプランを選択</strong>
                 <small>決済後、この画面へ戻って「購入を確認して書き出す」を押してください。</small>
                 <div>
-                  <Link className="primary" href="/account?checkout=one_time" target="_blank" rel="noreferrer"><span>1回払い・自動更新なし</span><strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存</strong></Link>
-                  <Link href="/account?checkout=starter" target="_blank" rel="noreferrer"><span>1か月ごと</span><strong>{STARTER_MONTHLY_PLAN_LABEL} ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
-                  <Link href="/account?checkout=standard" target="_blank" rel="noreferrer"><span>1か月ごと</span><strong>{STANDARD_MONTHLY_PLAN_LABEL} ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
+                  <Link className="primary" href="/account?checkout=one_time" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "one_time", source: "result" })}><span>1回払い・自動更新なし</span><strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存</strong></Link>
+                  <Link href="/account?checkout=starter" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "starter", source: "result" })}><span>1か月ごと</span><strong>{STARTER_MONTHLY_PLAN_LABEL} ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
+                  <Link href="/account?checkout=standard" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "standard", source: "result" })}><span>1か月ごと</span><strong>{STANDARD_MONTHLY_PLAN_LABEL} ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
                 </div>
               </div>
             ) : null}
@@ -3950,12 +3961,12 @@ export default function VideoMixClient() {
       </section>
 
       <nav className="videoMixMobileSteps" aria-label="編集手順">
-        <button type="button" className={mobileStep === 1 ? "isActive" : ""} onClick={() => setMobileStep(1)}>1 素材</button>
-        <button type="button" className={mobileStep === 2 ? "isActive" : ""} disabled={!plan} onClick={() => setMobileStep(2)}>2 つなぎ</button>
-        <button type="button" className={mobileStep === 3 ? "isActive" : ""} disabled={!plan} onClick={() => setMobileStep(3)}>3 音声・保存</button>
+        <button type="button" className={mobileStep === 1 ? "isActive" : ""} aria-current={mobileStep === 1 ? "step" : undefined} onClick={() => setMobileStep(1)}>1 素材</button>
+        <button type="button" className={mobileStep === 2 ? "isActive" : ""} aria-current={mobileStep === 2 ? "step" : undefined} disabled={!plan} onClick={() => setMobileStep(2)}>2 つなぎ</button>
+        <button type="button" className={mobileStep === 3 ? "isActive" : ""} aria-current={mobileStep === 3 ? "step" : undefined} disabled={!plan} onClick={() => setMobileStep(3)}>3 音声・保存</button>
       </nav>
 
-      <footer className="videoMixFooter"><Link href="/" target="_blank" rel="noreferrer">トップへ戻る</Link><Link href="/privacy" target="_blank" rel="noreferrer">プライバシー</Link><Link href="/terms" target="_blank" rel="noreferrer">利用規約</Link></footer>
+      <footer className="videoMixFooter"><Link href="/" target="_blank" rel="noreferrer">トップへ戻る</Link><Link href="/support" target="_blank" rel="noreferrer">よくある質問・お問い合わせ</Link><Link href="/privacy" target="_blank" rel="noreferrer">プライバシー</Link><Link href="/terms" target="_blank" rel="noreferrer">利用規約</Link></footer>
     </main>
   );
 }

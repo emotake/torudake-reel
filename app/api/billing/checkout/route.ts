@@ -12,7 +12,10 @@ import {
   getCurrentUser,
   isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
-import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
+import {
+  isAccountDeletionScheduled,
+  isPasskeyAuthenticationConfigured,
+} from "../../../../lib/account-auth";
 import {
   isBillingConfigured,
   isCanonicalBillingRequest,
@@ -30,6 +33,10 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../lib/request-safety";
 import { recordServerProductEvent } from "../../../../lib/product-analytics";
+import {
+  billingRateLimitedResponse,
+  consumeBillingRateLimit,
+} from "../../../../lib/billing-rate-limit";
 
 const MAX_CHECKOUT_REQUEST_BYTES = 16 * 1024;
 
@@ -133,6 +140,29 @@ export async function POST(request: Request) {
   let checkoutSessionCreated = false;
 
   try {
+    const user = await getOrCreateBillingUser(currentUser);
+    if (await isAccountDeletionScheduled(user.id)) {
+      return Response.json(
+        {
+          error:
+            "アカウント削除を予約中のため、新しい購入を開始できません。アカウント画面で削除予約を取り消してからお試しください。",
+          code: "account_deletion_scheduled",
+        },
+        { status: 409 },
+      );
+    }
+    if (payload.plan === "one_time") {
+      const rateLimit = await consumeBillingRateLimit(
+        user.id,
+        "one_time_checkout",
+      );
+      if (!rateLimit.allowed) {
+        return billingRateLimitedResponse(
+          rateLimit,
+          "動画1本プランの決済画面を続けて開いたため、少し待ってからもう一度お試しください。",
+        );
+      }
+    }
     const readiness = await getStripeReadiness();
     if (!readiness.ready) {
       const message =
@@ -146,7 +176,6 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
-    const user = await getOrCreateBillingUser(currentUser);
     const billingStatus = await getBillingStatusForUser(user.id);
     if (payload.plan !== "one_time") {
       if (billingStatus.monthlySubscriptionActive) {

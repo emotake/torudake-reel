@@ -38,6 +38,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /実際の動画・音声・テロップで確認/);
   assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
   assert.match(html, /用途別の例文で、4つの話し方を聴き比べられます/);
+  assert.match(html, /固定見本は試聴用モデル（gpt-4o-mini-tts）/);
+  assert.match(html, /実際の動画では本番モデル（gpt-realtime-2\.1-mini）/);
   assert.match(html, /朝七時に駅を出発して、海沿いのカフェで/);
   assert.match(html, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
   assert.match(html, /週末のナイトマーケットは大盛況で/);
@@ -51,7 +53,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /lifestyleGallery/);
   assert.doesNotMatch(html, /4工程|AUTO CUT/);
   assert.match(html, /動画を選んで無料で試す/);
-  assert.match(html, /編集・プレビューは無料/);
+  assert.match(html, /無料体験：合計3分以内・最大2動画まで/);
+  assert.match(html, /プラン購入時に決済・書き出し成功時に1本分を使用/);
   assert.match(html, /動画1本だけ保存/);
   assert.match(html, /料金を見る/);
   assert.match(html, /href="\/video-mix"/);
@@ -107,6 +110,8 @@ test("renders the five-pattern photo reel editor as a separate public route", as
 
   assert.match(html, /写真を選ぶだけ。/);
   assert.match(html, /動きのある1本に。/);
+  assert.match(html, /写真を選んで無料でプレビュー/);
+  assert.match(html, /無料体験はサービス共通で合計3分以内・最大2動画まで/);
   assert.match(html, /自動編集を選ぶ/);
   assert.match(html, /シネマ/);
   assert.match(html, /リズム/);
@@ -142,7 +147,8 @@ test("renders the ordered five-video editor as a separate public route", async (
   assert.match(html, /ほかの5種類も見る/);
   assert.match(html, /AIナレーションを入れる/);
   assert.match(html, /AIナレーションと発話に合うテロップも追加できます/);
-  assert.match(html, /保存時は完成動画1本分の利用枠を使用/);
+  assert.match(html, /動画を選んで無料でプレビュー/);
+  assert.match(html, /プラン購入時に決済・書き出し成功時に完成動画1本分の利用枠を使用/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/video-mix"/,
@@ -283,6 +289,27 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/commercial-disclosure"/,
+  );
+});
+
+test("publishes safe support guidance for billing, recovery, and export failures", async () => {
+  const response = await render("/support");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /決済・月額プランの解約/);
+  assert.match(html, /書き出しや保存に失敗した/);
+  assert.match(html, /パスキーを登録した端末を紛失した/);
+  assert.match(html, /二重請求・返金について/);
+  assert.match(html, /エラー番号/);
+  assert.match(html, /利用端末とブラウザ/);
+  assert.match(html, /問題が起きた工程/);
+  assert.match(html, /動画・音声ファイルや字幕・台本の本文はメールへ添付・貼り付けしないでください/);
+  assert.match(html, /torudake\.reel@gmail\.com/);
+  assert.doesNotMatch(html, /24時間以内|営業日以内|自動返信|独自ドメイン/);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/support"/,
   );
 });
 

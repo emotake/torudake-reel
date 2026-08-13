@@ -31,6 +31,10 @@ import {
 } from "../../../../lib/request-safety";
 import { recordServerProductEvent } from "../../../../lib/product-analytics";
 import { describeStripeProductTelemetry } from "../../../../lib/stripe-product-analytics";
+import {
+  getRequestIdentifiers,
+  logOperationalEvent,
+} from "../../../../lib/observability";
 
 type StripeObject = Record<string, unknown>;
 
@@ -59,6 +63,7 @@ const PURCHASE_STATE_EVENT_TYPES = new Set([
 ]);
 
 export async function POST(request: Request) {
+  const { requestId, correlationId } = getRequestIdentifiers(request);
   const { webhookSecret } = getStripeConfig();
   const signature = request.headers.get("stripe-signature");
   if (!isStripeWebhookConfigured() || !webhookSecret) {
@@ -106,7 +111,27 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid Stripe event." }, { status: 400 });
   }
 
-  const eventClaim = await beginStripeEvent(event.id, event.type);
+  let eventClaim: Awaited<ReturnType<typeof beginStripeEvent>>;
+  try {
+    eventClaim = await beginStripeEvent(event.id, event.type);
+  } catch (error) {
+    logOperationalEvent("error", request, {
+      event: "stripe_webhook_claim_failed",
+      component: "stripe_webhook",
+      operation: "claim_event",
+      status: 500,
+      outcome: "failed",
+      errorCode: "webhook_claim_failed",
+      eventType: event.type,
+      requestId,
+      correlationId,
+      error,
+    });
+    return Response.json(
+      { error: "Stripe webhook processing failed." },
+      { status: 500 },
+    );
+  }
   if (eventClaim === "processed") {
     return Response.json({ received: true, duplicate: true });
   }
@@ -145,7 +170,18 @@ export async function POST(request: Request) {
     return Response.json({ received: true });
   } catch (error) {
     await abandonStripeEvent(event.id).catch(() => undefined);
-    console.error("Stripe webhook processing failed", event.type, error);
+    logOperationalEvent("error", request, {
+      event: "stripe_webhook_processing_failed",
+      component: "stripe_webhook",
+      operation: "process_event",
+      status: 500,
+      outcome: "failed",
+      errorCode: "webhook_processing_failed",
+      eventType: event.type,
+      requestId,
+      correlationId,
+      error,
+    });
     return Response.json(
       { error: "Stripe webhook processing failed." },
       { status: 500 },

@@ -191,8 +191,25 @@ export function runLocalChecks({ root = PROJECT_ROOT } = {}) {
     d1DatabaseId: "c0b9cc06-fc19-4e02-acac-2c19d32f3fdc",
     d1MigrationsDir: "drizzle",
     d1MigrationsTable: "d1_migrations",
+    observabilityContract: "config/observability.json",
   };
   checkExactObject(targets, expectedTargets, "Release targets", errors);
+
+  const observability = readJson(
+    resolve(root, targets.observabilityContract),
+  );
+  if (
+    observability?.schemaVersion !== 1 ||
+    observability?.production?.structuredLogs !== true ||
+    observability?.production?.sampling?.errors !== 1 ||
+    observability?.production?.sampling?.warnings !== 1
+  ) {
+    errors.push(
+      "Production observability must keep structured error/warning logs at full sampling.",
+    );
+  } else {
+    notes.push("Production observability contract is present.");
+  }
 
   const wranglerConfig = readJson(resolve(root, "wrangler.d1.jsonc"));
   const databaseConfig = wranglerConfig.d1_databases?.[0];
@@ -215,6 +232,16 @@ export function runLocalChecks({ root = PROJECT_ROOT } = {}) {
   ) {
     errors.push(
       "wrangler.d1.jsonc must remain D1-only and must never configure Pages or R2.",
+    );
+  }
+  if (
+    wranglerConfig.observability?.enabled !== true ||
+    wranglerConfig.observability?.logs?.enabled !== true ||
+    wranglerConfig.observability?.logs?.head_sampling_rate !== 1 ||
+    wranglerConfig.observability?.traces?.enabled !== false
+  ) {
+    errors.push(
+      "D1 maintenance observability must preserve all logs and keep paid traces disabled.",
     );
   }
 

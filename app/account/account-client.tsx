@@ -59,9 +59,61 @@ type BillingStatus = {
 
 type AuthOptions<T> = { options?: T; error?: string; code?: string };
 
+type AccountPasskey = {
+  id: string;
+  displayName: string;
+  deviceType: string;
+  backedUp: boolean;
+  createdAt: number;
+  lastUsedAt: number | null;
+};
+
+type BillingDocument = {
+  id: string;
+  kind: "receipt" | "invoice";
+  label: string;
+  createdAt: number;
+  amount: number;
+  amountRefunded: number;
+  currency: string;
+  status: string;
+  url: string;
+};
+
+type AccountDeletion = {
+  status: "scheduled";
+  requestedAt: number;
+  executeAfter: number;
+};
+
 const ACCOUNT_AUTH_HINT_STORAGE_KEY = "torudake-account-authenticated";
 const CHECKOUT_STATUS_POLL_ATTEMPTS = 8;
 const CHECKOUT_STATUS_POLL_INTERVAL_MS = 1_500;
+
+function checkoutPlanDetails(plan: CheckoutPlan | null) {
+  switch (plan) {
+    case "starter":
+      return {
+        name: STARTER_MONTHLY_PLAN_LABEL,
+        price: `¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 1か月・税込`,
+        renewal: "解約するまで1か月ごとに自動更新",
+      };
+    case "standard":
+      return {
+        name: STANDARD_MONTHLY_PLAN_LABEL,
+        price: `¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 1か月・税込`,
+        renewal: "解約するまで1か月ごとに自動更新",
+      };
+    case "one_time":
+      return {
+        name: "動画1本プラン",
+        price: `¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")} / 1本・税込`,
+        renewal: "1回払い・自動更新なし",
+      };
+    default:
+      return null;
+  }
+}
 
 function checkoutReflected(
   status: BillingStatus,
@@ -100,6 +152,16 @@ function activeMonthlyPlanLabel(status: BillingStatus) {
 
 export default function AccountClient() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [pendingCheckoutPlan, setPendingCheckoutPlan] =
+    useState<CheckoutPlan | null>(null);
+  const [passkeys, setPasskeys] = useState<AccountPasskey[]>([]);
+  const [passkeyNames, setPasskeyNames] = useState<Record<string, string>>({});
+  const [newPasskeyName, setNewPasskeyName] = useState("この端末");
+  const [billingDocuments, setBillingDocuments] = useState<BillingDocument[]>([]);
+  const [accountDeletion, setAccountDeletion] =
+    useState<AccountDeletion | null>(null);
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryReference, setRecoveryReference] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState<
@@ -107,6 +169,12 @@ export default function AccountClient() {
     | "login"
     | CheckoutPlan
     | "portal"
+    | "passkey_update"
+    | "passkey_delete"
+    | "revoke_sessions"
+    | "recovery"
+    | "delete_account"
+    | "cancel_deletion"
     | "logout"
     | null
   >(null);
@@ -130,9 +198,60 @@ export default function AccountClient() {
     return payload;
   }
 
-  async function postJson<T>(path: string, body?: unknown) {
+  async function loadPasskeys() {
+    const response = await fetch("/api/account/passkeys", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { passkeys?: AccountPasskey[]; error?: string }
+      | null;
+    if (!response.ok || !payload?.passkeys) {
+      throw new Error(payload?.error || "パスキーを読み込めませんでした。");
+    }
+    setPasskeys(payload.passkeys);
+    setPasskeyNames(
+      Object.fromEntries(
+        payload.passkeys.map((passkey) => [passkey.id, passkey.displayName]),
+      ),
+    );
+  }
+
+  async function loadBillingDocuments() {
+    const response = await fetch("/api/billing/portal", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { documents?: BillingDocument[]; error?: string }
+      | null;
+    if (!response.ok || !payload?.documents) {
+      throw new Error(payload?.error || "領収書・請求書を読み込めませんでした。");
+    }
+    setBillingDocuments(payload.documents);
+  }
+
+  async function loadAccountDeletion() {
+    const response = await fetch("/api/account/deletion", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { deletion?: AccountDeletion | null; error?: string }
+      | null;
+    if (!response.ok || !payload || !("deletion" in payload)) {
+      throw new Error(payload?.error || "削除予約の状況を読み込めませんでした。");
+    }
+    setAccountDeletion(payload.deletion ?? null);
+  }
+
+  async function mutationJson<T>(
+    path: string,
+    method: "POST" | "PATCH" | "DELETE",
+    body?: unknown,
+  ) {
     const response = await fetch(path, {
-      method: "POST",
+      method,
       credentials: "same-origin",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -144,6 +263,10 @@ export default function AccountClient() {
       throw new Error(payload?.error || "処理を完了できませんでした。");
     }
     return payload;
+  }
+
+  async function postJson<T>(path: string, body?: unknown) {
+    return mutationJson<T>(path, "POST", body);
   }
 
   async function registerPasskey() {
@@ -167,7 +290,7 @@ export default function AccountClient() {
       });
       await postJson<{ authenticated: boolean }>(
         "/api/account/passkey/register/verify",
-        credential,
+        { credential, displayName: newPasskeyName },
       );
       setNotice(
         addingBackupPasskey
@@ -175,6 +298,7 @@ export default function AccountClient() {
           : "アカウントを作成しました。この端末の本人確認でログインできます。",
       );
       await loadStatus();
+      await loadPasskeys();
     } catch (authError) {
       setError(
         authenticationMessage(
@@ -212,6 +336,192 @@ export default function AccountClient() {
       await loadStatus();
     } catch (authError) {
       setError(authenticationMessage(authError, "ログインできませんでした。"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reauthenticate() {
+    const prepared = await postJson<
+      AuthOptions<PublicKeyCredentialRequestOptionsJSON>
+    >("/api/account/passkey/reauth/options");
+    if (!prepared.options) throw new Error("本人確認情報を準備できませんでした。");
+    const credential = await startAuthentication({
+      optionsJSON: prepared.options,
+    });
+    await postJson<{ authenticated: boolean }>(
+      "/api/account/passkey/login/verify",
+      credential,
+    );
+  }
+
+  async function renamePasskey(passkey: AccountPasskey) {
+    const nextName = passkeyNames[passkey.id] ?? passkey.displayName;
+    if (nextName === passkey.displayName) return;
+    setBusy("passkey_update");
+    setError("");
+    try {
+      await mutationJson<{ updated: boolean }>(
+        "/api/account/passkeys",
+        "PATCH",
+        {
+          id: passkey.id,
+          displayName: nextName,
+        },
+      );
+      setNotice("パスキーの端末名を更新しました。");
+      await loadPasskeys();
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "端末名を更新できませんでした。",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deletePasskey(passkey: AccountPasskey) {
+    if (
+      !window.confirm(
+        `「${passkey.displayName}」を削除しますか？ 削除後、このパスキーではログインできません。`,
+      )
+    ) {
+      return;
+    }
+    setBusy("passkey_delete");
+    setError("");
+    try {
+      await reauthenticate();
+      await mutationJson<{ deleted: boolean }>(
+        "/api/account/passkeys",
+        "DELETE",
+        { id: passkey.id },
+      );
+      setNotice("パスキーを削除し、ほかの端末のログイン状態を解除しました。");
+      await loadPasskeys();
+    } catch (deleteError) {
+      setError(authenticationMessage(deleteError, "パスキーを削除できませんでした。"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeAllSessions() {
+    if (
+      !window.confirm(
+        "すべての端末をログアウトしますか？ この操作後は、この端末でも再ログインが必要です。",
+      )
+    ) {
+      return;
+    }
+    setBusy("revoke_sessions");
+    setError("");
+    try {
+      await reauthenticate();
+      const response = await fetch("/api/account/sessions", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "ログイン状態を解除できませんでした。");
+      }
+      window.localStorage.removeItem(ACCOUNT_AUTH_HINT_STORAGE_KEY);
+      setNotice("");
+      await loadStatus();
+    } catch (sessionError) {
+      setError(authenticationMessage(sessionError, "ログイン状態を解除できませんでした。"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function requestRecovery() {
+    setBusy("recovery");
+    setError("");
+    setRecoveryReference("");
+    try {
+      const payload = await postJson<{ accepted: boolean; reference: string }>(
+        "/api/account/recovery",
+        { billingEmail: recoveryEmail },
+      );
+      setRecoveryReference(payload.reference);
+    } catch (recoveryError) {
+      setError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "復旧相談を受け付けられませんでした。",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function scheduleAccountDeletion() {
+    const remainingCredits = status?.oneTimeCredits ?? 0;
+    if (
+      !window.confirm(
+        `アカウント削除を予約しますか？ 即時には削除されず、30日間は取り消せます。${remainingCredits > 0 ? `動画1本プランの保存枠が${remainingCredits}本残っており、削除後は利用できません。` : ""}月額プランが有効な場合は先に自動更新の解約が必要です。`,
+      )
+    ) {
+      return;
+    }
+    setBusy("delete_account");
+    setError("");
+    try {
+      await reauthenticate();
+      const payload = await postJson<{
+        scheduled: boolean;
+        requestedAt: number;
+        executeAfter: number;
+      }>("/api/account/deletion", {
+        confirmDeletion: true,
+        confirmUnusedCredits: remainingCredits > 0,
+      });
+      setAccountDeletion({
+        status: "scheduled",
+        requestedAt: payload.requestedAt,
+        executeAfter: payload.executeAfter,
+      });
+      setNotice("アカウント削除を予約しました。30日間はこの画面から取り消せます。");
+    } catch (deletionError) {
+      setError(
+        authenticationMessage(
+          deletionError,
+          "アカウント削除を予約できませんでした。",
+        ),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelAccountDeletion() {
+    setBusy("cancel_deletion");
+    setError("");
+    try {
+      const response = await fetch("/api/account/deletion", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.error || "削除予約を取り消せませんでした。");
+      }
+      setAccountDeletion(null);
+      setNotice("アカウント削除の予約を取り消しました。");
+    } catch (cancelError) {
+      setError(
+        cancelError instanceof Error
+          ? cancelError.message
+          : "削除予約を取り消せませんでした。",
+      );
     } finally {
       setBusy(null);
     }
@@ -278,6 +588,13 @@ export default function AccountClient() {
         rawPlan === "one_time"
           ? rawPlan
           : null;
+      const requestedPlan =
+        checkout === "starter" ||
+        checkout === "standard" ||
+        checkout === "one_time"
+          ? checkout
+          : null;
+      setPendingCheckoutPlan(requestedPlan);
       const rawCreditsBefore = query.get("credits_before");
       const parsedCreditsBefore = Number(rawCreditsBefore);
       const oneTimeCreditsBefore =
@@ -342,6 +659,31 @@ export default function AccountClient() {
   }, []);
 
   useEffect(() => {
+    if (!status?.authenticated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await loadPasskeys();
+        await loadAccountDeletion();
+        if (status.user?.hasStripeCustomer) {
+          await loadBillingDocuments();
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "アカウントの安全情報を読み込めませんでした。",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status?.authenticated, status?.user?.hasStripeCustomer]);
+
+  useEffect(() => {
     if (!status?.authenticated || checkoutStarted.current) return;
     const checkout = new URLSearchParams(window.location.search).get("checkout");
     if (
@@ -365,6 +707,7 @@ export default function AccountClient() {
   }
 
   if (status && !status.authenticated) {
+    const selectedPlan = checkoutPlanDetails(pendingCheckoutPlan);
     return (
       <main className="accountPage">
         <section className="accountSignInCard">
@@ -374,13 +717,35 @@ export default function AccountClient() {
           <p>
             この端末で初めて使う方は「アカウントを作る」、ほかの端末ですでに登録した方は「ログイン」を選んでください。Face ID・Touch ID・端末の画面ロックを使うため、パスワードを覚える必要はありません。
           </p>
+          {selectedPlan && (
+            <article className="accountNotice accountSelectedPlan" aria-label="選択中の料金プラン">
+              <p>選択中のプラン</p>
+              <h2>{selectedPlan.name}</h2>
+              <strong>{selectedPlan.price}</strong>
+              <span>{selectedPlan.renewal}</span>
+              <small>
+                ここではまだ決済されません。パスキーで本人確認したあと、Stripeの決済画面を開きます。
+              </small>
+            </article>
+          )}
           {!status.authenticationAvailable ? (
             <p className="accountError" role="alert">アカウント認証を現在利用できません。</p>
           ) : (
             <div className="accountAuthActions">
+              <label className="accountField">
+                この端末の名前
+                <input
+                  className="accountTextField"
+                  value={newPasskeyName}
+                  maxLength={40}
+                  autoComplete="off"
+                  onChange={(event) => setNewPasskeyName(event.target.value)}
+                  placeholder="例：自分のiPhone"
+                />
+              </label>
               <button
                 className="accountPrimaryAction"
-                disabled={busy !== null}
+                disabled={busy !== null || !newPasskeyName.trim()}
                 onClick={registerPasskey}
               >
                 {busy === "register" ? "本人確認中…" : "はじめての方：アカウントを作る"}
@@ -400,13 +765,42 @@ export default function AccountClient() {
           </small>
           <p className="accountRecoveryHelp">
             有料プランをご利用中で、端末変更・紛失によりログインできない場合は、
-            <a
-              href={`mailto:torudake.reel@gmail.com?subject=${encodeURIComponent("撮るだけリール アカウント復旧・解約の相談")}`}
-            >
+            <Link href="/support">
               運営へ復旧・解約を相談
-            </a>
+            </Link>
             してください。
           </p>
+          <details className="accountRecoveryHelp">
+            <summary>パスキーをすべて失い、ログインできない場合</summary>
+            <p>
+              決済時のメールアドレスから復旧・解約の相談を受け付けます。ここでログイン権限が自動発行されることはありません。
+            </p>
+            <label className="accountField">
+              決済時のメールアドレス
+              <input
+                className="accountTextField"
+                type="email"
+                value={recoveryEmail}
+                autoComplete="email"
+                onChange={(event) => setRecoveryEmail(event.target.value)}
+              />
+            </label>
+            <button
+              className="accountSecondaryAction"
+              disabled={busy !== null || !recoveryEmail.trim()}
+              onClick={requestRecovery}
+            >
+              {busy === "recovery" ? "受付中…" : "復旧・解約の相談を受け付ける"}
+            </button>
+            {recoveryReference && (
+              <p role="status">
+                受付番号：<strong>{recoveryReference}</strong><br />
+                <Link href={`/support?recovery=${encodeURIComponent(recoveryReference)}`}>
+                  受付番号を添えて運営へ連絡する
+                </Link>
+              </p>
+            )}
+          </details>
           <div className="accountLegalLinks">
             <Link href="/terms">利用規約</Link>
             <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
@@ -430,13 +824,6 @@ export default function AccountClient() {
       <header className="accountHeader">
         <Link className="accountBrand" href="/"><span>▶</span>撮るだけリール</Link>
         <div className="accountHeaderActions">
-          <button
-            className="accountSecondaryAction accountBackupPasskey"
-            disabled={busy !== null}
-            onClick={registerPasskey}
-          >
-            {busy === "register" ? "追加中…" : "予備パスキーを追加"}
-          </button>
           <button className="accountSignOut" disabled={busy !== null} onClick={logout}>
             {busy === "logout" ? "ログアウト中…" : "ログアウト"}
           </button>
@@ -495,6 +882,93 @@ export default function AccountClient() {
               </strong>
               <span>{status.monthly?.cancelAtPeriodEnd ? "期間終了後に解約" : "月3本・月7本プラン利用時に表示"}</span>
             </article>
+          </section>
+
+          <section className="accountPlans" aria-labelledby="accountSecurityTitle">
+            <header className="accountPlansIntro">
+              <p className="eyebrow">SECURITY</p>
+              <h2 id="accountSecurityTitle">ログインする端末を管理</h2>
+              <p>
+                端末ごとに分かりやすい名前を付けられます。紛失した端末のパスキーは削除し、必要に応じて全端末をログアウトしてください。
+              </p>
+            </header>
+            <article className="accountPlanCard accountCompactCard featured">
+              <label className="accountField">
+                追加する端末の名前
+                <input
+                  className="accountTextField"
+                  value={newPasskeyName}
+                  maxLength={40}
+                  autoComplete="off"
+                  onChange={(event) => setNewPasskeyName(event.target.value)}
+                  placeholder="例：仕事用Mac"
+                />
+              </label>
+              <button
+                disabled={busy !== null || !newPasskeyName.trim()}
+                onClick={registerPasskey}
+              >
+                {busy === "register" ? "本人確認中…" : "予備パスキーを追加"}
+              </button>
+              <small>最大10件。追加時にFace ID・Touch ID・端末の画面ロックで本人確認します。</small>
+            </article>
+            {passkeys.map((passkey) => (
+              <article className="accountPlanCard accountCompactCard" key={passkey.id}>
+                <label className="accountField">
+                  端末名
+                  <input
+                    className="accountTextField"
+                    value={passkeyNames[passkey.id] ?? passkey.displayName}
+                    maxLength={40}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      setPasskeyNames((current) => ({
+                        ...current,
+                        [passkey.id]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <span>
+                  {passkey.backedUp ? "クラウド同期対応" : "この端末に保存"}
+                  {" ・ "}
+                  登録日 {new Date(passkey.createdAt * 1000).toLocaleDateString("ja-JP")}
+                </span>
+                {passkey.lastUsedAt && (
+                  <small>
+                    最終利用 {new Date(passkey.lastUsedAt * 1000).toLocaleString("ja-JP")}
+                  </small>
+                )}
+                <div className="accountAuthActions">
+                  <button
+                    className="accountSecondaryAction"
+                    disabled={
+                      busy !== null ||
+                      !(passkeyNames[passkey.id] ?? "").trim() ||
+                      (passkeyNames[passkey.id] ?? passkey.displayName) ===
+                        passkey.displayName
+                    }
+                    onClick={() => renamePasskey(passkey)}
+                  >
+                    名前を保存
+                  </button>
+                  <button
+                    className="accountSecondaryAction"
+                    disabled={busy !== null || passkeys.length <= 1}
+                    onClick={() => deletePasskey(passkey)}
+                  >
+                    このパスキーを削除
+                  </button>
+                </div>
+              </article>
+            ))}
+            <button
+              className="accountPortalButton"
+              disabled={busy !== null}
+              onClick={revokeAllSessions}
+            >
+              {busy === "revoke_sessions" ? "本人確認中…" : "すべての端末をログアウト"}
+            </button>
           </section>
 
           <section className="accountPlans" aria-labelledby="accountPlansTitle">
@@ -613,10 +1087,82 @@ export default function AccountClient() {
           </section>
 
           {status.user?.hasStripeCustomer && (
-            <button className="accountPortalButton" disabled={busy !== null} onClick={openPortal}>
-              {busy === "portal" ? "開いています…" : "支払い方法・解約を管理"}
-            </button>
+            <section className="accountPlans" aria-labelledby="billingDocumentsTitle">
+              <header className="accountPlansIntro">
+                <p className="eyebrow">PAYMENT HISTORY</p>
+                <h2 id="billingDocumentsTitle">領収書・請求書と契約管理</h2>
+                <p>
+                  領収書・請求書はStripeの安全な画面で表示します。カード番号は撮るだけリールへ保存されません。
+                </p>
+              </header>
+              {billingDocuments.length > 0 ? (
+                billingDocuments.map((document) => (
+                  <article className="accountPlanCard accountCompactCard" key={document.id}>
+                    <p>{new Date(document.createdAt * 1000).toLocaleDateString("ja-JP")}</p>
+                    <h2>{document.label}</h2>
+                    <strong>{formatBillingAmount(document.amount, document.currency)}</strong>
+                    {document.amountRefunded > 0 && (
+                      <span>
+                        返金済み {formatBillingAmount(document.amountRefunded, document.currency)}
+                      </span>
+                    )}
+                    <a
+                      className="accountSecondaryAction"
+                      href={document.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Stripeで表示
+                    </a>
+                  </article>
+                ))
+              ) : (
+                <p className="accountSecurity">表示できる領収書・請求書はまだありません。</p>
+              )}
+              <button className="accountPortalButton" disabled={busy !== null} onClick={openPortal}>
+                {busy === "portal"
+                  ? "開いています…"
+                  : "支払い方法・自動更新・解約をStripeで管理"}
+              </button>
+            </section>
           )}
+
+          <section className="accountPlans" aria-labelledby="accountDeletionTitle">
+            <header className="accountPlansIntro">
+              <p className="eyebrow">ACCOUNT CONTROL</p>
+              <h2 id="accountDeletionTitle">アカウントの削除</h2>
+              <p>
+                月額プランを利用中の場合は、先にStripeで自動更新を解約し、現在の利用期間が終了してから削除を予約できます。誤操作や端末紛失に備え、予約後すぐには削除せず30日間の猶予を設けます。
+              </p>
+            </header>
+            {accountDeletion ? (
+              <article className="accountPlanCard accountCompactCard featured">
+                <p>削除予約中</p>
+                <h2>
+                  削除手続き開始予定日 {new Date(accountDeletion.executeAfter * 1000).toLocaleDateString("ja-JP")}
+                </h2>
+                <span>予定日まではログインでき、この画面から予約を取り消せます。予定日以降、運営が安全確認のうえ削除処理を進めます。</span>
+                <button
+                  className="accountSecondaryAction"
+                  disabled={busy !== null}
+                  onClick={cancelAccountDeletion}
+                >
+                  {busy === "cancel_deletion" ? "取消中…" : "削除予約を取り消す"}
+                </button>
+              </article>
+            ) : (
+              <button
+                className="accountSecondaryAction"
+                disabled={busy !== null}
+                onClick={scheduleAccountDeletion}
+              >
+                {busy === "delete_account" ? "本人確認中…" : "本人確認して削除を予約"}
+              </button>
+            )}
+            <small>
+              返金・支払い異議・法令対応に必要な課金記録は、個人情報を最小化したうえで必要な期間保持する場合があります。
+            </small>
+          </section>
         </>
       )}
 
@@ -645,4 +1191,17 @@ function authenticationMessage(error: unknown, fallback: string) {
     return "本人確認がキャンセルされました。もう一度お試しください。";
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+function formatBillingAmount(amount: number, currency: string) {
+  const normalizedCurrency = /^[A-Z]{3}$/.test(currency) ? currency : "JPY";
+  const majorAmount = normalizedCurrency === "JPY" ? amount : amount / 100;
+  try {
+    return new Intl.NumberFormat("ja-JP", {
+      style: "currency",
+      currency: normalizedCurrency,
+    }).format(majorAmount);
+  } catch {
+    return `${majorAmount.toLocaleString("ja-JP")} ${normalizedCurrency}`;
+  }
 }

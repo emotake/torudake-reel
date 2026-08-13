@@ -4,6 +4,8 @@
   "provider": "OpenAI",
   "sampleModel": "gpt-4o-mini-tts",
   "productionModel": "gpt-realtime-2.1-mini",
+  "productionParity": false,
+  "productionModelDifferenceNote": "The static previews and production narration use different models, so timing, pauses, and intonation can differ.",
   "purpose": "Static, no-cost voice previews for the four delivery templates",
   "mastering": {
     "sampleRateHz": 24000,

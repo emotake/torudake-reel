@@ -1,0 +1,40 @@
+name: Private CI template
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 18 * * 5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:preflight:offline
+      - run: pnpm exec tsc --noEmit --incremental false
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build:cloudflare-pages
+
+  # Intentionally no deployment, D1 mutation, remote health secret, or payment
+  # credential. Keep the repository private and use a protected production
+  # environment with required reviewers if deployment is added later.

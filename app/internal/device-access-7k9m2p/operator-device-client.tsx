@@ -160,6 +160,12 @@ export default function OperatorDeviceClient() {
             <Link className="operatorAccessPrimary" href="/">
               動画を作る
             </Link>
+            <Link
+              className="operatorAccessQuiet"
+              href="/internal/device-access-7k9m2p/operations"
+            >
+              運営状況を確認
+            </Link>
             <button
               className="operatorAccessQuiet"
               type="button"

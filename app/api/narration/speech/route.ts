@@ -29,6 +29,12 @@ import {
   productUpstreamErrorCode,
   recordServerProductEvent,
 } from "../../../../lib/product-analytics";
+import {
+  getRequestIdentifiers,
+  logOperationalEvent,
+  withRequestIdentifier,
+} from "../../../../lib/observability";
+import { recordProviderUsageBestEffort } from "../../../../lib/provider-usage";
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
@@ -110,8 +116,35 @@ type RealtimeServerEvent = {
   response?: {
     status?: string;
     status_details?: { error?: OpenAIError["error"] };
+    usage?: RealtimeUsage;
   };
 };
+
+type RealtimeUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  input_token_details?: { audio_tokens?: number };
+  output_token_details?: { audio_tokens?: number };
+  input_tokens_details?: { audio_tokens?: number };
+  output_tokens_details?: { audio_tokens?: number };
+};
+
+type SpeechProviderOperation =
+  | "narration_speech"
+  | "narration_partial_correction";
+
+function realtimeUsageCounters(usage?: RealtimeUsage) {
+  return {
+    inputTokens: usage?.input_tokens,
+    outputTokens: usage?.output_tokens,
+    inputAudioTokens:
+      usage?.input_token_details?.audio_tokens ??
+      usage?.input_tokens_details?.audio_tokens,
+    outputAudioTokens:
+      usage?.output_token_details?.audio_tokens ??
+      usage?.output_tokens_details?.audio_tokens,
+  };
+}
 
 type WorkerWebSocket = WebSocket & { accept(): void };
 type WebSocketUpgradeResponse = Response & { webSocket?: WorkerWebSocket };
@@ -218,6 +251,7 @@ async function requestRealtimeSpeech(
   style: NarrationStyle,
   options: {
     allowFallback: boolean;
+    operation: SpeechProviderOperation;
     deliveryPreset: NarrationDeliveryPreset | null;
     emphasisText: string;
     maximumOutputSeconds: number | null;
@@ -245,6 +279,13 @@ async function requestRealtimeSpeech(
       },
     )) as WebSocketUpgradeResponse;
   } catch {
+    await recordProviderUsageBestEffort({
+      provider: "openai",
+      model: REALTIME_MODEL,
+      operation: options.operation,
+      outcome: "failure",
+      inputCharacters: script.length,
+    });
     if (signal?.aborted) {
       return realtimeFailureResponse(499, {
         code: "request_aborted",
@@ -270,12 +311,26 @@ async function requestRealtimeSpeech(
       if (options.allowFallback) {
         headers.set(FALLBACK_ALLOWED_HEADER, "1");
       }
+      await recordProviderUsageBestEffort({
+        provider: "openai",
+        model: REALTIME_MODEL,
+        operation: options.operation,
+        outcome: "failure",
+        inputCharacters: script.length,
+      });
       return new Response(upgradeResponse.body, {
         status: upgradeResponse.status,
         statusText: upgradeResponse.statusText,
         headers,
       });
     }
+    await recordProviderUsageBestEffort({
+      provider: "openai",
+      model: REALTIME_MODEL,
+      operation: options.operation,
+      outcome: "failure",
+      inputCharacters: script.length,
+    });
     return realtimeFailureResponse(
       502,
       {
@@ -302,17 +357,36 @@ async function requestRealtimeSpeech(
         socket.close(1000, "narration complete");
       }
     };
-    const finish = (response: Response) => {
+    const finish = async (
+      response: Response,
+      outcome: "success" | "failure",
+      usage?: RealtimeUsage,
+      audioSeconds = 0,
+    ) => {
       if (settled) return;
       settled = true;
       cleanup();
+      await recordProviderUsageBestEffort({
+        provider: "openai",
+        model: REALTIME_MODEL,
+        operation: options.operation,
+        outcome,
+        ...realtimeUsageCounters(usage),
+        audioSeconds,
+        inputCharacters: script.length,
+      });
       resolve(response);
     };
     const fail = (
       status: number,
       error: OpenAIError["error"],
       fallbackAllowed = false,
-    ) => finish(realtimeFailureResponse(status, error, fallbackAllowed));
+    ) => {
+      void finish(
+        realtimeFailureResponse(status, error, fallbackAllowed),
+        "failure",
+      );
+    };
     const timeout = setTimeout(() => {
       fail(
         504,
@@ -476,10 +550,13 @@ async function requestRealtimeSpeech(
           });
           return;
         }
-        finish(
+        void finish(
           new Response(pcm16ChunksToWav(chunks, REALTIME_SAMPLE_RATE), {
             headers: { "Content-Type": "audio/wav" },
           }),
+          "success",
+          event.response?.usage,
+          receivedAudioBytes / (REALTIME_SAMPLE_RATE * 2),
         );
       }
     });
@@ -525,6 +602,8 @@ async function requestSpeech(
   fallback = false,
   options: {
     partialCorrection: boolean;
+    operation: SpeechProviderOperation;
+    targetDurationSeconds: number | null;
     deliveryPreset: NarrationDeliveryPreset | null;
     emphasisText: string;
     maximumOutputSeconds: number | null;
@@ -541,6 +620,7 @@ async function requestSpeech(
       style,
       {
         allowFallback: !options.partialCorrection,
+        operation: options.operation,
         deliveryPreset: options.deliveryPreset,
         emphasisText: options.emphasisText,
         maximumOutputSeconds: options.maximumOutputSeconds,
@@ -550,45 +630,66 @@ async function requestSpeech(
     );
   }
 
-  return fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(
-      fallback
-        ? {
-            model: FALLBACK_MODEL,
-            input: script,
-            voice: settings.fallbackVoice,
-            response_format: "mp3",
-            speed: settings.speed,
-          }
-        : {
-            model: LEGACY_MODEL,
-            input: script,
-            voice: settings.legacyVoice,
-            response_format: "mp3",
-            speed: settings.speed,
-            instructions: [
-              JAPANESE_LANGUAGE_AND_ACCENT,
-              settings.instructions,
-              narrationDeliveryInstruction(
-                options.deliveryPreset,
-                options.emphasisText,
-              ),
-              partialCorrectionContinuityInstruction(
-                options.expectedDurationSeconds,
-              ),
-              DELIVERY_GUARD,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          },
-    ),
-    signal,
-  });
+  const model = fallback ? FALLBACK_MODEL : LEGACY_MODEL;
+  try {
+    const response = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        fallback
+          ? {
+              model: FALLBACK_MODEL,
+              input: script,
+              voice: settings.fallbackVoice,
+              response_format: "mp3",
+              speed: settings.speed,
+            }
+          : {
+              model: LEGACY_MODEL,
+              input: script,
+              voice: settings.legacyVoice,
+              response_format: "mp3",
+              speed: settings.speed,
+              instructions: [
+                JAPANESE_LANGUAGE_AND_ACCENT,
+                settings.instructions,
+                narrationDeliveryInstruction(
+                  options.deliveryPreset,
+                  options.emphasisText,
+                ),
+                partialCorrectionContinuityInstruction(
+                  options.expectedDurationSeconds,
+                ),
+                DELIVERY_GUARD,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            },
+      ),
+      signal,
+    });
+    await recordProviderUsageBestEffort({
+      provider: "openai",
+      model,
+      operation: options.operation,
+      outcome: response.ok ? "success" : "failure",
+      inputCharacters: script.length,
+      audioSeconds: response.ok ? options.targetDurationSeconds ?? 0 : 0,
+    });
+    return response;
+  } catch (error) {
+    await recordProviderUsageBestEffort({
+      provider: "openai",
+      model,
+      operation: options.operation,
+      outcome: "failure",
+      inputCharacters: script.length,
+    });
+    throw error;
+  }
 }
 
 function speechError(status: number, payload: OpenAIError) {
@@ -613,6 +714,7 @@ function aiOperationQuotaHeaders(limit: number, remaining: number) {
 }
 
 export async function POST(request: Request) {
+  const { requestId, correlationId } = getRequestIdentifiers(request);
   const apiKey =
     typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
   if (!apiKey) {
@@ -870,6 +972,10 @@ export async function POST(request: Request) {
       false,
       {
         partialCorrection,
+        operation: partialCorrection
+          ? "narration_partial_correction"
+          : "narration_speech",
+        targetDurationSeconds,
         deliveryPreset,
         emphasisText,
         maximumOutputSeconds:
@@ -899,6 +1005,10 @@ export async function POST(request: Request) {
           true,
           {
             partialCorrection,
+            operation: partialCorrection
+              ? "narration_partial_correction"
+              : "narration_speech",
+            targetDurationSeconds,
             deliveryPreset,
             emphasisText,
             maximumOutputSeconds: null,
@@ -915,20 +1025,27 @@ export async function POST(request: Request) {
       const errorPayload = (await response
         .json()
         .catch(() => ({}))) as OpenAIError;
-      console.error(
-        "OpenAI narration speech failed",
-        response.status,
-        response.headers.get("x-request-id"),
-        errorPayload.error?.code,
-        errorPayload.error?.type,
-      );
+      logOperationalEvent("error", request, {
+        event: "openai_narration_speech_failed",
+        component: "ai",
+        operation: partialCorrection
+          ? "narration_partial_correction"
+          : "narration_speech",
+        status: response.status,
+        outcome: "failed",
+        errorCode: errorPayload.error?.code ?? errorPayload.error?.type ?? null,
+        upstreamRequestId: response.headers.get("x-request-id"),
+        upstreamStatus: response.status,
+        requestId,
+        correlationId,
+      });
       await recordServerProductEvent(request, "ai_operation_failed", {
         operation: "narration_speech",
         outcome: "failed",
         error_code: productUpstreamErrorCode(response.status),
       });
-      return Response.json(
-        { error: speechError(response.status, errorPayload) },
+      return withRequestIdentifier(Response.json(
+        { error: speechError(response.status, errorPayload), requestId },
         {
           status: response.status,
           headers: meteredAuthorization
@@ -938,13 +1055,13 @@ export async function POST(request: Request) {
               )
             : undefined,
         },
-      );
+      ), request, requestId);
     }
 
     const audio = await response.arrayBuffer();
     if (!audio.byteLength) {
-      return Response.json(
-        { error: "AI音声を生成できませんでした。もう一度お試しください。" },
+      return withRequestIdentifier(Response.json(
+        { error: "AI音声を生成できませんでした。もう一度お試しください。", requestId },
         {
           status: 502,
           headers: meteredAuthorization
@@ -954,7 +1071,7 @@ export async function POST(request: Request) {
               )
             : undefined,
         },
-      );
+      ), request, requestId);
     }
     let completedQuotaHeaders: Record<string, string> = {};
     if (meteredAuthorization) {

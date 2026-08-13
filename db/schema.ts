@@ -2,6 +2,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -79,6 +80,9 @@ export const accountPasskeys = sqliteTable(
     backedUp: integer("backed_up", { mode: "boolean" })
       .notNull()
       .default(false),
+    // Keep migration defaults ASCII-only so D1 tooling cannot corrupt the
+    // value when a Windows shell uses a legacy code page. The UI localizes it.
+    displayName: text("display_name").notNull().default("Device"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     lastUsedAt: integer("last_used_at"),
@@ -176,6 +180,70 @@ export const billingSubscriptions = sqliteTable(
   ],
 );
 
+export const accountRecoveryChallenges = sqliteTable(
+  "account_recovery_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    contactHash: text("contact_hash").notNull(),
+    networkHash: text("network_hash").notNull(),
+    challengeHash: text("challenge_hash"),
+    status: text("status", {
+      enum: [
+        "requested",
+        "reviewing",
+        "approved",
+        "consumed",
+        "rejected",
+        "expired",
+      ],
+    })
+      .notNull()
+      .default("requested"),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    reviewedAt: integer("reviewed_at"),
+    consumedAt: integer("consumed_at"),
+  },
+  (table) => [
+    index("account_recovery_contact_created_idx").on(
+      table.contactHash,
+      table.createdAt,
+    ),
+    index("account_recovery_network_created_idx").on(
+      table.networkHash,
+      table.createdAt,
+    ),
+    index("account_recovery_status_expires_idx").on(
+      table.status,
+      table.expiresAt,
+    ),
+  ],
+);
+
+export const accountDeletionRequests = sqliteTable(
+  "account_deletion_requests",
+  {
+    userId: text("user_id").primaryKey(),
+    status: text("status", {
+      enum: ["scheduled", "cancelled", "completed"],
+    })
+      .notNull()
+      .default("scheduled"),
+    requestedAt: integer("requested_at").notNull(),
+    executeAfter: integer("execute_after").notNull(),
+    cancelledAt: integer("cancelled_at"),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("account_deletion_status_execute_idx").on(
+      table.status,
+      table.executeAfter,
+    ),
+  ],
+);
+
 export const billingCheckoutLocks = sqliteTable(
   "billing_checkout_locks",
   {
@@ -189,6 +257,26 @@ export const billingCheckoutLocks = sqliteTable(
   (table) => [
     uniqueIndex("billing_checkout_locks_token_unique").on(table.lockToken),
     index("billing_checkout_locks_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
+export const billingRateLimits = sqliteTable(
+  "billing_rate_limits",
+  {
+    userId: text("user_id").notNull(),
+    action: text("action", {
+      enum: ["one_time_checkout", "portal", "billing_documents"],
+    }).notNull(),
+    windowStartedAt: integer("window_started_at").notNull(),
+    attempts: integer("attempts").notNull().default(1),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.action],
+      name: "billing_rate_limits_user_action_pk",
+    }),
+    index("billing_rate_limits_updated_at_idx").on(table.updatedAt),
   ],
 );
 
@@ -562,5 +650,36 @@ export const productFeedback = sqliteTable(
       table.actorHash,
       table.createdAt,
     ),
+  ],
+);
+
+/**
+ * Privacy-minimal provider cost telemetry. Rows are aggregate-only: no user,
+ * actor, request, media, script, transcript, or filename identifier is stored.
+ */
+export const providerUsageDaily = sqliteTable(
+  "provider_usage_daily",
+  {
+    day: text("day").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    operation: text("operation").notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failureCount: integer("failure_count").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    inputAudioTokens: integer("input_audio_tokens").notNull().default(0),
+    outputAudioTokens: integer("output_audio_tokens").notNull().default(0),
+    audioSeconds: real("audio_seconds").notNull().default(0),
+    inputCharacters: integer("input_characters").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.day, table.provider, table.model, table.operation],
+      name: "provider_usage_daily_dimension_pk",
+    }),
+    index("provider_usage_daily_updated_at_idx").on(table.updatedAt),
   ],
 );

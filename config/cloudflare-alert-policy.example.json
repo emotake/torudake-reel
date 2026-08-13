@@ -1,0 +1,21 @@
+{
+  "alert_type": "pages_event_alert",
+  "enabled": true,
+  "mechanisms": {
+    "email": [
+      {
+        "id": "REPLACE_WITH_VERIFIED_OPERATIONS_EMAIL"
+      }
+    ]
+  },
+  "name": "Torudake Reel production Pages failure",
+  "description": "Production Pages deployment failure notification. Application 5xx is monitored separately through synthetic readiness.",
+  "filters": {
+    "project_id": [
+      "torudake-reel"
+    ],
+    "environment": [
+      "production"
+    ]
+  }
+}

@@ -15,8 +15,8 @@
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic",
     Meiryo, sans-serif;
-  --font-display: "Avenir Next", "Segoe UI", system-ui, -apple-system,
-    BlinkMacSystemFont, sans-serif;
+  --font-display: "Avenir Next", var(--font-sans);
+  --font-serif: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
 }
 
 * {
@@ -168,7 +168,7 @@ a {
 
 .brandText small {
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -306,7 +306,7 @@ a {
   align-items: center;
   margin: 0 0 15px;
   color: var(--coral);
-  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-display);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -399,7 +399,7 @@ a {
   border-radius: 14px;
   background: linear-gradient(145deg, #26344a, var(--ink));
   color: var(--mint);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 900;
   box-shadow: 0 12px 24px rgba(16, 24, 40, 0.18);
@@ -548,7 +548,7 @@ a {
     linear-gradient(145deg, rgba(185, 245, 208, 0.96), rgba(255, 255, 255, 0.18)),
     var(--ink);
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -586,7 +586,7 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
-  color: #6e7889;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -619,7 +619,7 @@ a {
   place-items: center;
   border-radius: 14px;
   background: #06c755;
-  color: #fff;
+  color: #062d19;
   font-size: 12px;
   font-weight: 950;
   letter-spacing: -0.03em;
@@ -642,7 +642,7 @@ a {
 .lineSaveCard small {
   display: block;
   margin-top: 2px;
-  color: #7b867f;
+  color: #526158;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -656,7 +656,7 @@ a {
   padding: 0 14px;
   border-radius: 12px;
   background: #06c755;
-  color: #fff;
+  color: #062d19;
   font-size: 13px;
   font-weight: 900;
   text-decoration: none;
@@ -761,7 +761,7 @@ a {
 
 .visualBadge strong {
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 25px;
 }
 
@@ -786,7 +786,7 @@ a {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.09);
   color: rgba(255, 255, 255, 0.9);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 850;
   letter-spacing: 0.08em;
@@ -850,7 +850,7 @@ a {
   border-radius: 5px;
   background: rgba(16, 24, 40, 0.85);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -1278,7 +1278,7 @@ a {
   border-radius: 999px;
   background: rgba(16, 24, 40, 0.46);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1445,7 +1445,7 @@ a {
 
 .painStrip i {
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-style: normal;
 }
@@ -1516,7 +1516,7 @@ a {
   top: 21px;
   right: 24px;
   color: #c7c0b7;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
   font-weight: 800;
 }
@@ -1530,7 +1530,7 @@ a {
   border-radius: 20px;
   background: var(--cream);
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 26px;
   font-weight: 900;
   box-shadow: inset 0 0 0 1px rgba(16, 24, 40, 0.06);
@@ -1636,7 +1636,7 @@ a {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 15px;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -1647,7 +1647,7 @@ a {
   border-radius: 6px;
   background: var(--mint);
   color: var(--mint-dark);
-  font-family: "Noto Sans JP", sans-serif;
+  font-family: var(--font-sans);
   font-size: 7px;
   font-style: normal;
   letter-spacing: 0;
@@ -1798,7 +1798,7 @@ a {
 .priceGrid article > p {
   margin: 0 0 11px;
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -1811,7 +1811,7 @@ a {
 
 .priceGrid article > strong {
   margin-top: 16px;
-  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-display);
   font-size: 38px;
   letter-spacing: -0.04em;
 }
@@ -1901,7 +1901,7 @@ a {
   border-radius: 17px;
   background: var(--mint);
   color: var(--mint-dark);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 900;
 }
@@ -2199,7 +2199,7 @@ footer > small {
   border-radius: 19px;
   background: var(--mint);
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 26px;
   font-weight: 900;
   box-shadow: 5px 5px 0 var(--ink);
@@ -2324,7 +2324,7 @@ footer > small {
 }
 
 .realUploadProgress strong {
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 17px;
 }
 
@@ -2429,7 +2429,7 @@ footer > small {
   border-radius: 10px;
   background: var(--ink);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 8px;
   font-weight: 900;
 }
@@ -2546,7 +2546,7 @@ footer > small {
 
 .receiptCode strong {
   overflow: hidden;
-  font-family: "DM Sans", monospace;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   text-overflow: ellipsis;
 }
@@ -2583,7 +2583,7 @@ footer > small {
   border-radius: 50%;
   background: var(--mint);
   color: var(--mint-dark);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
 }
 
@@ -2648,7 +2648,7 @@ footer > small {
 
 .workspaceHeading > span {
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -2702,7 +2702,7 @@ footer > small {
   border-radius: 5px;
   background: rgba(16, 24, 40, 0.82);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
   font-style: normal;
   font-weight: 900;
@@ -2823,7 +2823,7 @@ footer > small {
   border-radius: 8px;
   background: var(--ink);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 8px;
 }
 
@@ -3053,7 +3053,7 @@ footer > small {
   border-radius: 12px;
   background: var(--ink);
   color: #ffd26a;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 17px;
   font-weight: 900;
   box-shadow: 0 7px 18px #10182824;
@@ -3171,7 +3171,7 @@ footer > small {
 .tonePreview small {
   margin: 0;
   color: inherit;
-  font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-size: 6px;
   font-weight: 600;
   letter-spacing: .08em;
@@ -3180,7 +3180,7 @@ footer > small {
 .tonePreview strong {
   margin-top: 1px;
   color: inherit;
-  font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-size: 10px !important;
   line-height: 1.25;
 }
@@ -3251,13 +3251,13 @@ footer > small {
 
 .tonePreview.signature small {
   color: #9b6c48;
-  font-family: Georgia, "Yu Mincho", serif;
+  font-family: var(--font-serif);
   font-style: italic;
 }
 
 .tonePreview.signature strong {
   color: #d95a48;
-  font-family: Georgia, "Yu Mincho", serif;
+  font-family: var(--font-serif);
   letter-spacing: .03em;
 }
 
@@ -3292,7 +3292,7 @@ footer > small {
 }
 
 .lengthOptions strong {
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 24px;
 }
 
@@ -3487,7 +3487,7 @@ footer > small {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 900;
 }
@@ -3552,7 +3552,7 @@ footer > small {
 
 .progressNumber {
   margin-top: 5px;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   text-align: right;
 }
 
@@ -3673,7 +3673,7 @@ footer > small {
 
 .timeSaved strong {
   color: var(--mint-dark);
-  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-display);
   font-size: 25px;
 }
 
@@ -3933,7 +3933,7 @@ footer > small {
 
 .captionStyleSample.pop {
   color: #fffdf7;
-  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-size: 7.5px;
   font-weight: 900;
   text-shadow:
@@ -3947,7 +3947,7 @@ footer > small {
 
 .captionStyleSample.signature {
   color: #fffaf0;
-  font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  font-family: var(--font-serif);
   font-weight: 700;
   letter-spacing: .06em;
   text-shadow:
@@ -3974,7 +3974,7 @@ footer > small {
   background: linear-gradient(155deg, #73b7d0 0%, #2f7187 54%, #153e48 100%);
   box-shadow: none;
   color: #fff;
-  font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: .055em;
@@ -4025,7 +4025,7 @@ footer > small {
   border-radius: 7px;
   background: var(--caption-panel, #fff);
   color: var(--caption-accent, #e45f4d);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-style: normal;
   font-weight: 900;
@@ -4038,13 +4038,13 @@ footer > small {
 }
 
 .identityMonogram.pop {
-  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", sans-serif;
+  font-family: var(--font-sans);
   text-shadow: 2px 2px 0 #172033;
 }
 
 .identityMonogram.signature {
   border-radius: 9px 2px 9px 2px;
-  font-family: Georgia, serif;
+  font-family: var(--font-serif);
 }
 
 .captionIdentitySummary > span:nth-child(2) {
@@ -4199,7 +4199,7 @@ footer > small {
   border: 1px solid #eaded3;
   background: #fffdfa;
   color: #d94f3b;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 8px;
   font-style: normal;
   font-weight: 900;
@@ -4242,7 +4242,7 @@ footer > small {
   border-color: #5f554b;
   background: #28231f;
   color: #fffaf0;
-  font-family: Georgia, serif;
+  font-family: var(--font-serif);
   text-shadow: 0 2px 3px #000;
 }
 
@@ -4331,7 +4331,7 @@ footer > small {
   display: block;
   margin-bottom: 3px;
   color: var(--caption-accent, #e45f4d);
-  font-family: "DM Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-display);
   font-size: .58em;
   font-weight: 850;
   letter-spacing: .12em;
@@ -4397,7 +4397,7 @@ footer > small {
   box-shadow: none;
   backdrop-filter: none;
   color: #fffdf7;
-  font-family: "Hiragino Maru Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-weight: 900;
   letter-spacing: .025em;
   text-shadow:
@@ -4475,7 +4475,7 @@ footer > small {
   box-shadow: none;
   backdrop-filter: none;
   color: #fffaf0;
-  font-family: "Yu Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  font-family: var(--font-serif);
   font-weight: 700;
   letter-spacing: .075em;
   text-shadow:
@@ -4508,7 +4508,7 @@ footer > small {
   box-shadow: none;
   backdrop-filter: none;
   color: #fff;
-  font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
@@ -4761,6 +4761,15 @@ footer > small {
   min-height: 420px;
   flex-direction: column;
   padding: 28px;
+}
+
+.accountPlans article.accountCompactCard {
+  min-height: 0;
+  gap: 12px;
+}
+
+.accountPlans article.accountCompactCard > :last-child {
+  margin-bottom: 0;
 }
 
 .accountPlans article.featured {
@@ -5296,7 +5305,7 @@ footer > small {
   border-radius: 10px;
   background: var(--ink);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 900;
   text-align: center;
@@ -5340,7 +5349,7 @@ footer > small {
 }
 
 .originalAudioPresets strong {
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
 }
 
@@ -5428,6 +5437,38 @@ footer > small {
   align-items: center;
   font-size: 14px;
   font-weight: 900;
+}
+
+.accountField {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: #3f4858;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.accountTextField {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 14px;
+  border: 1px solid rgba(23, 36, 58, 0.24);
+  border-radius: 12px;
+  outline: 0;
+  color: #17243a;
+  background: #fff;
+  font: inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.accountTextField::placeholder {
+  color: #737b87;
+}
+
+.accountTextField:focus-visible {
+  border-color: var(--coral-dark);
+  box-shadow: 0 0 0 3px rgba(143, 37, 28, 0.18);
 }
 
 .asrDictionaryField > span small {
@@ -5826,7 +5867,7 @@ footer > small {
 .photoReelEyebrow {
   margin: 0;
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.16em;
@@ -5849,6 +5890,38 @@ footer > small {
   color: #596579;
   font-size: 14px;
   line-height: 2;
+}
+
+.photoReelHeroCta {
+  display: inline-grid;
+  min-width: min(100%, 390px);
+  min-height: 62px;
+  gap: 3px;
+  justify-items: center;
+  margin-top: 24px;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
+  color: white;
+  box-shadow: 0 14px 34px rgba(143, 37, 28, 0.24);
+  cursor: pointer;
+}
+
+.photoReelHeroCta strong {
+  font-size: 15px;
+}
+
+.photoReelHeroCta small {
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.photoReelHeroCta:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .photoReelTrust {
@@ -6035,7 +6108,7 @@ footer > small {
 .photoReelPlayback > span {
   min-width: 72px;
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 800;
   text-align: right;
@@ -6076,7 +6149,7 @@ footer > small {
 
 .photoReelOutputFacts strong {
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
 }
 
@@ -6110,7 +6183,7 @@ footer > small {
   border-radius: 10px;
   background: var(--ink);
   color: var(--mint);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 900;
 }
@@ -6133,7 +6206,7 @@ footer > small {
   border-radius: 999px;
   background: var(--cream);
   color: var(--coral-dark);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 10px;
 }
 
@@ -6240,7 +6313,7 @@ footer > small {
 
 .photoReelPhotoNumber {
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 900;
   text-align: center;
@@ -6277,7 +6350,7 @@ footer > small {
 
 .photoReelPhotoInfo small {
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 8px;
 }
 
@@ -6541,7 +6614,7 @@ footer > small {
 
 .photoReelField > span small {
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 8px;
 }
 
@@ -6655,7 +6728,7 @@ footer > small {
   border-radius: 13px;
   background: white;
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-weight: 900;
 }
@@ -6848,7 +6921,7 @@ footer > small {
 
 .photoReelPurchaseLink > span {
   color: var(--mint);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-weight: 900;
   letter-spacing: 0.05em;
 }
@@ -6995,7 +7068,7 @@ footer > small {
 
 .photoReelHow article > span {
   color: var(--coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
   font-weight: 900;
 }
@@ -8303,7 +8376,7 @@ footer > small {
   border-radius: 6px;
   background: rgba(16,24,40,.78);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
 }
 
@@ -8316,7 +8389,7 @@ footer > small {
   border-radius: 6px;
   background: var(--coral);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
   font-weight: 900;
 }
@@ -8335,7 +8408,7 @@ footer > small {
   border-radius: 6px;
   background: rgba(16,24,40,.76);
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 7px;
   font-weight: 900;
 }
@@ -8368,7 +8441,7 @@ footer > small {
   border-radius: 50%;
   background: white;
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 10px;
   font-weight: 800;
   cursor: pointer;
@@ -8478,7 +8551,7 @@ footer > small {
   align-items: center;
   justify-content: space-between;
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
@@ -8628,7 +8701,7 @@ footer > small {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 11px;
   font-weight: 800;
   cursor: pointer;
@@ -9140,7 +9213,7 @@ footer > small {
   border-radius: 14px;
   background: var(--mint);
   color: var(--mint-dark);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 900;
 }
@@ -10752,7 +10825,7 @@ footer > small {
 
 .setupQuickStartHeading span {
   color: var(--mint-dark);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -10977,7 +11050,7 @@ footer > small {
   border-radius: 14px;
   background: var(--ink);
   color: var(--mint);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 16px;
   font-weight: 900;
 }
@@ -11191,14 +11264,23 @@ footer > small {
     padding-left: 10px;
   }
 
+  .topActions {
+    gap: 5px;
+  }
+
   .topActions .trialButton {
-    display: none;
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding-right: 9px;
+    padding-left: 9px;
+    font-size: 12px;
   }
 
   .accountButton {
     flex: none;
-    padding-right: 10px;
-    padding-left: 10px;
+    padding-right: 8px;
+    padding-left: 8px;
   }
 }
 
@@ -11602,11 +11684,21 @@ footer > small {
   font-size: clamp(20px, 2.4vw, 29px);
 }
 
-.voiceSampleShelf p:last-child {
+.voiceSampleShelf .voiceSampleDescription,
+.voiceSampleShelf .voiceSampleModelNote {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.voiceSampleShelf .voiceSampleModelNote {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--mint-dark);
+  border-radius: 0 9px 9px 0;
+  background: rgba(255, 255, 255, 0.74);
+  color: #4f5d70;
 }
 
 .voiceSampleTypes {
@@ -12115,7 +12207,7 @@ footer > small {
 
 .videoMixHeader > div span {
   color: var(--mix-coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.16em;
@@ -12157,12 +12249,44 @@ footer > small {
   font-style: normal;
 }
 
-.videoMixHero > div > p:last-child {
+.videoMixHero > div > p:not(.videoMixEyebrow) {
   max-width: 690px;
   margin: 26px 0 0;
   color: #4a566b;
   font-size: clamp(15px, 1.5vw, 18px);
   line-height: 1.95;
+}
+
+.videoMixHeroCta {
+  display: inline-grid;
+  min-width: min(100%, 410px);
+  min-height: 62px;
+  gap: 3px;
+  justify-items: center;
+  margin-top: 24px;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--mix-coral), #8f251c);
+  color: white;
+  box-shadow: 0 14px 34px rgba(143, 37, 28, 0.24);
+  cursor: pointer;
+}
+
+.videoMixHeroCta strong {
+  font-size: 15px;
+}
+
+.videoMixHeroCta small {
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.videoMixHeroCta:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .videoMixHero aside {
@@ -12226,7 +12350,7 @@ footer > small {
 .videoMixPreviewHeading small,
 .videoMixPlayback span {
   color: var(--mix-subtle);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 700;
 }
@@ -12411,7 +12535,7 @@ footer > small {
   place-content: center;
   border-radius: 50%;
   color: white;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 800;
   background: var(--mix-ink);
@@ -12435,7 +12559,7 @@ footer > small {
 
 .videoMixSectionTitle > strong {
   color: var(--mix-coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
 }
 
@@ -12523,7 +12647,7 @@ footer > small {
 
 .videoMixSourceSummary > span {
   color: var(--mix-coral);
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 800;
 }
@@ -12696,7 +12820,7 @@ footer > small {
 .videoMixClipList legend strong {
   float: right;
   color: #217251;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
 }
 
 .videoMixClipList label {
@@ -12911,8 +13035,8 @@ footer > small {
   height: 34px;
   place-items: center;
   border-radius: 50%;
-  color: #fff;
-  font-family: "DM Sans", sans-serif;
+  color: #062d19;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 800;
   background: var(--mix-coral);
@@ -13327,7 +13451,7 @@ footer > small {
   place-content: center;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 15px;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 800;
 }

@@ -36,6 +36,13 @@ const AUTH_RATE_WINDOW_SECONDS = 10 * 60;
 const AUTH_NETWORK_LIMIT = 30;
 const AUTH_GLOBAL_LIMIT = 3_000;
 const MAX_PASSKEYS_PER_ACCOUNT = 10;
+const RECENT_AUTHENTICATION_SECONDS = 10 * 60;
+const RECOVERY_REQUEST_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
+const RECOVERY_RATE_WINDOW_SECONDS = 24 * 60 * 60;
+const RECOVERY_CONTACT_LIMIT = 3;
+const RECOVERY_NETWORK_LIMIT = 5;
+const RECOVERY_GLOBAL_LIMIT = 1_000;
+const PASSKEY_DISPLAY_NAME_MAX_LENGTH = 40;
 
 type D1Result = { meta?: { changes?: number } };
 type D1Statement = {
@@ -70,6 +77,15 @@ export type AccountIdentity = {
   email: string;
   billingEmail: string | null;
   fullName: string | null;
+};
+
+export type AccountPasskeySummary = {
+  id: string;
+  displayName: string;
+  deviceType: string;
+  backedUp: boolean;
+  createdAt: number;
+  lastUsedAt: number | null;
 };
 
 export class AccountAuthError extends Error {
@@ -203,6 +219,7 @@ export async function registrationOptions(request: Request) {
 export async function verifyRegistration(
   request: Request,
   response: RegistrationResponseJSON,
+  requestedDisplayName?: unknown,
 ) {
   const challenge = await consumeChallenge(request, "registration");
   if (!challenge.user_id) throw new Error("Registration user is missing.");
@@ -272,14 +289,16 @@ export async function verifyRegistration(
   const sessionToken = randomAccountToken();
   const sessionHash = await hashAccountToken(sessionToken);
   const transports = sanitizeTransports(response.response.transports);
+  const displayName = normalizePasskeyDisplayName(requestedDisplayName);
   try {
     await database.batch([
       database
         .prepare(`
           INSERT INTO account_passkeys (
             credential_id, user_id, public_key, counter, transports,
-            device_type, backed_up, created_at, updated_at, last_used_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            device_type, backed_up, display_name, created_at, updated_at,
+            last_used_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .bind(
           registrationInfo.credential.id,
@@ -289,6 +308,7 @@ export async function verifyRegistration(
           transports.length ? JSON.stringify(transports) : null,
           registrationInfo.credentialDeviceType,
           registrationInfo.credentialBackedUp ? 1 : 0,
+          displayName,
           now,
           now,
           now,
@@ -352,6 +372,51 @@ export async function authenticationOptions(request: Request) {
   };
 }
 
+export async function reauthenticationOptions(request: Request) {
+  const context = relyingPartyContext(request);
+  const identity = await requireAccountIdentity(request);
+  const database = databaseOrThrow();
+  const passkeys = await database
+    .prepare(`
+      SELECT credential_id, transports
+      FROM account_passkeys
+      WHERE user_id = ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `)
+    .bind(identity.id, MAX_PASSKEYS_PER_ACCOUNT)
+    .all<{ credential_id: string; transports: string | null }>();
+  const credentials = passkeys.results ?? [];
+  if (!credentials.length) {
+    throw new AccountAuthError(
+      "passkey_not_found",
+      404,
+      "本人確認に使えるパスキーが見つかりませんでした。",
+    );
+  }
+  const options = await generateAuthenticationOptions({
+    rpID: context.rpId,
+    timeout: CHALLENGE_LIFETIME_SECONDS * 1_000,
+    allowCredentials: credentials.map((credential) => ({
+      id: credential.credential_id,
+      transports: parseTransports(credential.transports),
+    })),
+    userVerification: "required",
+  });
+  const now = Math.floor(Date.now() / 1_000);
+  const challengeToken = await saveChallenge(request, database, {
+    challenge: options.challenge,
+    ceremony: "authentication",
+    userId: identity.id,
+    context,
+    now,
+  });
+  return {
+    options,
+    cookie: accountChallengeCookie(challengeToken, context.secure),
+  };
+}
+
 export async function verifyAuthentication(
   request: Request,
   response: AuthenticationResponseJSON,
@@ -379,6 +444,13 @@ export async function verifyAuthentication(
       "unknown_passkey",
       404,
       "この端末で使えるアカウントが見つかりませんでした。",
+    );
+  }
+  if (challenge.user_id && challenge.user_id !== passkey.user_id) {
+    throw new AccountAuthError(
+      "reauthentication_identity_changed",
+      401,
+      "現在のアカウントのパスキーで本人確認してください。",
     );
   }
 
@@ -469,6 +541,232 @@ export async function getAccountIdentity(request: Request) {
   } satisfies AccountIdentity;
 }
 
+export async function getAccountPasskeys(
+  request: Request,
+): Promise<AccountPasskeySummary[]> {
+  const identity = await requireAccountIdentity(request);
+  const rows = await databaseOrThrow()
+    .prepare(`
+      SELECT credential_id, display_name, device_type, backed_up,
+        created_at, last_used_at
+      FROM account_passkeys
+      WHERE user_id = ?
+      ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC
+      LIMIT ?
+    `)
+    .bind(identity.id, MAX_PASSKEYS_PER_ACCOUNT)
+    .all<{
+      credential_id: string;
+      display_name: string;
+      device_type: string;
+      backed_up: number;
+      created_at: number;
+      last_used_at: number | null;
+    }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.credential_id,
+    displayName:
+      !row.display_name || row.display_name === "Device"
+        ? "登録済みの端末"
+        : row.display_name,
+    deviceType: row.device_type,
+    backedUp: row.backed_up === 1,
+    createdAt: row.created_at,
+    lastUsedAt: row.last_used_at,
+  }));
+}
+
+export async function renameAccountPasskey(
+  request: Request,
+  credentialId: unknown,
+  requestedDisplayName: unknown,
+) {
+  const identity = await requireAccountIdentity(request);
+  const id = validateCredentialId(credentialId);
+  const displayName = normalizePasskeyDisplayName(
+    requestedDisplayName,
+    false,
+  );
+  const now = Math.floor(Date.now() / 1_000);
+  const updated = await databaseOrThrow()
+    .prepare(`
+      UPDATE account_passkeys
+      SET display_name = ?, updated_at = ?
+      WHERE credential_id = ? AND user_id = ?
+    `)
+    .bind(displayName, now, id, identity.id)
+    .run();
+  if (updated.meta?.changes !== 1) {
+    throw new AccountAuthError(
+      "passkey_not_found",
+      404,
+      "指定したパスキーが見つかりませんでした。",
+    );
+  }
+  return { displayName };
+}
+
+export async function deleteAccountPasskey(
+  request: Request,
+  credentialId: unknown,
+) {
+  const session = await requireRecentAccountSession(request);
+  const id = validateCredentialId(credentialId);
+  const database = databaseOrThrow();
+  const deleted = await database
+    .prepare(`
+      DELETE FROM account_passkeys
+      WHERE credential_id = ?
+        AND user_id = ?
+        AND (
+          SELECT COUNT(*) FROM account_passkeys WHERE user_id = ?
+        ) > 1
+    `)
+    .bind(id, session.userId, session.userId)
+    .run();
+  if (deleted.meta?.changes !== 1) {
+    const passkey = await database
+      .prepare(`
+        SELECT credential_id FROM account_passkeys
+        WHERE credential_id = ? AND user_id = ?
+        LIMIT 1
+      `)
+      .bind(id, session.userId)
+      .first<{ credential_id: string }>();
+    throw new AccountAuthError(
+      passkey ? "last_passkey_cannot_be_deleted" : "passkey_not_found",
+      passkey ? 409 : 404,
+      passkey
+        ? "最後のパスキーは削除できません。先に予備のパスキーを追加してください。"
+        : "指定したパスキーが見つかりませんでした。",
+    );
+  }
+
+  // A session is not tied to one credential in the legacy schema. Keep the
+  // freshly verified current session and revoke every other session so a
+  // removed or lost authenticator cannot leave an old browser signed in.
+  await database
+    .prepare(`
+      DELETE FROM account_sessions
+      WHERE user_id = ? AND token_hash <> ?
+    `)
+    .bind(session.userId, session.tokenHash)
+    .run();
+  const remaining = await database
+    .prepare(`
+      SELECT COUNT(*) AS count FROM account_passkeys WHERE user_id = ?
+    `)
+    .bind(session.userId)
+    .first<{ count: number }>();
+  return { remaining: Math.max(0, remaining?.count ?? 0) };
+}
+
+export async function revokeAllAccountSessions(request: Request) {
+  const session = await requireRecentAccountSession(request);
+  await databaseOrThrow()
+    .prepare("DELETE FROM account_sessions WHERE user_id = ?")
+    .bind(session.userId)
+    .run();
+  return clearAccountSessionCookie(new URL(request.url).protocol === "https:");
+}
+
+/**
+ * Records a support-assisted recovery request without granting authentication.
+ * No recovery bearer secret is issued until an operator completes the manual
+ * identity-verification runbook and an audited delivery channel exists.
+ */
+export async function createAccountRecoveryChallenge(
+  request: Request,
+  billingEmail: unknown,
+) {
+  const normalizedEmail = normalizeRecoveryEmail(billingEmail);
+  const database = databaseOrThrow();
+  const now = Math.floor(Date.now() / 1_000);
+  const contactHash = await recoveryValueHash(
+    `contact\n${normalizedEmail}`,
+  );
+  const networkHash = await authenticationNetworkHash(request);
+  const reference = crypto.randomUUID();
+  const matchingUser = await database
+    .prepare(`
+      SELECT id FROM users
+      WHERE lower(billing_email) = ?
+        OR (
+          lower(email) = ?
+          AND email NOT LIKE '%@anonymous.torudake.invalid'
+        )
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `)
+    .bind(normalizedEmail, normalizedEmail)
+    .first<{ id: string }>();
+
+  await database
+    .prepare(`
+      UPDATE account_recovery_challenges
+      SET status = 'expired'
+      WHERE status IN ('requested', 'reviewing', 'approved')
+        AND expires_at <= ?
+    `)
+    .bind(now)
+    .run();
+  await database
+    .prepare(`
+      INSERT INTO account_recovery_challenges (
+        id, user_id, contact_hash, network_hash, challenge_hash, status,
+        created_at, expires_at, reviewed_at, consumed_at
+      )
+      SELECT ?, ?, ?, ?, NULL, 'requested', ?, ?, NULL, NULL
+      WHERE (
+        SELECT COUNT(*) FROM account_recovery_challenges
+        WHERE contact_hash = ? AND created_at >= ?
+      ) < ?
+        AND (
+          SELECT COUNT(*) FROM account_recovery_challenges
+          WHERE network_hash = ? AND created_at >= ?
+        ) < ?
+        AND (
+          SELECT COUNT(*) FROM account_recovery_challenges
+          WHERE created_at >= ?
+        ) < ?
+    `)
+    .bind(
+      reference,
+      matchingUser?.id ?? null,
+      contactHash,
+      networkHash,
+      now,
+      now + RECOVERY_REQUEST_LIFETIME_SECONDS,
+      contactHash,
+      now - RECOVERY_RATE_WINDOW_SECONDS,
+      RECOVERY_CONTACT_LIMIT,
+      networkHash,
+      now - RECOVERY_RATE_WINDOW_SECONDS,
+      RECOVERY_NETWORK_LIMIT,
+      now - RECOVERY_RATE_WINDOW_SECONDS,
+      RECOVERY_GLOBAL_LIMIT,
+    )
+    .run();
+
+  // The same generic response is returned for unknown emails and rate-limited
+  // requests to avoid exposing whether a paid account exists.
+  return { reference };
+}
+
+export async function isAccountDeletionScheduled(userId: string) {
+  if (!userId || userId.length > 255) return false;
+  const row = await databaseOrThrow()
+    .prepare(`
+      SELECT 1 AS scheduled
+      FROM account_deletion_requests
+      WHERE user_id = ? AND status = 'scheduled'
+      LIMIT 1
+    `)
+    .bind(userId)
+    .first<{ scheduled: number }>();
+  return row?.scheduled === 1;
+}
+
 export async function revokeAccountSession(request: Request) {
   const token = getAccountSessionToken(request);
   if (token) {
@@ -481,6 +779,55 @@ export async function revokeAccountSession(request: Request) {
     }
   }
   return clearAccountSessionCookie(new URL(request.url).protocol === "https:");
+}
+
+async function requireAccountIdentity(request: Request) {
+  const identity = await getAccountIdentity(request);
+  if (!identity) {
+    throw new AccountAuthError(
+      "authentication_required",
+      401,
+      "続けるにはアカウントへのログインが必要です。",
+    );
+  }
+  return identity;
+}
+
+export async function requireRecentAccountSession(request: Request) {
+  const token = getAccountSessionToken(request);
+  if (!token) {
+    throw new AccountAuthError(
+      "authentication_required",
+      401,
+      "続けるにはアカウントへのログインが必要です。",
+    );
+  }
+  const now = Math.floor(Date.now() / 1_000);
+  const tokenHash = await hashAccountToken(token);
+  const session = await databaseOrThrow()
+    .prepare(`
+      SELECT user_id, created_at
+      FROM account_sessions
+      WHERE token_hash = ? AND expires_at > ?
+      LIMIT 1
+    `)
+    .bind(tokenHash, now)
+    .first<{ user_id: string; created_at: number }>();
+  if (!session) {
+    throw new AccountAuthError(
+      "authentication_required",
+      401,
+      "続けるにはアカウントへのログインが必要です。",
+    );
+  }
+  if (session.created_at < now - RECENT_AUTHENTICATION_SECONDS) {
+    throw new AccountAuthError(
+      "reauthentication_required",
+      401,
+      "安全のため、パスキーで本人確認をやり直してから操作してください。",
+    );
+  }
+  return { userId: session.user_id, tokenHash };
 }
 
 async function saveChallenge(
@@ -673,6 +1020,99 @@ async function authenticationNetworkHash(request: Request) {
     "HMAC",
     key,
     new TextEncoder().encode(`torudake-auth-v1\n${connectingIp || "local"}`),
+  );
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+function normalizePasskeyDisplayName(
+  value: unknown,
+  allowDefault = true,
+) {
+  if (value === undefined && allowDefault) return "登録済みの端末";
+  if (typeof value !== "string") {
+    throw new AccountAuthError(
+      "invalid_passkey_name",
+      400,
+      "端末名を入力してください。",
+    );
+  }
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (
+    !normalized ||
+    Array.from(normalized).length > PASSKEY_DISPLAY_NAME_MAX_LENGTH
+  ) {
+    throw new AccountAuthError(
+      "invalid_passkey_name",
+      400,
+      `端末名は${PASSKEY_DISPLAY_NAME_MAX_LENGTH}文字以内で入力してください。`,
+    );
+  }
+  return normalized;
+}
+
+function validateCredentialId(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9_-]{16,1024}$/.test(value)
+  ) {
+    throw new AccountAuthError(
+      "invalid_passkey_id",
+      400,
+      "指定したパスキーを確認できませんでした。",
+    );
+  }
+  return value;
+}
+
+function normalizeRecoveryEmail(value: unknown) {
+  if (typeof value !== "string") {
+    throw new AccountAuthError(
+      "invalid_recovery_contact",
+      400,
+      "決済時に使用したメールアドレスを入力してください。",
+    );
+  }
+  const email = value.trim().toLowerCase();
+  if (
+    email.length > 254 ||
+    !/^[^\s@]{1,64}@[^\s@]{1,189}$/.test(email)
+  ) {
+    throw new AccountAuthError(
+      "invalid_recovery_contact",
+      400,
+      "決済時に使用したメールアドレスを入力してください。",
+    );
+  }
+  return email;
+}
+
+async function recoveryValueHash(value: string) {
+  const secret =
+    typeof env.TRIAL_ISSUANCE_SECRET === "string"
+      ? env.TRIAL_ISSUANCE_SECRET.trim()
+      : "";
+  if (secret.length < 32) {
+    throw new AccountAuthError(
+      "authentication_not_configured",
+      503,
+      "アカウント復旧の受付を現在利用できません。",
+    );
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`torudake-recovery-v1\n${value}`),
   );
   return bytesToBase64Url(new Uint8Array(digest));
 }

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "service": "torudake-reel",
+  "production": {
+    "provider": "cloudflare-pages-functions",
+    "structuredLogs": true,
+    "requestHeader": "X-Request-Id",
+    "correlationHeader": "X-Correlation-Id",
+    "sampling": {
+      "errors": 1,
+      "warnings": 1,
+      "success": 0.01
+    },
+    "alerts": {
+      "syntheticReadinessMinutes": 5,
+      "consecutiveReadinessFailures": 2,
+      "serverErrorWindowMinutes": 5,
+      "serverErrorThreshold": 3,
+      "stripeWebhookFailureThreshold": 1
+    }
+  },
+  "workerMaintenance": {
+    "config": "wrangler.d1.jsonc",
+    "logs": {
+      "enabled": true,
+      "headSamplingRate": 1
+    },
+    "traces": {
+      "enabled": false,
+      "reason": "Traces are intentionally off until the paid observability budget is approved."
+    }
+  }
+}
+

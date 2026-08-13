@@ -20,6 +20,7 @@ const [
   privacySource,
   termsSource,
   commercialSource,
+  supportSource,
   robotsSource,
   sitemapSource,
   manifestSource,
@@ -29,6 +30,7 @@ const [
   readProjectFile("app/privacy/page.tsx"),
   readProjectFile("app/terms/page.tsx"),
   readProjectFile("app/commercial-disclosure/page.tsx"),
+  readProjectFile("app/support/page.tsx"),
   readProjectFile("public/robots.txt"),
   readProjectFile("public/sitemap.xml"),
   readProjectFile("public/manifest.webmanifest"),
@@ -56,6 +58,7 @@ test("lists only canonical public pages in the sitemap", () => {
     `${SITE_ORIGIN}/guide/iphone-mov-reel`,
     `${SITE_ORIGIN}/guide/silent-video-narration`,
     `${SITE_ORIGIN}/guide/japanese-reading`,
+    `${SITE_ORIGIN}/support`,
     `${SITE_ORIGIN}/privacy`,
     `${SITE_ORIGIN}/terms`,
     `${SITE_ORIGIN}/commercial-disclosure`,
@@ -83,6 +86,7 @@ test("publishes self canonicals for every indexable legal page", () => {
   assert.match(privacySource, /path:\s*"\/privacy"/);
   assert.match(termsSource, /path:\s*"\/terms"/);
   assert.match(commercialSource, /path:\s*"\/commercial-disclosure"/);
+  assert.match(supportSource, /path:\s*"\/support"/);
 });
 
 test("marks account pages as private from search results", () => {

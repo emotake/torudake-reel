@@ -3627,6 +3627,7 @@ export default function Home() {
           <a href="/privacy">プライバシー</a>
           <a href="/terms">利用規約</a>
           <a href="/commercial-disclosure">特商法表記</a>
+          <Link href="/support">よくある質問・お問い合わせ</Link>
         </div>
         <small>© 2026 撮るだけリール</small>
       </footer>
@@ -3761,6 +3762,31 @@ function Landing({
   recoverDraft: () => void;
   discardDraft: () => void;
 }) {
+  const pricingSectionRef = useRef<HTMLElement>(null);
+  const pricingViewedRef = useRef(false);
+
+  useEffect(() => {
+    const pricingSection = pricingSectionRef.current;
+    if (!pricingSection || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          pricingViewedRef.current ||
+          !entries.some((entry) => entry.isIntersecting)
+        ) {
+          return;
+        }
+        pricingViewedRef.current = true;
+        trackClientEvent("pricing_viewed", { source: "landing" });
+        observer.disconnect();
+      },
+      { threshold: 0.25 },
+    );
+    observer.observe(pricingSection);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
       <section className="hero">
@@ -3788,7 +3814,7 @@ function Landing({
             </aside>
           )}
           <p className="eyebrow">
-            <span>NEW</span>
+            <span>新着</span>
             日常で撮った動画から、投稿できる1本へ
           </p>
           <h1>
@@ -3825,20 +3851,19 @@ function Landing({
           </div>
         </div>
 
-        <div className="heroDetails">
+          <div className="heroDetails">
           <div className="heroOffer" aria-label="無料体験と保存料金">
             <span className="heroOfferMark" aria-hidden="true">
               ¥0
             </span>
             <div>
-              <strong>編集・プレビューは無料</strong>
-              <small>完成動画を保存するまでは料金がかかりません</small>
+              <strong>無料体験：合計3分以内・最大2動画まで</strong>
+              <small>AI処理は1動画につき3回。編集結果が完成すると1動画分を使用します</small>
             </div>
             <div className="heroOfferPrice">
-              <strong>動画1本だけ保存 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+              <strong>保存は動画1本 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
               <small>
-                または{STARTER_MONTHLY_PLAN_LABEL} ¥
-                {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から
+                プラン購入時に決済・書き出し成功時に1本分を使用
               </small>
             </div>
             <a href="#price">
@@ -3848,7 +3873,7 @@ function Landing({
           </div>
           <Link className="photoReelEntry" href="/video-mix">
             <span className="photoReelEntryMark" aria-hidden="true">
-              MIX
+              動画
             </span>
             <span>
               <strong>動画をつないで作る</strong>
@@ -3858,7 +3883,7 @@ function Landing({
           </Link>
           <Link className="photoReelEntry" href="/photo-reel">
             <span className="photoReelEntryMark" aria-hidden="true">
-              PHOTO
+              写真
             </span>
             <span>
               <strong>写真からリールを作る</strong>
@@ -3878,10 +3903,13 @@ function Landing({
 
       <section className="voiceSampleShelf" aria-labelledby="voiceSampleTitle">
         <div>
-          <p className="eyebrow">AI VOICE PREVIEW</p>
+          <p className="eyebrow">AI音声を試聴</p>
           <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
-          <p>
+          <p className="voiceSampleDescription">
             それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。
+          </p>
+          <p className="voiceSampleModelNote">
+            固定見本は試聴用モデル（gpt-4o-mini-tts）で作成しています。実際の動画では本番モデル（gpt-realtime-2.1-mini）を使うため、声の抑揚や間は完全には同じになりません。
           </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
@@ -3939,7 +3967,7 @@ function Landing({
 
       <section className="howSection" id="how">
         <div className="sectionHeading">
-          <p className="eyebrow">HOW IT WORKS</p>
+          <p className="eyebrow">かんたん3ステップ</p>
           <h2>
             あなたがするのは、
             <br />
@@ -3974,7 +4002,7 @@ function Landing({
 
       <section className="differenceSection" id="difference">
         <div className="differenceCopy">
-          <p className="eyebrow">NOT ANOTHER EDITOR</p>
+          <p className="eyebrow">このサービスでできること</p>
           <h2>
             編集ソフトではなく、
             <br />
@@ -4001,7 +4029,7 @@ function Landing({
         </div>
         <div className="memoryCard">
           <div className="memoryTop">
-            <span>MY STYLE</span>
+            <span>自分の設定</span>
             <i>自動保存</i>
           </div>
           <div className="stylePreview">
@@ -4033,9 +4061,9 @@ function Landing({
         </div>
       </section>
 
-      <section className="priceSection" id="price">
+      <section className="priceSection" id="price" ref={pricingSectionRef}>
         <div className="sectionHeading compact">
-          <p className="eyebrow">SIMPLE PRICE</p>
+          <p className="eyebrow">料金プラン</p>
           <h2>使い方に合う保存方法を。</h2>
           <p>まず無料で仕上がりを確認。気に入った動画だけ保存できます。</p>
         </div>
@@ -4156,7 +4184,7 @@ function Landing({
 
       <section className="bottomCta">
         <div>
-          <p className="eyebrow">YOUR NEXT REEL</p>
+          <p className="eyebrow">次の投稿を作る</p>
           <h2>
             撮りっぱなしの動画を、
             <br />
@@ -4454,13 +4482,13 @@ function SetupWorkspace({
     <section className="workspace">
       <div className="workspaceHeading">
         <div>
-          <p className="eyebrow">NEW PROJECT</p>
+          <p className="eyebrow">新しい動画</p>
           <h1>どんなリールにしますか？</h1>
           <p>
             元の音声を活かす編集と、AIナレーションを重ねる編集から選べます。
           </p>
         </div>
-        <span>STEP 1 / 2</span>
+        <span>ステップ 1 / 2</span>
       </div>
 
       <div className="setupGrid">
@@ -4504,7 +4532,7 @@ function SetupWorkspace({
                 <span>実際のサンプル動画</span>
               </div>
             )}
-            <i>RAW</i>
+            <i>元動画</i>
           </div>
           <div className="fileRow">
             <span className="fileIcon">▶</span>
@@ -4529,7 +4557,7 @@ function SetupWorkspace({
             <section className="silentFallback" aria-labelledby="silentFallbackTitle">
               <span className="silentFallbackIcon" aria-hidden="true">♪</span>
               <div>
-                <p className="eyebrow">NO SPOKEN AUDIO</p>
+                <p className="eyebrow">音声がありません</p>
                 <h2 id="silentFallbackTitle">話し声のない動画でした</h2>
                 <p>
                   エラーで止めず、動画に合う2つの仕上げ方から選べます。
@@ -4553,7 +4581,7 @@ function SetupWorkspace({
           <section className="setupQuickStart" aria-labelledby="quickStartTitle">
             <div className="setupQuickStartHeading">
               <div>
-                <span>RECOMMENDED</span>
+                <span>おすすめ</span>
                 <h2 id="quickStartTitle">おすすめで作る</h2>
               </div>
               <p>音声の使い方だけ選べば、見やすい設定でそのまま始められます。</p>
@@ -5086,13 +5114,13 @@ function Processing({
           <span className="orbit two">
             {narration
               ? narrationAutoCutEnabled
-                ? "CUT"
-                : "KEEP"
+                ? "短く編集"
+                : "長さを保持"
               : spokenCutMode === "auto"
-                ? "AUTO"
+                ? "自動"
                 : spokenCutMode === "manual"
-                  ? "SELECT"
-                  : "KEEP"}
+                  ? "手動"
+                  : "長さを保持"}
           </span>
           <span className="orbit three">
             {(narration
@@ -5104,7 +5132,7 @@ function Processing({
         </div>
 
         <div className="processingCopy">
-          <p className="eyebrow">AI EDITING</p>
+          <p className="eyebrow">AIで編集中</p>
           <h1>投稿できる状態に整えています。</h1>
           <p>
             {file?.name ?? "サンプル動画"}の
@@ -9117,7 +9145,7 @@ function ResultWorkspace({
           </summary>
           <div className="narrationStudioHeading">
             <div>
-              <p className="eyebrow">VOICE STUDIO</p>
+              <p className="eyebrow">AI音声の調整</p>
               <h2>声と投稿文を、あなたらしく整える</h2>
             </div>
             <span>公開動画への透かしなし</span>
@@ -10086,7 +10114,7 @@ function ResultWorkspace({
           </summary>
           <div className="editPanelHeading">
             <div>
-              <p className="eyebrow">TEXT EDIT</p>
+              <p className="eyebrow">テロップ編集</p>
               <h2>
                 {narrationPlan
                   ? narrationCaptionsEnabled
@@ -10256,7 +10284,7 @@ function ResultWorkspace({
         </summary>
         <div className="thumbnailMakerHeading">
           <div>
-            <p className="eyebrow">COVER MAKER</p>
+            <p className="eyebrow">表紙を作る</p>
             <h2>動画から、投稿用の表紙をつくる</h2>
             <p>
               顔・構図・画質・場面変化を端末内で確認し、実際の動画フレームから9:16の表紙を生成します。
@@ -10495,7 +10523,7 @@ function ResultWorkspace({
           <i aria-hidden="true">⌄</i>
         </summary>
         <div>
-          <p className="eyebrow">READY TO POST</p>
+          <p className="eyebrow">投稿の準備</p>
           <h2>字幕データを、すぐ使える形式で保存できます。</h2>
         </div>
         <div className="deliverableCards">
@@ -10546,7 +10574,7 @@ function ResultWorkspace({
         <div className="handoffPrompt">
           <div className="handoffPromptIcon">↑</div>
           <div>
-            <p className="eyebrow">TRY YOUR VIDEO</p>
+            <p className="eyebrow">自分の動画で試す</p>
             <h2>サンプルではなく、実際の動画でも試せます。</h2>
             <p>
               動画を選ぶと、音声を解析して時刻付きの日本語字幕を自動生成します。
@@ -10845,7 +10873,7 @@ function ResultWorkspace({
             >
               ×
             </button>
-            <p className="eyebrow">BEFORE EXPORT</p>
+            <p className="eyebrow">保存前の確認</p>
             <h2 id="disclosure-title">投稿時の表示を確認してください</h2>
             <p id="disclosure-description">
               動画には透かしを入れません。代わりに、コピー済みの投稿文へ次の一文を残して投稿してください。

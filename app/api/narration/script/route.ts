@@ -33,11 +33,18 @@ import {
   productUpstreamErrorCode,
   recordServerProductEvent,
 } from "../../../../lib/product-analytics";
+import {
+  getRequestIdentifiers,
+  logOperationalEvent,
+  withRequestIdentifier,
+} from "../../../../lib/observability";
+import { recordProviderUsageBestEffort } from "../../../../lib/provider-usage";
 
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
 const MAX_SCRIPT_REQUEST_BYTES = 6_500_000;
 const SCRIPT_REQUEST_TIMEOUT_MS = 45_000;
+const NARRATION_SCRIPT_MODEL = "gpt-5.6-luna";
 export const NARRATION_RESERVATION_HEADER = "X-Usage-Reservation-Id";
 export const NARRATION_ACTION_HEADER = "X-AI-Operation-Id";
 const GOALS = new Set(["follow", "sales", "reach"]);
@@ -97,6 +104,12 @@ type OpenAIResponse = {
     content?: Array<{ type?: string; text?: string }>;
   }>;
   error?: { code?: string; message?: string; type?: string };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    input_tokens_details?: { audio_tokens?: number };
+    output_tokens_details?: { audio_tokens?: number };
+  };
 };
 
 function outputText(payload: OpenAIResponse) {
@@ -142,6 +155,7 @@ function apiError(status: number, payload: OpenAIResponse) {
 }
 
 export async function POST(request: Request) {
+  const { requestId, correlationId } = getRequestIdentifiers(request);
   const apiKey =
     typeof env.OPENAI_API_KEY === "string" ? env.OPENAI_API_KEY.trim() : "";
   if (!apiKey) {
@@ -164,6 +178,8 @@ export async function POST(request: Request) {
 
   let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
   let meteredAuthorizationSettled = false;
+  let providerOperation: "narration_initial" | "narration_script" =
+    "narration_script";
 
   try {
     let usageHeaderPreflight: Readonly<{
@@ -277,6 +293,7 @@ export async function POST(request: Request) {
       ? payload.previousScript.replace(/\s+/g, " ").trim().slice(0, 2_000)
       : "";
   const initialNarration = payload.initialNarration === true;
+  providerOperation = initialNarration ? "narration_initial" : "narration_script";
   const suppliedNarrationBundleToken =
     typeof payload.narrationBundleToken === "string"
       ? payload.narrationBundleToken.trim()
@@ -528,7 +545,7 @@ export async function POST(request: Request) {
       },
       signal: upstreamAbort.signal,
       body: JSON.stringify({
-      model: "gpt-5.6-luna",
+      model: NARRATION_SCRIPT_MODEL,
       store: false,
       reasoning: { effort: "none" },
       safety_identifier: await safetyIdentifier(request),
@@ -565,42 +582,76 @@ export async function POST(request: Request) {
       }),
     });
   } catch (error) {
+    await recordProviderUsageBestEffort({
+      provider: "openai",
+      model: NARRATION_SCRIPT_MODEL,
+      operation: providerOperation,
+      outcome: "failure",
+    });
     if (upstreamAbort.signal.aborted) {
-      return Response.json(
+      return withRequestIdentifier(Response.json(
         {
           error: upstreamAbort.didTimeOut()
             ? "AI台本の生成に時間がかかっています。少し待ってからもう一度お試しください。"
             : "AI台本の生成を中止しました。",
         },
         { status: upstreamAbort.didTimeOut() ? 504 : 499 },
-      );
+      ), request, requestId);
     }
-    console.error("OpenAI narration script request failed", error);
-    return Response.json(
-      { error: "AI台本を生成できませんでした。もう一度お試しください。" },
+    logOperationalEvent("error", request, {
+      event: "openai_narration_script_request_failed",
+      component: "ai",
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      status: 502,
+      outcome: "failed",
+      errorCode: upstreamAbort.didTimeOut()
+        ? "upstream_timeout"
+        : "upstream_request_failed",
+      requestId,
+      correlationId,
+      error,
+    });
+    return withRequestIdentifier(Response.json(
+      { error: "AI台本を生成できませんでした。もう一度お試しください。", requestId },
       { status: 502 },
-    );
+    ), request, requestId);
   } finally {
     upstreamAbort.cleanup();
   }
   const responsePayload = (await response.json().catch(() => ({}))) as OpenAIResponse;
+  await recordProviderUsageBestEffort({
+    provider: "openai",
+    model: NARRATION_SCRIPT_MODEL,
+    operation: providerOperation,
+    outcome: response.ok ? "success" : "failure",
+    inputTokens: responsePayload.usage?.input_tokens,
+    outputTokens: responsePayload.usage?.output_tokens,
+    inputAudioTokens: responsePayload.usage?.input_tokens_details?.audio_tokens,
+    outputAudioTokens: responsePayload.usage?.output_tokens_details?.audio_tokens,
+  });
   if (!response.ok) {
-    console.error(
-      "OpenAI narration script failed",
-      response.status,
-      response.headers.get("x-request-id"),
-      responsePayload.error?.code,
-      responsePayload.error?.type,
-    );
+    logOperationalEvent("error", request, {
+      event: "openai_narration_script_failed",
+      component: "ai",
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      status: response.status,
+      outcome: "failed",
+      errorCode:
+        responsePayload.error?.code ?? responsePayload.error?.type ?? null,
+      upstreamRequestId: response.headers.get("x-request-id"),
+      upstreamStatus: response.status,
+      requestId,
+      correlationId,
+    });
     await recordServerProductEvent(request, "ai_operation_failed", {
       operation: initialNarration ? "narration_initial" : "narration_script",
       outcome: "failed",
       error_code: productUpstreamErrorCode(response.status),
     });
-    return Response.json(
-      { error: apiError(response.status, responsePayload) },
+    return withRequestIdentifier(Response.json(
+      { error: apiError(response.status, responsePayload), requestId },
       { status: response.status },
-    );
+    ), request, requestId);
   }
 
   try {
@@ -669,17 +720,38 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    console.error("OpenAI narration response parse failed", error);
-    return Response.json(
-      { error: "ナレーション台本を整えられませんでした。もう一度お試しください。" },
+    logOperationalEvent("error", request, {
+      event: "openai_narration_script_parse_failed",
+      component: "ai",
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      status: 502,
+      outcome: "failed",
+      errorCode: "invalid_upstream_response",
+      upstreamRequestId: response.headers.get("x-request-id"),
+      requestId,
+      correlationId,
+      error,
+    });
+    return withRequestIdentifier(Response.json(
+      { error: "ナレーション台本を整えられませんでした。もう一度お試しください。", requestId },
       { status: 502 },
-    );
+    ), request, requestId);
   }
   } finally {
     if (meteredAuthorization && !meteredAuthorizationSettled) {
       await abandonMeteredAiOperation(meteredAuthorization).catch(
         (cleanupError) => {
-          console.error("narration script usage cleanup failed", cleanupError);
+          logOperationalEvent("error", request, {
+            event: "narration_script_usage_cleanup_failed",
+            component: "ai",
+            operation: "release_usage_lease",
+            status: 500,
+            outcome: "failed",
+            errorCode: "usage_cleanup_failed",
+            requestId,
+            correlationId,
+            error: cleanupError,
+          });
         },
       );
     }

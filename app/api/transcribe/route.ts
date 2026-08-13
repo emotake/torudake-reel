@@ -43,6 +43,11 @@ import {
   recordServerProductEvent,
 } from "../../../lib/product-analytics";
 import {
+  getRequestIdentifiers,
+  logOperationalEvent,
+} from "../../../lib/observability";
+import { recordProviderUsageBestEffort } from "../../../lib/provider-usage";
+import {
   buildAsrVocabularyPrompt,
   sanitizeAsrUserDictionary,
 } from "../../../lib/asr-user-dictionary";
@@ -105,6 +110,15 @@ type TranscriptionResponse = {
     word?: string;
   }>;
   text?: string;
+  usage?: {
+    seconds?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    input_token_details?: { audio_tokens?: number };
+    output_token_details?: { audio_tokens?: number };
+    input_tokens_details?: { audio_tokens?: number };
+    output_tokens_details?: { audio_tokens?: number };
+  };
 };
 
 type OpenAIErrorResponse = {
@@ -127,6 +141,50 @@ type TranscriptionCallResult =
       requestId: string | null;
       status: number;
     };
+
+function transcriptionDurationSeconds(
+  transcription: TranscriptionResponse,
+  knownAudioSeconds = 0,
+) {
+  return Math.max(
+    Number.isFinite(knownAudioSeconds) ? knownAudioSeconds : 0,
+    Number.isFinite(Number(transcription.usage?.seconds))
+      ? Number(transcription.usage?.seconds)
+      : 0,
+    Number.isFinite(Number(transcription.duration))
+      ? Number(transcription.duration)
+      : 0,
+    ...(transcription.segments ?? []).map((segment) => Number(segment.end) || 0),
+    ...(transcription.words ?? []).map((word) => Number(word.end) || 0),
+  );
+}
+
+async function recordTranscriptionProviderUsage(
+  model: string,
+  operation: "transcribe" | "transcribe_refine",
+  outcome: "success" | "failure",
+  transcription?: TranscriptionResponse,
+  knownAudioSeconds = 0,
+) {
+  const usage = transcription?.usage;
+  await recordProviderUsageBestEffort({
+    provider: "openai",
+    model,
+    operation,
+    outcome,
+    inputTokens: usage?.input_tokens,
+    outputTokens: usage?.output_tokens,
+    inputAudioTokens:
+      usage?.input_token_details?.audio_tokens ??
+      usage?.input_tokens_details?.audio_tokens,
+    outputAudioTokens:
+      usage?.output_token_details?.audio_tokens ??
+      usage?.output_tokens_details?.audio_tokens,
+    audioSeconds: transcription
+      ? transcriptionDurationSeconds(transcription, knownAudioSeconds)
+      : knownAudioSeconds,
+  });
+}
 
 const HIGH_ACCURACY_PROMPT =
   "日本語のInstagramリール用動画です。聞こえた日本語を省略せず、言い換えず、固有名詞・数字・商品名をできるだけ正確に文字起こししてください。";
@@ -186,18 +244,23 @@ async function requestTranscription(
   mode: "timed" | "timed-fallback" | "refine",
   requestSignal: AbortSignal,
   asrDictionary: readonly string[] = [],
+  knownAudioSeconds = 0,
 ): Promise<TranscriptionCallResult> {
   const formData = new FormData();
   const isWhisperTimedPrimary = mode === "timed";
   const isDiarizedTimedFallback = mode === "timed-fallback";
+  const model = isWhisperTimedPrimary
+    ? "whisper-1"
+    : isDiarizedTimedFallback
+      ? "gpt-4o-transcribe-diarize"
+      : "gpt-4o-transcribe";
+  const providerOperation = mode === "refine"
+    ? "transcribe_refine"
+    : "transcribe";
   formData.set("file", file, safeFileName(file.name));
   formData.set(
     "model",
-    isWhisperTimedPrimary
-      ? "whisper-1"
-      : isDiarizedTimedFallback
-        ? "gpt-4o-transcribe-diarize"
-        : "gpt-4o-transcribe",
+    model,
   );
   formData.set("language", "ja");
   formData.set(
@@ -243,6 +306,13 @@ async function requestTranscription(
       },
     );
   } catch (error) {
+    await recordTranscriptionProviderUsage(
+      model,
+      providerOperation,
+      "failure",
+      undefined,
+      knownAudioSeconds,
+    );
     return {
       ok: false,
       status: upstreamAbort.didTimeOut() ? 504 : requestSignal.aborted ? 499 : 502,
@@ -268,6 +338,13 @@ async function requestTranscription(
     const errorResponse = (await response
       .json()
       .catch(() => null)) as OpenAIErrorResponse | null;
+    await recordTranscriptionProviderUsage(
+      model,
+      providerOperation,
+      "failure",
+      undefined,
+      knownAudioSeconds,
+    );
     return {
       ok: false,
       status: response.status,
@@ -276,10 +353,30 @@ async function requestTranscription(
     };
   }
 
+  let transcription: TranscriptionResponse;
+  try {
+    transcription = (await response.json()) as TranscriptionResponse;
+  } catch (error) {
+    await recordTranscriptionProviderUsage(
+      model,
+      providerOperation,
+      "success",
+      undefined,
+      knownAudioSeconds,
+    );
+    throw error;
+  }
+  await recordTranscriptionProviderUsage(
+    model,
+    providerOperation,
+    "success",
+    transcription,
+    knownAudioSeconds,
+  );
   return {
     ok: true,
     requestId: response.headers.get("x-request-id"),
-    transcription: (await response.json()) as TranscriptionResponse,
+    transcription,
   };
 }
 
@@ -301,6 +398,9 @@ async function requestTimedTranscription(
   file: File,
   requestSignal: AbortSignal,
   asrDictionary: readonly string[] = [],
+  requestForLog?: Request,
+  requestIdForLog?: string,
+  correlationIdForLog?: string,
 ) {
   let result = await requestTranscription(
     apiKey,
@@ -324,13 +424,20 @@ async function requestTimedTranscription(
   }
 
   if (canUseTimedFallback(result)) {
-    console.warn(
-      "OpenAI timed transcription fallback activated",
-      result.status,
-      result.requestId,
-      result.error?.code,
-      result.error?.type,
-    );
+    if (requestForLog) {
+      logOperationalEvent("warn", requestForLog, {
+        event: "openai_timed_transcription_fallback",
+        component: "ai",
+        operation: "transcribe",
+        status: result.status,
+        outcome: "fallback",
+        errorCode: result.error?.code ?? result.error?.type ?? null,
+        upstreamRequestId: result.requestId,
+        upstreamStatus: result.status,
+        requestId: requestIdForLog,
+        correlationId: correlationIdForLog,
+      });
+    }
     return requestTranscription(
       apiKey,
       file,
@@ -375,6 +482,7 @@ function transcriptionError(
 }
 
 export async function POST(request: Request) {
+  const { requestId, correlationId } = getRequestIdentifiers(request);
   let temporaryTransfer:
     | Awaited<ReturnType<typeof findTransfer>>
     | undefined = undefined;
@@ -604,24 +712,34 @@ export async function POST(request: Request) {
       file,
       request.signal,
       asrDictionary,
+      request,
+      requestId,
+      correlationId,
     );
     if (!timedResult.ok) {
-      console.error(
-        "OpenAI transcription failed",
-        timedResult.status,
-        timedResult.requestId,
-        timedResult.error?.code,
-        timedResult.error?.type,
-      );
+      logOperationalEvent("error", request, {
+        event: "openai_transcription_failed",
+        component: "ai",
+        operation: "transcribe",
+        status: timedResult.status,
+        outcome: "failed",
+        errorCode: timedResult.error?.code ?? timedResult.error?.type ?? null,
+        upstreamRequestId: timedResult.requestId,
+        upstreamStatus: timedResult.status,
+        requestId,
+        correlationId,
+      });
       await recordServerProductEvent(request, "ai_operation_failed", {
         operation: "transcribe",
         outcome: "failed",
         error_code: productUpstreamErrorCode(timedResult.status),
       });
-      return jsonError(
+      const upstreamErrorResponse = jsonError(
         transcriptionError(timedResult.status, timedResult.error),
         timedResult.status,
       );
+      upstreamErrorResponse.headers.set("X-Request-Id", requestId);
+      return upstreamErrorResponse;
     }
 
     const transcription = timedResult.transcription;
@@ -629,18 +747,12 @@ export async function POST(request: Request) {
     const transcriptionDuration = Number(transcription.duration);
     const rawWords = getRawWords(transcription);
     let rawSegments = getRawSegments(transcription);
+    const observedAudioSeconds = transcriptionDurationSeconds(transcription);
     if (meteredAuthorization) {
-      const observedDuration = Math.max(
-        Number.isFinite(transcriptionDuration) && transcriptionDuration > 0
-          ? transcriptionDuration
-          : 0,
-        ...rawSegments.map((segment) => segment.end),
-        ...rawWords.map((word) => word.end),
-      );
       const observedUsage = await recordMeteredAiTranscriptionDuration(
         meteredAuthorization.action,
         meteredAuthorization.lease,
-        observedDuration,
+        observedAudioSeconds,
       );
       if (!observedUsage.allowed) {
         return meteredJsonError(
@@ -665,6 +777,7 @@ export async function POST(request: Request) {
         "refine",
         request.signal,
         asrDictionary,
+        observedAudioSeconds,
       );
       if (refineResult.ok) {
         const refinedText = refineResult.transcription.text?.trim() ?? "";
@@ -676,19 +789,31 @@ export async function POST(request: Request) {
           transcriptionText = refinedText;
           refined = true;
         } else if (refinedText) {
-          console.warn(
-            "OpenAI high-accuracy transcription ignored incomplete result",
-            refineResult.requestId,
-          );
+          logOperationalEvent("warn", request, {
+            event: "openai_transcription_refinement_rejected",
+            component: "ai",
+            operation: "transcribe_refine",
+            status: 422,
+            outcome: "incomplete_result",
+            errorCode: "incomplete_refinement",
+            upstreamRequestId: refineResult.requestId,
+            requestId,
+            correlationId,
+          });
         }
       } else {
-        console.error(
-          "OpenAI high-accuracy transcription failed",
-          refineResult.status,
-          refineResult.requestId,
-          refineResult.error?.code,
-          refineResult.error?.type,
-        );
+        logOperationalEvent("error", request, {
+          event: "openai_transcription_refinement_failed",
+          component: "ai",
+          operation: "transcribe_refine",
+          status: refineResult.status,
+          outcome: "failed",
+          errorCode: refineResult.error?.code ?? refineResult.error?.type ?? null,
+          upstreamRequestId: refineResult.requestId,
+          upstreamStatus: refineResult.status,
+          requestId,
+          correlationId,
+        });
       }
     }
 
@@ -769,22 +894,54 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    console.error("transcription route failed", error);
-    return jsonError(
+    logOperationalEvent("error", request, {
+      event: "transcription_route_failed",
+      component: "ai",
+      operation: "transcribe",
+      status: 500,
+      outcome: "failed",
+      errorCode: "route_exception",
+      requestId,
+      correlationId,
+      error,
+    });
+    const routeErrorResponse = jsonError(
       "動画を読み取れませんでした。もう一度お試しください。",
       500,
     );
+    routeErrorResponse.headers.set("X-Request-Id", requestId);
+    return routeErrorResponse;
   } finally {
     if (meteredAuthorization && !meteredAuthorizationSettled) {
       await abandonMeteredAiOperation(meteredAuthorization).catch(
         (cleanupError) => {
-          console.error("transcription usage cleanup failed", cleanupError);
+          logOperationalEvent("error", request, {
+            event: "transcription_usage_cleanup_failed",
+            component: "ai",
+            operation: "release_usage_lease",
+            status: 500,
+            outcome: "failed",
+            errorCode: "usage_cleanup_failed",
+            requestId,
+            correlationId,
+            error: cleanupError,
+          });
         },
       );
     }
     if (temporaryTransfer) {
       await removeTransfer(temporaryTransfer).catch((cleanupError) => {
-        console.error("temporary transcription upload cleanup failed", cleanupError);
+        logOperationalEvent("error", request, {
+          event: "temporary_transcription_upload_cleanup_failed",
+          component: "ai",
+          operation: "delete_temporary_upload",
+          status: 500,
+          outcome: "failed",
+          errorCode: "temporary_upload_cleanup_failed",
+          requestId,
+          correlationId,
+          error: cleanupError,
+        });
       });
     }
   }

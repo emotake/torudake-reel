@@ -15,7 +15,11 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "release:preflight": "node scripts/release-preflight.mjs",
-    "release:preflight:offline": "node scripts/release-preflight.mjs --offline"
+    "release:preflight:offline": "node scripts/release-preflight.mjs --offline",
+    "ops:health": "node scripts/operations/synthetic-readiness.mjs",
+    "ops:health:detailed": "node scripts/operations/synthetic-readiness.mjs --detailed",
+    "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
+    "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs"
   },
   "dependencies": {
     "@mediabunny/aac-encoder": "1.51.0",

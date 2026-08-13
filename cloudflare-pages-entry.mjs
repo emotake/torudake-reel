@@ -4,11 +4,19 @@ import { setRuntimeEnvironment } from "./cloudflare-pages-env-shim.mjs";
 const PUBLIC_MEDIA_PREFIX = "/demo/";
 const PUBLIC_MEDIA_CACHE_CONTROL =
   "public, max-age=86400, stale-while-revalidate=604800";
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 const pagesWorker = {
   async fetch(request, env, context) {
     setRuntimeEnvironment(env);
     const url = new URL(request.url);
+    const requestId = requestIdentifier(
+      request.headers.get("x-request-id"),
+    );
+    const correlationId = requestIdentifier(
+      request.headers.get("x-correlation-id"),
+      requestId,
+    );
 
     // Pages is a public origin, not the OpenAI Sites dispatcher. Never forward
     // client-supplied identity headers from this entry point, even if a Pages
@@ -17,39 +25,59 @@ const pagesWorker = {
     for (const name of [...headers.keys()]) {
       if (name.startsWith("oai-authenticated-user-")) headers.delete(name);
     }
+    headers.set("x-request-id", requestId);
+    headers.set("x-correlation-id", correlationId);
     const sanitizedRequest = new Request(request, { headers });
 
-    // Pages static assets currently answer Range requests with 200. Keep demo
-    // media in the Worker route so browsers can seek without downloading from
-    // the beginning, while continuing to source the immutable bytes from the
-    // Pages asset namespace.
-    if (
-      (request.method === "GET" || request.method === "HEAD") &&
-      url.pathname.startsWith(PUBLIC_MEDIA_PREFIX)
-    ) {
-      return withSecurityHeaders(
-        await servePublicMedia(sanitizedRequest, env),
-        url,
+    let response;
+    try {
+      // Pages static assets currently answer Range requests with 200. Keep demo
+      // media in the Worker route so browsers can seek without downloading from
+      // the beginning, while continuing to source the immutable bytes from the
+      // Pages asset namespace.
+      if (
+        (request.method === "GET" || request.method === "HEAD") &&
+        url.pathname.startsWith(PUBLIC_MEDIA_PREFIX)
+      ) {
+        response = await servePublicMedia(sanitizedRequest, env);
+      } else if (
+        // Cloudflare Pages advanced mode sends every request through _worker.js.
+        // Vinext's generated worker assumes its hashed client assets are served
+        // before the worker (the Workers Static Assets default), so forward those
+        // files explicitly when running on Pages.
+        (request.method === "GET" || request.method === "HEAD") &&
+        url.pathname.startsWith("/assets/")
+      ) {
+        response = await env.ASSETS.fetch(sanitizedRequest);
+      } else {
+        response = await worker.fetch(sanitizedRequest, env, context);
+      }
+    } catch (error) {
+      console.error(
+        runtimeLog(request, url, requestId, correlationId, {
+          event: "unhandled_request_exception",
+          status: 500,
+          errorName: error instanceof Error ? error.name : "NonErrorThrown",
+        }),
+      );
+      response = Response.json(
+        { error: "Internal server error.", requestId },
+        { status: 500 },
       );
     }
 
-    // Cloudflare Pages advanced mode sends every request through _worker.js.
-    // Vinext's generated worker assumes its hashed client assets are served
-    // before the worker (the Workers Static Assets default), so forward those
-    // files explicitly when running on Pages.
-    if (
-      (request.method === "GET" || request.method === "HEAD") &&
-      url.pathname.startsWith("/assets/")
-    ) {
-      return withSecurityHeaders(
-        await env.ASSETS.fetch(sanitizedRequest),
-        url,
+    if (response.status >= 500) {
+      console.error(
+        runtimeLog(request, url, requestId, correlationId, {
+          event: "http_server_error",
+          status: response.status,
+        }),
       );
     }
-
     return withSecurityHeaders(
-      await worker.fetch(sanitizedRequest, env, context),
+      response,
       url,
+      { requestId, correlationId },
     );
   },
 };
@@ -228,7 +256,29 @@ function sliceByteStream(source, start, end) {
   });
 }
 
-function withSecurityHeaders(response, url) {
+function requestIdentifier(value, fallback = "") {
+  const normalized = value?.trim() ?? "";
+  if (REQUEST_ID_PATTERN.test(normalized)) return normalized;
+  return fallback || crypto.randomUUID();
+}
+
+function runtimeLog(request, url, requestId, correlationId, fields) {
+  return {
+    schemaVersion: 1,
+    timestamp: new Date().toISOString(),
+    severity: "error",
+    service: "torudake-reel",
+    component: "runtime",
+    requestId,
+    correlationId,
+    method: request.method,
+    path: url.pathname,
+    cfRay: request.headers.get("cf-ray")?.slice(0, 128) || undefined,
+    ...fields,
+  };
+}
+
+function withSecurityHeaders(response, url, identifiers = {}) {
   const headers = new Headers(response.headers);
   const isPrivatePath =
     url.pathname === "/account" ||
@@ -240,6 +290,12 @@ function withSecurityHeaders(response, url) {
     headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   }
   headers.set("X-Content-Type-Options", "nosniff");
+  if (identifiers.requestId) {
+    headers.set("X-Request-Id", identifiers.requestId);
+  }
+  if (identifiers.correlationId) {
+    headers.set("X-Correlation-Id", identifiers.correlationId);
+  }
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set(
     "Permissions-Policy",

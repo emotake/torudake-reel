@@ -15,8 +15,18 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const credential = (await readAuthJson(request)) as RegistrationResponseJSON;
-    const result = await verifyRegistration(request, credential);
+    const payload = await readAuthJson(request);
+    const wrappedCredential = "credential" in payload ? payload.credential : payload;
+    if (!wrappedCredential || typeof wrappedCredential !== "object") {
+      throw new Error("Passkey credential is missing.");
+    }
+    const result = await verifyRegistration(
+      request,
+      wrappedCredential as RegistrationResponseJSON,
+      "credential" in payload && "displayName" in payload
+        ? payload.displayName
+        : undefined,
+    );
     const response = privateJson({ authenticated: true });
     response.headers.append("Set-Cookie", result.sessionCookie);
     response.headers.append("Set-Cookie", result.challengeCookie);

@@ -1,0 +1,76 @@
+.page {
+  min-height: 100vh;
+  padding: clamp(24px, 5vw, 64px);
+  color: #18352f;
+  background: linear-gradient(150deg, #fffaf4 0%, #f0faf5 52%, #fff3ed 100%);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.header,
+.sectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto 24px;
+}
+
+.header h1 { margin: 4px 0 8px; font-size: clamp(30px, 5vw, 52px); letter-spacing: -.04em; }
+.header p, .sectionHeading p { margin: 0; color: #536b65; line-height: 1.7; }
+.eyebrow { color: #8f251c !important; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.actions button, .actions a { min-height: 44px; padding: 10px 16px; border: 1px solid #204d43; border-radius: 999px; background: #fff; color: #204d43; font: inherit; font-weight: 750; text-decoration: none; cursor: pointer; }
+.actions button:disabled { cursor: wait; opacity: .65; }
+.actions button:focus-visible, .actions a:focus-visible { outline: 3px solid #8f251c; outline-offset: 3px; }
+
+.page section { max-width: 1180px; margin: 0 auto 28px; }
+.sectionHeading { margin-bottom: 14px; align-items: end; }
+.sectionHeading h2, .panel h2 { margin: 0 0 6px; font-size: 20px; }
+.sectionHeading time { color: #536b65; font-size: 13px; white-space: nowrap; }
+.cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.metricCard, .panel { border: 1px solid rgba(32, 77, 67, .14); border-radius: 20px; background: rgba(255,255,255,.9); box-shadow: 0 16px 40px rgba(37, 68, 60, .07); }
+.metricCard { padding: 18px; }
+.metricCard span { display: block; min-height: 2.6em; color: #536b65; font-size: 12px; line-height: 1.3; }
+.metricCard strong { display: block; margin-top: 8px; font-size: 30px; line-height: 1; }
+.metricCard small { margin-left: 4px; font-size: 12px; }
+.warning { border-color: #bd3825; background: #fff2ee; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 18px; }
+.panel { padding: clamp(18px, 3vw, 28px); overflow: hidden; }
+.panel h3 { margin: 22px 0 10px; font-size: 15px; }
+.bars { display: grid; gap: 9px; margin-top: 18px; }
+.barRow { display: grid; grid-template-columns: 48px minmax(0, 1fr) 34px; align-items: center; gap: 10px; font-size: 12px; }
+.barTrack { height: 12px; overflow: hidden; border-radius: 999px; background: #e6efeb; }
+.barTrack span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #297766, #bd3825); }
+.definitionList { margin: 14px 0 0; }
+.definitionList div, .plans li, .feedback li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #e2ebe7; }
+.definitionList dt { color: #536b65; }
+.definitionList dd { margin: 0; font-weight: 800; }
+.plans, .feedback { margin: 0; padding: 0; list-style: none; }
+.tableWrap { overflow-x: auto; margin-top: 14px; }
+.tableWrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tableWrap th, .tableWrap td { padding: 10px 8px; border-bottom: 1px solid #e2ebe7; text-align: right; }
+.tableWrap th:first-child { text-align: left; }
+.tableWrap thead th { color: #536b65; font-size: 11px; }
+.empty { color: #536b65; line-height: 1.7; }
+.caveats { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: #f2f7f4; }
+.caveats h3 { margin-top: 0; }
+.caveats ul { margin: 0; padding-left: 1.3em; color: #536b65; font-size: 12px; line-height: 1.7; }
+.error, .loading { max-width: 1180px; margin: 0 auto 24px; padding: 14px 18px; border-radius: 14px; }
+.error { display: flex; gap: 12px; border: 1px solid #bd3825; background: #fff2ee; color: #7b2118; }
+.loading { background: #fff; color: #536b65; }
+
+@media (max-width: 920px) {
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .page { padding: 22px 14px 48px; }
+  .header, .sectionHeading { display: grid; }
+  .actions { width: 100%; }
+  .actions button, .actions a { flex: 1; text-align: center; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metricCard strong { font-size: 26px; }
+  .error { display: grid; }
+}

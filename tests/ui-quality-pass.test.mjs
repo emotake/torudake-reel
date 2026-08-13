@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, cssSource, photoReelSource] = await Promise.all([
+const [pageSource, cssSource, photoReelSource, videoMixSource] = await Promise.all([
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(
     new URL("../app/photo-reel/photo-reel-client.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../app/video-mix/video-mix-client.tsx", import.meta.url),
     "utf8",
   ),
 ]);
@@ -74,12 +78,79 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   const voiceManifest = JSON.parse(await readFile(voiceManifestUrl, "utf8"));
   assert.equal(voiceManifest.samples.length, 4);
   assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
+  assert.equal(voiceManifest.productionParity, false);
+  assert.match(voiceManifest.productionModelDifferenceNote, /different models/);
+  assert.match(pageSource, /固定見本は試聴用モデル（gpt-4o-mini-tts）/);
+  assert.match(pageSource, /実際の動画では本番モデル（gpt-realtime-2\.1-mini）/);
   for (const sample of voiceManifest.samples) {
     await access(new URL(`../public/demo/voices/${sample.file}`, import.meta.url));
     assert.ok(sample.durationSeconds >= 7 && sample.durationSeconds <= 10);
     assert.ok(sample.integratedLufs >= -20.2 && sample.integratedLufs <= -19.2);
     assert.ok(sample.truePeakDbtp <= -2);
   }
+});
+
+test("keeps first-screen trial and purchase claims precise", () => {
+  assert.match(pageSource, /無料体験：合計3分以内・最大2動画まで/);
+  assert.match(pageSource, /AI処理は1動画につき3回/);
+  assert.match(pageSource, /プラン購入時に決済・書き出し成功時に1本分を使用/);
+  assert.doesNotMatch(pageSource, /完成動画を保存するまでは料金がかかりません/);
+
+  assert.match(photoReelSource, /className="photoReelHeroCta"/);
+  assert.match(photoReelSource, /無料体験はサービス共通で合計3分以内・最大2動画まで/);
+  assert.match(photoReelSource, /購入手続き完了時に決済されます/);
+  assert.ok(
+    photoReelSource.indexOf('className="photoReelHeroCta"') <
+      photoReelSource.indexOf('className="photoReelWorkspace"'),
+  );
+
+  assert.match(videoMixSource, /className="videoMixHeroCta"/);
+  assert.match(videoMixSource, /プラン購入時に決済・書き出し成功時に完成動画1本分の利用枠を使用/);
+  assert.ok(
+    videoMixSource.indexOf('className="videoMixHeroCta"') <
+      videoMixSource.indexOf('className="videoMixWorkspace"'),
+  );
+});
+
+test("keeps mobile navigation and first-screen actions accessible", () => {
+  assert.equal((videoMixSource.match(/aria-current=\{mobileStep === [123] \? "step" : undefined\}/g) ?? []).length, 3);
+  assert.match(
+    cssSource,
+    /@media \(max-width: 420px\)[\s\S]*?\.topActions \.trialButton\s*\{[\s\S]*?display:\s*inline-flex/,
+  );
+  assert.doesNotMatch(
+    cssSource,
+    /@media \(max-width: 420px\)[\s\S]*?\.topActions \.trialButton\s*\{[^}]*display:\s*none/,
+  );
+  assert.match(cssSource, /\.lineSaveMark\s*\{[^}]*color:\s*#062d19/);
+  assert.match(cssSource, /\.lineSaveCard > a\s*\{[^}]*color:\s*#062d19/);
+  assert.match(cssSource, /\.trustRow\s*\{[^}]*color:\s*var\(--muted\)/);
+});
+
+test("uses declared font stacks and Japanese-first decorative labels", () => {
+  assert.match(cssSource, /--font-display:\s*"Avenir Next", var\(--font-sans\)/);
+  assert.match(cssSource, /--font-serif:/);
+  assert.doesNotMatch(cssSource, /font-family:\s*"DM Sans"/);
+  assert.doesNotMatch(cssSource, /font-family:\s*"Noto Sans JP"/);
+
+  for (const label of [
+    "AI音声を試聴",
+    "かんたん3ステップ",
+    "このサービスでできること",
+    "料金プラン",
+    "次の投稿を作る",
+    "新しい動画",
+    "AIで編集中",
+    "AI音声の調整",
+    "テロップ編集",
+    "表紙を作る",
+    "投稿の準備",
+    "保存前の確認",
+  ]) {
+    assert.match(pageSource, new RegExp(label));
+  }
+  assert.match(photoReelSource, /写真からリールへ · 端末内編集/);
+  assert.match(videoMixSource, /<span>複数動画編集<\/span>/);
 });
 
 test("keeps mobile account access and accessible touch targets visible", () => {

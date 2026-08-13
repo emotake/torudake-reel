@@ -7,5 +7,6 @@
   "d1Database": "torudake-reel-db",
   "d1DatabaseId": "c0b9cc06-fc19-4e02-acac-2c19d32f3fdc",
   "d1MigrationsDir": "drizzle",
-  "d1MigrationsTable": "d1_migrations"
+  "d1MigrationsTable": "d1_migrations",
+  "observabilityContract": "config/observability.json"
 }
