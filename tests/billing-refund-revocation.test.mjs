@@ -163,7 +163,7 @@ test("assigns each one-time use to its exact purchase", () => {
   );
   assert.match(
     billingStoreSource,
-    /activePurchaseIds[\s\S]{0,400}item\.billingPurchaseId/,
+    /billing_purchase_id IS NULL[\s\S]{0,300}FROM billing_purchases AS active_purchase[\s\S]{0,300}active_purchase\.revoked_at IS NULL/,
   );
 });
 

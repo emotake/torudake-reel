@@ -92,6 +92,11 @@ export type VideoCompositionBoundary = Readonly<{
   transition: VideoCompositionTransition;
 }>;
 
+export type VideoCompositionClipTransitionWindows = Readonly<{
+  incomingSeconds: number;
+  outgoingSeconds: number;
+}>;
+
 export type VideoCompositionPlan = Readonly<{
   sources: readonly VideoCompositionSource[];
   clips: readonly VideoCompositionPlannedClip[];
@@ -172,6 +177,44 @@ function finitePositive(value: number, name: string) {
 
 function roundTimelineSeconds(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+export function videoCompositionTransitionUsesOverlap(
+  type: VideoCompositionTransitionType,
+) {
+  return (
+    type === "crossfade" ||
+    type === "wipe-left" ||
+    type === "slide-left" ||
+    type === "zoom-dissolve"
+  );
+}
+
+function transitionWindowSeconds(transition: VideoCompositionTransition) {
+  if (transition.type === "cut") return 0;
+  return videoCompositionTransitionUsesOverlap(transition.type)
+    ? transition.duration
+    : transition.duration / 2;
+}
+
+/**
+ * Returns the exact portions of a clip occupied by its neighboring effects.
+ * The planner guarantees their sum never exceeds the clip duration. Preview
+ * and export can therefore use the same collision-free timing metadata.
+ */
+export function getVideoCompositionClipTransitionWindows(
+  plan: Pick<VideoCompositionPlan, "clips" | "boundaries">,
+  globalClipIndex: number,
+): VideoCompositionClipTransitionWindows {
+  if (!Number.isInteger(globalClipIndex) || !plan.clips[globalClipIndex]) {
+    throw new RangeError("Unknown video composition clip index.");
+  }
+  const incoming = plan.boundaries[globalClipIndex - 1]?.transition;
+  const outgoing = plan.boundaries[globalClipIndex]?.transition;
+  return {
+    incomingSeconds: incoming ? transitionWindowSeconds(incoming) : 0,
+    outgoingSeconds: outgoing ? transitionWindowSeconds(outgoing) : 0,
+  };
 }
 
 export function normalizeVideoCompositionTransition(
@@ -314,10 +357,6 @@ export function createVideoCompositionPlan({
   ) {
     throw new RangeError("The combined source duration must be 300 seconds or less.");
   }
-  if (editedCursor > VIDEO_COMPOSITION_MAX_OUTPUT_DURATION_SECONDS + TIME_EPSILON) {
-    throw new RangeError("The edited video must be 90 seconds or less.");
-  }
-
   const boundaryCount = Math.max(0, plannedClips.length - 1);
   if ((boundaryTransitions?.length ?? 0) > boundaryCount) {
     throw new RangeError(
@@ -325,7 +364,7 @@ export function createVideoCompositionPlan({
     );
   }
 
-  const boundaries: VideoCompositionBoundary[] = plannedClips
+  const requestedBoundaries: VideoCompositionBoundary[] = plannedClips
     .slice(1)
     .map((incoming, index) => {
       const outgoing = plannedClips[index];
@@ -359,12 +398,98 @@ export function createVideoCompositionPlan({
       };
     });
 
+  // A short middle clip can be touched by both neighboring effects. Allocate
+  // those windows together instead of clamping each boundary independently;
+  // otherwise the incoming effect wins the same frames and the outgoing
+  // effect collapses into a one-frame flash.
+  const allocatedDurations = requestedBoundaries.map(
+    (boundary) => boundary.transition.duration,
+  );
+  // A boundary participates in two adjacent clip constraints. Iterate to a
+  // fixed point so shrinking it for a later clip can never re-break an earlier
+  // one through ordering or rounding.
+  for (let pass = 0; pass < plannedClips.length; pass += 1) {
+    let changed = false;
+    plannedClips.forEach((clip, clipIndex) => {
+      const incomingBoundaryIndex = clipIndex - 1;
+      const outgoingBoundaryIndex = clipIndex;
+      const incoming = requestedBoundaries[incomingBoundaryIndex];
+      const outgoing = requestedBoundaries[outgoingBoundaryIndex];
+      const incomingWindow = incoming
+        ? transitionWindowSeconds({
+            ...incoming.transition,
+            duration: allocatedDurations[incomingBoundaryIndex],
+          })
+        : 0;
+      const outgoingWindow = outgoing
+        ? transitionWindowSeconds({
+            ...outgoing.transition,
+            duration: allocatedDurations[outgoingBoundaryIndex],
+          })
+        : 0;
+      const occupied = incomingWindow + outgoingWindow;
+      if (occupied <= clip.duration + TIME_EPSILON || occupied <= TIME_EPSILON) {
+        return;
+      }
+      const scale = clip.duration / occupied;
+      if (incoming) allocatedDurations[incomingBoundaryIndex] *= scale;
+      if (outgoing) allocatedDurations[outgoingBoundaryIndex] *= scale;
+      changed = true;
+    });
+    if (!changed) break;
+  }
+
+  const allocatedBoundaries = requestedBoundaries.map((boundary, index) => ({
+    ...boundary,
+    transition: {
+      ...boundary.transition,
+      duration: roundTimelineSeconds(allocatedDurations[index]),
+    },
+  }));
+
+  // Blend-style effects are true overlaps: the outgoing and incoming source
+  // clocks both advance through the boundary. Fade-to-colour effects retain
+  // the established full-length timeline because their halves live on either
+  // side of a hard boundary.
+  const timelineClips: VideoCompositionPlannedClip[] = [];
+  plannedClips.forEach((clip, index) => {
+    const previous = timelineClips.at(-1);
+    const incomingBoundary = allocatedBoundaries[index - 1];
+    const overlap =
+      incomingBoundary &&
+      videoCompositionTransitionUsesOverlap(incomingBoundary.transition.type)
+        ? incomingBoundary.transition.duration
+        : 0;
+    const editedStart = roundTimelineSeconds(
+      previous ? previous.editedEnd - overlap : 0,
+    );
+    timelineClips.push({
+      ...clip,
+      editedStart,
+      editedEnd: roundTimelineSeconds(editedStart + clip.duration),
+    });
+  });
+  const boundaries: VideoCompositionBoundary[] = allocatedBoundaries.map(
+    (boundary) => ({
+      ...boundary,
+      editedTime: timelineClips[boundary.incomingClipIndex].editedStart,
+    }),
+  );
+  const duration = timelineClips.at(-1)?.editedEnd ?? 0;
+  if (duration > VIDEO_COMPOSITION_MAX_OUTPUT_DURATION_SECONDS + TIME_EPSILON) {
+    throw new RangeError("The edited video must be 90 seconds or less.");
+  }
+  const timelineSources = plannedSources.map((source) => ({
+    ...source,
+    clips: source.clips.map((clip) => timelineClips[clip.globalClipIndex]),
+  }));
+
   return {
-    sources: plannedSources,
-    clips: plannedClips,
+    sources: timelineSources,
+    clips: timelineClips,
     boundaries,
     transition: normalizedTransition,
-    duration: roundTimelineSeconds(editedCursor),
+    duration,
     aggregateSourceDuration: roundTimelineSeconds(aggregateSourceDuration),
     totalSourceBytes,
     width: VIDEO_COMPOSITION_OUTPUT_WIDTH,
@@ -455,18 +580,6 @@ function createFrameTransition(
   };
 }
 
-function getLastScheduledSourceTime(
-  clip: VideoCompositionPlannedClip,
-  frameDuration: number,
-) {
-  const lastEditedFrameTime =
-    Math.floor((clip.editedEnd - TIME_EPSILON) / frameDuration) * frameDuration;
-  return Math.min(
-    clip.end,
-    clip.start + Math.max(0, lastEditedFrameTime - clip.editedStart),
-  );
-}
-
 function transitionForFrame(
   plan: VideoCompositionPlan,
   clip: VideoCompositionPlannedClip,
@@ -510,9 +623,9 @@ function transitionForFrame(
           sourceId: outgoing.sourceId,
           sourceIndex: outgoing.sourceIndex,
           clipIndex: outgoing.clipIndex,
-          sourceTime: getLastScheduledSourceTime(
-            outgoing,
-            1 / plan.frameRate,
+          sourceTime: Math.min(
+            outgoing.end,
+            outgoing.start + Math.max(0, editedTime - outgoing.editedStart),
           ),
         },
       });
@@ -566,10 +679,7 @@ function transitionForFrame(
           sourceId: outgoing.sourceId,
           sourceIndex: outgoing.sourceIndex,
           clipIndex: outgoing.clipIndex,
-          sourceTime: getLastScheduledSourceTime(
-            outgoing,
-            1 / plan.frameRate,
-          ),
+          sourceTime: outgoing.end,
         },
       });
     }
@@ -596,7 +706,7 @@ export function buildVideoCompositionFrameSchedule(
     const editedTime = frameIndex * frameDuration;
     while (
       clipIndex < plan.clips.length - 1 &&
-      editedTime >= plan.clips[clipIndex].editedEnd - TIME_EPSILON
+      editedTime >= plan.clips[clipIndex + 1].editedStart - TIME_EPSILON
     ) {
       clipIndex += 1;
     }

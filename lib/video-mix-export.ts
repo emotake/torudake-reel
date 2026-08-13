@@ -15,6 +15,9 @@ import {
   getPortableEqualPowerFadeGain,
   getPortableExportMemoryPreflight,
   getPreferredPortableInputAudioTrack,
+  type PortableAudioActivityRange,
+  type PortableAudioEnvelopePoint,
+  type PortableVideoDrawRect,
 } from "./portable-video-export";
 import {
   combineAudioLoudnessMeasurements,
@@ -29,6 +32,7 @@ import {
   VIDEO_COMPOSITION_OUTPUT_WIDTH,
   buildVideoCompositionFrameSchedule,
   createVideoCompositionPlan,
+  videoCompositionTransitionUsesOverlap,
   type VideoCompositionClip,
   type VideoCompositionFrameScheduleEntry,
   type VideoCompositionPlan,
@@ -45,12 +49,126 @@ const OUTPUT_AUDIO_BITRATE = 192_000;
 const OUTPUT_AUDIO_SAMPLE_RATE = 48_000;
 const OUTPUT_AUDIO_CHANNELS = 2;
 const TIME_EPSILON = 1e-7;
+export const VIDEO_MIX_SOURCE_AUDIO_ANALYSIS_MAX_SECONDS = 15;
+export const VIDEO_MIX_SOURCE_AUDIO_ANALYSIS_MAX_BUFFERS = 480;
 
 export type VideoMixSourceInput = Readonly<{
   id: string;
   file: File;
   clips: readonly VideoCompositionClip[];
+  framing?: VideoMixSourceFraming;
+  /** Cached local loudness gain shared with preview for the selected clips. */
+  audioNormalizationGain?: number;
 }>;
+
+export type VideoMixSourceFramingMode = "blur" | "cover" | "contain";
+
+export type VideoMixSourceFraming = Readonly<{
+  mode: VideoMixSourceFramingMode;
+  /** Horizontal focal position, normalized from 0 (left) to 1 (right). */
+  focusX: number;
+  /** Vertical focal position, normalized from 0 (top) to 1 (bottom). */
+  focusY: number;
+}>;
+
+export type VideoMixFrameLayout = Readonly<{
+  framing: VideoMixSourceFraming;
+  background:
+    | Readonly<{ kind: "solid"; color: "#000" }>
+    | Readonly<{
+        kind: "blurred-video";
+        rect: PortableVideoDrawRect;
+        blurPixels: number;
+      }>;
+  foregroundRect: PortableVideoDrawRect;
+}>;
+
+function clampFocus(value: number | undefined) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value!)) : 0.5;
+}
+
+function computeCoverRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  focusX: number,
+  focusY: number,
+): PortableVideoDrawRect {
+  const scale = Math.max(outputWidth / sourceWidth, outputHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  const overflowX = Math.max(0, width - outputWidth);
+  const overflowY = Math.max(0, height - outputHeight);
+  return {
+    x: overflowX > 0 ? -overflowX * focusX : 0,
+    y: overflowY > 0 ? -overflowY * focusY : 0,
+    width,
+    height,
+  };
+}
+
+/**
+ * Renderer-independent framing shared by the HTML preview and Canvas export.
+ * Wide footage defaults to a blurred fill, while native portrait footage uses
+ * a full-bleed crop. Explicit user choices always win.
+ */
+export function computeVideoMixFrameLayout(
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  framing?: VideoMixSourceFraming,
+): VideoMixFrameLayout {
+  // Reuse the established validation and contain calculation.
+  const containRect = computePortableVideoDrawRect(
+    sourceWidth,
+    sourceHeight,
+    outputWidth,
+    outputHeight,
+  );
+  const focusX = clampFocus(framing?.focusX);
+  const focusY = clampFocus(framing?.focusY);
+  const sourceAspect = sourceWidth / sourceHeight;
+  const outputAspect = outputWidth / outputHeight;
+  const mode =
+    framing?.mode ?? (sourceAspect > outputAspect * 1.15 ? "blur" : "cover");
+  if (mode !== "blur" && mode !== "cover" && mode !== "contain") {
+    throw new RangeError("Unsupported video framing mode.");
+  }
+  const normalizedFraming = { mode, focusX, focusY } as const;
+  const coverRect = computeCoverRect(
+    sourceWidth,
+    sourceHeight,
+    outputWidth,
+    outputHeight,
+    focusX,
+    focusY,
+  );
+  if (mode === "cover") {
+    return {
+      framing: normalizedFraming,
+      background: { kind: "solid", color: "#000" },
+      foregroundRect: coverRect,
+    };
+  }
+  if (mode === "blur") {
+    return {
+      framing: normalizedFraming,
+      background: {
+        kind: "blurred-video",
+        rect: coverRect,
+        blurPixels: Math.max(18, Math.round(Math.max(outputWidth, outputHeight) * 0.024)),
+      },
+      foregroundRect: containRect,
+    };
+  }
+  return {
+    framing: normalizedFraming,
+    background: { kind: "solid", color: "#000" },
+    foregroundRect: containRect,
+  };
+}
 
 export type VideoMixOverlayContext = Readonly<{
   canvas: HTMLCanvasElement;
@@ -94,6 +212,92 @@ export type VideoMixAudioOutputState =
   | "no-source-audio"
   | "source-audio-unavailable-in-selection";
 
+export type VideoMixNarrationDuckingMetadata = Readonly<{
+  enabled: boolean;
+  duration: number;
+  baseGain: number;
+  activity: readonly PortableAudioActivityRange[];
+  envelope: readonly PortableAudioEnvelopePoint[];
+}>;
+
+/** Exact narration ducking recipe shared by preview playback and export. */
+export function buildVideoMixNarrationDuckingMetadata(options: Readonly<{
+  activity: readonly PortableAudioActivityRange[];
+  baseGain: number;
+  duration: number;
+  enabled?: boolean;
+}>): VideoMixNarrationDuckingMetadata {
+  const enabled = options.enabled ?? true;
+  const activity = enabled ? options.activity : [];
+  return {
+    enabled,
+    duration: options.duration,
+    baseGain: options.baseGain,
+    activity: [...activity],
+    envelope: buildPortableDuckingEnvelope(
+      activity,
+      options.baseGain,
+      options.duration,
+    ),
+  };
+}
+
+/** Linearly samples the WebAudio automation recipe for an HTML preview. */
+export function getVideoMixDuckingGainAtTime(
+  metadata: VideoMixNarrationDuckingMetadata,
+  editedTime: number,
+) {
+  const points = metadata.envelope;
+  if (points.length === 0) return metadata.baseGain;
+  const time = Math.max(0, Math.min(metadata.duration, editedTime));
+  let previous = points[0];
+  for (let index = 1; index < points.length; index += 1) {
+    const next = points[index];
+    if (time <= next.time) {
+      const span = next.time - previous.time;
+      if (span <= TIME_EPSILON) return next.gain;
+      const progress = (time - previous.time) / span;
+      return previous.gain + (next.gain - previous.gain) * progress;
+    }
+    previous = next;
+  }
+  return previous.gain;
+}
+
+export type VideoMixTransitionAudioGains = Readonly<{
+  boundaryIndex: number;
+  outgoing: number;
+  incoming: number;
+}>;
+
+/** Equal-power source gains for the true-overlap scene change at `editedTime`. */
+export function getVideoMixTransitionAudioGains(
+  plan: VideoCompositionPlan,
+  editedTime: number,
+): VideoMixTransitionAudioGains | null {
+  const boundary = plan.boundaries.find(
+    (candidate) =>
+      candidate.transition.duration > TIME_EPSILON &&
+      videoCompositionTransitionUsesOverlap(candidate.transition.type) &&
+      editedTime >= candidate.editedTime - TIME_EPSILON &&
+      editedTime <
+        candidate.editedTime + candidate.transition.duration - TIME_EPSILON,
+  );
+  if (!boundary) return null;
+  const progress = Math.max(
+    0,
+    Math.min(
+      1,
+      (editedTime - boundary.editedTime) / boundary.transition.duration,
+    ),
+  );
+  return {
+    boundaryIndex: boundary.index,
+    outgoing: getPortableEqualPowerFadeGain(progress, "out"),
+    incoming: getPortableEqualPowerFadeGain(progress, "in"),
+  };
+}
+
 /**
  * Describes the audio expectation and the audio track actually written to the
  * MP4. Clients should pass `requireAudio` to their post-export quality check
@@ -131,6 +335,8 @@ export type VideoMixExportOptions = Readonly<{
   narrationAudio?: Blob;
   /** Narration gain after conservative loudness normalization. Defaults to 1. */
   narrationGain?: number;
+  /** Cached 0.65–1.35 narration normalization shared with the live preview. */
+  narrationNormalizationGain?: number;
   /** Lowers source audio only while narration is active. Defaults to true. */
   duckSourceAudioDuringNarration?: boolean;
   signal?: AbortSignal;
@@ -160,7 +366,7 @@ type PreparedVideoMixSource = {
   >;
   audioTrack: InputAudioTrack | null;
   duration: number;
-  drawRect: ReturnType<typeof computePortableVideoDrawRect>;
+  frameLayout: VideoMixFrameLayout;
   colorConversionPlan: PortableVideoColorConversionPlan;
 };
 
@@ -176,6 +382,9 @@ type ScheduledMixAudio = {
   fadeOut: boolean;
   fadeInDuration?: number;
   fadeOutDuration?: number;
+  /** Timeline-wide equal-power fades used by true-overlap scene changes. */
+  overlapFadeIn?: Readonly<{ start: number; end: number }>;
+  overlapFadeOut?: Readonly<{ start: number; end: number }>;
 };
 
 type RenderedVideoMixAudio = Readonly<{
@@ -192,9 +401,19 @@ type RenderedVideoMixAudio = Readonly<{
 export type VideoMixFrameDecodeBatch = Readonly<{
   sourceIndex: number;
   globalClipIndex: number;
-  /** The outgoing source frame is captured once after this batch. */
-  captureBoundaryIndex: number | null;
+  /** Primary output frames retained for backwards-compatible inspection. */
   frames: readonly VideoCompositionFrameScheduleEntry[];
+  /**
+   * One monotonic decoder stream per clip, including the advancing outgoing
+   * side of any blend transition. This avoids a decoder flush per frame.
+   */
+  requests: readonly VideoMixFrameDecodeRequest[];
+}>;
+
+export type VideoMixFrameDecodeRequest = Readonly<{
+  frameIndex: number;
+  role: "primary" | "transition-outgoing";
+  sourceTime: number;
 }>;
 
 const VIDEO_MIX_TRANSITION_CANVAS_BYTES =
@@ -222,25 +441,43 @@ export function buildVideoMixFrameDecodeBatches(
     buildVideoCompositionFrameSchedule(plan),
 ): VideoMixFrameDecodeBatch[] {
   const framesByClip = new Map<number, VideoCompositionFrameScheduleEntry[]>();
+  const requestsByClip = new Map<number, VideoMixFrameDecodeRequest[]>();
   for (const frame of schedule) {
     const frames = framesByClip.get(frame.globalClipIndex) ?? [];
     frames.push(frame);
     framesByClip.set(frame.globalClipIndex, frames);
+    const primaryRequests = requestsByClip.get(frame.globalClipIndex) ?? [];
+    primaryRequests.push({
+      frameIndex: frame.frameIndex,
+      role: "primary",
+      sourceTime: frame.sourceTime,
+    });
+    requestsByClip.set(frame.globalClipIndex, primaryRequests);
+    if (transitionUsesOutgoingFrame(frame) && frame.transition) {
+      const outgoingClipIndex =
+        plan.boundaries[frame.transition.boundaryIndex]?.outgoingClipIndex;
+      if (outgoingClipIndex === undefined) {
+        throw new Error("Unknown outgoing transition clip.");
+      }
+      const outgoingRequests = requestsByClip.get(outgoingClipIndex) ?? [];
+      outgoingRequests.push({
+        frameIndex: frame.frameIndex,
+        role: "transition-outgoing",
+        sourceTime: frame.transition.from.sourceTime,
+      });
+      requestsByClip.set(outgoingClipIndex, outgoingRequests);
+    }
   }
 
   return plan.clips.flatMap((clip) => {
     const frames = framesByClip.get(clip.globalClipIndex) ?? [];
-    if (frames.length === 0) return [];
-    const outgoingBoundary = plan.boundaries[clip.globalClipIndex];
+    const requests = requestsByClip.get(clip.globalClipIndex) ?? [];
+    if (requests.length === 0) return [];
     return [{
       sourceIndex: clip.sourceIndex,
       globalClipIndex: clip.globalClipIndex,
-      captureBoundaryIndex:
-        outgoingBoundary &&
-        transitionTypeUsesOutgoingFrame(outgoingBoundary.transition.type)
-          ? outgoingBoundary.index
-          : null,
       frames,
+      requests,
     }];
   });
 }
@@ -336,7 +573,7 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 async function* abortAwareVideoMixTimestamps(
-  frames: readonly VideoCompositionFrameScheduleEntry[],
+  frames: readonly Readonly<{ sourceTime: number }>[],
   signal?: AbortSignal,
 ) {
   for (const frame of frames) {
@@ -353,6 +590,157 @@ function normalizeAudioGain(value = 1) {
     throw new RangeError("Video mix audio gain must be between 0 and 2.");
   }
   return value;
+}
+
+function normalizeSourceAudioNormalizationGain(value: number | undefined) {
+  if (value === undefined) return null;
+  if (!Number.isFinite(value) || value < 0.4 || value > 1.8) {
+    throw new RangeError(
+      "Video mix source audio normalization gain must be between 0.4 and 1.8.",
+    );
+  }
+  return value;
+}
+
+type VideoMixLoudnessAccumulator = {
+  measurements: AudioLoudnessMeasurement[];
+  sumSquares: number;
+  peak: number;
+  sampleCount: number;
+};
+
+function createVideoMixLoudnessAccumulator(): VideoMixLoudnessAccumulator {
+  return { measurements: [], sumSquares: 0, peak: 0, sampleCount: 0 };
+}
+
+function addVideoMixAudioBufferMeasurement(
+  accumulator: VideoMixLoudnessAccumulator,
+  buffer: AudioBuffer,
+  startFrame = 0,
+  endFrame = buffer.length,
+) {
+  const safeStart = Math.max(0, Math.min(buffer.length, startFrame));
+  const safeEnd = Math.max(safeStart, Math.min(buffer.length, endFrame));
+  if (safeEnd <= safeStart) return;
+  const channels = Array.from(
+    { length: buffer.numberOfChannels },
+    (_, channel) => buffer.getChannelData(channel),
+  );
+  accumulator.measurements.push(
+    measureAudioLoudness(channels, buffer.sampleRate, {
+      startFrame: safeStart,
+      endFrame: safeEnd,
+    }),
+  );
+  const stride = Math.max(1, Math.ceil((safeEnd - safeStart) / 30_000));
+  channels.forEach((samples) => {
+    for (let frame = safeStart; frame < safeEnd; frame += stride) {
+      const sample = samples[frame];
+      if (!Number.isFinite(sample)) continue;
+      accumulator.sumSquares += sample * sample;
+      accumulator.peak = Math.max(accumulator.peak, Math.abs(sample));
+      accumulator.sampleCount += 1;
+    }
+  });
+}
+
+function finishVideoMixAudioNormalization(
+  accumulator: VideoMixLoudnessAccumulator,
+) {
+  const loudness = combineAudioLoudnessMeasurements(accumulator.measurements);
+  if (loudness.integratedLufs !== null) {
+    return Math.max(0.4, Math.min(1.8, computeLoudnessNormalizationGain(loudness)));
+  }
+  if (accumulator.sampleCount === 0 || accumulator.peak < 0.0001) return 1;
+  const rms = Math.sqrt(accumulator.sumSquares / accumulator.sampleCount);
+  const targetRms = 10 ** (-18 / 20);
+  return Math.min(1.8, Math.max(0.4, targetRms / rms), 0.9 / accumulator.peak);
+}
+
+export function createVideoMixSourceAudioAnalysisWindows(
+  clips: readonly VideoCompositionClip[],
+  maximumSeconds = VIDEO_MIX_SOURCE_AUDIO_ANALYSIS_MAX_SECONDS,
+) {
+  if (!Number.isFinite(maximumSeconds) || maximumSeconds <= 0) {
+    throw new RangeError("Video mix audio analysis duration must be positive.");
+  }
+  const valid = clips
+    .map((clip) => ({ start: clip.start, end: clip.end }))
+    .filter(
+      (clip) =>
+        Number.isFinite(clip.start) &&
+        Number.isFinite(clip.end) &&
+        clip.start >= 0 &&
+        clip.end - clip.start > TIME_EPSILON,
+    );
+  const selectedSeconds = valid.reduce(
+    (total, clip) => total + (clip.end - clip.start),
+    0,
+  );
+  if (selectedSeconds <= maximumSeconds + TIME_EPSILON) return valid;
+  // One centered window per selected clip keeps both cuts represented while
+  // bounding phone decode work independently of the original file duration.
+  return valid.map((clip) => {
+    const clipDuration = clip.end - clip.start;
+    const share = maximumSeconds * (clipDuration / selectedSeconds);
+    const duration = Math.min(clipDuration, share);
+    const start = clip.start + (clipDuration - duration) / 2;
+    return { start, end: start + duration };
+  });
+}
+
+/**
+ * Measures only bounded windows from the currently selected clips. Decoded
+ * PCM is consumed and discarded buffer-by-buffer, and callers can abort when
+ * a source is removed, trimmed, or the editor unmounts.
+ */
+export async function measureVideoMixSourceAudioNormalization(
+  file: File,
+  clips: readonly VideoCompositionClip[],
+  signal?: AbortSignal,
+) {
+  if (!(file instanceof File) || file.size <= 0) {
+    throw new TypeError("A non-empty video File is required for audio analysis.");
+  }
+  let input: InstanceType<(typeof import("mediabunny"))["Input"]> | null = null;
+  try {
+    throwIfAborted(signal);
+    const media = await import("mediabunny");
+    input = new media.Input({
+      source: new media.BlobSource(file),
+      formats: media.ALL_FORMATS,
+    });
+    if (!(await input.canRead())) return 1;
+    const audioTrack = await getPreferredPortableInputAudioTrack(input);
+    if (!audioTrack || !(await audioTrack.canDecode())) return 1;
+    const duration = await audioTrack.computeDuration();
+    if (!Number.isFinite(duration) || duration <= TIME_EPSILON) return 1;
+    const sink = new media.AudioBufferSink(audioTrack as InputAudioTrack);
+    const accumulator = createVideoMixLoudnessAccumulator();
+    const windows = createVideoMixSourceAudioAnalysisWindows(clips).map((window) => ({
+      start: Math.max(0, Math.min(duration, window.start)),
+      end: Math.max(0, Math.min(duration, window.end)),
+    }));
+    let decodedBuffers = 0;
+    for (const window of windows) {
+      if (window.end - window.start <= TIME_EPSILON) continue;
+      for await (const wrapped of sink.buffers(window.start, window.end)) {
+        throwIfAborted(signal);
+        addVideoMixAudioBufferMeasurement(accumulator, wrapped.buffer);
+        decodedBuffers += 1;
+        if (decodedBuffers >= VIDEO_MIX_SOURCE_AUDIO_ANALYSIS_MAX_BUFFERS) break;
+      }
+      if (decodedBuffers >= VIDEO_MIX_SOURCE_AUDIO_ANALYSIS_MAX_BUFFERS) break;
+    }
+    return finishVideoMixAudioNormalization(accumulator);
+  } catch (error) {
+    if (error instanceof PortableVideoExportAbortedError) throw error;
+    // Preview loudness analysis is an enhancement. Unsupported source audio
+    // remains playable at unity gain and export retains its own fallback.
+    return 1;
+  } finally {
+    input?.dispose();
+  }
 }
 
 function getOfflineAudioContextConstructor() {
@@ -378,7 +766,12 @@ function scheduleAudioBuffer(
 
   const source = context.createBufferSource();
   source.buffer = item.buffer;
-  if (!item.fadeIn && !item.fadeOut) {
+  if (
+    !item.fadeIn &&
+    !item.fadeOut &&
+    !item.overlapFadeIn &&
+    !item.overlapFadeOut
+  ) {
     source.connect(destination);
     source.start(item.placement.when, item.placement.offset, duration);
     return;
@@ -397,6 +790,43 @@ function scheduleAudioBuffer(
     maximumSingleFade,
   );
   const curveSteps = 32;
+  const itemStart = item.placement.when;
+  const itemEnd = itemStart + duration;
+  if (
+    !item.overlapFadeIn ||
+    item.overlapFadeIn.start > itemStart + TIME_EPSILON
+  ) {
+    gain.gain.setValueAtTime(1, itemStart);
+  }
+
+  const scheduleTimelineFade = (
+    window: Readonly<{ start: number; end: number }>,
+    direction: "in" | "out",
+  ) => {
+    const overlapStart = Math.max(itemStart, window.start);
+    const overlapEnd = Math.min(itemEnd, window.end);
+    if (overlapEnd - overlapStart <= TIME_EPSILON) return;
+    const windowDuration = window.end - window.start;
+    if (windowDuration <= TIME_EPSILON) return;
+    gain.gain.setValueCurveAtTime(
+      Float32Array.from({ length: curveSteps }, (_, index) => {
+        const timelineTime =
+          overlapStart +
+          ((overlapEnd - overlapStart) * index) / (curveSteps - 1);
+        return getPortableEqualPowerFadeGain(
+          (timelineTime - window.start) / windowDuration,
+          direction,
+        );
+      }),
+      overlapStart,
+      overlapEnd - overlapStart,
+    );
+    if (direction === "in" && overlapEnd < itemEnd - TIME_EPSILON) {
+      gain.gain.setValueAtTime(1, overlapEnd);
+    }
+  };
+  if (item.overlapFadeIn) scheduleTimelineFade(item.overlapFadeIn, "in");
+  if (item.overlapFadeOut) scheduleTimelineFade(item.overlapFadeOut, "out");
   if (item.fadeIn && fadeInDuration > TIME_EPSILON) {
     gain.gain.setValueCurveAtTime(
       Float32Array.from(
@@ -407,7 +837,7 @@ function scheduleAudioBuffer(
       item.placement.when,
       fadeInDuration,
     );
-  } else {
+  } else if (!item.overlapFadeIn) {
     gain.gain.setValueAtTime(1, item.placement.when);
   }
   if (item.fadeOut && fadeOutDuration > TIME_EPSILON) {
@@ -424,13 +854,67 @@ function scheduleAudioBuffer(
   source.start(item.placement.when, item.placement.offset, duration);
 }
 
-function applyMixAudioCrossfades(groups: ScheduledMixAudio[][]) {
-  groups.forEach((group) => {
+export type VideoMixClipAudioOverlapEnvelope = Readonly<{
+  fadeIn: Readonly<{ start: number; end: number }> | null;
+  fadeOut: Readonly<{ start: number; end: number }> | null;
+}>;
+
+/**
+ * Returns timeline fades for one clip independently of whether either
+ * neighboring clip actually contains decodable audio. This is important for
+ * audible-to-silent and silent-to-audible transitions: the audible side must
+ * still follow the same equal-power envelope as the visual preview.
+ */
+export function getVideoMixClipAudioOverlapEnvelope(
+  plan: VideoCompositionPlan,
+  clipIndex: number,
+): VideoMixClipAudioOverlapEnvelope {
+  const toWindow = (boundary: VideoCompositionPlan["boundaries"][number] | undefined) =>
+    boundary &&
+    boundary.transition.duration > TIME_EPSILON &&
+    videoCompositionTransitionUsesOverlap(boundary.transition.type)
+      ? {
+          start: boundary.editedTime,
+          end: boundary.editedTime + boundary.transition.duration,
+        }
+      : null;
+  return {
+    fadeIn: toWindow(plan.boundaries[clipIndex - 1]),
+    fadeOut: toWindow(plan.boundaries[clipIndex]),
+  };
+}
+
+function applyMixAudioCrossfades(
+  groups: ScheduledMixAudio[][],
+  plan: VideoCompositionPlan,
+) {
+  groups.forEach((group, clipIndex) => {
     if (group.length === 0) return;
     group[0].fadeIn = true;
     group[group.length - 1].fadeOut = true;
+    const envelope = getVideoMixClipAudioOverlapEnvelope(plan, clipIndex);
+    if (envelope.fadeIn) {
+      group.forEach((item) => {
+        item.overlapFadeIn = envelope.fadeIn!;
+      });
+      group[0].fadeIn = false;
+    }
+    if (envelope.fadeOut) {
+      group.forEach((item) => {
+        item.overlapFadeOut = envelope.fadeOut!;
+      });
+      group[group.length - 1].fadeOut = false;
+    }
   });
   for (let index = 0; index < groups.length - 1; index += 1) {
+    const boundary = plan.boundaries[index];
+    if (
+      boundary &&
+      boundary.transition.duration > TIME_EPSILON &&
+      videoCompositionTransitionUsesOverlap(boundary.transition.type)
+    ) {
+      continue;
+    }
     const outgoing = groups[index].at(-1);
     const incoming = groups[index + 1][0];
     if (!outgoing || !incoming) continue;
@@ -495,7 +979,7 @@ async function collectVideoMixAudio(
     }
   }
 
-  applyMixAudioCrossfades(groups);
+  applyMixAudioCrossfades(groups, plan);
   return groups.flat();
 }
 
@@ -507,6 +991,7 @@ async function renderVideoMixAudio(
     audioGain: number;
     narrationAudio: Blob | null;
     narrationGain: number;
+    narrationNormalizationGain: number | null;
     duckSourceAudioDuringNarration: boolean;
     signal?: AbortSignal;
   }>,
@@ -594,11 +1079,11 @@ async function renderVideoMixAudio(
 
   const masterGain = context.createGain();
   if (duckedSourceAudio) {
-    const envelope = buildPortableDuckingEnvelope(
-      narrationActivity,
-      options.audioGain,
-      plan.duration,
-    );
+    const envelope = buildVideoMixNarrationDuckingMetadata({
+      activity: narrationActivity,
+      baseGain: options.audioGain,
+      duration: plan.duration,
+    }).envelope;
     masterGain.gain.cancelScheduledValues(0);
     envelope.forEach((point, index) => {
       if (index === 0) {
@@ -618,10 +1103,11 @@ async function renderVideoMixAudio(
   limiter.release.value = 0.08;
   masterGain.connect(limiter).connect(context.destination);
   const sourceGains = prepared.map((_, sourceIndex) => {
-    const measurements: AudioLoudnessMeasurement[] = [];
-    let sumSquares = 0;
-    let peak = 0;
-    let sampleCount = 0;
+    const cachedGain = normalizeSourceAudioNormalizationGain(
+      prepared[sourceIndex].source.audioNormalizationGain,
+    );
+    if (cachedGain !== null) return cachedGain;
+    const accumulator = createVideoMixLoudnessAccumulator();
     scheduled
       .filter((item) => item.sourceIndex === sourceIndex)
       .forEach((item) => {
@@ -637,40 +1123,14 @@ async function renderVideoMixAudio(
           ),
         );
         if (endFrame <= startFrame) return;
-        measurements.push(
-          measureAudioLoudness(
-            Array.from(
-              { length: item.buffer.numberOfChannels },
-              (_, channel) => item.buffer.getChannelData(channel),
-            ),
-            item.buffer.sampleRate,
-            { startFrame, endFrame },
-          ),
+        addVideoMixAudioBufferMeasurement(
+          accumulator,
+          item.buffer,
+          startFrame,
+          endFrame,
         );
-        const stride = Math.max(1, Math.ceil((endFrame - startFrame) / 30_000));
-        for (
-          let channel = 0;
-          channel < item.buffer.numberOfChannels;
-          channel += 1
-        ) {
-          const samples = item.buffer.getChannelData(channel);
-          for (let frame = startFrame; frame < endFrame; frame += stride) {
-            const sample = samples[frame];
-            if (!Number.isFinite(sample)) continue;
-            sumSquares += sample * sample;
-            peak = Math.max(peak, Math.abs(sample));
-            sampleCount += 1;
-          }
-        }
       });
-    const loudness = combineAudioLoudnessMeasurements(measurements);
-    if (loudness.integratedLufs !== null) {
-      return computeLoudnessNormalizationGain(loudness);
-    }
-    if (sampleCount === 0 || peak < 0.0001) return 1;
-    const rms = Math.sqrt(sumSquares / sampleCount);
-    const targetRms = 10 ** (-18 / 20);
-    return Math.min(1.8, Math.max(0.4, targetRms / rms), 0.9 / peak);
+    return finishVideoMixAudioNormalization(accumulator);
   });
   const sourceNodes = sourceGains.map((gain) => {
     const node = context.createGain();
@@ -689,32 +1149,31 @@ async function renderVideoMixAudio(
     ),
   );
   if (narrationBuffer && narrationDuration > TIME_EPSILON) {
-    const narrationMeasurement = measureAudioLoudness(
-      narrationChannels,
-      narrationBuffer.sampleRate,
-      {
-        startFrame: 0,
-        endFrame: Math.min(
-          narrationBuffer.length,
-          Math.ceil(narrationDuration * narrationBuffer.sampleRate),
-        ),
-      },
-    );
-    const measuredNormalization = narrationMeasurement.integratedLufs === null
-      ? computePortableOriginalNormalizationGain(
-          Math.sqrt(Math.max(0, narrationMeasurement.ungatedMeanSquare)),
-          narrationMeasurement.samplePeak,
-        )
-      : computeLoudnessNormalizationGain(narrationMeasurement, {
-          targetLufs: -18,
-          truePeakLimitDbtp: -2,
-          minimumGain: 0.65,
-          maximumGain: 1.35,
-        });
-    const conservativeNormalization = Math.max(
-      0.65,
-      Math.min(1.35, measuredNormalization),
-    );
+    const conservativeNormalization = options.narrationNormalizationGain ?? (() => {
+      const narrationMeasurement = measureAudioLoudness(
+        narrationChannels,
+        narrationBuffer.sampleRate,
+        {
+          startFrame: 0,
+          endFrame: Math.min(
+            narrationBuffer.length,
+            Math.ceil(narrationDuration * narrationBuffer.sampleRate),
+          ),
+        },
+      );
+      const measuredNormalization = narrationMeasurement.integratedLufs === null
+        ? computePortableOriginalNormalizationGain(
+            Math.sqrt(Math.max(0, narrationMeasurement.ungatedMeanSquare)),
+            narrationMeasurement.samplePeak,
+          )
+        : computeLoudnessNormalizationGain(narrationMeasurement, {
+            targetLufs: -18,
+            truePeakLimitDbtp: -2,
+            minimumGain: 0.65,
+            maximumGain: 1.35,
+          });
+      return Math.max(0.65, Math.min(1.35, measuredNormalization));
+    })();
     const narrationGainNode = context.createGain();
     narrationGainNode.gain.value =
       options.narrationGain * conservativeNormalization;
@@ -758,6 +1217,53 @@ function copyCanvasFrame(
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.globalAlpha = 1;
   context.drawImage(source, 0, 0);
+}
+
+type VideoMixDrawableSample = Readonly<{
+  draw: (
+    context: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => void;
+}>;
+
+function drawVideoMixSourceFrame(
+  context: CanvasRenderingContext2D,
+  sample: VideoMixDrawableSample,
+  layout: VideoMixFrameLayout,
+) {
+  const { width, height } = context.canvas;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.globalAlpha = 1;
+  context.filter = "none";
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, width, height);
+
+  if (layout.background.kind === "blurred-video") {
+    const background = layout.background;
+    context.save();
+    context.filter = `blur(${background.blurPixels}px) saturate(0.88)`;
+    // A slight overscan keeps blur kernels from exposing dark canvas edges.
+    const overscan = 1.08;
+    const extraWidth = background.rect.width * (overscan - 1);
+    const extraHeight = background.rect.height * (overscan - 1);
+    sample.draw(
+      context,
+      background.rect.x - extraWidth / 2,
+      background.rect.y - extraHeight / 2,
+      background.rect.width + extraWidth,
+      background.rect.height + extraHeight,
+    );
+    context.restore();
+    context.fillStyle = "rgba(0,0,0,0.18)";
+    context.fillRect(0, 0, width, height);
+  }
+
+  const rect = layout.foregroundRect;
+  sample.draw(context, rect.x, rect.y, rect.width, rect.height);
+  context.filter = "none";
 }
 
 function releaseVideoMixTransitionCanvas(canvas: HTMLCanvasElement | null) {
@@ -892,6 +1398,19 @@ export async function exportVideoMixMp4(
     throw new TypeError("narrationAudio must be a non-empty Blob.");
   }
   const narrationGain = normalizeAudioGain(options.narrationGain);
+  const narrationNormalizationGain = options.narrationNormalizationGain === undefined
+    ? null
+    : Math.max(0.65, Math.min(1.35, options.narrationNormalizationGain));
+  if (
+    options.narrationNormalizationGain !== undefined &&
+    (!Number.isFinite(options.narrationNormalizationGain) ||
+      options.narrationNormalizationGain < 0.65 ||
+      options.narrationNormalizationGain > 1.35)
+  ) {
+    throw new RangeError(
+      "Video mix narration normalization gain must be between 0.65 and 1.35.",
+    );
+  }
   const duckSourceAudioDuringNarration =
     options.duckSourceAudioDuringNarration ?? true;
   const media = await import("mediabunny");
@@ -954,11 +1473,12 @@ export async function exportVideoMixMp4(
         videoTrack,
         audioTrack,
         duration,
-        drawRect: computePortableVideoDrawRect(
+        frameLayout: computeVideoMixFrameLayout(
           width,
           height,
           VIDEO_COMPOSITION_OUTPUT_WIDTH,
           VIDEO_COMPOSITION_OUTPUT_HEIGHT,
+          source.framing,
         ),
         colorConversionPlan,
       });
@@ -1039,6 +1559,7 @@ export async function exportVideoMixMp4(
         audioGain,
         narrationAudio,
         narrationGain,
+        narrationNormalizationGain,
         duckSourceAudioDuringNarration,
         signal: options.signal,
       },
@@ -1122,10 +1643,10 @@ export async function exportVideoMixMp4(
       ? audioSource.add(mixedAudio).then(() => audioSource.close())
       : Promise.resolve();
     const usesOutgoingTransitionFrame = transitionCanvasWorkingBytes > 0;
-    let outgoingTransitionFrame = usesOutgoingTransitionFrame
+    const outgoingTransitionFrame = usesOutgoingTransitionFrame
       ? document.createElement("canvas")
       : null;
-    let incomingTransitionFrame = usesOutgoingTransitionFrame
+    const incomingTransitionFrame = usesOutgoingTransitionFrame
       ? document.createElement("canvas")
       : null;
     for (const transitionCanvas of [
@@ -1136,78 +1657,104 @@ export async function exportVideoMixMp4(
       transitionCanvas.width = canvas.width;
       transitionCanvas.height = canvas.height;
     }
-    let outgoingTransitionBoundaryIndex: number | null = null;
+    const outgoingTransitionContext = outgoingTransitionFrame?.getContext("2d", {
+      alpha: false,
+      colorSpace: "srgb",
+    }) ?? null;
+    if (outgoingTransitionContext) {
+      outgoingTransitionContext.imageSmoothingEnabled = true;
+      outgoingTransitionContext.imageSmoothingQuality = "high";
+    }
     let emittedFrames = 0;
 
     try {
-      const sinks = prepared.map(
-        (item) => new media.VideoSampleSink(item.videoTrack),
+      // Each selected clip owns one monotonic decoder stream. During a blend,
+      // the current and outgoing streams advance together, but neither is
+      // recreated per frame and only two reusable transition canvases exist.
+      const decodeStates = new Map(
+        decodeBatches.map((batch) => {
+          const item = prepared[batch.sourceIndex];
+          const sink = new media.VideoSampleSink(item.videoTrack);
+          const state = {
+            batch,
+            item,
+            requestIndex: 0,
+            iterator: sink
+              .samplesAtTimestamps(
+                abortAwareVideoMixTimestamps(batch.requests, options.signal),
+              )
+              [Symbol.asyncIterator](),
+          };
+          return [batch.globalClipIndex, state] as [number, typeof state];
+        }),
       );
-      for (const batch of decodeBatches) {
-        throwIfAborted(options.signal);
-        const item = prepared[batch.sourceIndex];
-        const sink = sinks[batch.sourceIndex];
-        let batchFrameIndex = 0;
-        for await (const sample of sink.samplesAtTimestamps(
-          abortAwareVideoMixTimestamps(batch.frames, options.signal),
-        )) {
-          const frame = batch.frames[batchFrameIndex];
-          batchFrameIndex += 1;
-          if (!sample) {
-            throw new Error(`「${item.source.file.name}」の映像フレームを読み取れませんでした。`);
-          }
-          try {
-            // A sample may arrive just as cancellation is requested. Keep the
-            // abort check inside this try so that every yielded VideoSample is
-            // closed before the abort is propagated.
-            throwIfAborted(options.signal);
-            context.setTransform(1, 0, 0, 1, 0, 0);
-            context.globalAlpha = 1;
-            context.fillStyle = "#000";
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            sample.draw(
-              context,
-              item.drawRect.x,
-              item.drawRect.y,
-              item.drawRect.width,
-              item.drawRect.height,
-            );
+      const takeSample = async (
+        globalClipIndex: number,
+        frameIndex: number,
+        role: VideoMixFrameDecodeRequest["role"],
+      ) => {
+        const state = decodeStates.get(globalClipIndex);
+        const request = state?.batch.requests[state.requestIndex];
+        if (
+          !state ||
+          !request ||
+          request.frameIndex !== frameIndex ||
+          request.role !== role
+        ) {
+          throw new Error("動画のフレーム順序を確認できませんでした。");
+        }
+        const decoded = await state.iterator.next();
+        state.requestIndex += 1;
+        if (decoded.done || !decoded.value) {
+          throw new Error(
+            `「${state.item.source.file.name}」の映像フレームを読み取れませんでした。`,
+          );
+        }
+        return decoded.value;
+      };
 
-            const captureBoundaryIndex =
-              batch.captureBoundaryIndex !== null &&
-              batchFrameIndex === batch.frames.length
-                ? batch.captureBoundaryIndex
-                : null;
-            const outgoingFrameForCurrentBoundary = outgoingTransitionFrame;
-            const spareTransitionFrame = incomingTransitionFrame;
-            let promotedOutgoingFrame: HTMLCanvasElement | null = null;
-            let recycledIncomingFrame: HTMLCanvasElement | null = null;
-            if (captureBoundaryIndex !== null) {
-              if (!outgoingFrameForCurrentBoundary || !spareTransitionFrame) {
+      try {
+        for (const frame of schedule) {
+          throwIfAborted(options.signal);
+          const item = prepared[frame.sourceIndex];
+          const primarySample = await takeSample(
+            frame.globalClipIndex,
+            frame.frameIndex,
+            "primary",
+          );
+          let outgoingSample: Awaited<ReturnType<typeof takeSample>> | null = null;
+          try {
+            throwIfAborted(options.signal);
+            drawVideoMixSourceFrame(context, primarySample, item.frameLayout);
+
+            if (transitionUsesOutgoingFrame(frame) && frame.transition) {
+              const boundary = plan.boundaries[frame.transition.boundaryIndex];
+              const outgoingClip = plan.clips[boundary.outgoingClipIndex];
+              outgoingSample = await takeSample(
+                outgoingClip.globalClipIndex,
+                frame.frameIndex,
+                "transition-outgoing",
+              );
+              if (
+                !outgoingTransitionFrame ||
+                !outgoingTransitionContext ||
+                !incomingTransitionFrame
+              ) {
                 throw new PortableVideoExportUnsupportedError(
                   "browser",
-                  "動画の切り替え用フレームを準備できません。もう一度お試しください。",
+                  "動画の切り替えフレームを準備できません。",
                 );
               }
-              // The last frame of a very short middle clip can still belong
-              // to its incoming transition while also becoming the outgoing
-              // frame for the next boundary. Preserve the raw sample in the
-              // spare canvas without replacing the current boundary's frame.
-              copyCanvasFrame(canvas, spareTransitionFrame);
-              promotedOutgoingFrame = spareTransitionFrame;
-              recycledIncomingFrame = outgoingFrameForCurrentBoundary;
-            }
-
-            const transition = frame.transition;
-            if (transition && transitionUsesOutgoingFrame(frame)) {
+              drawVideoMixSourceFrame(
+                outgoingTransitionContext,
+                outgoingSample,
+                prepared[outgoingClip.sourceIndex].frameLayout,
+              );
               drawFrameTransition(
                 context,
                 frame,
-                outgoingTransitionBoundaryIndex === transition.boundaryIndex
-                  ? outgoingFrameForCurrentBoundary
-                  : null,
-                spareTransitionFrame,
-                promotedOutgoingFrame !== null,
+                outgoingTransitionFrame,
+                incomingTransitionFrame,
               );
             } else {
               drawFrameTransition(context, frame, null, null);
@@ -1226,29 +1773,26 @@ export async function exportVideoMixMp4(
               duration: frame.duration,
             });
             await videoSource.add(frame.editedTime, frame.duration);
-            if (
-              captureBoundaryIndex !== null &&
-              promotedOutgoingFrame &&
-              recycledIncomingFrame
-            ) {
-              // Promote only after the current boundary has been rendered.
-              // The former outgoing canvas becomes the next scratch canvas.
-              outgoingTransitionFrame = promotedOutgoingFrame;
-              incomingTransitionFrame = recycledIncomingFrame;
-              outgoingTransitionBoundaryIndex = captureBoundaryIndex;
-            }
           } finally {
-            sample.close();
+            primarySample.close();
+            outgoingSample?.close();
           }
           emittedFrames += 1;
           options.onProgress?.(
             0.16 + (emittedFrames / schedule.length) * 0.79,
           );
         }
-        throwIfAborted(options.signal);
-        if (batchFrameIndex !== batch.frames.length) {
-          throw new Error(`「${item.source.file.name}」の映像を最後まで読み取れませんでした。`);
+        for (const state of decodeStates.values()) {
+          if (state.requestIndex !== state.batch.requests.length) {
+            throw new Error(
+              `「${state.item.source.file.name}」の映像を最後まで読み取れませんでした。`,
+            );
+          }
         }
+      } finally {
+        await Promise.allSettled(
+          [...decodeStates.values()].map((state) => state.iterator.return?.()),
+        );
       }
       if (emittedFrames !== schedule.length) {
         throw new Error("複数動画を最後まで書き出せませんでした。");

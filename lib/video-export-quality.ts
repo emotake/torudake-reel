@@ -138,7 +138,229 @@ export type VideoExportQualityInspectionOptions = {
   expectedNarrationRanges?: readonly VideoExportTimedRange[];
   /** Decode audio to confirm that the encoded track contains audible data. */
   inspectAudioActivity?: boolean;
+  /**
+   * Sparse pixel decode around the program and edited boundaries. Kept
+   * opt-in because metadata-only callers may run outside a Canvas browser.
+   */
+  videoContentInspection?: VideoExportVideoContentInspectionOptions;
 };
+
+export type VideoExportVideoContentInspectionOptions = Readonly<{
+  boundarySeconds?: readonly number[];
+  /** Boundaries intentionally passing through black (fade-black). */
+  allowBlackAtBoundarySeconds?: readonly number[];
+}>;
+
+export type VideoExportDecodedFrameMetric = Readonly<{
+  time: number;
+  luminance: number;
+  variance: number;
+  fingerprint: number;
+}>;
+
+export type VideoExportVideoContentInspection = Readonly<{
+  status: "ok" | "unsupported" | "failed";
+  sampledFrames: readonly VideoExportDecodedFrameMetric[];
+  blackFrameTimes: readonly number[];
+  frozenPairStarts: readonly number[];
+  message: string | null;
+}>;
+
+function sparseVideoInspectionTimes(
+  duration: number,
+  boundaries: readonly number[],
+) {
+  const frame = 1 / 30;
+  const times = [frame, duration / 2, Math.max(frame, duration - frame)];
+  boundaries.forEach((boundary) => {
+    times.push(boundary - 2 * frame, boundary + 2 * frame);
+  });
+  return [...new Set(
+    times
+      .map((time) => Math.max(0, Math.min(Math.max(0, duration - frame), time)))
+      .map((time) => Math.round(time * 1_000) / 1_000),
+  )].sort((left, right) => left - right).slice(0, 23);
+}
+
+export function analyzeVideoExportDecodedFrames(
+  frames: readonly VideoExportDecodedFrameMetric[],
+  options: VideoExportVideoContentInspectionOptions = {},
+): Pick<
+  VideoExportVideoContentInspection,
+  "blackFrameTimes" | "frozenPairStarts"
+> {
+  const allowedBlack = options.allowBlackAtBoundarySeconds ?? [];
+  const blackFrameTimes = frames
+    .filter(
+      (frame) =>
+        frame.luminance < 5 &&
+        frame.variance < 9 &&
+        !allowedBlack.some((time) => Math.abs(frame.time - time) <= 0.12),
+    )
+    .map((frame) => frame.time);
+  const frozenPairStarts: number[] = [];
+  for (let index = 1; index < frames.length; index += 1) {
+    const previous = frames[index - 1];
+    const current = frames[index];
+    // Only boundary pairs sampled very close together are comparable. Static
+    // opening/middle/closing shots are not treated as freezes.
+    if (
+      current.time - previous.time <= 0.18 &&
+      Math.abs(current.fingerprint - previous.fingerprint) < 0.0005 &&
+      Math.abs(current.luminance - previous.luminance) < 0.2 &&
+      previous.variance > 12 &&
+      current.variance > 12
+    ) {
+      frozenPairStarts.push(previous.time);
+    }
+  }
+  return { blackFrameTimes, frozenPairStarts };
+}
+
+async function inspectDecodedVideoContent(
+  media: typeof import("mediabunny"),
+  track: import("mediabunny").InputVideoTrack,
+  duration: number,
+  options: VideoExportVideoContentInspectionOptions,
+): Promise<VideoExportVideoContentInspection> {
+  if (
+    typeof document === "undefined" &&
+    typeof OffscreenCanvas === "undefined"
+  ) {
+    return {
+      status: "unsupported",
+      sampledFrames: [],
+      blackFrameTimes: [],
+      frozenPairStarts: [],
+      message: null,
+    };
+  }
+  try {
+    if (!(await track.canDecode())) {
+      return {
+        status: "unsupported",
+        sampledFrames: [],
+        blackFrameTimes: [],
+        frozenPairStarts: [],
+        message: null,
+      };
+    }
+    const width = 64;
+    const height = 64;
+    const canvas =
+      typeof OffscreenCanvas !== "undefined"
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement("canvas"), { width, height });
+    const context = canvas.getContext("2d", {
+      alpha: false,
+      willReadFrequently: true,
+    }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!context) throw new Error("Canvas is unavailable.");
+    const times = sparseVideoInspectionTimes(
+      duration,
+      options.boundarySeconds ?? [],
+    );
+    const sink = new media.VideoSampleSink(track);
+    const sampledFrames: VideoExportDecodedFrameMetric[] = [];
+    let index = 0;
+    for await (const sample of sink.samplesAtTimestamps(times)) {
+      const time = times[index++];
+      if (!sample) continue;
+      try {
+        context.fillStyle = "#000";
+        context.fillRect(0, 0, width, height);
+        sample.draw(context, 0, 0, width, height);
+        const pixels = context.getImageData(0, 0, width, height).data;
+        let luminanceSum = 0;
+        let luminanceSquaredSum = 0;
+        let fingerprint = 0;
+        let count = 0;
+        for (let pixel = 0; pixel < pixels.length; pixel += 4 * 16) {
+          const luminance =
+            0.2126 * pixels[pixel] +
+            0.7152 * pixels[pixel + 1] +
+            0.0722 * pixels[pixel + 2];
+          luminanceSum += luminance;
+          luminanceSquaredSum += luminance * luminance;
+          fingerprint += luminance * ((count % 17) + 1);
+          count += 1;
+        }
+        const luminance = count > 0 ? luminanceSum / count : 0;
+        sampledFrames.push({
+          time,
+          luminance,
+          variance:
+            count > 0
+              ? Math.max(0, luminanceSquaredSum / count - luminance * luminance)
+              : 0,
+          fingerprint: count > 0 ? fingerprint / (count * 255 * 9) : 0,
+        });
+      } finally {
+        sample.close();
+      }
+    }
+    const findings = analyzeVideoExportDecodedFrames(sampledFrames, options);
+    const issueCount =
+      findings.blackFrameTimes.length + findings.frozenPairStarts.length;
+    return {
+      status: "ok",
+      sampledFrames,
+      ...findings,
+      message:
+        issueCount > 0
+          ? "完成動画の一部に黒画面または静止フレームの可能性があります。"
+          : null,
+    };
+  } catch {
+    return {
+      status: "failed",
+      sampledFrames: [],
+      blackFrameTimes: [],
+      frozenPairStarts: [],
+      message: "完成動画の映像内容を確認できませんでした。",
+    };
+  }
+}
+
+export async function inspectExportedVideoContent(
+  source: Blob,
+  options: VideoExportVideoContentInspectionOptions = {},
+): Promise<VideoExportVideoContentInspection> {
+  const media = await import("mediabunny");
+  const input = new media.Input({
+    source: new media.BlobSource(source),
+    formats: media.ALL_FORMATS,
+  });
+  try {
+    if (!(await input.canRead())) {
+      return {
+        status: "failed",
+        sampledFrames: [],
+        blackFrameTimes: [],
+        frozenPairStarts: [],
+        message: "完成動画を読み取れませんでした。",
+      };
+    }
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) {
+      return {
+        status: "failed",
+        sampledFrames: [],
+        blackFrameTimes: [],
+        frozenPairStarts: [],
+        message: "完成動画に映像がありません。",
+      };
+    }
+    return inspectDecodedVideoContent(
+      media,
+      track,
+      await track.computeDuration(),
+      options,
+    );
+  } finally {
+    input.dispose();
+  }
+}
 
 type PacketStatsLike = {
   packetCount: number;
@@ -749,7 +971,35 @@ export async function inspectExportedVideoQuality(
   source: Blob | VideoQualityInspectableInput,
   options: VideoExportQualityInspectionOptions = {},
 ) {
-  return inspectVideoExportQuality(source, options);
+  const inspection = await inspectVideoExportQuality(source, options);
+  if (
+    options.videoContentInspection &&
+    isBlobLike(source) &&
+    inspection.status === "ok"
+  ) {
+    // The established metrics shape remains unchanged. Content inspection is
+    // opt-in and blocking findings intentionally surface as analysis failure
+    // to existing callers that already require status === "ok".
+    const content = await inspectExportedVideoContent(
+      source,
+      options.videoContentInspection,
+    );
+    if (
+      content.status === "ok" &&
+      (content.blackFrameTimes.length > 0 ||
+        content.frozenPairStarts.length > 0)
+    ) {
+      return {
+        status: "analysis-failed" as const,
+        metrics: null,
+        unavailableMetrics: [...ALL_METRICS],
+        message:
+          content.message ??
+          "完成動画の映像に不自然な黒画面または静止が見つかりました。",
+      };
+    }
+  }
+  return inspection;
 }
 
 /** Returns null when the encoded dimensions could not be inspected. */

@@ -17,6 +17,9 @@ test("accepts only the bounded product funnel vocabulary", () => {
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_selected"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("checkout_started"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("export_completed"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_mix_narration_started"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_mix_paywall_shown"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_mix_add_failed"));
   assert.equal(isClientProductEvent("video_selected"), true);
   assert.equal(isClientProductEvent("arbitrary_event"), false);
 });
@@ -43,6 +46,25 @@ test("keeps product properties content-free and bounded", () => {
       format: "mov",
       count: 2,
       tags: ["voice", "quality"],
+    },
+  );
+
+  assert.deepEqual(
+    sanitizeProductProperties({
+      mode: "video_mix",
+      transition: "zoom-dissolve",
+      narration: "enabled",
+      source_count: 5,
+      clip_count: 10,
+      boundary_count: 9,
+    }),
+    {
+      mode: "video_mix",
+      transition: "zoom-dissolve",
+      narration: "enabled",
+      source_count: 5,
+      clip_count: 10,
+      boundary_count: 9,
     },
   );
   assert.equal(sanitizeProductProperties({ email: "person@example.com" }), null);

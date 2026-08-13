@@ -3,11 +3,14 @@ import {
   abandonMeteredAiOperation,
   authorizeMeteredAiOperation,
   completeMeteredAiOperation,
+  findOwnedUsageReservation,
+  getAiEntitlementBudgetForReservation,
   releaseMeteredAiOperation,
   type AuthorizedMeteredAiOperation,
 } from "../../../../lib/billing-store";
 import { getCurrentUser } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { isValidMeteredAiActionId } from "../../../../lib/operator-usage";
 import {
   createInitialNarrationToken,
   verifyInitialNarrationToken,
@@ -35,6 +38,8 @@ const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
 const MAX_SCRIPT_REQUEST_BYTES = 6_500_000;
 const SCRIPT_REQUEST_TIMEOUT_MS = 45_000;
+export const NARRATION_RESERVATION_HEADER = "X-Usage-Reservation-Id";
+export const NARRATION_ACTION_HEADER = "X-AI-Operation-Id";
 const GOALS = new Set(["follow", "sales", "reach"]);
 const LENGTHS = new Set([30, 60, 90]);
 
@@ -161,21 +166,68 @@ export async function POST(request: Request) {
   let meteredAuthorizationSettled = false;
 
   try {
+    let usageHeaderPreflight: Readonly<{
+      reservationId: string;
+      actionId: string;
+    }> | null = null;
+    if (usageEnforcementEnabled) {
+      const reservationId =
+        request.headers.get(NARRATION_RESERVATION_HEADER)?.trim() ?? "";
+      const actionId =
+        request.headers.get(NARRATION_ACTION_HEADER)?.trim() ?? "";
+      // Production usage enforcement requires both bounded identifiers before
+      // the multi-megabyte image body is parsed. Local/test bypasses still skip
+      // this contract through isUsageEnforcementEnabled(request).
+      if (
+        !/^[a-zA-Z0-9_-]{8,128}$/.test(reservationId) ||
+        !isValidMeteredAiActionId(actionId)
+      ) {
+        return Response.json(
+          {
+            error:
+              "AI処理の利用情報を確認できませんでした。動画を選び直してください。",
+          },
+          { status: 400, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      const currentUser = usagePrincipal?.currentUser ?? null;
+      const reservation = currentUser
+        ? await findOwnedUsageReservation(currentUser, reservationId)
+        : null;
+      if (!reservation) {
+        return Response.json(
+          {
+            error:
+              "利用枠を確認できませんでした。動画を選び直してください。",
+          },
+          {
+            status: currentUser ? 402 : 401,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+      // Resolve the active entitlement before accepting the large image body,
+      // but leave capacity to the atomic authorization below. A succeeded
+      // action may legitimately continue the same narration bundle even when
+      // that action used the entitlement's final available slot.
+      await getAiEntitlementBudgetForReservation(reservation);
+      usageHeaderPreflight = { reservationId, actionId };
+    }
 
-  let payload: {
-    frames?: unknown;
-    brief?: unknown;
-    goal?: unknown;
-    length?: unknown;
-    style?: unknown;
-    sourceDuration?: unknown;
-    usageReservationId?: unknown;
-    aiOperationId?: unknown;
-    initialNarration?: unknown;
-    narrationBundleToken?: unknown;
-    timingScale?: unknown;
-    previousScript?: unknown;
-  };
+    let payload: {
+      frames?: unknown;
+      brief?: unknown;
+      goal?: unknown;
+      length?: unknown;
+      style?: unknown;
+      sourceDuration?: unknown;
+      usageReservationId?: unknown;
+      aiOperationId?: unknown;
+      initialNarration?: unknown;
+      narrationBundleToken?: unknown;
+      timingScale?: unknown;
+      previousScript?: unknown;
+    };
   try {
     payload = await parseJsonBodyWithLimit<typeof payload>(
       request,
@@ -257,6 +309,16 @@ export async function POST(request: Request) {
       typeof payload.aiOperationId === "string"
         ? payload.aiOperationId.trim()
         : "";
+    if (
+      usageHeaderPreflight &&
+      (reservationId !== usageHeaderPreflight.reservationId ||
+        aiOperationId !== usageHeaderPreflight.actionId)
+    ) {
+      return Response.json(
+        { error: "AI処理の利用情報が一致しません。動画を選び直してください。" },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (initialNarration && !aiOperationId) {
       return Response.json(
         { error: "初回ナレーションの処理情報を確認できませんでした。動画を選び直してください。" },

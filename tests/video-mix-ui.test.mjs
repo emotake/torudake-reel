@@ -48,7 +48,8 @@ test("offers eight no-cost transition styles shared with the exporter", () => {
   ]) {
     assert.match(clientSource, new RegExp(`id: "${id}"`));
   }
-  assert.match(clientSource, /何度変えても追加料金やAI処理回数は発生しません/);
+  assert.match(clientSource, /つなぎ方の変更自体は無料です/);
+  assert.match(clientSource, /音声の作り直しにはAI処理を1回使います/);
   assert.match(clientSource, /exportVideoMixMp4\(\{/);
   assert.match(clientSource, /transition,/);
   assert.match(clientSource, /boundaryTransitions: resolvedBoundaryTransitions/);
@@ -74,6 +75,9 @@ test("adds an optional metered AI narration with locally aligned captions", () =
   assert.match(clientSource, /initialNarration:\s*true/);
   assert.match(clientSource, /narrationBundleToken/);
   assert.match(clientSource, /narrationAudio: narrationEnabled/);
+  assert.match(clientSource, /normalizationGain: prepared\.normalizationGain/);
+  assert.match(clientSource, /narrationNormalizationGain:/);
+  assert.match(clientSource, /setPreviewNarrationGain\(narrationPlayer, narration\.normalizationGain\)/);
   assert.match(clientSource, /drawVideoMixNarrationCaption/);
   assert.match(clientSource, /AI処理 残り/);
   assert.match(clientSource, /NARRATION_DISCLOSURE_TEXT/);
@@ -85,7 +89,7 @@ test("reserves once for all sources and consumes one entitlement only after a ve
     clientSource,
     /reserveMixUsage\([\s\S]*?requestedDuration,[\s\S]*?idempotencyKey,[\s\S]*?signal/,
   );
-  assert.match(clientSource, /ensureMixUsageReservation\(controller\.signal\)/);
+  assert.match(clientSource, /ensureMixUsageReservation\(controller\.signal, true\)/);
   assert.match(clientSource, /canSaveCompletedVideo\(reservation\.bucket\)/);
   assert.match(
     clientSource,
@@ -127,7 +131,8 @@ test("makes cancellation, reservation release, checkout return, and repeated act
   assert.match(clientSource, /disabled=\{finalizingUsage\}/);
   assert.match(clientSource, /保存枠を確定中/);
   assert.match(clientSource, /invalidateGeneratedNarration/);
-  assert.match(clientSource, /if \(added\.length > 0\) \{[\s\S]*?clearNarrationDraft\(\)/);
+  assert.match(clientSource, /if \(added\.length > 0\) \{[\s\S]*?invalidateGeneratedNarration\(\)/);
+  assert.match(clientSource, /setNarrationStale\(true\)/);
 });
 
 test("serializes usage leases and discards stale reservation responses", () => {
@@ -187,22 +192,81 @@ test("does not revoke source object URLs when the source state merely changes", 
 });
 
 test("keeps preview layers and paid reservations safe across transitions and navigation", () => {
-  assert.match(clientSource, /incoming\.style\.zIndex = "2"/);
-  assert.match(clientSource, /outgoing\.style\.zIndex = "1"/);
-  assert.match(clientSource, /outgoing\.pause\(\)/);
-  assert.match(clientSource, /outgoing\.muted = true/);
-  assert.match(clientSource, /active\.muted = false/);
-  assert.match(clientSource, /other\.muted = true/);
+  assert.match(clientSource, /stylePreviewLayer\(incoming, 2, 0\)/);
+  assert.match(clientSource, /stylePreviewLayer\(outgoing, 0, 1\)/);
+  assert.match(clientSource, /setPreviewMediaGain\(outgoing, 0\)/);
+  assert.match(clientSource, /setPreviewMediaGain\([\s\S]*?active,/);
+  assert.match(clientSource, /getVideoMixTransitionAudioGains\(plan, time\)/);
+  assert.match(clientSource, /setPreviewMediaGain\([\s\S]*?active,[\s\S]*?incomingBaseGain \* \(transitionAudio\?\.incoming \?\? 1\)/);
+  assert.match(clientSource, /setPreviewMediaGain\([\s\S]*?other,[\s\S]*?outgoingBaseGain \* \(transitionAudio\?\.outgoing \?\? 0\)/);
   assert.match(clientSource, /transitionFrame\.from\.sourceTime/);
   assert.match(clientSource, /other\.dataset\.sourceId !== outgoingSource\.id/);
+  const previewConfigurationStart = clientSource.indexOf("const configurePreviewAt");
+  const previewConfiguration = clientSource.slice(
+    previewConfigurationStart,
+    clientSource.indexOf("const startPreview =", previewConfigurationStart),
+  );
+  assert.doesNotMatch(previewConfiguration, /outgoing\.pause\(\)|other\.pause\(\)/);
+  assert.doesNotMatch(previewConfiguration, /playPreviewMedia\(incoming\)|playPreviewMedia\(other\)/);
+  assert.match(clientSource, /const attempts = \[primary\.play\(\), secondary\.play\(\)\]/);
+  assert.match(clientSource, /setPreviewMediaGain\(primary, 0\)[\s\S]*?setPreviewMediaGain\(secondary, 0\)[\s\S]*?startPreviewMediaPair\(primary, secondary\)/);
+  assert.match(clientSource, /activeClipRef\.current = startClip\.globalClipIndex/);
+  assert.match(clientSource, /startFrame\?\.transition[\s\S]*?sources\[startFrame\.transition\.from\.sourceIndex\]/);
+  assert.match(clientSource, /Loading a new URL may implicitly pause a pre-started layer/);
+  assert.match(previewConfiguration, /setPreviewMediaGain\(incoming, 0\)[\s\S]*?incoming\.currentTime = targetTime/);
+  assert.match(previewConfiguration, /resumePreviewMediaMuted\(incoming, sourcePreviewGain\)/);
+  assert.match(previewConfiguration, /resumePreviewMediaMuted\(current, sourcePreviewGain\)/);
+  assert.doesNotMatch(previewConfiguration, /incoming\.play\(\)|current\.play\(\)|other\.play\(\)/);
+  const mediaGainGuard = clientSource.slice(
+    clientSource.indexOf("const setPreviewMediaGain"),
+    clientSource.indexOf("const setPreviewNarrationGain"),
+  );
+  assert.match(
+    mediaGainGuard,
+    /previewPendingPlayRef\.current\.has\(video\)[\s\S]*?previewDeferredGainRef\.current\.set\(video, safeGain\)[\s\S]*?node\.gain\.value = 0/,
+  );
+  assert.match(mediaGainGuard, /video\.muted = false/);
+  assert.doesNotMatch(
+    mediaGainGuard,
+    /video\.muted = true|video\.muted = safeGain <= 0/,
+  );
+  const mutedResume = clientSource.slice(
+    clientSource.indexOf("const resumePreviewMediaMuted"),
+    clientSource.indexOf("const previewSourceGainAt"),
+  );
+  assert.match(
+    mutedResume,
+    /previewPendingPlayRef\.current\.add\(video\)[\s\S]*?setPreviewMediaGain\(video, desiredGain\)[\s\S]*?video\.play\(\)/,
+  );
+  const singleClipPreview = clientSource.slice(
+    clientSource.indexOf("const previewSingleClip"),
+    clientSource.indexOf("const setClipEdgeFromPreview"),
+  );
+  assert.match(
+    singleClipPreview,
+    /stopPreview\(\);[\s\S]*?startPreview\(\{ start: clip\.editedStart, end: clip\.editedEnd \}\)/,
+  );
+  assert.doesNotMatch(singleClipPreview, /requestAnimationFrame\s*\(/);
   assert.match(clientSource, /window\.addEventListener\("pagehide"/);
   assert.match(clientSource, /sendMixUsageReleaseBeacon/);
   assert.match(clientSource, /activeReservationRef\.current = reservationId/);
-  assert.match(clientSource, /preparing \|\| exporting \|\| narrationGenerating \|\| Boolean\(pendingFinalize\)/);
+  assert.match(clientSource, /preparing \|\| exporting \|\| narrationGenerating \|\| discardingPending \|\| Boolean\(pendingFinalize\)/);
   assert.match(clientSource, /ensureMixExportActive\(controller\.signal, mountedRef\.current\)/);
   assert.match(clientSource, /pendingFinalizeRef\.current = stagedPending/);
   assert.match(clientSource, /activeReservationRef\.current = null;[\s\S]*?updateUsage\("complete", reservationId\)/);
-  assert.match(clientSource, /素材ごとの最終的な音量調整は書き出し時に反映します/);
+  assert.match(clientSource, /プレビューと書き出しへ同じ調整を反映します/);
+  assert.match(clientSource, /previewPrimaryBlurRef/);
+  assert.match(clientSource, /previewSecondaryBlurRef/);
+  assert.match(clientSource, /previewPrimaryLayerRef/);
+  assert.match(clientSource, /previewSecondaryLayerRef/);
+  assert.match(clientSource, /computeVideoMixFrameLayout/);
+  const layerStyling = clientSource.slice(
+    clientSource.indexOf("const stylePreviewLayer"),
+    clientSource.indexOf("const updatePreviewLayerBackground"),
+  );
+  assert.match(layerStyling, /wrapper\.style\.opacity = String\(opacity\)/);
+  assert.doesNotMatch(layerStyling, /video\.style\.opacity|background\.style\.opacity/);
+  assert.match(clientSource, /frameLayout\.framing\.mode === "cover"[\s\S]*?: "center"/);
   assert.match(cssSource, /\.videoMixPhone video\s*\{[^}]*object-fit:\s*contain/);
   assert.doesNotMatch(cssSource, /\.videoMixPhone video\s*\{[^}]*object-fit:\s*cover/);
 });
@@ -221,7 +285,7 @@ test("ships accessible mobile controls and route metadata", () => {
   assert.match(clientSource, /role="alert"/);
   assert.match(
     cssSource,
-    /\.videoMixShell[\s\S]*?:is\(button, a, input\):focus-visible[\s\S]*?outline:/,
+    /\.videoMixShell[\s\S]*?:is\(button, a, input, select, textarea, summary\):focus-visible[\s\S]*?outline:/,
   );
   assert.match(
     cssSource,
@@ -233,4 +297,126 @@ test("ships accessible mobile controls and route metadata", () => {
   );
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.videoMixTransitionGrid/);
   assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.videoMixShell/);
+});
+
+test("keeps local editing recoverable and reports errors next to upload", () => {
+  assert.match(clientSource, /readVideoMixClientDraft/);
+  assert.match(clientSource, /findVideoMixDraftSource/);
+  assert.match(clientSource, /saveVideoMixClientDraft/);
+  assert.match(clientSource, /window\.addEventListener\("beforeunload"/);
+  assert.match(clientSource, /videoMixSourceFeedback/);
+  assert.match(clientSource, /sourceFeedbackRef\.current\?\.focus/);
+  assert.match(clientSource, /undoRemoveSource/);
+});
+
+test("retains stale narration, durable output, framing, and mobile steps", () => {
+  assert.match(clientSource, /setNarrationStale\(true\)/);
+  assert.match(clientSource, /ひとつ前の音声へ戻す/);
+  assert.match(clientSource, /saveDurableVideoMixOutput/);
+  assert.match(clientSource, /markDurableVideoMixOutputCompleted/);
+  assert.match(clientSource, /listDurableVideoMixOutputRecoveryCandidates/);
+  assert.match(clientSource, /loadDurableVideoMixOutput\(metadata\.id\)/);
+  assert.match(clientSource, /framing: source\.framing/);
+  assert.match(clientSource, /縦画面への収め方/);
+  assert.match(clientSource, /data-mobile-step/);
+  assert.match(clientSource, /ほかの5種類も見る/);
+  assert.match(clientSource, /主役の縦位置/);
+  assert.match(clientSource, /videoMixBlurCanvas/);
+  assert.match(clientSource, /width=\{540\} height=\{960\}/);
+  assert.match(clientSource, /measureVideoMixSourceAudioNormalization\([\s\S]*?source\.file,[\s\S]*?source\.clips,[\s\S]*?controller\.signal/);
+  assert.match(clientSource, /audioNormalizationCacheRef\.current\.get\(source\.key\)/);
+  assert.match(clientSource, /window\.setTimeout\([\s\S]*?180/);
+  assert.match(clientSource, /audioNormalizationGain: previewSourceNormalizationGain\(source\)/);
+  assert.match(clientSource, /createMediaElementSource\(primary\)/);
+  assert.match(clientSource, /source\.audioNormalizationGain/);
+});
+
+test("exposes fine cut controls and accessible playback progress", () => {
+  assert.match(clientSource, /videoMixFilmstrip/);
+  assert.match(clientSource, /extractVideoFilmstrip/);
+  assert.match(clientSource, /window\.setTimeout[\s\S]*?5_000/);
+  assert.match(clientSource, /window\.clearTimeout\(timeoutId\)/);
+  assert.match(clientSource, /video\.removeAttribute\("src"\)/);
+  assert.match(clientSource, /source\.thumbnails\.map/);
+  assert.match(clientSource, /このカットを繰り返し再生/);
+  assert.match(clientSource, /停止位置を開始に/);
+  assert.match(clientSource, /type="number"/);
+  assert.match(clientSource, /aria-valuetext/);
+  assert.match(clientSource, /role="progressbar"/);
+  assert.match(clientSource, /tabIndex=\{-1\}[\s\S]*?aria-hidden="true"/);
+});
+
+test("reserves only after an explicit AI or export action and renews before export", () => {
+  const synchronization = clientSource.slice(
+    clientSource.indexOf("const synchronizeBillingAndQuota"),
+    clientSource.indexOf("const completeReservationUsage"),
+  );
+  assert.doesNotMatch(synchronization, /reserveMixUsage\(|renewMixUsage\(/);
+  assert.match(synchronization, /readMixBillingStatus\(\)/);
+  assert.match(clientSource, /ensureMixUsageReservation\(controller\.signal, true\)/);
+  assert.match(
+    clientSource,
+    /activeReservationBucketRef\.current === "free"[\s\S]*?SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT[\s\S]*?ONE_TIME_AI_OPERATION_SUCCESS_LIMIT[\s\S]*?rememberAiQuota\(paidLimit, paidLimit\)/,
+  );
+  assert.match(clientSource, /fetch\("\/api\/usage\/renew"/);
+  assert.match(clientSource, /status === "completed"/);
+  assert.match(clientSource, /sendMixUsageReleaseBeacon\(reservationId, reservationKeyRef\.current\)/);
+});
+
+test("keeps a durable download until sharing succeeds or the seven-day TTL expires", () => {
+  const saveResult = clientSource.slice(
+    clientSource.indexOf("const saveResult"),
+    clientSource.indexOf("return (", clientSource.indexOf("const saveResult")),
+  );
+  const anchorDownload = saveResult.slice(saveResult.indexOf("document.createElement"));
+  assert.doesNotMatch(
+    anchorDownload.slice(0, anchorDownload.indexOf("const deleteResultDurableCopy")),
+    /deleteDurableVideoMixOutput/,
+  );
+  assert.match(saveResult, /await navigator\.share/);
+  assert.match(clientSource, /7日以内に自動削除/);
+  assert.match(clientSource, /const deleteResultDurableCopy/);
+  assert.match(clientSource, /端末内の一時コピーを削除/);
+  assert.match(clientSource, /durableId: undefined/);
+});
+
+test("binds recovered durable output to the current account before creating a Blob URL", () => {
+  assert.match(clientSource, /async function verifyDurableVideoMixOutputOwnership/);
+  assert.match(clientSource, /fetch\("\/api\/usage\/status"/);
+  assert.match(
+    clientSource,
+    /listDurableVideoMixOutputRecoveryCandidates\(\)[\s\S]*?for \(const metadata of candidates\)[\s\S]*?verifyDurableVideoMixOutputOwnership\([\s\S]*?metadata\.reservationId[\s\S]*?if \(!owned\) continue[\s\S]*?loadDurableVideoMixOutput\(metadata\.id\)[\s\S]*?URL\.createObjectURL\(saved\.blob\)/,
+  );
+});
+
+test("renews a recovered completion without falling back to a free save", () => {
+  const retry = clientSource.slice(
+    clientSource.indexOf("const retryFinalize"),
+    clientSource.indexOf("const discardPending"),
+  );
+  assert.match(retry, /renewMixUsage\(/);
+  assert.match(retry, /refreshed\.status !== "completed"/);
+  assert.match(retry, /!canSaveCompletedVideo\(refreshed\.bucket\)/);
+  assert.match(retry, /setShowPurchase\(true\)/);
+  assert.match(retry, /pendingResult = \{ \.\.\.pendingResult, bucket: refreshed\.bucket \}/);
+  assert.match(retry, /completeReservationUsage\([\s\S]*?refreshed\.bucket/);
+});
+
+test("releases a committed reservation by key when its reserve response was lost", () => {
+  assert.match(clientSource, /function sendMixUsageReleaseBeacon\([\s\S]*?reservationId: string \| null/);
+  assert.match(
+    clientSource,
+    /const releaseActiveReservationOnPageHide[\s\S]*?sendMixUsageReleaseBeacon\(reservationId, reservationKeyRef\.current\)/,
+  );
+});
+
+test("marks generated narration stale when a transition changes the edited duration", () => {
+  assert.match(
+    clientSource,
+    /const selectGlobalTransition[\s\S]*?clearResult\(\);[\s\S]*?invalidateGeneratedNarration\(\);[\s\S]*?setTransition/,
+  );
+  assert.match(
+    clientSource,
+    /onChange=\{\(event\) => \{[\s\S]*?clearResult\(\);[\s\S]*?invalidateGeneratedNarration\(\);[\s\S]*?setBoundaryTransitionPreferences/,
+  );
 });

@@ -3,11 +3,22 @@ import test from "node:test";
 
 import {
   createVideoMixNarrationFrameRequests,
+  createVideoMixNarrationContactSheetRequests,
+  computeVideoMixNarrationNormalizationGain,
   drawVideoMixNarrationCaption,
   extractVideoMixNarrationFrames,
   getActiveVideoMixCaption,
   prepareVideoMixNarration,
 } from "../lib/video-mix-narration.ts";
+
+test("shares a bounded narration normalization gain with preview and export", () => {
+  const quiet = new Float32Array(48_000).fill(0.01);
+  const loud = new Float32Array(48_000).fill(0.9);
+  assert.equal(computeVideoMixNarrationNormalizationGain([quiet], 48_000, 1), 1.35);
+  const loudGain = computeVideoMixNarrationNormalizationGain([loud], 48_000, 1);
+  assert.ok(loudGain >= 0.65 && loudGain <= 1.35);
+  assert.ok(loudGain < 1);
+});
 
 async function withFrameExtractionEnvironment(run, onDataUrl = () => undefined) {
   const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -181,6 +192,23 @@ test("rejects more than five narration frame sources", () => {
   );
 });
 
+test("covers all ten selected clips with at most five contact sheets", () => {
+  const sources = Array.from({ length: 5 }, (_, sourceIndex) => ({
+    clips: [
+      { start: sourceIndex * 10, end: sourceIndex * 10 + 1 },
+      { start: sourceIndex * 10 + 2, end: sourceIndex * 10 + 3 },
+    ],
+  }));
+  const sheets = createVideoMixNarrationContactSheetRequests(sources);
+  assert.equal(sheets.length, 5);
+  assert.equal(sheets.flatMap((sheet) => sheet.frames).length, 10);
+  assert.deepEqual(sheets.map((sheet) => sheet.frames.length), [2, 2, 2, 2, 2]);
+  assert.deepEqual(
+    sheets.flatMap((sheet) => sheet.frames.map((frame) => frame.sourceIndex)),
+    [0, 0, 1, 1, 2, 2, 3, 3, 4, 4],
+  );
+});
+
 test("extracts sources sequentially, preserves order, and releases every video", async () => {
   await withFrameExtractionEnvironment(async (stats) => {
     const sources = [
@@ -206,6 +234,26 @@ test("extracts sources sequentially, preserves order, and releases every video",
     assert.equal(stats.removedSources, 2);
     assert.equal(stats.cleanupLoads, 2);
   });
+});
+
+test("encodes two selected clips from one source into one contact-sheet image", async () => {
+  const drawnTimes = [];
+  await withFrameExtractionEnvironment(
+    async () => {
+      const frames = await extractVideoMixNarrationFrames([
+        {
+          file: new File([new Uint8Array([1])], "two-clips.mp4", { type: "video/mp4" }),
+          clips: [
+            { start: 0, end: 2 },
+            { start: 4, end: 6 },
+          ],
+        },
+      ]);
+      assert.equal(frames.length, 1);
+    },
+    () => drawnTimes.push("encoded"),
+  );
+  assert.deepEqual(drawnTimes, ["encoded"]);
 });
 
 test("aborting frame extraction returns no frames and still cleans the active source", async () => {

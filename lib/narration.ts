@@ -248,6 +248,14 @@ export function splitNarrationScript(script: string) {
   return compact.slice(0, 24);
 }
 
+/** Removes presentation-only differences before checking caption coverage. */
+export function canonicalizeNarrationTextForComparison(text: string) {
+  return cleanText(text, 2_000)
+    .normalize("NFKC")
+    .replace(/[\s\p{P}\p{S}]/gu, "")
+    .toLocaleLowerCase("ja-JP");
+}
+
 export function normalizeNarrationPlan(value: unknown): NarrationPlan {
   const payload =
     typeof value === "object" && value !== null
@@ -270,21 +278,27 @@ export function normalizeNarrationPlan(value: unknown): NarrationPlan {
     })
     .filter((item) => item.text)
     .slice(0, 24);
-  const fallbackSegments = splitNarrationScript(script).map((text, index) => ({
+  const resolvedScript =
+    script ||
+    segments
+      .map((item) => item.text)
+      .join("")
+      .slice(0, 2_000);
+  const fallbackSegments = splitNarrationScript(resolvedScript).map((text, index) => ({
     text,
     emphasis: index === 0,
   }));
+  const combinedSegmentText = segments.map((item) => item.text).join("");
+  const segmentsCoverScript =
+    segments.length > 0 &&
+    canonicalizeNarrationTextForComparison(combinedSegmentText) ===
+      canonicalizeNarrationTextForComparison(resolvedScript);
 
   return {
     title: cleanText(payload.title, 80) || "今日のリール",
-    script:
-      script ||
-      segments
-        .map((item) => item.text)
-        .join("")
-        .slice(0, 2_000),
+    script: resolvedScript,
     socialCaption: cleanText(payload.socialCaption, 1_200),
-    segments: segments.length ? segments : fallbackSegments,
+    segments: segmentsCoverScript ? segments : fallbackSegments,
   };
 }
 

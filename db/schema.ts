@@ -1,4 +1,11 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const videoTransfers = sqliteTable(
   "video_transfers",
@@ -160,6 +167,12 @@ export const billingSubscriptions = sqliteTable(
   (table) => [
     index("billing_subscriptions_user_id_idx").on(table.userId),
     index("billing_subscriptions_status_idx").on(table.status),
+    index("billing_subscriptions_user_status_period_idx").on(
+      table.userId,
+      table.status,
+      table.currentPeriodEnd,
+      table.updatedAt,
+    ),
   ],
 );
 
@@ -215,6 +228,10 @@ export const billingPurchases = sqliteTable(
   },
   (table) => [
     index("billing_purchases_user_id_idx").on(table.userId),
+    index("billing_purchases_user_revoked_idx").on(
+      table.userId,
+      table.revokedAt,
+    ),
     uniqueIndex("billing_purchases_payment_intent_unique").on(
       table.stripePaymentIntentId,
     ),
@@ -239,6 +256,7 @@ export const usageReservations = sqliteTable(
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     completedAt: integer("completed_at"),
+    releaseRequestedAt: integer("release_requested_at"),
     billingPurchaseId: text("billing_purchase_id"),
   },
   (table) => [
@@ -250,6 +268,34 @@ export const usageReservations = sqliteTable(
     index("usage_reservations_billing_purchase_id_idx").on(
       table.billingPurchaseId,
     ),
+    index("usage_reservations_user_status_expires_idx").on(
+      table.userId,
+      table.status,
+      table.expiresAt,
+    ),
+    index("usage_reservations_user_status_bucket_created_idx").on(
+      table.userId,
+      table.status,
+      table.bucket,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const usageReleaseIntents = sqliteTable(
+  "usage_release_intents",
+  {
+    userId: text("user_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestedAt: integer("requested_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.idempotencyKey],
+      name: "usage_release_intents_user_key_pk",
+    }),
+    index("usage_release_intents_expires_at_idx").on(table.expiresAt),
   ],
 );
 
@@ -334,6 +380,11 @@ export const usageOperationLeases = sqliteTable(
   },
   (table) => [
     index("usage_operation_leases_expires_at_idx").on(table.expiresAt),
+    index("usage_operation_leases_reservation_operation_expires_idx").on(
+      table.reservationId,
+      table.operation,
+      table.expiresAt,
+    ),
   ],
 );
 

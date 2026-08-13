@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  analyzeVideoExportDecodedFrames,
   assessExportedVideoQuality,
   assessVideoExportQuality,
   explainVideoExportResolution,
@@ -44,6 +45,26 @@ function qualityMetrics(overrides = {}) {
     ...overrides,
   };
 }
+
+test("flags sparse black and frozen boundary frames but exempts intentional black fades", () => {
+  const frames = [
+    { time: 0.1, luminance: 80, variance: 200, fingerprint: 0.2 },
+    { time: 1.93, luminance: 45, variance: 160, fingerprint: 0.4 },
+    { time: 2.07, luminance: 45.05, variance: 161, fingerprint: 0.4001 },
+    { time: 3, luminance: 0.5, variance: 1, fingerprint: 0.01 },
+  ];
+  const findings = analyzeVideoExportDecodedFrames(frames, {
+    boundarySeconds: [2, 3],
+  });
+  assert.deepEqual(findings.frozenPairStarts, [1.93]);
+  assert.deepEqual(findings.blackFrameTimes, [3]);
+
+  const intentional = analyzeVideoExportDecodedFrames(frames, {
+    boundarySeconds: [2, 3],
+    allowBlackAtBoundarySeconds: [3],
+  });
+  assert.deepEqual(intentional.blackFrameTimes, []);
+});
 
 test("recognizes portrait, landscape, and square 1080p output", () => {
   assert.equal(

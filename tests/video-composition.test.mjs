@@ -7,6 +7,7 @@ import {
   VIDEO_COMPOSITION_SOURCE_END_TOLERANCE_SECONDS,
   buildVideoCompositionFrameSchedule,
   createVideoCompositionPlan,
+  getVideoCompositionClipTransitionWindows,
   getVideoCompositionTransitionVisual,
   normalizeVideoCompositionTransition,
 } from "../lib/video-composition.ts";
@@ -39,10 +40,10 @@ test("preserves source order and chronological clip order", () => {
       ["first-take", 1, 4],
     ],
   );
-  assert.equal(plan.duration, 8);
+  assert.equal(plan.duration, 7.4);
   assert.equal(plan.boundaries.length, 2);
-  assert.equal(plan.boundaries[0].editedTime, 2);
-  assert.equal(plan.boundaries[1].editedTime, 5);
+  assert.equal(plan.boundaries[0].editedTime, 1.7);
+  assert.equal(plan.boundaries[1].editedTime, 4.4);
 });
 test("requires one or two non-overlapping forward clips per source", () => {
   assert.throws(
@@ -284,7 +285,7 @@ test("schedules each boundary with its final override without changing order or 
     "one",
     "two",
   ]);
-  assert.equal(schedule.at(-1).editedTime + schedule.at(-1).duration, 3);
+  assert.equal(schedule.at(-1).editedTime + schedule.at(-1).duration, plan.duration);
 });
 
 test("builds one monotonic 30fps schedule across ordered sources", () => {
@@ -314,7 +315,7 @@ test("builds one monotonic 30fps schedule across ordered sources", () => {
   );
 });
 
-test("describes crossfade frames for preview/export parity without shortening output", () => {
+test("describes a true crossfade overlap with both source clocks advancing", () => {
   const plan = createVideoCompositionPlan({
     sources: [
       source("one", 8, [{ start: 1, end: 2 }]),
@@ -337,13 +338,19 @@ test("describes crossfade frames for preview/export parity without shortening ou
         frame.transition.progress <= 1,
     ),
   );
-  assert.equal(
-    schedule.at(-1).editedTime + schedule.at(-1).duration,
-    2,
+  assert.equal(plan.duration, 1.7);
+  assert.equal(schedule.at(-1).editedTime + schedule.at(-1).duration, plan.duration);
+  assert.ok(
+    transitionFrames.every(
+      (frame, index) =>
+        index === 0 ||
+        frame.transition.from.sourceTime >
+          transitionFrames[index - 1].transition.from.sourceTime,
+    ),
   );
 });
 
-test("uses the actual final scheduled outgoing frame for blend transitions", () => {
+test("uses an advancing outgoing source time for blend transitions", () => {
   const plan = createVideoCompositionPlan({
     sources: [
       source("one", 8, [{ start: 1, end: 2.015 }]),
@@ -352,16 +359,18 @@ test("uses the actual final scheduled outgoing frame for blend transitions", () 
     transition: "crossfade",
   });
   const schedule = buildVideoCompositionFrameSchedule(plan);
-  const outgoingFrames = schedule.filter(
-    (frame) => frame.globalClipIndex === 0,
-  );
   const firstBlendFrame = schedule.find(
     (frame) => frame.transition?.type === "crossfade",
   );
 
-  assert.equal(
-    firstBlendFrame.transition.from.sourceTime,
-    outgoingFrames.at(-1).sourceTime,
+  const blendFrames = schedule.filter((frame) => frame.transition?.type === "crossfade");
+  assert.ok(firstBlendFrame.transition.from.sourceTime < blendFrames.at(-1).transition.from.sourceTime);
+  assert.ok(
+    blendFrames.every(
+      (frame, index) =>
+        index === 0 ||
+        frame.transition.from.sourceTime > blendFrames[index - 1].transition.from.sourceTime,
+    ),
   );
 });
 
@@ -412,7 +421,12 @@ test("adds four premium transition schedules without changing order or duration"
       expectedPhases,
     );
     assert.deepEqual(plan.sources.map((item) => item.id), ["first", "second"]);
-    assert.equal(plan.duration, 2);
+    assert.equal(
+      plan.duration,
+      type === "wipe-left" || type === "slide-left" || type === "zoom-dissolve"
+        ? 2 - plan.boundaries[0].transition.duration
+        : 2,
+    );
     assert.equal(
       schedule.at(-1).editedTime + schedule.at(-1).duration,
       plan.duration,
@@ -425,6 +439,35 @@ test("adds four premium transition schedules without changing order or duration"
         return values.every(Number.isFinite);
       }),
     );
+  }
+});
+
+test("jointly allocates every 8x8 transition pair around a minimum middle clip", () => {
+  const types = Object.keys(VIDEO_COMPOSITION_DEFAULT_TRANSITION_DURATIONS);
+  for (const incomingType of types) {
+    for (const outgoingType of types) {
+      const plan = createVideoCompositionPlan({
+        sources: [
+          source("first", 1, [{ start: 0, end: 0.35 }]),
+          source("middle", 1, [{ start: 0, end: 0.35 }]),
+          source("last", 1, [{ start: 0, end: 0.35 }]),
+        ],
+        transition: "cut",
+        boundaryTransitions: [incomingType, outgoingType],
+      });
+      const windows = getVideoCompositionClipTransitionWindows(plan, 1);
+      assert.ok(
+        windows.incomingSeconds + windows.outgoingSeconds <= 0.35 + 1e-6,
+        `${incomingType} -> ${outgoingType} exceeded the middle clip`,
+      );
+      const transitionBoundaries = new Set(
+        buildVideoCompositionFrameSchedule(plan)
+          .filter((frame) => frame.transition)
+          .map((frame) => frame.transition.boundaryIndex),
+      );
+      if (incomingType !== "cut") assert.ok(transitionBoundaries.has(0));
+      if (outgoingType !== "cut") assert.ok(transitionBoundaries.has(1));
+    }
   }
 });
 

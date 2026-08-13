@@ -1,7 +1,14 @@
 import { getCaptionDisplayRange, type CaptionSegment } from "./captions";
 import { buildNarrationTimeline, type NarrationPlan } from "./narration";
 import { attachNarrationCaptionDisplayTiming } from "./narration-alignment";
-import { detectPortableNarrationActivity } from "./portable-video-export";
+import {
+  computePortableOriginalNormalizationGain,
+  detectPortableNarrationActivity,
+} from "./portable-video-export";
+import {
+  computeLoudnessNormalizationGain,
+  measureAudioLoudness,
+} from "./audio-loudness";
 import {
   VIDEO_COMPOSITION_MAX_SOURCES,
   type VideoCompositionClip,
@@ -19,12 +26,18 @@ export type PreparedVideoMixNarration = Readonly<{
   decodedDuration: number;
   audioDuration: number;
   activity: ReturnType<typeof detectPortableNarrationActivity>;
+  normalizationGain: number;
   captions: CaptionSegment[];
 }>;
 
 export type VideoMixNarrationFrameRequest = Readonly<{
   sourceIndex: number;
   sourceTime: number;
+}>;
+
+export type VideoMixNarrationContactSheetRequest = Readonly<{
+  sourceIndex: number;
+  frames: readonly VideoMixNarrationFrameRequest[];
 }>;
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -54,6 +67,30 @@ function waitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal) {
       },
     );
   });
+}
+
+export function computeVideoMixNarrationNormalizationGain(
+  channels: readonly Float32Array[],
+  sampleRate: number,
+  duration: number,
+) {
+  const endFrame = Math.max(0, Math.ceil(duration * sampleRate));
+  const measurement = measureAudioLoudness(channels, sampleRate, {
+    startFrame: 0,
+    endFrame,
+  });
+  const measured = measurement.integratedLufs === null
+    ? computePortableOriginalNormalizationGain(
+        Math.sqrt(Math.max(0, measurement.ungatedMeanSquare)),
+        measurement.samplePeak,
+      )
+    : computeLoudnessNormalizationGain(measurement, {
+        targetLufs: -18,
+        truePeakLimitDbtp: -2,
+        minimumGain: 0.65,
+        maximumGain: 1.35,
+      });
+  return Math.max(0.65, Math.min(1.35, measured));
 }
 
 function releaseFrameVideo(video: HTMLVideoElement, url: string) {
@@ -125,30 +162,23 @@ function seekVideo(video: HTMLVideoElement, time: number, signal?: AbortSignal) 
  */
 export async function extractVideoMixNarrationFrames(
   sources: readonly VideoMixNarrationFrameSource[],
-  count = 6,
+  count = VIDEO_COMPOSITION_MAX_SOURCES,
   signal?: AbortSignal,
 ) {
   throwIfAborted(signal);
+  // `count` remains accepted for existing callers. Contact sheets are always
+  // bounded by source count so no selected clip can be dropped.
+  if (!Number.isFinite(count) || count <= 0) return [];
   if (sources.length > VIDEO_COMPOSITION_MAX_SOURCES) {
     throw new RangeError(`動画は最大${VIDEO_COMPOSITION_MAX_SOURCES}本までです。`);
   }
-  const requested = createVideoMixNarrationFrameRequests(sources, count, signal);
+  const requested = createVideoMixNarrationContactSheetRequests(sources, signal);
   if (requested.length === 0) return [];
 
   const frames: string[] = [];
-  let requestIndex = 0;
-  while (requestIndex < requested.length) {
+  for (const sheet of requested) {
     throwIfAborted(signal);
-    const sourceIndex = requested[requestIndex].sourceIndex;
-    const sourceRequests: VideoMixNarrationFrameRequest[] = [];
-    while (
-      requestIndex < requested.length &&
-      requested[requestIndex].sourceIndex === sourceIndex
-    ) {
-      sourceRequests.push(requested[requestIndex]);
-      requestIndex += 1;
-    }
-
+    const sourceIndex = sheet.sourceIndex;
     const url = URL.createObjectURL(sources[sourceIndex].file);
     let video: HTMLVideoElement | null = null;
     try {
@@ -159,25 +189,43 @@ export async function extractVideoMixNarrationFrames(
       video.src = url;
       await waitForMetadata(video, signal);
       throwIfAborted(signal);
-      for (const request of sourceRequests) {
-        throwIfAborted(signal);
-        await seekVideo(video, request.sourceTime, signal);
-        throwIfAborted(signal);
+      const canvas = document.createElement("canvas");
+      if (sheet.frames.length === 1) {
         const scale = Math.min(
           1,
           FRAME_LONG_EDGE / Math.max(video.videoWidth, video.videoHeight),
         );
-        const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
         canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("動画の場面を読み取れませんでした。");
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        throwIfAborted(signal);
-        const frame = canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
-        throwIfAborted(signal);
-        frames.push(frame);
+      } else {
+        canvas.width = FRAME_LONG_EDGE;
+        canvas.height = FRAME_LONG_EDGE;
       }
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("動画の場面を読み取れませんでした。");
+      for (const [cellIndex, request] of sheet.frames.entries()) {
+        throwIfAborted(signal);
+        await seekVideo(video, request.sourceTime, signal);
+        throwIfAborted(signal);
+        const cellWidth = canvas.width / sheet.frames.length;
+        const scale = Math.min(
+          cellWidth / video.videoWidth,
+          canvas.height / video.videoHeight,
+        );
+        const drawWidth = video.videoWidth * scale;
+        const drawHeight = video.videoHeight * scale;
+        context.drawImage(
+          video,
+          cellIndex * cellWidth + (cellWidth - drawWidth) / 2,
+          (canvas.height - drawHeight) / 2,
+          drawWidth,
+          drawHeight,
+        );
+        throwIfAborted(signal);
+      }
+      const frame = canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY);
+      throwIfAborted(signal);
+      frames.push(frame);
     } finally {
       if (video) releaseFrameVideo(video, url);
       else URL.revokeObjectURL(url);
@@ -185,6 +233,35 @@ export async function extractVideoMixNarrationFrames(
   }
   throwIfAborted(signal);
   return frames;
+}
+
+/**
+ * One image is sent for each source. When a source contributes two clips, the
+ * image is a two-cell contact sheet, so five sources / ten cuts still fit the
+ * endpoint's five-image contract without omitting any selected scene.
+ */
+export function createVideoMixNarrationContactSheetRequests(
+  sources: readonly Pick<VideoMixNarrationFrameSource, "clips">[],
+  signal?: AbortSignal,
+): VideoMixNarrationContactSheetRequest[] {
+  throwIfAborted(signal);
+  if (sources.length > VIDEO_COMPOSITION_MAX_SOURCES) {
+    throw new RangeError(`動画は最大${VIDEO_COMPOSITION_MAX_SOURCES}本までです。`);
+  }
+  return sources.flatMap((source, sourceIndex) => {
+    throwIfAborted(signal);
+    const frames = source.clips
+      .filter((clip) => clip.end > clip.start)
+      .slice(0, 2)
+      .map((clip) => ({
+        sourceIndex,
+        sourceTime: Math.max(
+          clip.start,
+          Math.min(clip.end - 0.001, clip.start + (clip.end - clip.start) / 2),
+        ),
+      }));
+    return frames.length > 0 ? [{ sourceIndex, frames }] : [];
+  });
 }
 
 export function createVideoMixNarrationFrameRequests(
@@ -342,6 +419,11 @@ export async function prepareVideoMixNarration(
       decoded.sampleRate,
       maximumDuration,
     );
+    const normalizationGain = computeVideoMixNarrationNormalizationGain(
+      channels,
+      decoded.sampleRate,
+      maximumDuration,
+    );
     throwIfAborted(signal);
     const timeline = buildNarrationTimeline(
       plan.segments,
@@ -359,6 +441,7 @@ export async function prepareVideoMixNarration(
       decodedDuration: decoded.duration,
       audioDuration: maximumDuration,
       activity,
+      normalizationGain,
       captions,
     };
   } finally {

@@ -4,14 +4,108 @@ import test from "node:test";
 
 import {
   buildVideoMixFrameDecodeBatches,
+  buildVideoMixNarrationDuckingMetadata,
+  computeVideoMixFrameLayout,
+  createVideoMixSourceAudioAnalysisWindows,
   createVideoMixAudioExportMetadata,
   exportVideoMixMp4,
   getVideoMixTransitionCanvasWorkingBytes,
+  getVideoMixDuckingGainAtTime,
+  getVideoMixClipAudioOverlapEnvelope,
+  getVideoMixTransitionAudioGains,
+  measureVideoMixSourceAudioNormalization,
 } from "../lib/video-mix-export.ts";
 import {
   buildVideoCompositionFrameSchedule,
   createVideoCompositionPlan,
 } from "../lib/video-composition.ts";
+
+test("uses equal-power audio gains throughout a true-overlap transition", () => {
+  const plan = createVideoCompositionPlan({
+    sources: [
+      { id: "one", fileSize: 10, duration: 4, clips: [{ start: 0, end: 4 }] },
+      { id: "two", fileSize: 10, duration: 4, clips: [{ start: 0, end: 4 }] },
+    ],
+    transition: { type: "crossfade", duration: 0.4 },
+  });
+  const boundary = plan.boundaries[0];
+  const start = getVideoMixTransitionAudioGains(plan, boundary.editedTime);
+  const middle = getVideoMixTransitionAudioGains(
+    plan,
+    boundary.editedTime + boundary.transition.duration / 2,
+  );
+  assert.ok(start);
+  assert.ok(middle);
+  assert.equal(start.incoming, 0);
+  assert.equal(start.outgoing, 1);
+  assert.ok(Math.abs(middle.incoming - Math.SQRT1_2) < 1e-12);
+  assert.ok(Math.abs(middle.outgoing - Math.SQRT1_2) < 1e-12);
+  assert.equal(
+    getVideoMixTransitionAudioGains(
+      plan,
+      boundary.editedTime + boundary.transition.duration + 0.01,
+    ),
+    null,
+  );
+});
+
+test("keeps the audible side faded when the neighboring overlap clip is silent", () => {
+  const plan = createVideoCompositionPlan({
+    sources: [
+      { id: "audible", fileSize: 10, duration: 4, clips: [{ start: 0, end: 4 }] },
+      { id: "silent", fileSize: 10, duration: 4, clips: [{ start: 0, end: 4 }] },
+    ],
+    transition: { type: "crossfade", duration: 0.4 },
+  });
+  const outgoingOnly = getVideoMixClipAudioOverlapEnvelope(plan, 0);
+  const incomingOnly = getVideoMixClipAudioOverlapEnvelope(plan, 1);
+  assert.equal(outgoingOnly.fadeIn, null);
+  assert.deepEqual(outgoingOnly.fadeOut, {
+    start: plan.boundaries[0].editedTime,
+    end: plan.boundaries[0].editedTime + 0.4,
+  });
+  assert.deepEqual(incomingOnly.fadeIn, outgoingOnly.fadeOut);
+  assert.equal(incomingOnly.fadeOut, null);
+});
+
+test("bounds selected-clip loudness analysis for preview/export parity", () => {
+  assert.equal(typeof measureVideoMixSourceAudioNormalization, "function");
+  const windows = createVideoMixSourceAudioAnalysisWindows([
+    { start: 10, end: 30 },
+    { start: 50, end: 70 },
+  ]);
+  assert.equal(windows.length, 2);
+  assert.ok(Math.abs(windows.reduce((sum, item) => sum + item.end - item.start, 0) - 15) < 1e-9);
+  assert.deepEqual(windows, [
+    { start: 16.25, end: 23.75 },
+    { start: 56.25, end: 63.75 },
+  ]);
+});
+
+test("scales preview backing blur to the same displayed radius as export", () => {
+  const exported = computeVideoMixFrameLayout(1920, 1080, 1080, 1920, {
+    mode: "blur",
+    focusX: 0.3,
+    focusY: 0.7,
+  });
+  const preview = computeVideoMixFrameLayout(1920, 1080, 540, 960, {
+    mode: "blur",
+    focusX: 0.3,
+    focusY: 0.7,
+  });
+  assert.equal(exported.background.kind, "blurred-video");
+  assert.equal(preview.background.kind, "blurred-video");
+  assert.ok(
+    Math.abs(
+      exported.background.blurPixels * (360 / 1080) -
+        preview.background.blurPixels * (360 / 540),
+    ) < 0.01,
+  );
+  assert.equal(preview.background.rect.x, exported.background.rect.x / 2);
+  assert.equal(preview.background.rect.y, exported.background.rect.y / 2);
+  assert.equal(preview.background.rect.width, exported.background.rect.width / 2);
+  assert.equal(preview.background.rect.height, exported.background.rect.height / 2);
+});
 
 test("exposes the browser-only multi-video MP4 exporter", () => {
   assert.equal(typeof exportVideoMixMp4, "function");
@@ -168,7 +262,7 @@ test("decodes a maximum composition in monotonic clip batches instead of per fra
   const schedule = buildVideoCompositionFrameSchedule(plan);
   const batches = buildVideoMixFrameDecodeBatches(plan, schedule);
 
-  assert.equal(schedule.length, 2_700);
+  assert.equal(schedule.length, Math.ceil(plan.duration * plan.frameRate));
   assert.equal(batches.length, 10);
   assert.equal(
     batches.reduce((total, batch) => total + batch.frames.length, 0),
@@ -177,10 +271,6 @@ test("decodes a maximum composition in monotonic clip batches instead of per fra
   assert.deepEqual(
     batches.flatMap((batch) => batch.frames.map((frame) => frame.frameIndex)),
     schedule.map((frame) => frame.frameIndex),
-  );
-  assert.equal(
-    batches.filter((batch) => batch.captureBoundaryIndex !== null).length,
-    9,
   );
   assert.ok(
     batches.every((batch) =>
@@ -191,9 +281,22 @@ test("decodes a maximum composition in monotonic clip batches instead of per fra
       ),
     ),
   );
+  assert.ok(
+    batches.every((batch) =>
+      batch.requests.every(
+        (request, index) =>
+          index === 0 || request.sourceTime >= batch.requests[index - 1].sourceTime,
+      ),
+    ),
+  );
+  assert.ok(
+    batches.some((batch) =>
+      batch.requests.some((request) => request.role === "transition-outgoing"),
+    ),
+  );
 });
 
-test("preserves consecutive premium boundaries around a 0.35s middle clip", async () => {
+test("preserves both advancing premium boundaries around a 0.35s middle clip", async () => {
   const plan = createVideoCompositionPlan({
     sources: Array.from({ length: 3 }, (_, sourceIndex) => ({
       id: `short-${sourceIndex}`,
@@ -208,36 +311,27 @@ test("preserves consecutive premium boundaries around a 0.35s middle clip", asyn
   const batches = buildVideoMixFrameDecodeBatches(plan, schedule);
   const middleBatch = batches[1];
 
-  assert.equal(middleBatch.captureBoundaryIndex, 1);
-  assert.equal(middleBatch.frames[0].transition?.boundaryIndex, 0);
-  assert.equal(middleBatch.frames.at(-1).transition?.boundaryIndex, 0);
-  assert.equal(middleBatch.frames.at(-1).transition?.type, "wipe-left");
-  assert.equal(batches[2].frames[0].transition?.boundaryIndex, 1);
-  assert.equal(batches[2].frames[0].transition?.type, "slide-left");
+  const boundaryIndexes = new Set(
+    schedule.filter((frame) => frame.transition).map((frame) => frame.transition.boundaryIndex),
+  );
+  assert.deepEqual(boundaryIndexes, new Set([0, 1]));
+  assert.ok(
+    middleBatch.requests.some((request) => request.role === "transition-outgoing"),
+  );
+  assert.ok(
+    middleBatch.requests.every(
+      (request, index) =>
+        index === 0 || request.sourceTime >= middleBatch.requests[index - 1].sourceTime,
+    ),
+  );
 
   const source = await readFile(
     new URL("../lib/video-mix-export.ts", import.meta.url),
     "utf8",
   );
-  const renderLoop = source.slice(
-    source.indexOf("for await (const sample"),
-    source.indexOf("if (emittedFrames !== schedule.length)"),
-  );
-  const captureRawIndex = renderLoop.indexOf(
-    "copyCanvasFrame(canvas, spareTransitionFrame)",
-  );
-  const renderCurrentBoundaryIndex = renderLoop.indexOf(
-    "drawFrameTransition(",
-    captureRawIndex,
-  );
-  const promoteSpareIndex = renderLoop.indexOf(
-    "outgoingTransitionFrame = promotedOutgoingFrame",
-  );
-
-  assert.ok(captureRawIndex >= 0);
-  assert.ok(renderCurrentBoundaryIndex > captureRawIndex);
-  assert.ok(promoteSpareIndex > renderCurrentBoundaryIndex);
-  assert.match(renderLoop, /incomingFrameAlreadyCaptured|promotedOutgoingFrame !== null/);
+  assert.match(source, /role: "transition-outgoing"/);
+  assert.match(source, /takeSample\([\s\S]*"transition-outgoing"/);
+  assert.match(source, /drawVideoMixSourceFrame\([\s\S]*outgoingSample/);
 });
 
 test("closes yielded samples on abort and releases transition backing stores", async () => {
@@ -245,28 +339,50 @@ test("closes yielded samples on abort and releases transition backing stores", a
     new URL("../lib/video-mix-export.ts", import.meta.url),
     "utf8",
   );
-  const renderLoop = source.slice(
-    source.indexOf("for await (const sample"),
-    source.indexOf("if (emittedFrames !== schedule.length)"),
-  );
-  const guardedWorkIndex = renderLoop.indexOf("try {");
-  const abortSafetyCommentIndex = renderLoop.indexOf(
-    "// A sample may arrive just as cancellation is requested.",
-  );
-  const abortIndex = renderLoop.indexOf("throwIfAborted(options.signal)");
-  const sampleCloseIndex = renderLoop.indexOf("sample.close()");
-
-  assert.ok(guardedWorkIndex >= 0);
-  assert.ok(abortSafetyCommentIndex > guardedWorkIndex);
-  assert.ok(abortIndex > abortSafetyCommentIndex);
-  assert.ok(sampleCloseIndex > abortIndex);
-  assert.match(renderLoop, /finally \{\s*sample\.close\(\);\s*\}/);
+  assert.match(source, /finally \{\s*primarySample\.close\(\);\s*outgoingSample\?\.close\(\);\s*\}/);
+  assert.match(source, /state\.iterator\.return\?\.\(\)/);
   assert.match(source, /releaseVideoMixTransitionCanvas\(outgoingTransitionFrame\)/);
   assert.match(source, /releaseVideoMixTransitionCanvas\(incomingTransitionFrame\)/);
   assert.match(
     source,
     /function releaseVideoMixTransitionCanvas[\s\S]*canvas\.width = 0;[\s\S]*canvas\.height = 0;/,
   );
+});
+
+test("shares deterministic framing for blurred, covered, and contained sources", () => {
+  const blurred = computeVideoMixFrameLayout(1920, 1080, 1080, 1920);
+  assert.equal(blurred.framing.mode, "blur");
+  assert.equal(blurred.background.kind, "blurred-video");
+  assert.equal(blurred.foregroundRect.width, 1080);
+
+  const covered = computeVideoMixFrameLayout(1920, 1080, 1080, 1920, {
+    mode: "cover",
+    focusX: 1,
+    focusY: -1,
+  });
+  assert.equal(covered.framing.focusX, 1);
+  assert.equal(covered.framing.focusY, 0);
+  assert.equal(covered.foregroundRect.height, 1920);
+  assert.ok(covered.foregroundRect.x < 0);
+
+  const portrait = computeVideoMixFrameLayout(1080, 1920, 1080, 1920);
+  assert.equal(portrait.framing.mode, "cover");
+  assert.equal(portrait.foregroundRect.x, 0);
+  assert.equal(portrait.foregroundRect.y, 0);
+  assert.equal(portrait.foregroundRect.width, 1080);
+  assert.equal(portrait.foregroundRect.height, 1920);
+});
+
+test("shares the exact narration activity ducking envelope with preview", () => {
+  const metadata = buildVideoMixNarrationDuckingMetadata({
+    activity: [{ start: 1, end: 2 }],
+    baseGain: 1,
+    duration: 3,
+  });
+  assert.equal(getVideoMixDuckingGainAtTime(metadata, 0), 1);
+  assert.ok(Math.abs(getVideoMixDuckingGainAtTime(metadata, 1) - 0.42) < 1e-12);
+  assert.ok(Math.abs(getVideoMixDuckingGainAtTime(metadata, 1.5) - 0.42) < 1e-12);
+  assert.equal(getVideoMixDuckingGainAtTime(metadata, 3), 1);
 });
 
 test("accounts for two reusable transition canvases instead of one per boundary", () => {
@@ -355,7 +471,7 @@ test("uses source-specific dimensions, HDR plans, progress and abort", async () 
   assert.doesNotMatch(source, /outgoingTransitionFrames/);
 });
 
-test("renders premium transition metadata on Canvas without retiming audio", async () => {
+test("renders premium transition metadata on Canvas with matching overlap audio", async () => {
   const source = await readFile(
     new URL("../lib/video-mix-export.ts", import.meta.url),
     "utf8",
@@ -371,9 +487,16 @@ test("renders premium transition metadata on Canvas without retiming audio", asy
   assert.match(source, /visual\.overlayOpacity/);
   assert.match(source, /context\.clip\(\)/);
   assert.match(source, /context\.scale\(scale, scale\)/);
-  // Transition visuals remain a video-only concern. Existing source-audio
-  // placement and equal-power cut handling stay on the original path.
-  assert.match(source, /applyMixAudioCrossfades\(groups\)/);
+  assert.match(source, /applyMixAudioCrossfades\(groups, plan\)/);
+  assert.match(source, /videoCompositionTransitionUsesOverlap/);
+  assert.match(source, /item\.overlapFadeOut = envelope\.fadeOut/);
+  assert.match(source, /item\.overlapFadeIn = envelope\.fadeIn/);
+  assert.match(source, /prepared\[sourceIndex\]\.source\.audioNormalizationGain/);
+  assert.match(
+    source,
+    /!item\.overlapFadeIn \|\|[\s\S]*?item\.overlapFadeIn\.start > itemStart \+ TIME_EPSILON[\s\S]*?gain\.gain\.setValueAtTime\(1, itemStart\)/,
+  );
+  assert.match(source, /else if \(!item\.overlapFadeIn\)/);
 });
 
 test("does not change the established single-video exporter contract", async () => {

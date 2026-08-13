@@ -85,91 +85,12 @@ type D1Database = {
   batch: (statements: D1Statement[]) => Promise<unknown>;
 };
 
-let operatorUsageSchemaReady = false;
-
-async function ensureOperatorUsageSchema() {
-  if (operatorUsageSchemaReady) return;
+function getOperatorUsageDatabase() {
   const database = env.DB as unknown as D1Database | undefined;
   if (!database?.prepare || !database?.batch) {
     throw new Error("Operator usage database binding is unavailable.");
   }
-
-  await database.batch([
-    database.prepare(`
-      CREATE TABLE IF NOT EXISTS operator_usage_operations (
-        id text PRIMARY KEY NOT NULL,
-        reservation_id text NOT NULL,
-        operation text NOT NULL,
-        count integer DEFAULT 1 NOT NULL,
-        successful_count integer DEFAULT 0 NOT NULL,
-        updated_at integer NOT NULL
-      )
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS operator_usage_operations_reservation_id_idx
-      ON operator_usage_operations (reservation_id)
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS operator_usage_operations_updated_at_idx
-      ON operator_usage_operations (updated_at)
-    `),
-    database.prepare(`
-      CREATE TABLE IF NOT EXISTS usage_observed_durations (
-        reservation_id text PRIMARY KEY NOT NULL,
-        observed_milliseconds integer DEFAULT 0 NOT NULL,
-        blocked_at integer,
-        updated_at integer NOT NULL
-      )
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS usage_observed_durations_blocked_at_idx
-      ON usage_observed_durations (blocked_at)
-    `),
-    database.prepare(`
-      CREATE TABLE IF NOT EXISTS usage_operation_leases (
-        id text PRIMARY KEY NOT NULL,
-        reservation_id text NOT NULL,
-        operation text NOT NULL,
-        lease_token text NOT NULL,
-        acquired_at integer NOT NULL,
-        expires_at integer NOT NULL,
-        updated_at integer NOT NULL
-      )
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS usage_operation_leases_expires_at_idx
-      ON usage_operation_leases (expires_at)
-    `),
-    database.prepare(`
-      CREATE TABLE IF NOT EXISTS metered_ai_actions (
-        id text PRIMARY KEY NOT NULL,
-        reservation_id text NOT NULL,
-        action_id text NOT NULL,
-        operation text NOT NULL,
-        status text DEFAULT 'pending' NOT NULL,
-        attempt_count integer DEFAULT 1 NOT NULL,
-        observed_milliseconds integer DEFAULT 0 NOT NULL,
-        created_at integer NOT NULL,
-        expires_at integer NOT NULL,
-        succeeded_at integer,
-        failed_at integer,
-        updated_at integer NOT NULL
-      )
-    `),
-    database.prepare(`
-      CREATE UNIQUE INDEX IF NOT EXISTS metered_ai_actions_reservation_action_unique
-      ON metered_ai_actions (reservation_id, action_id)
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS metered_ai_actions_reservation_status_idx
-      ON metered_ai_actions (reservation_id, status)
-    `),
-    database.prepare(`
-      CREATE INDEX IF NOT EXISTS metered_ai_actions_expires_at_idx
-      ON metered_ai_actions (expires_at)
-    `),
-  ]);
-  operatorUsageSchemaReady = true;
+  return database;
 }
 
 export type UsageOperationLease = {
@@ -190,8 +111,7 @@ export async function acquireUsageOperationLease(
   requestedTtlSeconds = TRANSCRIPTION_LEASE_TTL_SECONDS,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<UsageOperationLease | null> {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const ttlSeconds = Math.min(
     MAX_OPERATION_LEASE_TTL_SECONDS,
     Math.max(
@@ -220,6 +140,7 @@ export async function acquireUsageOperationLease(
         WHERE id = ?
           AND status IN ('reserved', 'completed')
           AND expires_at >= ?
+          AND release_requested_at IS NULL
       )
       ON CONFLICT(id) DO UPDATE SET
         lease_token = excluded.lease_token,
@@ -233,6 +154,7 @@ export async function acquireUsageOperationLease(
           WHERE id = excluded.reservation_id
             AND status IN ('reserved', 'completed')
             AND expires_at >= ?
+            AND release_requested_at IS NULL
         )
       RETURNING lease_token, expires_at
     `)
@@ -263,9 +185,9 @@ export async function acquireUsageOperationLease(
 /** Releases only the exact lease held by this Worker invocation. */
 export async function releaseUsageOperationLease(
   lease: UsageOperationLease,
+  nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const id = `${lease.reservationId}:${lease.operation}`;
   const row = await database
     .prepare(`
@@ -278,7 +200,44 @@ export async function releaseUsageOperationLease(
     `)
     .bind(id, lease.reservationId, lease.operation, lease.token)
     .first<{ id: string }>();
-  return row?.id === id;
+  if (row?.id !== id) return false;
+
+  // A pagehide beacon can arrive while an upstream AI request owns the lease.
+  // The release intent is stored on the reservation and prevents replacement
+  // leases; the exact owner performs the deferred release when it finishes.
+  await finalizeRequestedUsageRelease(
+    database,
+    lease.reservationId,
+    nowSeconds,
+  );
+  return true;
+}
+
+async function finalizeRequestedUsageRelease(
+  database: D1Database,
+  reservationId: string,
+  nowSeconds: number,
+) {
+  const row = await database
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'released',
+          expires_at = MIN(expires_at, ?)
+      WHERE id = ?
+        AND status = 'reserved'
+        AND release_requested_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM usage_operation_leases
+          WHERE reservation_id = usage_reservations.id
+            AND operation = 'metered_ai'
+            AND expires_at > ?
+        )
+      RETURNING id
+    `)
+    .bind(nowSeconds - 1, reservationId, nowSeconds)
+    .first<{ id: string }>();
+  return row?.id === reservationId;
 }
 
 export type MeteredAiActionStatus = "pending" | "succeeded" | "failed";
@@ -296,8 +255,7 @@ export async function getMeteredAiEntitlementUsage(
   scope: MeteredAiEntitlementScope,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       SELECT
@@ -426,8 +384,7 @@ export async function getMeteredAiAction(
   reservationId: string,
   actionId: string,
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       SELECT ${METERED_AI_ACTION_RETURNING_COLUMNS}
@@ -450,8 +407,7 @@ export async function getMeteredAiActionByOperation(
   reservationId: string,
   operation: MeteredAiOperation,
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       SELECT ${METERED_AI_ACTION_RETURNING_COLUMNS}
@@ -470,8 +426,7 @@ export async function getMeteredAiUsageCounts(
   reservationId: string,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       SELECT
@@ -533,7 +488,6 @@ export async function createMeteredAiAction(
     successfulLimit: Number.MAX_SAFE_INTEGER,
   },
 ) {
-  await ensureOperatorUsageSchema();
   if (
     !isValidMeteredAiActionId(actionId) ||
     !hasMatchingMeteredAiLease(lease, reservationId)
@@ -541,7 +495,7 @@ export async function createMeteredAiAction(
     return null;
   }
   const limit = Math.max(1, Math.floor(successfulLimit));
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const id = meteredAiActionId(reservationId, actionId);
   const pendingExpiresAt = nowSeconds + METERED_AI_ACTION_PENDING_TTL_SECONDS;
   const entitlementGuard = entitlementScope.userId
@@ -686,9 +640,8 @@ export async function continueMeteredAiAction(
   lease: UsageOperationLease,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
   if (!hasMatchingMeteredAiLease(lease, action.reservationId)) return null;
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const pendingExpiresAt = nowSeconds + METERED_AI_ACTION_PENDING_TTL_SECONDS;
   const row = await database
     .prepare(`
@@ -755,9 +708,8 @@ export async function markMeteredAiActionSucceeded(
   successfulLimit: number,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
   if (!hasMatchingMeteredAiLease(lease, action.reservationId)) return null;
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const limit = Math.max(1, Math.floor(successfulLimit));
   const row = await database
     .prepare(`
@@ -838,9 +790,8 @@ export async function markMeteredAiActionFailed(
   lease: UsageOperationLease,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
   if (!hasMatchingMeteredAiLease(lease, action.reservationId)) return null;
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       UPDATE metered_ai_actions
@@ -897,7 +848,7 @@ async function blockObservedDuration(
   reservationId: string,
   nowSeconds: number,
 ) {
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   await database.batch([
     database
       .prepare(`
@@ -936,7 +887,6 @@ export async function recordObservedTranscriptionDuration(
   observedSeconds: number,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<ObservedDurationResult> {
-  await ensureOperatorUsageSchema();
   if (
     !Number.isFinite(observedSeconds) ||
     observedSeconds <= 0 ||
@@ -950,7 +900,7 @@ export async function recordObservedTranscriptionDuration(
     };
   }
 
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const observedMilliseconds = Math.max(
     1,
     Math.ceil(observedSeconds * 1_000),
@@ -1025,7 +975,6 @@ export async function recordMeteredAiTranscriptionDuration(
   observedSeconds: number,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<ObservedDurationResult> {
-  await ensureOperatorUsageSchema();
   if (
     action.operation !== "transcribe" ||
     !hasMatchingMeteredAiLease(lease, action.reservationId)
@@ -1050,7 +999,7 @@ export async function recordMeteredAiTranscriptionDuration(
     };
   }
 
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const observedMilliseconds = Math.max(
     1,
     Math.ceil(observedSeconds * 1_000),
@@ -1137,8 +1086,7 @@ export async function recordMeteredAiTranscriptionDuration(
 }
 
 export async function isObservedDurationBlocked(reservationId: string) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const row = await database
     .prepare(`
       SELECT blocked_at
@@ -1157,8 +1105,7 @@ export async function consumeOperatorUsageOperation(
   operation: OperatorUsageOperation,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const id = `${reservationId}:${operation}`;
   const row = await database
     .prepare(`
@@ -1209,8 +1156,7 @@ export async function getOperatorUsageOperationCounts(
   reservationId: string,
   operation: OperatorUsageOperation,
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const id = `${reservationId}:${operation}`;
   const row = await database
     .prepare(`
@@ -1235,8 +1181,7 @@ export async function markOperatorUsageOperationSucceeded(
   operation: OperatorUsageOperation,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
   const id = `${reservationId}:${operation}`;
   const row = await database
     .prepare(`
@@ -1263,8 +1208,7 @@ export async function releaseOrCompleteUsageReservation(
   userId: string,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
 
   const released = await database
     .prepare(`
@@ -1348,16 +1292,19 @@ export async function settleExpiredUsageReservations(
   userId: string,
   nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  await ensureOperatorUsageSchema();
-  const database = env.DB as unknown as D1Database;
+  const database = getOperatorUsageDatabase();
 
   await database
     .prepare(`
       UPDATE usage_reservations
-      SET status = 'released'
+      SET status = 'released',
+          expires_at = MIN(expires_at, ?)
       WHERE user_id = ?
         AND status = 'reserved'
-        AND expires_at < ?
+        AND (
+          expires_at < ?
+          OR release_requested_at IS NOT NULL
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM usage_operation_leases
@@ -1366,6 +1313,6 @@ export async function settleExpiredUsageReservations(
             AND expires_at > ?
         )
     `)
-    .bind(userId, nowSeconds, nowSeconds)
+    .bind(nowSeconds - 1, userId, nowSeconds, nowSeconds)
     .run();
 }

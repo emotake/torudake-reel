@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import {
@@ -52,7 +52,11 @@ import {
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing"];
 const ACTIVE_USAGE_STATUSES = ["reserved", "completed"] as const;
-const RESERVATION_LIFETIME_SECONDS = 60 * 60;
+export const USAGE_RESERVATION_LIFETIME_SECONDS = 60 * 60;
+// A release beacon can overtake the corresponding reserve request. Keep its
+// idempotency tombstone well beyond every Worker/request retry window, while
+// still allowing indexed garbage collection.
+export const USAGE_RELEASE_INTENT_TTL_SECONDS = 24 * 60 * 60;
 // Checkout sessions are explicitly limited to 30 minutes. Keep the database
 // lock one minute longer so an expiry webhook and a late browser retry cannot
 // overlap a still-completable Stripe session.
@@ -73,6 +77,9 @@ type AtomicD1Statement = {
 
 type AtomicD1Database = {
   prepare: (query: string) => AtomicD1Statement;
+  batch?: (
+    statements: AtomicD1BoundStatement[],
+  ) => Promise<AtomicD1Result[]>;
 };
 
 type QueryD1BoundStatement = AtomicD1BoundStatement & {
@@ -83,6 +90,9 @@ type QueryD1Database = {
   prepare: (query: string) => {
     bind: (...values: unknown[]) => QueryD1BoundStatement;
   };
+  batch?: (
+    statements: QueryD1BoundStatement[],
+  ) => Promise<AtomicD1Result[]>;
 };
 
 export class UsageLimitError extends Error {
@@ -198,86 +208,129 @@ export async function getBillingUserByStripeCustomer(
   return rows[0] ?? null;
 }
 
-export async function getBillingStatusForUser(userId: string) {
+export async function getBillingStatusForUser(
+  userId: string,
+  now = Math.floor(Date.now() / 1000),
+) {
   const db = getDb();
-  const now = Math.floor(Date.now() / 1000);
 
   await settleExpiredUsageReservations(userId, now);
 
   const subscriptions = await db
     .select()
     .from(billingSubscriptions)
-    .where(eq(billingSubscriptions.userId, userId))
-    .orderBy(desc(billingSubscriptions.updatedAt));
-  const currentSubscription =
-    subscriptions.find(
-      (item) =>
-        ACTIVE_SUBSCRIPTION_STATUSES.includes(item.status) &&
-        item.currentPeriodEnd > now,
-    ) ?? null;
+    .where(
+      and(
+        eq(billingSubscriptions.userId, userId),
+        inArray(billingSubscriptions.status, ACTIVE_SUBSCRIPTION_STATUSES),
+        gt(billingSubscriptions.currentPeriodEnd, now),
+      ),
+    )
+    .orderBy(desc(billingSubscriptions.updatedAt))
+    .limit(1);
+  const currentSubscription = subscriptions[0] ?? null;
   const subscription =
     currentSubscription?.revokedPeriodStart ===
     currentSubscription?.currentPeriodStart
       ? null
       : currentSubscription;
-
-  const purchases = await db
-    .select()
-    .from(billingPurchases)
-    .where(
-      and(
-        eq(billingPurchases.userId, userId),
-        isNull(billingPurchases.revokedAt),
-      ),
-    );
-  const usage = await db
-    .select()
-    .from(usageReservations)
-    .where(
-      and(
-        eq(usageReservations.userId, userId),
-        inArray(usageReservations.status, [...ACTIVE_USAGE_STATUSES]),
-      ),
-    );
-
-  const freeUsage = usage.filter((item) => item.bucket === "free");
-  const activePurchaseIds = new Set(purchases.map((purchase) => purchase.id));
-  const oneTimeUsage = usage.filter(
-    (item) =>
-      item.bucket === "one_time" &&
-      (!item.billingPurchaseId || activePurchaseIds.has(item.billingPurchaseId)),
-  );
   const operatorDayStart = startOfTokyoDaySeconds(now);
-  const operatorVideosUsedToday = usage.filter(
-    (item) =>
-      item.bucket === "operator" &&
-      item.createdAt >= operatorDayStart,
-  ).length;
-  const monthlyUsage = currentSubscription
-    ? usage.filter(
-        (item) =>
-          item.bucket === "subscription" &&
-          item.createdAt >= currentSubscription.currentPeriodStart &&
-          item.createdAt < currentSubscription.currentPeriodEnd,
-      )
-    : [];
   const monthlyVideoLimit = currentSubscription
     ? monthlyPlanVideoLimit(currentSubscription.planKey)
     : 0;
-  const purchasedCredits = purchases.reduce(
-    (total, purchase) => total + purchase.credits,
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Billing database binding is unavailable.");
+  }
+  const [usageTotals, purchaseTotals] = await Promise.all([
+    database
+      .prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN bucket = 'free' THEN 1 ELSE 0 END), 0)
+            AS free_videos_used,
+          COALESCE(SUM(CASE
+            WHEN bucket = 'free' THEN source_duration_seconds
+            ELSE 0
+          END), 0) AS free_seconds_used,
+          COALESCE(SUM(CASE
+            WHEN bucket = 'operator' AND created_at >= ? THEN 1
+            ELSE 0
+          END), 0) AS operator_videos_used_today,
+          COALESCE(SUM(CASE
+            WHEN bucket = 'subscription'
+              AND created_at >= ?
+              AND created_at < ?
+            THEN 1
+            ELSE 0
+          END), 0) AS monthly_videos_used,
+          COALESCE(SUM(CASE
+            WHEN bucket = 'one_time'
+              AND (
+                billing_purchase_id IS NULL
+                OR EXISTS (
+                  SELECT 1
+                  FROM billing_purchases AS active_purchase
+                  WHERE active_purchase.id = usage_reservations.billing_purchase_id
+                    AND active_purchase.user_id = usage_reservations.user_id
+                    AND active_purchase.revoked_at IS NULL
+                )
+              )
+            THEN 1
+            ELSE 0
+          END), 0) AS one_time_videos_used
+        FROM usage_reservations
+        WHERE user_id = ?
+          AND status IN ('reserved', 'completed')
+      `)
+      .bind(
+        operatorDayStart,
+        currentSubscription?.currentPeriodStart ?? 0,
+        currentSubscription?.currentPeriodEnd ?? 0,
+        userId,
+      )
+      .first<{
+        free_videos_used: number;
+        free_seconds_used: number;
+        operator_videos_used_today: number;
+        monthly_videos_used: number;
+        one_time_videos_used: number;
+      }>(),
+    database
+      .prepare(`
+        SELECT COALESCE(SUM(credits), 0) AS purchased_credits
+        FROM billing_purchases
+        WHERE user_id = ?
+          AND revoked_at IS NULL
+      `)
+      .bind(userId)
+      .first<{ purchased_credits: number }>(),
+  ]);
+
+  const freeVideosUsed = Math.max(0, usageTotals?.free_videos_used ?? 0);
+  const freeSecondsUsed = Math.max(0, usageTotals?.free_seconds_used ?? 0);
+  const operatorVideosUsedToday = Math.max(
     0,
+    usageTotals?.operator_videos_used_today ?? 0,
+  );
+  const monthlyVideosUsed = Math.max(
+    0,
+    usageTotals?.monthly_videos_used ?? 0,
+  );
+  const oneTimeVideosUsed = Math.max(
+    0,
+    usageTotals?.one_time_videos_used ?? 0,
+  );
+  const purchasedCredits = Math.max(
+    0,
+    purchaseTotals?.purchased_credits ?? 0,
   );
 
   return {
     subscription,
     currentSubscription,
-    freeVideosUsed: freeUsage.length,
-    freeSecondsUsed: freeUsage.reduce(
-      (total, item) => total + item.sourceDurationSeconds,
-      0,
-    ),
-    monthlyVideosUsed: monthlyUsage.length,
+    freeVideosUsed,
+    freeSecondsUsed,
+    monthlyVideosUsed,
     monthlyPlanActive: Boolean(subscription),
     monthlySubscriptionActive: Boolean(currentSubscription),
     monthlyAccessRevoked: Boolean(currentSubscription) && !subscription,
@@ -286,10 +339,42 @@ export async function getBillingStatusForUser(userId: string) {
     operatorVideosUsedToday,
     oneTimeCreditsRemaining: Math.max(
       0,
-      purchasedCredits - oneTimeUsage.length,
+      purchasedCredits - oneTimeVideosUsed,
     ),
   };
 }
+
+export class UsageReservationConflictError extends Error {
+  readonly code:
+    | "idempotency_key_owned_by_another_user"
+    | "idempotency_payload_mismatch";
+
+  constructor(code: UsageReservationConflictError["code"]) {
+    super("The usage reservation cannot be reused for this request.");
+    this.name = "UsageReservationConflictError";
+    this.code = code;
+  }
+}
+
+export class UsageReservationBusyError extends Error {
+  constructor() {
+    super("The usage reservation is waiting for an active operation to finish.");
+    this.name = "UsageReservationBusyError";
+  }
+}
+
+export type UsageReservationApiStatus =
+  | "reserved"
+  | "release_pending"
+  | "expired"
+  | "completed"
+  | "released";
+
+export type UsageReservationOutcome =
+  | "created"
+  | "existing"
+  | "renewed"
+  | "reactivated";
 
 export type MonthlyCheckoutLock = {
   userId: string;
@@ -447,6 +532,212 @@ export async function releaseMonthlyCheckoutLock(
   return released.meta?.changes === 1;
 }
 
+type UsageReservationRecord = typeof usageReservations.$inferSelect;
+
+export type UsageReservationWithOutcome = UsageReservationRecord & {
+  reservationOutcome: UsageReservationOutcome;
+};
+
+export type UsageReservationSelector = {
+  reservationId?: string | null;
+  idempotencyKey?: string | null;
+};
+
+function withUsageReservationOutcome(
+  reservation: UsageReservationRecord,
+  reservationOutcome: UsageReservationOutcome,
+): UsageReservationWithOutcome {
+  return { ...reservation, reservationOutcome };
+}
+
+export function publicUsageReservationState(
+  reservation: UsageReservationRecord,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const releasePending =
+    reservation.status === "reserved" &&
+    reservation.releaseRequestedAt !== null;
+  const expired =
+    reservation.status === "reserved" && reservation.expiresAt < nowSeconds;
+  const status: UsageReservationApiStatus = releasePending
+    ? "release_pending"
+    : expired
+      ? "expired"
+      : reservation.status;
+  return {
+    reservationId: reservation.id,
+    idempotencyKey: reservation.idempotencyKey,
+    status,
+    expiresAt: reservation.expiresAt,
+    ttlSeconds: Math.max(0, reservation.expiresAt - nowSeconds),
+    releasePending,
+    renewable:
+      status === "reserved" ||
+      status === "release_pending" ||
+      status === "expired" ||
+      status === "released",
+  } as const;
+}
+
+async function findUsageReservationForUser(
+  userId: string,
+  selector: UsageReservationSelector,
+) {
+  const selectorPredicate =
+    selector.reservationId && selector.idempotencyKey
+      ? and(
+          eq(usageReservations.id, selector.reservationId),
+          eq(usageReservations.idempotencyKey, selector.idempotencyKey),
+        )
+      : selector.reservationId
+        ? eq(usageReservations.id, selector.reservationId)
+        : selector.idempotencyKey
+          ? eq(usageReservations.idempotencyKey, selector.idempotencyKey)
+          : null;
+  if (!selectorPredicate) return null;
+  const rows = await getDb()
+    .select()
+    .from(usageReservations)
+    .where(and(eq(usageReservations.userId, userId), selectorPredicate))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getUsageReservationState(
+  currentUser: CurrentUser,
+  selector: UsageReservationSelector,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+) {
+  const user = await getOrCreateBillingUser(currentUser);
+  await settleExpiredUsageReservations(user.id, nowSeconds);
+  const reservation = await findUsageReservationForUser(user.id, selector);
+  return reservation
+    ? {
+        reservation,
+        ...publicUsageReservationState(reservation, nowSeconds),
+      }
+    : null;
+}
+
+async function materializeReleasedUsageReservation(
+  userId: string,
+  idempotencyKey: string,
+  sourceDurationSeconds: number,
+  options: { operator?: boolean },
+  nowSeconds: number,
+) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const reservationId = crypto.randomUUID();
+  const bucket: BillingBucket = options.operator ? "operator" : "free";
+  const inserted = await database
+    .prepare(`
+      INSERT INTO usage_reservations (
+        id, user_id, idempotency_key, source_duration_seconds,
+        bucket, status, created_at, expires_at, completed_at,
+        release_requested_at, billing_purchase_id
+      )
+      SELECT ?, ?, ?, ?, ?, 'released', ?, ?, NULL, intent.requested_at, NULL
+      FROM usage_release_intents AS intent
+      WHERE intent.user_id = ?
+        AND intent.idempotency_key = ?
+        AND intent.expires_at >= ?
+      ON CONFLICT(idempotency_key) DO NOTHING
+    `)
+    .bind(
+      reservationId,
+      userId,
+      idempotencyKey,
+      sourceDurationSeconds,
+      bucket,
+      nowSeconds,
+      nowSeconds - 1,
+      userId,
+      idempotencyKey,
+      nowSeconds,
+    )
+    .run();
+  if (inserted.meta?.changes !== 1) return null;
+  return findUsageReservationForUser(userId, { reservationId });
+}
+
+async function reconcileUsageReleaseIntent(
+  userId: string,
+  idempotencyKey: string,
+  nowSeconds: number,
+) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  return database
+    .prepare(`
+      UPDATE usage_reservations
+      SET release_requested_at = COALESCE(
+            release_requested_at,
+            (
+              SELECT intent.requested_at
+              FROM usage_release_intents AS intent
+              WHERE intent.user_id = usage_reservations.user_id
+                AND intent.idempotency_key = usage_reservations.idempotency_key
+                AND intent.expires_at >= ?
+            )
+          ),
+          status = CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM usage_operation_leases
+              WHERE reservation_id = usage_reservations.id
+                AND operation = 'metered_ai'
+                AND expires_at > ?
+            ) THEN 'released'
+            ELSE status
+          END,
+          expires_at = CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM usage_operation_leases
+              WHERE reservation_id = usage_reservations.id
+                AND operation = 'metered_ai'
+                AND expires_at > ?
+            ) THEN MIN(expires_at, ?)
+            ELSE expires_at
+          END
+      WHERE user_id = ?
+        AND idempotency_key = ?
+        AND status = 'reserved'
+        AND EXISTS (
+          SELECT 1
+          FROM usage_release_intents AS intent
+          WHERE intent.user_id = usage_reservations.user_id
+            AND intent.idempotency_key = usage_reservations.idempotency_key
+            AND intent.expires_at >= ?
+        )
+      RETURNING id
+    `)
+    .bind(
+      nowSeconds,
+      nowSeconds,
+      nowSeconds,
+      nowSeconds - 1,
+      userId,
+      idempotencyKey,
+      nowSeconds,
+    )
+    .first<{ id: string }>();
+}
+
+async function loadReservationAfterReleaseIntent(
+  userId: string,
+  idempotencyKey: string,
+  nowSeconds: number,
+) {
+  await reconcileUsageReleaseIntent(userId, idempotencyKey, nowSeconds);
+  return findUsageReservationForUser(userId, { idempotencyKey });
+}
+
 export async function reserveUsage(
   currentUser: CurrentUser,
   sourceDurationSeconds: number,
@@ -455,16 +746,37 @@ export async function reserveUsage(
 ) {
   const db = getDb();
   const user = await getOrCreateBillingUser(currentUser);
+  const roundedDuration = Math.max(1, Math.ceil(sourceDurationSeconds));
+  const requestStartedAt = Math.floor(Date.now() / 1_000);
   const existing = await db
     .select()
     .from(usageReservations)
     .where(eq(usageReservations.idempotencyKey, idempotencyKey))
     .limit(1);
-  if (existing[0] && existing[0].userId === user.id) {
-    return existing[0];
+  if (existing[0]) {
+    const reconciled = await loadReservationAfterReleaseIntent(
+      user.id,
+      idempotencyKey,
+      requestStartedAt,
+    );
+    return reuseExistingUsageReservation(
+      reconciled ?? existing[0],
+      user.id,
+      roundedDuration,
+      requestStartedAt,
+    );
+  }
+  const preemptivelyReleased = await materializeReleasedUsageReservation(
+    user.id,
+    idempotencyKey,
+    roundedDuration,
+    options,
+    requestStartedAt,
+  );
+  if (preemptivelyReleased) {
+    return withUsageReservationOutcome(preemptivelyReleased, "created");
   }
 
-  const roundedDuration = Math.max(1, Math.ceil(sourceDurationSeconds));
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const status = await getBillingStatusForUser(user.id);
     const bucket = chooseBillingBucket(
@@ -485,7 +797,7 @@ export async function reserveUsage(
       bucket,
       status: "reserved",
       createdAt: now,
-      expiresAt: now + RESERVATION_LIFETIME_SECONDS,
+      expiresAt: now + USAGE_RESERVATION_LIFETIME_SECONDS,
       completedAt: null,
     };
     if (await insertUsageReservationAtomically(reservation, status)) {
@@ -497,7 +809,7 @@ export async function reserveUsage(
       if (!inserted[0]) {
         throw new Error("Reserved usage could not be reloaded.");
       }
-      return inserted[0];
+      return withUsageReservationOutcome(inserted[0], "created");
     }
 
     const concurrent = await db
@@ -505,11 +817,499 @@ export async function reserveUsage(
       .from(usageReservations)
       .where(eq(usageReservations.idempotencyKey, idempotencyKey))
       .limit(1);
-    if (concurrent[0]?.userId === user.id) return concurrent[0];
+    if (concurrent[0]) {
+      const reconciled = await loadReservationAfterReleaseIntent(
+        user.id,
+        idempotencyKey,
+        Math.floor(Date.now() / 1_000),
+      );
+      return reuseExistingUsageReservation(
+        reconciled ?? concurrent[0],
+        user.id,
+        roundedDuration,
+        Math.floor(Date.now() / 1_000),
+      );
+    }
+    const releasedAfterRace = await materializeReleasedUsageReservation(
+      user.id,
+      idempotencyKey,
+      roundedDuration,
+      options,
+      Math.floor(Date.now() / 1_000),
+    );
+    if (releasedAfterRace) {
+      return withUsageReservationOutcome(releasedAfterRace, "created");
+    }
   }
 
   if (options.operator) throw new OperatorUsageLimitError();
   throw new UsageLimitError();
+}
+
+async function reuseExistingUsageReservation(
+  existing: UsageReservationRecord,
+  userId: string,
+  roundedDuration: number,
+  nowSeconds: number,
+): Promise<UsageReservationWithOutcome> {
+  if (existing.userId !== userId) {
+    throw new UsageReservationConflictError(
+      "idempotency_key_owned_by_another_user",
+    );
+  }
+  if (existing.sourceDurationSeconds !== roundedDuration) {
+    throw new UsageReservationConflictError("idempotency_payload_mismatch");
+  }
+  if (existing.status === "completed") {
+    // A completed key is terminal: return its explicit state so a recovering
+    // client can rotate to a fresh key without charging this row again.
+    return withUsageReservationOutcome(existing, "existing");
+  }
+  if (
+    existing.status === "released" ||
+    existing.releaseRequestedAt !== null ||
+    existing.expiresAt < nowSeconds
+  ) {
+    // Reserve retries are observational only. Reopening a terminal/pending
+    // row requires the explicit renew contract, otherwise a response retry can
+    // undo a pagehide release that already won the race.
+    return withUsageReservationOutcome(existing, "existing");
+  }
+  if (
+    existing.status === "reserved" &&
+    existing.releaseRequestedAt === null &&
+    existing.expiresAt >= nowSeconds
+  ) {
+    return withUsageReservationOutcome(existing, "existing");
+  }
+  return withUsageReservationOutcome(existing, "existing");
+}
+
+async function hasActiveMeteredAiLease(
+  reservationId: string,
+  nowSeconds: number,
+) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const row = await database
+    .prepare(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM usage_operation_leases
+        WHERE reservation_id = ?
+          AND operation = 'metered_ai'
+          AND expires_at > ?
+      ) AS active
+    `)
+    .bind(reservationId, nowSeconds)
+    .first<{ active: number }>();
+  return row?.active === 1;
+}
+
+async function reactivateUsageReservationAtomically(
+  existing: UsageReservationRecord,
+  bucket: BillingBucket,
+  status: Awaited<ReturnType<typeof getBillingStatusForUser>>,
+  nowSeconds: number,
+) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare || !database.batch) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const expiresAt = nowSeconds + USAGE_RESERVATION_LIFETIME_SECONDS;
+  let statement: QueryD1BoundStatement;
+  if (bucket === "operator") {
+    statement = database
+      .prepare(`
+        UPDATE usage_reservations
+        SET bucket = 'operator',
+            status = 'reserved',
+            created_at = ?,
+            expires_at = ?,
+            completed_at = NULL,
+            release_requested_at = NULL,
+            billing_purchase_id = NULL
+        WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_operation_leases
+            WHERE reservation_id = usage_reservations.id
+              AND operation = 'metered_ai' AND expires_at > ?
+          )
+          AND (
+            SELECT COUNT(*) FROM usage_reservations AS active_reservation
+            WHERE active_reservation.user_id = ?
+              AND active_reservation.bucket = 'operator'
+              AND active_reservation.status IN ('reserved', 'completed')
+              AND active_reservation.id != usage_reservations.id
+              AND active_reservation.created_at >= ?
+          ) < ?
+      `)
+      .bind(
+        nowSeconds,
+        expiresAt,
+        existing.id,
+        existing.userId,
+        nowSeconds,
+        existing.userId,
+        startOfTokyoDaySeconds(nowSeconds),
+        OPERATOR_DAILY_VIDEO_LIMIT,
+      );
+  } else if (bucket === "subscription" && status.subscription) {
+    statement = database
+      .prepare(`
+        UPDATE usage_reservations
+        SET bucket = 'subscription',
+            status = 'reserved',
+            created_at = ?,
+            expires_at = ?,
+            completed_at = NULL,
+            release_requested_at = NULL,
+            billing_purchase_id = NULL
+        WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_operation_leases
+            WHERE reservation_id = usage_reservations.id
+              AND operation = 'metered_ai' AND expires_at > ?
+          )
+          AND EXISTS (
+            SELECT 1 FROM billing_subscriptions
+            WHERE id = ? AND user_id = ?
+              AND status IN ('active', 'trialing')
+              AND current_period_start = ? AND current_period_end = ?
+              AND current_period_end > ? AND plan_key = ?
+              AND (revoked_period_start IS NULL OR revoked_period_start != current_period_start)
+          )
+          AND (
+            SELECT COUNT(*) FROM usage_reservations AS active_reservation
+            WHERE active_reservation.user_id = ?
+              AND active_reservation.bucket = 'subscription'
+              AND active_reservation.status IN ('reserved', 'completed')
+              AND active_reservation.id != usage_reservations.id
+              AND active_reservation.created_at >= ?
+              AND active_reservation.created_at < ?
+          ) < ?
+      `)
+      .bind(
+        nowSeconds,
+        expiresAt,
+        existing.id,
+        existing.userId,
+        nowSeconds,
+        status.subscription.id,
+        existing.userId,
+        status.subscription.currentPeriodStart,
+        status.subscription.currentPeriodEnd,
+        nowSeconds,
+        status.subscription.planKey,
+        existing.userId,
+        status.subscription.currentPeriodStart,
+        status.subscription.currentPeriodEnd,
+        status.monthlyVideoLimit,
+      );
+  } else if (bucket === "one_time") {
+    statement = database
+      .prepare(`
+        UPDATE usage_reservations
+        SET bucket = 'one_time',
+            status = 'reserved',
+            created_at = ?,
+            expires_at = ?,
+            completed_at = NULL,
+            release_requested_at = NULL,
+            billing_purchase_id = (
+              SELECT purchase.id
+              FROM billing_purchases AS purchase
+              WHERE purchase.user_id = usage_reservations.user_id
+                AND purchase.revoked_at IS NULL
+                AND (
+                  SELECT COUNT(*) FROM usage_reservations AS active_reservation
+                  WHERE active_reservation.billing_purchase_id = purchase.id
+                    AND active_reservation.status IN ('reserved', 'completed')
+                    AND active_reservation.id != usage_reservations.id
+                ) < purchase.credits
+              ORDER BY purchase.purchased_at, purchase.id
+              LIMIT 1
+            )
+        WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_operation_leases
+            WHERE reservation_id = usage_reservations.id
+              AND operation = 'metered_ai' AND expires_at > ?
+          )
+          AND EXISTS (
+            SELECT 1 FROM billing_purchases AS purchase
+            WHERE purchase.user_id = usage_reservations.user_id
+              AND purchase.revoked_at IS NULL
+              AND (
+                SELECT COUNT(*) FROM usage_reservations AS active_reservation
+                WHERE active_reservation.billing_purchase_id = purchase.id
+                  AND active_reservation.status IN ('reserved', 'completed')
+                  AND active_reservation.id != usage_reservations.id
+              ) < purchase.credits
+          )
+      `)
+      .bind(nowSeconds, expiresAt, existing.id, existing.userId, nowSeconds);
+  } else {
+    statement = database
+      .prepare(`
+        UPDATE usage_reservations
+        SET bucket = 'free',
+            status = 'reserved',
+            created_at = ?,
+            expires_at = ?,
+            completed_at = NULL,
+            release_requested_at = NULL,
+            billing_purchase_id = NULL
+        WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_operation_leases
+            WHERE reservation_id = usage_reservations.id
+              AND operation = 'metered_ai' AND expires_at > ?
+          )
+          AND (
+            SELECT COUNT(*) FROM usage_reservations AS active_reservation
+            WHERE active_reservation.user_id = ?
+              AND active_reservation.bucket = 'free'
+              AND active_reservation.status IN ('reserved', 'completed')
+              AND active_reservation.id != usage_reservations.id
+          ) < ?
+          AND COALESCE((
+            SELECT SUM(active_reservation.source_duration_seconds)
+            FROM usage_reservations AS active_reservation
+            WHERE active_reservation.user_id = ?
+              AND active_reservation.bucket = 'free'
+              AND active_reservation.status IN ('reserved', 'completed')
+              AND active_reservation.id != usage_reservations.id
+          ), 0) + source_duration_seconds <= ?
+      `)
+      .bind(
+        nowSeconds,
+        expiresAt,
+        existing.id,
+        existing.userId,
+        nowSeconds,
+        existing.userId,
+        FREE_VIDEO_LIMIT,
+        existing.userId,
+        FREE_SECONDS_LIMIT,
+      );
+  }
+
+  const results = await database.batch([
+    statement,
+    database
+      .prepare(`
+        DELETE FROM usage_release_intents
+        WHERE user_id = ? AND idempotency_key = ?
+          AND EXISTS (
+            SELECT 1 FROM usage_reservations
+            WHERE id = ? AND user_id = ?
+              AND status = 'reserved'
+              AND release_requested_at IS NULL
+              AND created_at = ? AND expires_at = ?
+          )
+      `)
+      .bind(
+        existing.userId,
+        existing.idempotencyKey,
+        existing.id,
+        existing.userId,
+        nowSeconds,
+        expiresAt,
+      ),
+  ]);
+  if (results[0]?.meta?.changes !== 1) return null;
+  const rows = await getDb()
+    .select()
+    .from(usageReservations)
+    .where(eq(usageReservations.id, existing.id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function renewUsageReservation(
+  currentUser: CurrentUser,
+  selector: UsageReservationSelector,
+  options: { sourceDurationSeconds?: number; operator?: boolean } = {},
+  nowSeconds = Math.floor(Date.now() / 1_000),
+): Promise<UsageReservationWithOutcome | null> {
+  const user = await getOrCreateBillingUser(currentUser);
+  const existing = await findUsageReservationForUser(user.id, selector);
+  if (!existing) return null;
+  const roundedDuration =
+    options.sourceDurationSeconds === undefined
+      ? existing.sourceDurationSeconds
+      : Math.max(1, Math.ceil(options.sourceDurationSeconds));
+  if (roundedDuration !== existing.sourceDurationSeconds) {
+    throw new UsageReservationConflictError("idempotency_payload_mismatch");
+  }
+  if (existing.status === "completed") {
+    return withUsageReservationOutcome(existing, "existing");
+  }
+  if (existing.bucket === "operator" && options.operator !== true) {
+    throw new OperatorUsageLimitError();
+  }
+
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare || !database.batch) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const expiresAt = nowSeconds + USAGE_RESERVATION_LIFETIME_SECONDS;
+  const currentStatus = await getBillingStatusForUser(user.id, nowSeconds);
+  const preferredBucket = chooseBillingBucket(
+    {
+      ...currentStatus,
+      operatorActive: options.operator === true,
+    },
+    roundedDuration,
+  );
+  const shouldUpgradePaidPriority =
+    (existing.bucket === "free" &&
+      (preferredBucket === "subscription" || preferredBucket === "one_time")) ||
+    (existing.bucket === "one_time" && preferredBucket === "subscription");
+  if (
+    existing.status === "reserved" &&
+    existing.expiresAt >= nowSeconds &&
+    !shouldUpgradePaidPriority
+  ) {
+    // Renewal is the sole explicit resume action. Deleting the key tombstone
+    // and extending the currently-bound entitlement share one D1 transaction,
+    // so a concurrent release is ordered entirely before or after the resume.
+    const results = await database.batch([
+      database
+        .prepare(`
+          UPDATE usage_reservations
+          SET expires_at = MAX(expires_at, ?),
+              release_requested_at = NULL
+          WHERE id = ? AND user_id = ? AND status = 'reserved'
+            AND expires_at >= ?
+            AND (
+              bucket = 'free'
+              OR (bucket = 'operator' AND ? = 1)
+              OR (
+                bucket = 'subscription'
+                AND EXISTS (
+                  SELECT 1 FROM billing_subscriptions
+                  WHERE user_id = usage_reservations.user_id
+                    AND status IN ('active', 'trialing')
+                    AND current_period_start <= usage_reservations.created_at
+                    AND current_period_end > usage_reservations.created_at
+                    AND current_period_end > ?
+                    AND (revoked_period_start IS NULL OR revoked_period_start != current_period_start)
+                )
+              )
+              OR (
+                bucket = 'one_time'
+                AND (
+                  (
+                    billing_purchase_id IS NOT NULL
+                    AND EXISTS (
+                      SELECT 1 FROM billing_purchases
+                      WHERE id = usage_reservations.billing_purchase_id
+                        AND user_id = usage_reservations.user_id
+                        AND revoked_at IS NULL
+                    )
+                  )
+                  OR (
+                    billing_purchase_id IS NULL
+                    AND (
+                      SELECT COALESCE(SUM(credits), 0)
+                      FROM billing_purchases
+                      WHERE user_id = usage_reservations.user_id
+                        AND revoked_at IS NULL
+                    ) >= (
+                      SELECT COUNT(*)
+                      FROM usage_reservations AS ranked_reservation
+                      WHERE ranked_reservation.user_id = usage_reservations.user_id
+                        AND ranked_reservation.bucket = 'one_time'
+                        AND ranked_reservation.status IN ('reserved', 'completed')
+                        AND (
+                          ranked_reservation.created_at < usage_reservations.created_at
+                          OR (
+                            ranked_reservation.created_at = usage_reservations.created_at
+                            AND ranked_reservation.id <= usage_reservations.id
+                          )
+                        )
+                    )
+                  )
+                )
+              )
+            )
+        `)
+        .bind(
+          expiresAt,
+          existing.id,
+          user.id,
+          nowSeconds,
+          options.operator === true ? 1 : 0,
+          nowSeconds,
+        ),
+      database
+        .prepare(`
+          DELETE FROM usage_release_intents
+          WHERE user_id = ? AND idempotency_key = ?
+            AND EXISTS (
+              SELECT 1 FROM usage_reservations
+              WHERE id = ? AND user_id = ?
+                AND status = 'reserved'
+                AND release_requested_at IS NULL
+                AND expires_at >= ?
+            )
+        `)
+        .bind(
+          user.id,
+          existing.idempotencyKey,
+          existing.id,
+          user.id,
+          expiresAt,
+        ),
+    ]);
+    if (results[0]?.meta?.changes === 1) {
+      const renewed = await findUsageReservationForUser(user.id, {
+        reservationId: existing.id,
+      });
+      return renewed
+        ? withUsageReservationOutcome(renewed, "renewed")
+        : null;
+    }
+  }
+
+  // The old entitlement can legitimately become stale while the reservation
+  // is still within its TTL (for example, a subscription period rollover or a
+  // refunded one-time credit). Rebind the same idempotent row to the best
+  // entitlement available now, never while upstream AI still owns its lease.
+  if (await hasActiveMeteredAiLease(existing.id, nowSeconds)) {
+    throw new UsageReservationBusyError();
+  }
+  const bucket = preferredBucket;
+  if (!bucket) {
+    if (options.operator) throw new OperatorUsageLimitError();
+    throw new UsageLimitError();
+  }
+  if (
+    (existing.bucket === "subscription" || existing.bucket === "one_time") &&
+    bucket === "free"
+  ) {
+    throw new UsageLimitError();
+  }
+  const reactivated = await reactivateUsageReservationAtomically(
+    existing,
+    bucket,
+    currentStatus,
+    nowSeconds,
+  );
+  if (reactivated) {
+    return withUsageReservationOutcome(reactivated, "reactivated");
+  }
+  const concurrent = await findUsageReservationForUser(user.id, {
+    reservationId: existing.id,
+  });
+  if (concurrent) {
+    return withUsageReservationOutcome(concurrent, "existing");
+  }
+  return null;
 }
 
 type AtomicUsageReservation = {
@@ -551,7 +1351,11 @@ async function insertUsageReservationAtomically(
           bucket, status, created_at, expires_at, completed_at
         )
         SELECT ?, ?, ?, ?, 'operator', 'reserved', ?, ?, NULL
-        WHERE (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM usage_release_intents
+          WHERE user_id = ? AND idempotency_key = ? AND expires_at >= ?
+        )
+        AND (
           SELECT COUNT(*)
           FROM usage_reservations
           WHERE user_id = ?
@@ -564,6 +1368,9 @@ async function insertUsageReservationAtomically(
       .bind(
         ...values,
         reservation.userId,
+        reservation.idempotencyKey,
+        reservation.createdAt,
+        reservation.userId,
         startOfTokyoDaySeconds(reservation.createdAt),
         OPERATOR_DAILY_VIDEO_LIMIT,
       );
@@ -575,7 +1382,11 @@ async function insertUsageReservationAtomically(
           bucket, status, created_at, expires_at, completed_at
         )
         SELECT ?, ?, ?, ?, 'subscription', 'reserved', ?, ?, NULL
-        WHERE EXISTS (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM usage_release_intents
+          WHERE user_id = ? AND idempotency_key = ? AND expires_at >= ?
+        )
+        AND EXISTS (
           SELECT 1
           FROM billing_subscriptions
           WHERE id = ?
@@ -603,6 +1414,9 @@ async function insertUsageReservationAtomically(
       `)
       .bind(
         ...values,
+        reservation.userId,
+        reservation.idempotencyKey,
+        reservation.createdAt,
         status.subscription.id,
         reservation.userId,
         status.subscription.currentPeriodStart,
@@ -626,6 +1440,10 @@ async function insertUsageReservationAtomically(
         FROM billing_purchases AS purchase
         WHERE purchase.user_id = ?
           AND purchase.revoked_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_release_intents
+            WHERE user_id = ? AND idempotency_key = ? AND expires_at >= ?
+          )
           AND (
             SELECT COUNT(*)
             FROM usage_reservations
@@ -636,7 +1454,13 @@ async function insertUsageReservationAtomically(
         LIMIT 1
         ON CONFLICT(idempotency_key) DO NOTHING
       `)
-      .bind(...values, reservation.userId);
+      .bind(
+        ...values,
+        reservation.userId,
+        reservation.userId,
+        reservation.idempotencyKey,
+        reservation.createdAt,
+      );
   } else {
     statement = database
       .prepare(`
@@ -645,7 +1469,11 @@ async function insertUsageReservationAtomically(
           bucket, status, created_at, expires_at, completed_at
         )
         SELECT ?, ?, ?, ?, 'free', 'reserved', ?, ?, NULL
-        WHERE (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM usage_release_intents
+          WHERE user_id = ? AND idempotency_key = ? AND expires_at >= ?
+        )
+        AND (
           SELECT COUNT(*)
           FROM usage_reservations
           WHERE user_id = ?
@@ -663,6 +1491,9 @@ async function insertUsageReservationAtomically(
       `)
       .bind(
         ...values,
+        reservation.userId,
+        reservation.idempotencyKey,
+        reservation.createdAt,
         reservation.userId,
         FREE_VIDEO_LIMIT,
         reservation.userId,
@@ -970,6 +1801,7 @@ export async function completeUsage(
         AND user_id = ?
         AND status IN ('reserved', 'completed')
         AND expires_at >= ?
+        AND release_requested_at IS NULL
         AND (
           bucket IN ('free', 'operator')
           OR (
@@ -1033,51 +1865,184 @@ export async function completeUsage(
   return Boolean(completed?.id);
 }
 
-export async function releaseUsage(
-  currentUser: CurrentUser,
-  reservationId: string,
+export type UsageReleaseResult = {
+  released: boolean;
+  pending: boolean;
+  status: UsageReservationApiStatus | "not_found";
+  reservationId: string | null;
+};
+
+const MAX_ACTIVE_USAGE_RELEASE_INTENTS_PER_USER = 16;
+
+async function persistUsageReleaseIntentAndReconcile(
+  userId: string,
+  idempotencyKey: string,
+  nowSeconds: number,
 ) {
-  // A release response can be lost after the database update. Treat an
-  // already-released reservation as success so the browser can safely retry
-  // without leaving its editor locked or reusing a dead reservation.
-  const user = await getOrCreateBillingUser(currentUser);
-  const now = Math.floor(Date.now() / 1_000);
   const database = env.DB as unknown as QueryD1Database | undefined;
-  if (!database?.prepare) {
+  if (!database?.prepare || !database.batch) {
     throw new Error("Usage database binding is unavailable.");
   }
-  // AI results remain in metered_ai_actions for abuse accounting and audit,
-  // but an unsaved video must not consume a paid save slot. Refuse only while
-  // an upstream AI request still owns the reservation lease.
-  const released = await database
-    .prepare(`
-      UPDATE usage_reservations
-      SET status = 'released', expires_at = ?
-      WHERE id = ?
-        AND user_id = ?
-        AND status = 'reserved'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM usage_operation_leases
-          WHERE reservation_id = ?
-            AND operation = 'metered_ai'
-            AND expires_at > ?
-        )
-      RETURNING id
-    `)
-    .bind(now - 1, reservationId, user.id, reservationId, now)
-    .first<{ id: string }>();
-  if (released?.id) return true;
-  const existing = await database
-    .prepare(`
-      SELECT status
-      FROM usage_reservations
-      WHERE id = ? AND user_id = ?
-      LIMIT 1
-    `)
-    .bind(reservationId, user.id)
-    .first<{ status: string }>();
-  return existing?.status === "released";
+  const intentExpiresAt = nowSeconds + USAGE_RELEASE_INTENT_TTL_SECONDS;
+  await database.batch([
+    database
+      .prepare(`
+        DELETE FROM usage_release_intents
+        WHERE expires_at < ?
+      `)
+      .bind(nowSeconds),
+    database
+      .prepare(`
+        INSERT INTO usage_release_intents (
+          user_id, idempotency_key, requested_at, expires_at
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, idempotency_key) DO UPDATE SET
+          requested_at = MIN(requested_at, excluded.requested_at),
+          expires_at = MAX(expires_at, excluded.expires_at)
+      `)
+      .bind(userId, idempotencyKey, nowSeconds, intentExpiresAt),
+    database
+      .prepare(`
+        DELETE FROM usage_release_intents
+        WHERE user_id = ?
+          AND idempotency_key IN (
+            SELECT idempotency_key
+            FROM usage_release_intents
+            WHERE user_id = ? AND expires_at >= ?
+            ORDER BY requested_at DESC, idempotency_key DESC
+            LIMIT -1 OFFSET ?
+          )
+      `)
+      .bind(
+        userId,
+        userId,
+        nowSeconds,
+        MAX_ACTIVE_USAGE_RELEASE_INTENTS_PER_USER,
+      ),
+    database
+      .prepare(`
+        UPDATE usage_reservations
+        SET release_requested_at = COALESCE(
+              release_requested_at,
+              (
+                SELECT intent.requested_at
+                FROM usage_release_intents AS intent
+                WHERE intent.user_id = usage_reservations.user_id
+                  AND intent.idempotency_key = usage_reservations.idempotency_key
+                  AND intent.expires_at >= ?
+              )
+            ),
+            status = CASE
+              WHEN NOT EXISTS (
+                SELECT 1
+                FROM usage_operation_leases
+                WHERE reservation_id = usage_reservations.id
+                  AND operation = 'metered_ai'
+                  AND expires_at > ?
+              ) THEN 'released'
+              ELSE status
+            END,
+            expires_at = CASE
+              WHEN NOT EXISTS (
+                SELECT 1
+                FROM usage_operation_leases
+                WHERE reservation_id = usage_reservations.id
+                  AND operation = 'metered_ai'
+                  AND expires_at > ?
+              ) THEN MIN(expires_at, ?)
+              ELSE expires_at
+            END
+        WHERE user_id = ?
+          AND idempotency_key = ?
+          AND status = 'reserved'
+          AND EXISTS (
+            SELECT 1
+            FROM usage_release_intents AS intent
+            WHERE intent.user_id = usage_reservations.user_id
+              AND intent.idempotency_key = usage_reservations.idempotency_key
+              AND intent.expires_at >= ?
+          )
+      `)
+      .bind(
+        nowSeconds,
+        nowSeconds,
+        nowSeconds,
+        nowSeconds - 1,
+        userId,
+        idempotencyKey,
+        nowSeconds,
+      ),
+  ]);
+}
+
+export async function requestUsageRelease(
+  currentUser: CurrentUser,
+  selector: string | UsageReservationSelector,
+  now = Math.floor(Date.now() / 1_000),
+): Promise<UsageReleaseResult> {
+  // The key tombstone is persisted even when reserve has not committed yet.
+  // D1 serializes its insertion and reservation reconciliation in one batch,
+  // so either reserve sees the tombstone or this request sees the reservation.
+  const user = await getOrCreateBillingUser(currentUser);
+  const normalizedSelector =
+    typeof selector === "string" ? { reservationId: selector } : selector;
+  const initiallyExisting = await findUsageReservationForUser(
+    user.id,
+    normalizedSelector,
+  );
+  if (initiallyExisting?.status === "completed") {
+    return {
+      released: false,
+      pending: false,
+      status: "completed",
+      reservationId: initiallyExisting.id,
+    };
+  }
+  const idempotencyKey =
+    normalizedSelector.idempotencyKey ?? initiallyExisting?.idempotencyKey;
+  if (!idempotencyKey) {
+    return {
+      released: false,
+      pending: false,
+      status: "not_found",
+      reservationId: null,
+    };
+  }
+  await persistUsageReleaseIntentAndReconcile(user.id, idempotencyKey, now);
+  const existing = await findUsageReservationForUser(user.id, {
+    idempotencyKey,
+  });
+  if (!existing) {
+    return {
+      released: false,
+      pending: true,
+      status: "release_pending",
+      reservationId: null,
+    };
+  }
+  if (existing.status === "completed") {
+    return {
+      released: false,
+      pending: false,
+      status: "completed",
+      reservationId: existing.id,
+    };
+  }
+  const released = existing.status === "released";
+  return {
+    released,
+    pending: !released && existing.releaseRequestedAt !== null,
+    status: released ? "released" : "release_pending",
+    reservationId: existing.id,
+  };
+}
+
+export async function releaseUsage(
+  currentUser: CurrentUser,
+  selector: string | UsageReservationSelector,
+) {
+  const result = await requestUsageRelease(currentUser, selector);
+  return result.released;
 }
 
 type StripeSubscriptionRecord = {

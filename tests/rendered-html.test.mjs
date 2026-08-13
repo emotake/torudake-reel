@@ -139,11 +139,7 @@ test("renders the ordered five-video editor as a separate public route", async (
   assert.match(html, /最大5本・合計500MB・合計5分まで/);
   assert.match(html, /自然なフェード/);
   assert.match(html, /黒へフェード/);
-  assert.match(html, /白へフェード/);
-  assert.match(html, /光で切替/);
-  assert.match(html, /横ワイプ/);
-  assert.match(html, /横スライド/);
-  assert.match(html, /ズームフェード/);
+  assert.match(html, /ほかの5種類も見る/);
   assert.match(html, /AIナレーションを入れる/);
   assert.match(html, /AIナレーションと発話に合うテロップも追加できます/);
   assert.match(html, /保存時は完成動画1本分の利用枠を使用/);
@@ -226,6 +222,8 @@ test("publishes a privacy policy for uploaded media and external processors", as
 
   assert.match(html, /プライバシーポリシー/);
   assert.match(html, /OpenAI/);
+  assert.match(html, /利用枠の確定前に端末内へ一時保存/);
+  assert.match(html, /遅くとも7日を目安に削除対象/);
   assert.match(html, /Cloudflare/);
   assert.match(html, /Stripe/);
   assert.match(html, /Google Analytics/);

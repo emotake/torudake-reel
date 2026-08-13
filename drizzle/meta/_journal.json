@@ -127,6 +127,20 @@
       "when": 1786512297962,
       "tag": "0017_zippy_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1786566280107,
+      "tag": "0018_steady_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786568486210,
+      "tag": "0019_slim_alice",
+      "breakpoints": true
     }
   ]
 }

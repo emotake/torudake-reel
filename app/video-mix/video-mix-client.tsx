@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/preserve-manual-memoization -- This media editor deliberately keeps stable callbacks around long-running browser media and reservation lifecycles. */
+
 import Link from "next/link";
 import {
   useCallback,
@@ -13,6 +15,7 @@ import {
 import {
   canSaveCompletedVideo,
   isBillingBucket,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   ONE_TIME_PRICE_JPY,
   STARTER_MONTHLY_PLAN_LABEL,
   STARTER_MONTHLY_PRICE_JPY,
@@ -20,6 +23,7 @@ import {
   STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_PRICE_JPY,
   STANDARD_MONTHLY_VIDEO_LIMIT,
+  SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
   type BillingBucket,
 } from "../../lib/billing-policy";
 import {
@@ -29,13 +33,19 @@ import {
   VIDEO_COMPOSITION_MAX_TOTAL_SOURCE_BYTES,
   buildVideoCompositionFrameSchedule,
   createVideoCompositionPlan,
+  videoCompositionTransitionUsesOverlap,
   type VideoCompositionClip,
   type VideoCompositionFrameScheduleEntry,
   type VideoCompositionPlan,
   type VideoCompositionTransitionType,
 } from "../../lib/video-composition";
 import {
+  buildVideoMixNarrationDuckingMetadata,
+  computeVideoMixFrameLayout,
   exportVideoMixMp4,
+  getVideoMixDuckingGainAtTime,
+  getVideoMixTransitionAudioGains,
+  measureVideoMixSourceAudioNormalization,
   type VideoMixAudioExportMetadata,
 } from "../../lib/video-mix-export";
 import {
@@ -59,6 +69,25 @@ import {
   resolveVideoMixBoundaryTransitions,
   type VideoMixBoundaryTransitionPreferences,
 } from "../../lib/video-mix-boundary-preferences";
+import {
+  clampVideoMixDraftClips,
+  defaultVideoMixFraming,
+  findVideoMixDraftSource,
+  readVideoMixClientDraft,
+  saveVideoMixClientDraft,
+  type VideoMixClientDraft,
+  type VideoMixSourceFraming,
+} from "../../lib/client-video-mix-draft";
+import {
+  cleanupExpiredVideoMixOutputs,
+  deleteDurableVideoMixOutput,
+  listDurableVideoMixOutputRecoveryCandidates,
+  loadDurableVideoMixOutput,
+  markDurableVideoMixOutputCompleted,
+  saveDurableVideoMixOutput,
+} from "../../lib/client-video-mix-output";
+import { trackClientEvent } from "../../lib/client-analytics";
+import { productDurationBucket } from "../../lib/product-analytics-schema";
 
 const ACCEPTED_VIDEO_TYPES = new Set([
   "video/mp4",
@@ -77,7 +106,17 @@ type MixSource = {
   width: number;
   height: number;
   clips: VideoCompositionClip[];
+  framing: VideoMixSourceFraming;
+  thumbnails: readonly string[];
+  audioNormalizationGain: number;
+  audioNormalizationAnalysisKey: string | null;
 };
+
+type RemovedMixSource = Readonly<{
+  source: MixSource;
+  index: number;
+  boundaryTransitions: VideoMixBoundaryTransitionPreferences;
+}>;
 
 type MixResult = {
   blob: Blob;
@@ -85,6 +124,7 @@ type MixResult = {
   filename: string;
   bucket: BillingBucket;
   qualityMessage: string;
+  durableId?: string;
 };
 
 type PendingFinalize = {
@@ -95,6 +135,10 @@ type PendingFinalize = {
 type UsageReservation = {
   reservationId: string | null;
   bucket: BillingBucket | null;
+  status: "reserved" | "completed" | "released" | "expired" | "release_pending" | null;
+  expiresAt: number | null;
+  releasePending: boolean;
+  reused: boolean;
   aiOperationLimit: number;
   aiOperationsRemaining: number;
 };
@@ -116,6 +160,8 @@ type MixNarration = Readonly<{
   audio: Blob;
   url: string;
   captions: CaptionSegment[];
+  activity: Awaited<ReturnType<typeof prepareVideoMixNarration>>["activity"];
+  normalizationGain: number;
   audioDuration: number;
   style: NarrationStyle;
 }>;
@@ -172,6 +218,7 @@ function formatSeconds(value: number) {
 }
 
 function formatBytes(bytes: number) {
+  if (bytes <= 0) return "0MB";
   return `${Math.max(0.1, bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
@@ -188,6 +235,16 @@ function isSupportedVideo(file: File) {
 
 function fileFingerprint(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
+}
+
+function sourceAudioNormalizationAnalysisKey(
+  file: File,
+  clips: readonly VideoCompositionClip[],
+) {
+  const ranges = clips
+    .map((clip) => `${clip.start.toFixed(3)}-${clip.end.toFixed(3)}`)
+    .join(",");
+  return `${fileFingerprint(file)}:${ranges}`;
 }
 
 function createSourceId(file: File) {
@@ -291,6 +348,71 @@ function buildFilename() {
   return `torudake-video-mix-${stamp}.mp4`;
 }
 
+async function extractVideoFilmstrip(
+  sourceUrl: string,
+  duration: number,
+  signal: AbortSignal,
+) {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = sourceUrl;
+  const canvas = document.createElement("canvas");
+  canvas.width = 120;
+  canvas.height = 68;
+  const context = canvas.getContext("2d");
+  if (!context) return [];
+  const waitFor = (eventName: "loadedmetadata" | "seeked") =>
+    new Promise<void>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        cleanup();
+        reject(new Error("Thumbnail frame timed out."));
+      }, 5_000);
+      const cleanup = () => {
+        window.clearTimeout(timeoutId);
+        signal.removeEventListener("abort", onAbort);
+        video.removeEventListener(eventName, onReady);
+        video.removeEventListener("error", onError);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException("Thumbnail generation aborted.", "AbortError"));
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Thumbnail frame could not be read."));
+      };
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      video.addEventListener(eventName, onReady, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      if (signal.aborted) onAbort();
+    });
+  try {
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+      video.load();
+      await waitFor("loadedmetadata");
+    }
+    const frames: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      if (signal.aborted) throw new DOMException("Thumbnail generation aborted.", "AbortError");
+      video.currentTime = Math.min(Math.max(0, duration - 0.02), duration * ((index + 0.5) / 6));
+      await waitFor("seeked");
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.62));
+    }
+    return frames;
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
 async function readApiError(response: Response, fallback: string) {
   const payload = (await response.json().catch(() => null)) as { error?: string } | null;
   return payload?.error?.trim() || fallback;
@@ -324,11 +446,23 @@ async function reserveMixUsage(
       response.status,
     );
   }
-  const payload = (await response.json()) as { required?: boolean; reservationId?: string; bucket?: unknown };
+  const payload = (await response.json()) as {
+    required?: boolean;
+    reservationId?: string;
+    bucket?: unknown;
+    status?: unknown;
+    expiresAt?: unknown;
+    releasePending?: unknown;
+    reused?: unknown;
+  };
   if (!payload.required) {
     return {
       reservationId: null,
       bucket: null,
+      status: null,
+      expiresAt: null,
+      releasePending: false,
+      reused: false,
       aiOperationLimit: DEFAULT_AI_OPERATION_LIMIT,
       aiOperationsRemaining: DEFAULT_AI_OPERATION_LIMIT,
     };
@@ -353,8 +487,96 @@ async function reserveMixUsage(
   return {
     reservationId: payload.reservationId,
     bucket: payload.bucket,
+    status:
+      payload.status === "reserved" ||
+      payload.status === "completed" ||
+      payload.status === "released" ||
+      payload.status === "expired" ||
+      payload.status === "release_pending"
+        ? payload.status
+        : "reserved",
+    expiresAt: Number.isFinite(payload.expiresAt) ? Number(payload.expiresAt) : null,
+    releasePending: payload.releasePending === true,
+    reused: payload.reused === true,
     aiOperationLimit,
     aiOperationsRemaining,
+  };
+}
+
+async function renewMixUsage(
+  reservationId: string,
+  idempotencyKey: string | null,
+  duration: number | undefined,
+  signal?: AbortSignal,
+): Promise<UsageReservation> {
+  const response = await fetch("/api/usage/renew", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reservationId,
+      idempotencyKey,
+      ...(duration && duration > 0 ? { sourceDurationSeconds: duration } : {}),
+    }),
+    signal,
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        required?: boolean;
+        reservationId?: string;
+        bucket?: unknown;
+        status?: unknown;
+        expiresAt?: unknown;
+        releasePending?: unknown;
+        reused?: unknown;
+        aiOperationLimit?: unknown;
+        aiOperationsRemaining?: unknown;
+        error?: string;
+      }
+    | null;
+  if (!response.ok || !payload) {
+    throw new VideoMixRequestError(
+      payload?.error || "利用枠の有効期限を更新できませんでした。通信を確認して、もう一度お試しください。",
+      response.status,
+    );
+  }
+  if (!payload.required) {
+    return {
+      reservationId: null,
+      bucket: null,
+      status: null,
+      expiresAt: null,
+      releasePending: false,
+      reused: true,
+      aiOperationLimit: DEFAULT_AI_OPERATION_LIMIT,
+      aiOperationsRemaining: DEFAULT_AI_OPERATION_LIMIT,
+    };
+  }
+  if (!payload.reservationId || !isBillingBucket(payload.bucket)) {
+    throw new Error("更新した利用枠を確認できませんでした。");
+  }
+  const aiOperationLimit =
+    Number.isInteger(payload.aiOperationLimit) && Number(payload.aiOperationLimit) > 0
+      ? Number(payload.aiOperationLimit)
+      : DEFAULT_AI_OPERATION_LIMIT;
+  return {
+    reservationId: payload.reservationId,
+    bucket: payload.bucket,
+    status:
+      payload.status === "reserved" ||
+      payload.status === "completed" ||
+      payload.status === "released" ||
+      payload.status === "expired" ||
+      payload.status === "release_pending"
+        ? payload.status
+        : "reserved",
+    expiresAt: Number.isFinite(payload.expiresAt) ? Number(payload.expiresAt) : null,
+    releasePending: payload.releasePending === true,
+    reused: payload.reused !== false,
+    aiOperationLimit,
+    aiOperationsRemaining:
+      Number.isInteger(payload.aiOperationsRemaining) && Number(payload.aiOperationsRemaining) >= 0
+        ? Math.min(aiOperationLimit, Number(payload.aiOperationsRemaining))
+        : aiOperationLimit,
   };
 }
 
@@ -382,7 +604,11 @@ async function requestMixNarrationPlan(options: Readonly<{
 }>) {
   const response = await fetch("/api/narration/script", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Usage-Reservation-Id": options.reservationId ?? "",
+      "X-AI-Operation-Id": options.operationId,
+    },
     body: JSON.stringify({
       frames: options.frames,
       brief: options.brief,
@@ -523,8 +749,35 @@ async function readMixBillingStatus() {
   return payload;
 }
 
-function sendMixUsageReleaseBeacon(reservationId: string) {
-  const body = JSON.stringify({ reservationId });
+async function verifyDurableVideoMixOutputOwnership(reservationId: string) {
+  const response = await fetch("/api/usage/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reservationId }),
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | { required?: boolean; reservationId?: unknown; status?: unknown }
+    | null;
+  return Boolean(
+    response.ok &&
+      payload?.required === true &&
+      payload.reservationId === reservationId &&
+      (payload.status === "reserved" ||
+        payload.status === "release_pending" ||
+        payload.status === "expired" ||
+        payload.status === "released" ||
+        payload.status === "completed"),
+  );
+}
+
+function sendMixUsageReleaseBeacon(
+  reservationId: string | null,
+  idempotencyKey: string | null,
+) {
+  if (!reservationId && !idempotencyKey) return false;
+  const body = JSON.stringify({ reservationId, idempotencyKey });
   try {
     return Boolean(
       typeof navigator !== "undefined" &&
@@ -572,6 +825,12 @@ async function inspectMixOutput(
     packetSampleCount: 360,
     inspectAudioActivity: audioMetadata.inspectAudioActivity,
     expectedNarrationRanges,
+    videoContentInspection: {
+      boundarySeconds: plan.boundaries.map((boundary) => boundary.editedTime),
+      allowBlackAtBoundarySeconds: plan.boundaries
+        .filter((boundary) => boundary.transition.type === "fade-black")
+        .map((boundary) => boundary.editedTime),
+    },
   });
   const assessment = assessExportedVideoQuality(inspection, { width: 1080, height: 1920 }, {
     expectedDurationSeconds: plan.duration,
@@ -598,25 +857,52 @@ async function inspectMixOutput(
 }
 
 function clipAtTime(plan: VideoCompositionPlan, time: number) {
-  return plan.clips.find((clip, index) =>
-    time >= clip.editedStart && (time < clip.editedEnd || index === plan.clips.length - 1),
-  ) ?? plan.clips.at(-1)!;
+  for (let index = plan.clips.length - 1; index >= 0; index -= 1) {
+    const clip = plan.clips[index];
+    if (
+      time >= clip.editedStart &&
+      (time < clip.editedEnd || index === plan.clips.length - 1)
+    ) {
+      return clip;
+    }
+  }
+  return plan.clips.at(-1)!;
 }
 
 export default function VideoMixClient() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const sourceFeedbackRef = useRef<HTMLParagraphElement>(null);
   const previewPrimaryRef = useRef<HTMLVideoElement>(null);
   const previewSecondaryRef = useRef<HTMLVideoElement>(null);
+  const previewPrimaryLayerRef = useRef<HTMLSpanElement>(null);
+  const previewSecondaryLayerRef = useRef<HTMLSpanElement>(null);
+  const previewPrimaryBlurRef = useRef<HTMLCanvasElement>(null);
+  const previewSecondaryBlurRef = useRef<HTMLCanvasElement>(null);
+  const transitionOverlayRef = useRef<HTMLSpanElement>(null);
   const previewCaptionRef = useRef<HTMLCanvasElement>(null);
   const narrationAudioRef = useRef<HTMLAudioElement>(null);
+  const previewAudioContextRef = useRef<AudioContext | null>(null);
+  const previewPrimaryGainRef = useRef<GainNode | null>(null);
+  const previewSecondaryGainRef = useRef<GainNode | null>(null);
+  const previewNarrationGainRef = useRef<GainNode | null>(null);
+  const previewPendingPlayRef = useRef(new Set<HTMLVideoElement>());
+  const previewDeferredGainRef = useRef(new Map<HTMLVideoElement, number>());
   const transitionButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const finishModeButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const animationRef = useRef<number | null>(null);
+  const isPlayingRef = useRef(false);
+  const previewLoopRef = useRef<{ start: number; end: number } | null>(null);
+  const lastPreviewUiUpdateRef = useRef(0);
+  const lastPreviewBackgroundUpdateRef = useRef<[string, string]>(["", ""]);
   const previewStartedAtRef = useRef(0);
   const previewStartTimeRef = useRef(0);
   const activeLayerRef = useRef<0 | 1>(0);
   const activeClipRef = useRef(-1);
   const exportAbortRef = useRef<AbortController | null>(null);
   const narrationAbortRef = useRef<AbortController | null>(null);
+  const thumbnailAbortRef = useRef<AbortController | null>(null);
+  const audioNormalizationAbortRef = useRef<AbortController | null>(null);
+  const audioNormalizationCacheRef = useRef(new Map<string, number>());
   const resultRef = useRef<MixResult | null>(null);
   const pendingFinalizeRef = useRef<PendingFinalize | null>(null);
   const sourcesRef = useRef<MixSource[]>([]);
@@ -627,6 +913,8 @@ export default function VideoMixClient() {
   const finalizeActionRef = useRef(false);
   const activeReservationRef = useRef<string | null>(null);
   const activeReservationBucketRef = useRef<BillingBucket | null>(null);
+  const activeReservationStatusRef = useRef<UsageReservation["status"]>(null);
+  const activeReservationExpiresAtRef = useRef<number | null>(null);
   const reservationKeyRef = useRef<string | null>(null);
   const reservationDurationRef = useRef<number | null>(null);
   const reservationInvalidatedRef = useRef(false);
@@ -636,10 +924,13 @@ export default function VideoMixClient() {
   const billingSyncRef = useRef<Promise<void> | null>(null);
   const lastBillingSyncAtRef = useRef(0);
   const narrationRef = useRef<MixNarration | null>(null);
+  const previousNarrationRef = useRef<MixNarration | null>(null);
+  const removedSourceRef = useRef<RemovedMixSource | null>(null);
   const pageHidingRef = useRef(false);
   const mountedRef = useRef(true);
   const aiOperationLimitRef = useRef(DEFAULT_AI_OPERATION_LIMIT);
   const aiOperationsRemainingRef = useRef(DEFAULT_AI_OPERATION_LIMIT);
+  const paidSaveAvailableRef = useRef(false);
 
   const [sources, setSources] = useState<MixSource[]>([]);
   const [transition, setTransition] = useState<VideoCompositionTransitionType>("crossfade");
@@ -651,6 +942,8 @@ export default function VideoMixClient() {
   const [narrationGoal, setNarrationGoal] = useState<CaptionGoal>("follow");
   const [narrationBrief, setNarrationBrief] = useState("");
   const [narration, setNarration] = useState<MixNarration | null>(null);
+  const [previousNarration, setPreviousNarration] = useState<MixNarration | null>(null);
+  const [narrationStale, setNarrationStale] = useState(false);
   const [narrationGenerating, setNarrationGenerating] = useState(false);
   const [aiOperationLimit, setAiOperationLimit] = useState(DEFAULT_AI_OPERATION_LIMIT);
   const [aiOperationsRemaining, setAiOperationsRemaining] = useState(DEFAULT_AI_OPERATION_LIMIT);
@@ -658,15 +951,27 @@ export default function VideoMixClient() {
   const [preparing, setPreparing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewTime, setPreviewTime] = useState(0);
-  const [overlayStyle, setOverlayStyle] = useState<React.CSSProperties>({ opacity: 0 });
   const [exporting, setExporting] = useState(false);
   const [finalizingUsage, setFinalizingUsage] = useState(false);
+  const [discardingPending, setDiscardingPending] = useState(false);
+  const [deletingDurableCopy, setDeletingDurableCopy] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [result, setResult] = useState<MixResult | null>(null);
   const [pendingFinalize, setPendingFinalize] = useState<PendingFinalize | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [sourceFeedback, setSourceFeedback] = useState<{
+    kind: "error" | "message";
+    text: string;
+  } | null>(null);
   const [showPurchase, setShowPurchase] = useState(false);
+  const [removedSource, setRemovedSource] = useState<RemovedMixSource | null>(null);
+  const [mobileStep, setMobileStep] = useState<1 | 2 | 3>(1);
+  const [showAllTransitions, setShowAllTransitions] = useState(false);
+  const [loadedDraft] = useState<VideoMixClientDraft | null>(() =>
+    typeof window === "undefined" ? null : readVideoMixClientDraft(window.localStorage),
+  );
+  const [draftSettingsApplied, setDraftSettingsApplied] = useState(false);
 
   const boundaryPreferenceKeys = useMemo(
     () => getVideoMixBoundaryPreferenceKeys(sources),
@@ -714,20 +1019,259 @@ export default function VideoMixClient() {
   const schedule = useMemo(() => plan ? buildVideoCompositionFrameSchedule(plan) : [], [plan]);
   const totalBytes = sources.reduce((sum, source) => sum + source.file.size, 0);
   const aggregateDuration = sources.reduce((sum, source) => sum + source.duration, 0);
+  const audioNormalizationRequestKey = useMemo(
+    () =>
+      sources
+        .map((source) =>
+          sourceAudioNormalizationAnalysisKey(source.file, source.clips),
+        )
+        .join("|"),
+    [sources],
+  );
   const hasIndividualTransitions =
     Object.keys(activeBoundaryTransitionPreferences).length > 0;
   const editingLocked =
-    preparing || exporting || narrationGenerating || Boolean(pendingFinalize);
+    preparing || exporting || narrationGenerating || discardingPending || Boolean(pendingFinalize);
+  const previewDuckingMetadata = useMemo(() =>
+    narration && plan
+      ? buildVideoMixNarrationDuckingMetadata({
+          activity: narration.activity,
+          baseGain: 1,
+          duration: plan.duration,
+          enabled: narrationEnabled,
+        })
+      : null,
+    [narration, narrationEnabled, plan],
+  );
+
+  const analyticsSnapshot = useCallback(() => ({
+    mode: "video_mix" as const,
+    source_count: sourcesRef.current.length,
+    clip_count: sourcesRef.current.reduce((sum, source) => sum + source.clips.length, 0),
+    duration_bucket: productDurationBucket(plan?.duration ?? 0),
+    narration: narrationEnabled ? "enabled" : "disabled",
+    transition:
+      Object.keys(activeBoundaryTransitionPreferences).length > 0
+        ? "mixed"
+        : transition,
+  }), [activeBoundaryTransitionPreferences, narrationEnabled, plan?.duration, transition]);
+
+  const announceSourceFeedback = useCallback(
+    (kind: "error" | "message", text: string) => {
+      setSourceFeedback({ kind, text });
+      if (kind === "error") {
+        window.queueMicrotask(() => sourceFeedbackRef.current?.focus());
+      }
+    },
+    [],
+  );
 
   const stopPreview = useCallback(() => {
     if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
     animationRef.current = null;
+    previewLoopRef.current = null;
     for (const video of [previewPrimaryRef.current, previewSecondaryRef.current]) {
       video?.pause();
       if (video) video.muted = true;
     }
+    if (previewPrimaryGainRef.current) previewPrimaryGainRef.current.gain.value = 0;
+    if (previewSecondaryGainRef.current) previewSecondaryGainRef.current.gain.value = 0;
+    previewPendingPlayRef.current.clear();
+    previewDeferredGainRef.current.clear();
     narrationAudioRef.current?.pause();
+    if (previewNarrationGainRef.current) previewNarrationGainRef.current.gain.value = 0;
+    isPlayingRef.current = false;
     setIsPlaying(false);
+  }, []);
+
+  const ensurePreviewAudioGraph = useCallback(() => {
+    if (previewAudioContextRef.current) {
+      void previewAudioContextRef.current.resume().catch(() => undefined);
+      return true;
+    }
+    const primary = previewPrimaryRef.current;
+    const secondary = previewSecondaryRef.current;
+    const narrationPlayer = narrationAudioRef.current;
+    if (!primary || !secondary || !narrationPlayer) return false;
+    const AudioContextConstructor =
+      typeof AudioContext !== "undefined"
+        ? AudioContext
+        : (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+    if (!AudioContextConstructor) return false;
+    try {
+      const context = new AudioContextConstructor();
+      const limiter = context.createDynamicsCompressor();
+      limiter.threshold.value = -1;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.08;
+      limiter.connect(context.destination);
+      const primaryGain = context.createGain();
+      const secondaryGain = context.createGain();
+      const narrationGain = context.createGain();
+      primaryGain.gain.value = 0;
+      secondaryGain.gain.value = 0;
+      narrationGain.gain.value = 0;
+      context.createMediaElementSource(primary).connect(primaryGain);
+      context.createMediaElementSource(secondary).connect(secondaryGain);
+      context.createMediaElementSource(narrationPlayer).connect(narrationGain);
+      primaryGain.connect(limiter);
+      secondaryGain.connect(limiter);
+      narrationGain.connect(limiter);
+      previewAudioContextRef.current = context;
+      previewPrimaryGainRef.current = primaryGain;
+      previewSecondaryGainRef.current = secondaryGain;
+      previewNarrationGainRef.current = narrationGain;
+      void context.resume().catch(() => undefined);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const setPreviewMediaGain = useCallback((
+    video: HTMLVideoElement,
+    gain: number,
+  ) => {
+    const safeGain = Math.max(0, Math.min(2, gain));
+    const node = video === previewPrimaryRef.current
+      ? previewPrimaryGainRef.current
+      : previewSecondaryGainRef.current;
+    // Keep both elements unmuted for their entire authorized playback session.
+    // WebKit pauses a video that is unmuted outside a trusted user gesture, so
+    // silence/transition mixing must be expressed through GainNode (or volume
+    // in the no-WebAudio fallback), never by toggling HTMLMediaElement.muted.
+    video.muted = false;
+    if (previewPendingPlayRef.current.has(video)) {
+      previewDeferredGainRef.current.set(video, safeGain);
+      if (node) {
+        video.volume = 1;
+        node.gain.value = 0;
+      } else {
+        video.volume = 0;
+      }
+      return;
+    }
+    previewDeferredGainRef.current.delete(video);
+    if (node) {
+      video.volume = 1;
+      node.gain.value = safeGain;
+    } else {
+      video.volume = Math.min(1, safeGain);
+    }
+  }, []);
+
+  const setPreviewNarrationGain = useCallback((
+    player: HTMLAudioElement,
+    gain: number,
+  ) => {
+    const safeGain = Math.max(0, Math.min(1.35, gain));
+    player.muted = safeGain <= 0;
+    if (previewNarrationGainRef.current) {
+      player.volume = 1;
+      previewNarrationGainRef.current.gain.value = safeGain;
+    } else {
+      player.volume = Math.min(1, safeGain);
+    }
+  }, []);
+
+  const playPreviewMedia = useCallback((
+    media: HTMLMediaElement,
+    reportFailure = true,
+  ) => {
+    void media.play().catch(() => {
+      if (!reportFailure) return;
+      if (!mountedRef.current) return;
+      stopPreview();
+      setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
+    });
+  }, [stopPreview]);
+
+  const startPreviewMediaPair = useCallback((
+    primary: HTMLVideoElement,
+    secondary: HTMLVideoElement,
+  ) => {
+    // Invoke both play() calls synchronously before awaiting either promise so
+    // they share the same trusted click activation. Report one combined error
+    // only after both promises settle; a late boundary never calls play().
+    const media = [primary, secondary] as const;
+    media.forEach((video) => {
+      previewPendingPlayRef.current.add(video);
+      previewDeferredGainRef.current.set(video, 0);
+    });
+    const attempts = [primary.play(), secondary.play()];
+    attempts.forEach((attempt, index) => {
+      void attempt.then(
+        () => {
+          const video = media[index];
+          previewPendingPlayRef.current.delete(video);
+          const desiredGain = isPlayingRef.current
+            ? previewDeferredGainRef.current.get(video) ?? 0
+            : 0;
+          previewDeferredGainRef.current.delete(video);
+          setPreviewMediaGain(video, desiredGain);
+        },
+        () => {
+          const video = media[index];
+          previewPendingPlayRef.current.delete(video);
+          previewDeferredGainRef.current.delete(video);
+          setPreviewMediaGain(video, 0);
+        },
+      );
+    });
+    void Promise.allSettled(attempts).then((results) => {
+      if (results.every((result) => result.status === "fulfilled")) return;
+      if (!mountedRef.current || !isPlayingRef.current) return;
+      stopPreview();
+      setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
+    });
+  }, [setPreviewMediaGain, stopPreview]);
+
+  const resumePreviewMediaMuted = useCallback((
+    video: HTMLVideoElement,
+    desiredGain: number,
+  ) => {
+    if (previewPendingPlayRef.current.has(video)) {
+      setPreviewMediaGain(video, desiredGain);
+      return;
+    }
+    previewPendingPlayRef.current.add(video);
+    setPreviewMediaGain(video, desiredGain);
+    void video.play().then(
+      () => {
+        previewPendingPlayRef.current.delete(video);
+        const latestGain = isPlayingRef.current
+          ? previewDeferredGainRef.current.get(video) ?? 0
+          : 0;
+        previewDeferredGainRef.current.delete(video);
+        setPreviewMediaGain(video, latestGain);
+      },
+      () => {
+        previewPendingPlayRef.current.delete(video);
+        previewDeferredGainRef.current.delete(video);
+        setPreviewMediaGain(video, 0);
+        if (!mountedRef.current || !isPlayingRef.current) return;
+        stopPreview();
+        setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
+      },
+    );
+  }, [setPreviewMediaGain, stopPreview]);
+
+  const previewSourceGainAt = useCallback((time: number) =>
+    previewDuckingMetadata
+      ? getVideoMixDuckingGainAtTime(previewDuckingMetadata, time)
+      : 1,
+    [previewDuckingMetadata],
+  );
+
+  const previewSourceNormalizationGain = useCallback((source: MixSource) => {
+    const key = sourceAudioNormalizationAnalysisKey(source.file, source.clips);
+    return audioNormalizationCacheRef.current.get(key) ??
+      (source.audioNormalizationAnalysisKey === key
+        ? source.audioNormalizationGain
+        : 1);
   }, []);
 
   const clearResult = useCallback(() => {
@@ -739,41 +1283,65 @@ export default function VideoMixClient() {
     setShowPurchase(false);
   }, []);
 
-  const selectGlobalTransition = useCallback(
-    (nextTransition: VideoCompositionTransitionType) => {
-      if (editingLocked) return;
-      stopPreview();
-      clearResult();
-      setTransition(nextTransition);
-      setBoundaryTransitionPreferences({});
-    },
-    [clearResult, editingLocked, stopPreview],
-  );
-
-  const handleTransitionKeyDown = (
-    event: KeyboardEvent<HTMLButtonElement>,
-    currentIndex: number,
-  ) => {
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-      nextIndex = (currentIndex + 1) % TRANSITION_OPTIONS.length;
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-      nextIndex =
-        (currentIndex - 1 + TRANSITION_OPTIONS.length) % TRANSITION_OPTIONS.length;
-    } else if (event.key === "Home") {
-      nextIndex = 0;
-    } else if (event.key === "End") {
-      nextIndex = TRANSITION_OPTIONS.length - 1;
-    }
-    if (nextIndex === null) return;
-    event.preventDefault();
-    selectGlobalTransition(TRANSITION_OPTIONS[nextIndex].id);
-    transitionButtonRefs.current[nextIndex]?.focus();
-  };
-
   useEffect(() => {
     resultRef.current = result;
   }, [result]);
+
+  useEffect(() => {
+    void (async () => {
+      await cleanupExpiredVideoMixOutputs().catch(() => undefined);
+      const candidates = await listDurableVideoMixOutputRecoveryCandidates();
+      for (const metadata of candidates) {
+        if (!mountedRef.current || resultRef.current) return;
+        const recoveredBucket = metadata.bucket;
+        if (!isBillingBucket(recoveredBucket)) continue;
+        // A browser profile can be shared by several signed-in people. Check
+        // metadata-only candidates newest-first and load Blob bytes only after
+        // the reservation is proven to belong to the current principal.
+        const owned = await verifyDurableVideoMixOutputOwnership(
+          metadata.reservationId,
+        );
+        if (!owned) continue;
+        const saved = await loadDurableVideoMixOutput(metadata.id);
+        if (
+          !saved ||
+          saved.metadata.reservationId !== metadata.reservationId ||
+          saved.metadata.bucket !== recoveredBucket ||
+          !mountedRef.current ||
+          resultRef.current
+        ) continue;
+        const recovered: MixResult = {
+          blob: saved.blob,
+          url: URL.createObjectURL(saved.blob),
+          filename: saved.metadata.filename,
+          bucket: recoveredBucket,
+          qualityMessage: saved.metadata.qualityMessage,
+          durableId: saved.metadata.id,
+        };
+        if (saved.metadata.status === "pending-completion") {
+          const pending = {
+            result: recovered,
+            reservationId: saved.metadata.reservationId,
+          };
+          pendingFinalizeRef.current = pending;
+          activeReservationRef.current = saved.metadata.reservationId;
+          activeReservationBucketRef.current = recovered.bucket;
+          activeReservationStatusRef.current = "reserved";
+          setPendingFinalize(pending);
+          setError("完成動画を復元しました。利用確認を再試行すると保存へ進めます。");
+        } else {
+          resultRef.current = recovered;
+          setResult(recovered);
+          setMessage("端末に一時保存していた完成動画を復元しました。保存または共有できます。");
+        }
+        trackClientEvent("draft_recovered", {
+          mode: "video_mix",
+          outcome: "restored",
+        });
+        return;
+      }
+    })().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     pendingFinalizeRef.current = pendingFinalize;
@@ -786,6 +1354,123 @@ export default function VideoMixClient() {
   useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
+
+  useEffect(() => {
+    audioNormalizationAbortRef.current?.abort();
+    if (!audioNormalizationRequestKey) return;
+    const controller = new AbortController();
+    audioNormalizationAbortRef.current = controller;
+    const requestedSources = sourcesRef.current.map((source) => ({
+      id: source.id,
+      file: source.file,
+      clips: source.clips.map((clip) => ({ ...clip })),
+      key: sourceAudioNormalizationAnalysisKey(source.file, source.clips),
+    }));
+    const applyGain = (sourceId: string, key: string, gain: number) => {
+      if (controller.signal.aborted || !mountedRef.current) return;
+      const current = sourcesRef.current;
+      const next = current.map((source) => {
+        if (
+          source.id !== sourceId ||
+          sourceAudioNormalizationAnalysisKey(source.file, source.clips) !== key ||
+          (source.audioNormalizationAnalysisKey === key &&
+            source.audioNormalizationGain === gain)
+        ) {
+          return source;
+        }
+        return {
+          ...source,
+          audioNormalizationGain: gain,
+          audioNormalizationAnalysisKey: key,
+        };
+      });
+      if (next.every((source, index) => source === current[index])) return;
+      sourcesRef.current = next;
+      setSources(next);
+    };
+    // Make adding videos responsive first; audio analysis is local, serial and
+    // bounded to short selected-clip windows, then cached for preview/export.
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        for (const source of requestedSources) {
+          if (controller.signal.aborted) return;
+          const cached = audioNormalizationCacheRef.current.get(source.key);
+          if (cached !== undefined) {
+            applyGain(source.id, source.key, cached);
+            continue;
+          }
+          try {
+            const gain = await measureVideoMixSourceAudioNormalization(
+              source.file,
+              source.clips,
+              controller.signal,
+            );
+            if (controller.signal.aborted) return;
+            audioNormalizationCacheRef.current.set(source.key, gain);
+            applyGain(source.id, source.key, gain);
+          } catch {
+            if (controller.signal.aborted) return;
+            // Unsupported tracks remain at unity; export can use its decoded
+            // selected-clip fallback without blocking local editing.
+          }
+        }
+      })();
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+      if (audioNormalizationAbortRef.current === controller) {
+        audioNormalizationAbortRef.current = null;
+      }
+    };
+  }, [audioNormalizationRequestKey]);
+
+  useEffect(() => {
+    if (sources.length === 0) return;
+    const timer = window.setTimeout(() => {
+      saveVideoMixClientDraft(window.localStorage, {
+        version: 1,
+        savedAt: Date.now(),
+        sources: sources.map((source) => ({
+          id: source.id,
+          fingerprint: fileFingerprint(source.file),
+          name: source.file.name,
+          duration: source.duration,
+          width: source.width,
+          height: source.height,
+          clips: source.clips,
+          framing: source.framing,
+        })),
+        transition,
+        boundaryTransitions: activeBoundaryTransitionPreferences,
+        narrationEnabled,
+        narrationCaptionsEnabled,
+        narrationStyle,
+        narrationGoal,
+        narrationBrief,
+      });
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeBoundaryTransitionPreferences,
+    narrationBrief,
+    narrationCaptionsEnabled,
+    narrationEnabled,
+    narrationGoal,
+    narrationStyle,
+    sources,
+    transition,
+  ]);
+
+  useEffect(() => {
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (sourcesRef.current.length === 0 || resultRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, []);
 
   const withReservationLock = useCallback(<T,>(operation: () => Promise<T>) => {
     const result = reservationMutexRef.current.then(operation, operation);
@@ -820,6 +1505,8 @@ export default function VideoMixClient() {
     if (activeReservationRef.current !== reservationId) return;
     activeReservationRef.current = null;
     activeReservationBucketRef.current = null;
+    activeReservationStatusRef.current = null;
+    activeReservationExpiresAtRef.current = null;
     reservationKeyRef.current = null;
     reservationDurationRef.current = null;
     reservationInvalidatedRef.current = false;
@@ -842,9 +1529,10 @@ export default function VideoMixClient() {
 
   const releaseActiveReservationOnPageHide = useCallback(() => {
     const reservationId = activeReservationRef.current;
-    if (reservationId) {
-      sendMixUsageReleaseBeacon(reservationId);
-    }
+    // The reserve response itself may be lost after the server committed it.
+    // Releasing by the already-created idempotency key closes that pagehide
+    // race even before a reservation ID reaches the client.
+    sendMixUsageReleaseBeacon(reservationId, reservationKeyRef.current);
   }, []);
 
   useEffect(() => {
@@ -868,12 +1556,22 @@ export default function VideoMixClient() {
       primaryVideo?.pause();
       secondaryVideo?.pause();
       narrationAudio?.pause();
+      void previewAudioContextRef.current?.close().catch(() => undefined);
+      previewAudioContextRef.current = null;
+      previewPrimaryGainRef.current = null;
+      previewSecondaryGainRef.current = null;
+      previewNarrationGainRef.current = null;
       exportAbortRef.current?.abort();
       narrationAbortRef.current?.abort();
+      thumbnailAbortRef.current?.abort();
+      audioNormalizationAbortRef.current?.abort();
       if (!pageHidingRef.current) {
         void releaseActiveReservationForeground().catch(() => undefined);
       }
       sourcesRef.current.forEach((source) => URL.revokeObjectURL(source.url));
+      if (removedSourceRef.current) {
+        URL.revokeObjectURL(removedSourceRef.current.source.url);
+      }
       if (resultRef.current) URL.revokeObjectURL(resultRef.current.url);
       if (
         pendingFinalizeRef.current &&
@@ -882,6 +1580,7 @@ export default function VideoMixClient() {
         URL.revokeObjectURL(pendingFinalizeRef.current.result.url);
       }
       if (narrationRef.current) URL.revokeObjectURL(narrationRef.current.url);
+      if (previousNarrationRef.current) URL.revokeObjectURL(previousNarrationRef.current.url);
     };
   }, [releaseActiveReservationForeground, releaseActiveReservationOnPageHide]);
 
@@ -907,6 +1606,8 @@ export default function VideoMixClient() {
       if (activeReservationRef.current === reservation.reservationId) {
         activeReservationRef.current = null;
         activeReservationBucketRef.current = null;
+        activeReservationStatusRef.current = null;
+        activeReservationExpiresAtRef.current = null;
       }
       if (reservationKeyRef.current === idempotencyKey) {
         reservationKeyRef.current = null;
@@ -918,7 +1619,7 @@ export default function VideoMixClient() {
   );
 
   const ensureMixUsageReservation = useCallback(
-    (signal?: AbortSignal) =>
+    (signal?: AbortSignal, renewBeforeExport = false) =>
       withReservationLock(async () => {
         if (signal) ensureVideoMixActionActive(signal, mountedRef.current);
         const currentDuration = () =>
@@ -946,17 +1647,58 @@ export default function VideoMixClient() {
         }
 
         if (signal) ensureVideoMixActionActive(signal, mountedRef.current);
+        if (
+          renewBeforeExport &&
+          paidSaveAvailableRef.current &&
+          activeReservationBucketRef.current === "free"
+        ) {
+          reservationInvalidatedRef.current = true;
+          await releaseActiveReservationLocked();
+        }
         if (activeReservationRef.current) {
-          return {
-            reservationId: activeReservationRef.current,
-            bucket: activeReservationBucketRef.current,
-            aiOperationLimit: aiOperationLimitRef.current,
-            aiOperationsRemaining: aiOperationsRemainingRef.current,
-          } satisfies UsageReservation;
+          if (renewBeforeExport) {
+            const refreshed = await renewMixUsage(
+              activeReservationRef.current,
+              reservationKeyRef.current,
+              currentDuration(),
+              signal,
+            );
+            if (refreshed.status === "completed") {
+              // A completed reservation is terminal and must never be reused
+              // for a second saved video.
+              activeReservationRef.current = null;
+              activeReservationBucketRef.current = null;
+              activeReservationStatusRef.current = null;
+              activeReservationExpiresAtRef.current = null;
+              reservationKeyRef.current = null;
+              reservationDurationRef.current = null;
+            } else {
+              if (refreshed.status !== null && refreshed.status !== "reserved") {
+                throw new Error("利用枠を安全に更新できませんでした。もう一度お試しください。");
+              }
+              activeReservationRef.current = refreshed.reservationId;
+              activeReservationBucketRef.current = refreshed.bucket;
+              activeReservationStatusRef.current = refreshed.status;
+              activeReservationExpiresAtRef.current = refreshed.expiresAt;
+              rememberAiQuota(refreshed.aiOperationLimit, refreshed.aiOperationsRemaining);
+              return refreshed;
+            }
+          } else {
+            return {
+              reservationId: activeReservationRef.current,
+              bucket: activeReservationBucketRef.current,
+              status: activeReservationStatusRef.current,
+              expiresAt: activeReservationExpiresAtRef.current,
+              releasePending: activeReservationStatusRef.current === "release_pending",
+              reused: true,
+              aiOperationLimit: aiOperationLimitRef.current,
+              aiOperationsRemaining: aiOperationsRemainingRef.current,
+            } satisfies UsageReservation;
+          }
         }
 
         const requestGeneration = sourceGenerationRef.current;
-        const idempotencyKey = reservationKeyRef.current ?? crypto.randomUUID();
+        let idempotencyKey = reservationKeyRef.current ?? crypto.randomUUID();
         reservationKeyRef.current = idempotencyKey;
         const requestedDuration = reservationDurationRef.current ?? currentDuration();
         reservationDurationRef.current = requestedDuration;
@@ -967,6 +1709,15 @@ export default function VideoMixClient() {
             idempotencyKey,
             signal,
           );
+          if (reservation.status === "completed") {
+            idempotencyKey = crypto.randomUUID();
+            reservationKeyRef.current = idempotencyKey;
+            reservation = await reserveMixUsage(
+              requestedDuration,
+              idempotencyKey,
+              signal,
+            );
+          }
         } catch (caught) {
           // The response may have been lost after the server committed. Keep
           // the key so the next locked operation can recover it exactly once.
@@ -985,6 +1736,8 @@ export default function VideoMixClient() {
 
         activeReservationRef.current = reservation.reservationId;
         activeReservationBucketRef.current = reservation.bucket;
+        activeReservationStatusRef.current = reservation.status;
+        activeReservationExpiresAtRef.current = reservation.expiresAt;
         reservationInvalidatedRef.current = false;
         rememberAiQuota(
           reservation.aiOperationLimit,
@@ -1030,84 +1783,24 @@ export default function VideoMixClient() {
         const hasPaidSave =
           monthlyHasRoom ||
           (billing.oneTimeCredits ?? 0) > 0;
-
-        await withReservationLock(async () => {
-          if (
-            hasPaidSave &&
-            activeReservationBucketRef.current === "free"
-          ) {
-            reservationInvalidatedRef.current = true;
-            await releaseActiveReservationLocked();
-          }
-
-          const requestGeneration = sourceGenerationRef.current;
-          const duration = sourcesRef.current.reduce(
-            (sum, source) => sum + source.duration,
-            0,
-          );
-          const reservationId = activeReservationRef.current;
-          const reservationKey = reservationKeyRef.current;
-          if (
-            reservationId &&
-            reservationKey &&
-            !reservationInvalidatedRef.current
-          ) {
-            const refreshed = await reserveMixUsage(duration, reservationKey);
-            if (
-              sourceGenerationRef.current !== requestGeneration ||
-              reservationInvalidatedRef.current
-            ) {
-              await releaseReturnedReservationLocked(refreshed, reservationKey);
-              return;
-            }
-            if (refreshed.reservationId !== reservationId) {
-              await releaseReturnedReservationLocked(refreshed, reservationKey);
-              reservationInvalidatedRef.current = true;
-              await releaseActiveReservationLocked();
-              throw new Error("利用枠の再確認結果が一致しませんでした。");
-            }
-            activeReservationBucketRef.current = refreshed.bucket;
-            rememberAiQuota(
-              refreshed.aiOperationLimit,
-              refreshed.aiOperationsRemaining,
-            );
-          } else if (
-            hasPaidSave &&
-            sourcesRef.current.length > 0 &&
-            duration > 0
-          ) {
-            const idempotencyKey = reservationKey ?? crypto.randomUUID();
-            reservationKeyRef.current = idempotencyKey;
-            reservationDurationRef.current = duration;
-            let refreshed: UsageReservation;
-            try {
-              refreshed = await reserveMixUsage(duration, idempotencyKey);
-            } catch (caught) {
-              reservationInvalidatedRef.current = true;
-              throw caught;
-            }
-            if (
-              sourceGenerationRef.current !== requestGeneration ||
-              reservationInvalidatedRef.current
-            ) {
-              await releaseReturnedReservationLocked(refreshed, idempotencyKey);
-              return;
-            }
-            activeReservationRef.current = refreshed.reservationId;
-            activeReservationBucketRef.current = refreshed.bucket;
-            reservationInvalidatedRef.current = false;
-            rememberAiQuota(
-              refreshed.aiOperationLimit,
-              refreshed.aiOperationsRemaining,
-            );
-            if (!refreshed.reservationId) {
-              reservationKeyRef.current = null;
-              reservationDurationRef.current = null;
-            }
-          }
-        });
+        // Focus/visibility synchronization is intentionally read-only. A paid
+        // credit is reserved only after the user explicitly asks for AI or export.
+        paidSaveAvailableRef.current = hasPaidSave;
 
         if (hasPaidSave) {
+          // A just-purchased entitlement must be actionable even when the
+          // preceding free reservation has no AI actions left. This is only a
+          // provisional display value; the explicit AI action below replaces
+          // it with the atomic reservation response from the server.
+          if (
+            !activeReservationRef.current ||
+            activeReservationBucketRef.current === "free"
+          ) {
+            const paidLimit = monthlyHasRoom
+              ? SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT
+              : ONE_TIME_AI_OPERATION_SUCCESS_LIMIT;
+            rememberAiQuota(paidLimit, paidLimit);
+          }
           setShowPurchase(false);
           setMessage(
             "購入済みの利用枠を確認しました。編集内容を保ったまま続けられます。",
@@ -1123,12 +1816,7 @@ export default function VideoMixClient() {
         }
       }
     },
-    [
-      releaseActiveReservationLocked,
-      releaseReturnedReservationLocked,
-      rememberAiQuota,
-      withReservationLock,
-    ],
+    [rememberAiQuota],
   );
 
   const completeReservationUsage = useCallback(
@@ -1149,6 +1837,8 @@ export default function VideoMixClient() {
       // release the same lease while completion is queued or in flight.
       activeReservationRef.current = null;
       activeReservationBucketRef.current = null;
+      activeReservationStatusRef.current = null;
+      activeReservationExpiresAtRef.current = null;
       return withReservationLock(async () => {
         try {
           await updateUsage("complete", reservationId);
@@ -1157,6 +1847,7 @@ export default function VideoMixClient() {
           if (!activeReservationRef.current) {
             activeReservationRef.current = reservationId;
             activeReservationBucketRef.current = previousBucket ?? bucket;
+            activeReservationStatusRef.current = "reserved";
           }
           throw caught;
         }
@@ -1175,6 +1866,8 @@ export default function VideoMixClient() {
         if (activeReservationRef.current === reservationId) {
           activeReservationRef.current = null;
           activeReservationBucketRef.current = null;
+          activeReservationStatusRef.current = null;
+          activeReservationExpiresAtRef.current = null;
           reservationKeyRef.current = null;
           reservationDurationRef.current = null;
           reservationInvalidatedRef.current = false;
@@ -1218,6 +1911,11 @@ export default function VideoMixClient() {
       narrationRef.current = null;
       setNarration(null);
       if (current) URL.revokeObjectURL(current.url);
+      const previous = previousNarrationRef.current;
+      previousNarrationRef.current = null;
+      setPreviousNarration(null);
+      if (previous) URL.revokeObjectURL(previous.url);
+      setNarrationStale(false);
       setDisclosureConfirmed(false);
       const canvas = previewCaptionRef.current;
       canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
@@ -1239,9 +1937,79 @@ export default function VideoMixClient() {
     if (!narrationRef.current && !activeReservationRef.current) return;
     stopPreview();
     clearResult();
-    clearNarrationDraft();
-    setMessage("設定を変更しました。台本と音声をもう一度作成してください。");
-  }, [clearNarrationDraft, clearResult, stopPreview]);
+    reservationInvalidatedRef.current = true;
+    void releaseActiveReservationForeground().catch(() => undefined);
+    if (narrationRef.current) {
+      setNarrationStale(true);
+      setDisclosureConfirmed(false);
+      setMessage("設定が変わりました。前のAI音声は残しています。作り直すと新しい音声へ差し替わります。");
+      return;
+    }
+  }, [clearResult, releaseActiveReservationForeground, stopPreview]);
+
+  const selectGlobalTransition = useCallback(
+    (nextTransition: VideoCompositionTransitionType) => {
+      if (editingLocked) return;
+      stopPreview();
+      clearResult();
+      invalidateGeneratedNarration();
+      setTransition(nextTransition);
+      setBoundaryTransitionPreferences({});
+      trackClientEvent("video_mix_transition_changed", {
+        mode: "video_mix",
+        transition: nextTransition,
+      });
+    },
+    [clearResult, editingLocked, invalidateGeneratedNarration, stopPreview],
+  );
+
+  const handleTransitionKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % TRANSITION_OPTIONS.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex =
+        (currentIndex - 1 + TRANSITION_OPTIONS.length) % TRANSITION_OPTIONS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = TRANSITION_OPTIONS.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    if (nextIndex >= 3) setShowAllTransitions(true);
+    selectGlobalTransition(TRANSITION_OPTIONS[nextIndex].id);
+    window.requestAnimationFrame(() => transitionButtonRefs.current[nextIndex]?.focus());
+  };
+
+  const selectFinishMode = useCallback((useNarration: boolean) => {
+    if (editingLocked || narrationEnabled === useNarration) return;
+    stopPreview();
+    clearResult();
+    setNarrationEnabled(useNarration);
+    if (!useNarration) {
+      clearNarrationDraft();
+      setNarrationStale(false);
+    }
+  }, [clearNarrationDraft, clearResult, editingLocked, narrationEnabled, stopPreview]);
+
+  const handleFinishModeKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % 2;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex + 1) % 2;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectFinishMode(nextIndex === 1);
+    finishModeButtonRefs.current[nextIndex]?.focus();
+  };
 
   const updateNarrationOverlay = useCallback(
     (time: number) => {
@@ -1265,6 +2033,94 @@ export default function VideoMixClient() {
     [narration, narrationCaptionsEnabled, narrationEnabled],
   );
 
+  const previewBackgroundForVideo = useCallback((video: HTMLVideoElement) =>
+    video === previewPrimaryRef.current
+      ? previewPrimaryBlurRef.current
+      : previewSecondaryBlurRef.current,
+  []);
+
+  const previewWrapperForVideo = useCallback((video: HTMLVideoElement) =>
+    video === previewPrimaryRef.current
+      ? previewPrimaryLayerRef.current
+      : previewSecondaryLayerRef.current,
+  []);
+
+  const stylePreviewLayer = useCallback((
+    video: HTMLVideoElement,
+    baseZIndex: number,
+    opacity: number,
+    transform = "none",
+    clipPath = "none",
+  ) => {
+    const wrapper = previewWrapperForVideo(video);
+    if (!wrapper) return;
+    // Background and foreground are one composited source frame. Applying
+    // opacity to each child separately would double-apply alpha and make a
+    // nominal 50/50 crossfade too dark.
+    wrapper.style.zIndex = String(baseZIndex);
+    wrapper.style.opacity = String(opacity);
+    wrapper.style.transform = transform;
+    wrapper.style.clipPath = clipPath;
+  }, [previewWrapperForVideo]);
+
+  const updatePreviewLayerBackground = useCallback((
+    video: HTMLVideoElement,
+    source: MixSource,
+    sourceTime: number,
+  ) => {
+    const canvas = previewBackgroundForVideo(video);
+    if (!canvas) return;
+    const layerIndex = video === previewPrimaryRef.current ? 0 : 1;
+    const frameBucket = Math.floor(sourceTime * 10);
+    const cacheKey = [
+      source.id,
+      source.framing.mode,
+      source.framing.focusX.toFixed(3),
+      source.framing.focusY.toFixed(3),
+      frameBucket,
+    ].join(":");
+    if (lastPreviewBackgroundUpdateRef.current[layerIndex] === cacheKey) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const layout = computeVideoMixFrameLayout(
+      source.width,
+      source.height,
+      canvas.width,
+      canvas.height,
+      source.framing,
+    );
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.globalAlpha = 1;
+    context.filter = "none";
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    if (layout.background.kind !== "blurred-video") {
+      lastPreviewBackgroundUpdateRef.current[layerIndex] = cacheKey;
+      return;
+    }
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    try {
+      const background = layout.background;
+      const overscan = 1.08;
+      const extraWidth = background.rect.width * (overscan - 1);
+      const extraHeight = background.rect.height * (overscan - 1);
+      context.filter = `blur(${background.blurPixels}px) saturate(0.88)`;
+      context.drawImage(
+        video,
+        background.rect.x - extraWidth / 2,
+        background.rect.y - extraHeight / 2,
+        background.rect.width + extraWidth,
+        background.rect.height + extraHeight,
+      );
+      context.filter = "none";
+      context.fillStyle = "rgba(0,0,0,0.18)";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      lastPreviewBackgroundUpdateRef.current[layerIndex] = cacheKey;
+    } catch {
+      // A decoded frame can briefly disappear while iOS changes media sources.
+    }
+  }, [previewBackgroundForVideo]);
+
   const configurePreviewAt = useCallback((time: number, play: boolean) => {
     if (!plan || sources.length === 0) return;
     const safeTime = Math.max(0, Math.min(plan.duration, time));
@@ -1275,7 +2131,21 @@ export default function VideoMixClient() {
     if (!primary || !secondary || !source) return;
     const current = activeLayerRef.current === 0 ? primary : secondary;
     const inactive = activeLayerRef.current === 0 ? secondary : primary;
-    const sourcePreviewGain = narrationEnabled && narration ? 0.14 : 1;
+    const sourcePreviewGain =
+      previewSourceGainAt(safeTime) * previewSourceNormalizationGain(source);
+    const frameLayout = computeVideoMixFrameLayout(
+      source.width,
+      source.height,
+      plan.width,
+      plan.height,
+      source.framing,
+    );
+    const applySourceFraming = (video: HTMLVideoElement) => {
+      video.style.objectFit = frameLayout.framing.mode === "cover" ? "cover" : "contain";
+      video.style.objectPosition = frameLayout.framing.mode === "cover"
+        ? `${frameLayout.framing.focusX * 100}% ${frameLayout.framing.focusY * 100}%`
+        : "center";
+    };
     if (activeClipRef.current !== clip.globalClipIndex || current.dataset.sourceId !== source.id) {
       const incomingIndex: 0 | 1 = activeLayerRef.current === 0 ? 1 : 0;
       const incoming = inactive;
@@ -1284,45 +2154,61 @@ export default function VideoMixClient() {
         clip.end,
         clip.start + Math.max(0, safeTime - clip.editedStart),
       );
-      outgoing.pause();
-      outgoing.muted = true;
-      outgoing.style.zIndex = "1";
-      outgoing.style.opacity = "1";
-      outgoing.style.transform = "none";
-      outgoing.style.clipPath = "none";
-      incoming.pause();
-      incoming.src = source.url;
-      incoming.dataset.sourceId = source.id;
-      incoming.muted = false;
-      incoming.volume = sourcePreviewGain;
-      incoming.style.zIndex = "2";
-      incoming.style.opacity = "0";
-      incoming.style.transform = "none";
-      incoming.style.clipPath = "none";
+      setPreviewMediaGain(outgoing, 0);
+      stylePreviewLayer(outgoing, 0, 1);
+      const sourceChanged = incoming.dataset.sourceId !== source.id;
+      if (sourceChanged) {
+        incoming.src = source.url;
+        incoming.dataset.sourceId = source.id;
+      }
+      setPreviewMediaGain(incoming, 0);
+      stylePreviewLayer(incoming, 2, 0);
+      applySourceFraming(incoming);
       activeLayerRef.current = incomingIndex;
       activeClipRef.current = clip.globalClipIndex;
       const seekAndMaybePlay = () => {
         if (incoming.dataset.sourceId !== source.id) return;
         incoming.currentTime = targetTime;
-        if (play) void incoming.play().catch(() => undefined);
+        updatePreviewLayerBackground(incoming, source, targetTime);
+        if (play && incoming.paused) {
+          // Loading a new URL may implicitly pause a pre-started layer. Resume
+          // muted first (allowed without activation), and defer every gain
+          // update until play() resolves so a transition tick cannot leak the
+          // pre-seek audio while the promise is pending.
+          resumePreviewMediaMuted(incoming, sourcePreviewGain);
+        } else {
+          setPreviewMediaGain(incoming, sourcePreviewGain);
+        }
       };
       if (incoming.readyState >= HTMLMediaElement.HAVE_METADATA) {
         seekAndMaybePlay();
       } else {
         incoming.addEventListener("loadedmetadata", seekAndMaybePlay, { once: true });
-        incoming.load();
+        // A source pre-started by the user's click is already loading. Calling
+        // load() again would abort that trusted play promise on Safari.
+        if (sourceChanged) incoming.load();
       }
     } else {
       const targetTime = Math.min(clip.end, clip.start + Math.max(0, safeTime - clip.editedStart));
-      current.muted = false;
-      current.volume = sourcePreviewGain;
-      current.style.zIndex = "2";
-      current.style.transform = "none";
-      current.style.clipPath = "none";
+      setPreviewMediaGain(current, sourcePreviewGain);
+      stylePreviewLayer(current, 2, 1);
+      applySourceFraming(current);
       if (Math.abs(current.currentTime - targetTime) > 0.3) current.currentTime = targetTime;
-      if (play && current.paused) void current.play().catch(() => undefined);
+      if (play && current.paused) {
+        resumePreviewMediaMuted(current, sourcePreviewGain);
+      }
+      updatePreviewLayerBackground(current, source, targetTime);
     }
-  }, [narration, narrationEnabled, plan, sources]);
+  }, [
+    plan,
+    previewSourceGainAt,
+    previewSourceNormalizationGain,
+    resumePreviewMediaMuted,
+    setPreviewMediaGain,
+    sources,
+    stylePreviewLayer,
+    updatePreviewLayerBackground,
+  ]);
 
   const updatePreviewTransition = useCallback((time: number) => {
     if (!plan || schedule.length === 0) return;
@@ -1332,18 +2218,24 @@ export default function VideoMixClient() {
     const active = activeLayerRef.current === 0 ? previewPrimaryRef.current : previewSecondaryRef.current;
     const other = activeLayerRef.current === 0 ? previewSecondaryRef.current : previewPrimaryRef.current;
     if (!active || !other) return;
-    const sourcePreviewGain = narrationEnabled && narration ? 0.14 : 1;
     if (transitionFrame) {
+      const usesOutgoingLayer = videoCompositionTransitionUsesOverlap(
+        transitionFrame.type,
+      );
       const outgoingSource = sources[transitionFrame.from.sourceIndex];
-      if (outgoingSource) {
+      if (usesOutgoingLayer && outgoingSource) {
         const seekOutgoingFrame = () => {
           if (other.dataset.sourceId !== outgoingSource.id) return;
-          if (Math.abs(other.currentTime - transitionFrame.from.sourceTime) > 0.04) {
+          if (Math.abs(other.currentTime - transitionFrame.from.sourceTime) > 0.3) {
             other.currentTime = transitionFrame.from.sourceTime;
           }
+          updatePreviewLayerBackground(
+            other,
+            outgoingSource,
+            transitionFrame.from.sourceTime,
+          );
         };
-        other.pause();
-        other.muted = true;
+        setPreviewMediaGain(other, 0);
         if (other.dataset.sourceId !== outgoingSource.id) {
           other.src = outgoingSource.url;
           other.dataset.sourceId = outgoingSource.id;
@@ -1351,65 +2243,151 @@ export default function VideoMixClient() {
           other.load();
         } else if (other.readyState >= HTMLMediaElement.HAVE_METADATA) {
           seekOutgoingFrame();
+        } else {
+          other.addEventListener("loadedmetadata", seekOutgoingFrame, { once: true });
         }
       }
       const visual = transitionFrame.visual;
-      active.style.zIndex = "2";
-      other.style.zIndex = "1";
-      active.style.opacity = String(visual.incomingOpacity);
-      other.style.opacity = String(visual.outgoingOpacity);
-      active.style.transform = `translateX(${visual.incomingOffsetX * 100}%) scale(${visual.incomingScale})`;
-      other.style.transform = `translateX(${visual.outgoingOffsetX * 100}%) scale(${visual.outgoingScale})`;
-      active.style.clipPath = visual.incomingReveal < 0.999
-        ? `inset(0 0 0 ${(1 - visual.incomingReveal) * 100}%)`
-        : "none";
-      other.style.clipPath = "none";
-      active.muted = false;
-      active.volume = sourcePreviewGain;
-      other.muted = true;
-      setOverlayStyle({
-        opacity: visual.overlayOpacity,
-        background: visual.overlayColor ?? "transparent",
-      });
+      stylePreviewLayer(
+        active,
+        2,
+        visual.incomingOpacity,
+        `translateX(${visual.incomingOffsetX * 100}%) scale(${visual.incomingScale})`,
+        visual.incomingReveal < 0.999
+          ? `inset(0 0 0 ${(1 - visual.incomingReveal) * 100}%)`
+          : "none",
+      );
+      stylePreviewLayer(
+        other,
+        0,
+        usesOutgoingLayer ? visual.outgoingOpacity : 0,
+        `translateX(${visual.outgoingOffsetX * 100}%) scale(${visual.outgoingScale})`,
+      );
+      const transitionAudio = getVideoMixTransitionAudioGains(plan, time);
+      const incomingSource = sources[frame.sourceIndex];
+      const incomingBaseGain =
+        previewSourceGainAt(time) *
+        (incomingSource ? previewSourceNormalizationGain(incomingSource) : 1);
+      const outgoingBaseGain =
+        previewSourceGainAt(time) *
+        (outgoingSource ? previewSourceNormalizationGain(outgoingSource) : 1);
+      setPreviewMediaGain(
+        active,
+        incomingBaseGain * (transitionAudio?.incoming ?? 1),
+      );
+      setPreviewMediaGain(
+        other,
+        outgoingBaseGain * (transitionAudio?.outgoing ?? 0),
+      );
+      if (transitionOverlayRef.current) {
+        transitionOverlayRef.current.style.opacity = String(visual.overlayOpacity);
+        transitionOverlayRef.current.style.background = visual.overlayColor ?? "transparent";
+      }
       return;
     }
-    active.style.zIndex = "2";
-    other.style.zIndex = "1";
-    active.style.opacity = "1";
-    other.style.opacity = "0";
-    active.style.transform = "none";
-    other.style.transform = "none";
-    active.style.clipPath = "none";
-    other.style.clipPath = "none";
-    active.muted = false;
-    active.volume = sourcePreviewGain;
-    other.muted = true;
-    other.pause();
-    setOverlayStyle({ opacity: 0, background: "transparent" });
-  }, [narration, narrationEnabled, plan, schedule, sources]);
+    stylePreviewLayer(active, 2, 1);
+    stylePreviewLayer(other, 0, 0);
+    const activeSource = sources[frame.sourceIndex];
+    const sourcePreviewGain =
+      previewSourceGainAt(time) *
+      (activeSource ? previewSourceNormalizationGain(activeSource) : 1);
+    setPreviewMediaGain(active, sourcePreviewGain);
+    setPreviewMediaGain(other, 0);
+    if (transitionOverlayRef.current) {
+      transitionOverlayRef.current.style.opacity = "0";
+      transitionOverlayRef.current.style.background = "transparent";
+    }
+  }, [
+    plan,
+    previewSourceGainAt,
+    previewSourceNormalizationGain,
+    schedule,
+    setPreviewMediaGain,
+    sources,
+    stylePreviewLayer,
+    updatePreviewLayerBackground,
+  ]);
 
-  const startPreview = () => {
+  const startPreview = (loopRange?: { start: number; end: number }) => {
     if (!plan || exporting || narrationGenerating) return;
-    if (isPlaying) {
+    if (isPlayingRef.current) {
       stopPreview();
       return;
     }
-    const startAt = previewTime >= plan.duration - 0.04 ? 0 : previewTime;
+    const startAt = loopRange?.start ?? (previewTime >= plan.duration - 0.04 ? 0 : previewTime);
+    previewLoopRef.current = loopRange ?? null;
+    ensurePreviewAudioGraph();
+    const primary = previewPrimaryRef.current;
+    const secondary = previewSecondaryRef.current;
+    const startClip = clipAtTime(plan, startAt);
+    const startSource = sources[startClip.sourceIndex];
+    const startFrame = schedule[Math.min(
+      schedule.length - 1,
+      Math.max(0, Math.floor(startAt * plan.frameRate)),
+    )];
+    const nextClip = plan.clips[startClip.globalClipIndex + 1] ?? startClip;
+    const standbySource = startFrame?.transition &&
+      videoCompositionTransitionUsesOverlap(startFrame.transition.type)
+        ? sources[startFrame.transition.from.sourceIndex]
+        : sources[nextClip.sourceIndex] ?? startSource;
+    if (primary && secondary && startSource && standbySource) {
+      // Both unmuted media elements must enter the playing state during this
+      // explicit click. Later `loadedmetadata` and rAF callbacks are not
+      // trusted user activations on iOS, and WebKit pauses a muted autoplaying
+      // video when it is unmuted later. Keep both unmuted with zero output gain
+      // while assigning/seeking, then configurePreviewAt raises only the
+      // currently audible layer. The standby remains authorized and playing
+      // silently, ready for a transition without another play() request.
+      setPreviewMediaGain(primary, 0);
+      setPreviewMediaGain(secondary, 0);
+      if (primary.dataset.sourceId !== startSource.id) {
+        primary.src = startSource.url;
+        primary.dataset.sourceId = startSource.id;
+        primary.load();
+      }
+      if (secondary.dataset.sourceId !== standbySource.id) {
+        secondary.src = standbySource.url;
+        secondary.dataset.sourceId = standbySource.id;
+        secondary.load();
+      }
+      activeLayerRef.current = 0;
+      activeClipRef.current = startClip.globalClipIndex;
+      startPreviewMediaPair(primary, secondary);
+    }
     setPreviewTime(startAt);
     previewStartTimeRef.current = startAt;
-    previewStartedAtRef.current = performance.now();
+    previewStartedAtRef.current = 0;
+    // Set playback intent before configuring both media layers so the outgoing
+    // side of a transition can start in the same user gesture as the incoming.
+    isPlayingRef.current = true;
+    setIsPlaying(true);
     configurePreviewAt(startAt, true);
     updatePreviewTransition(startAt);
     updateNarrationOverlay(startAt);
     const narrationPlayer = narrationAudioRef.current;
     if (narrationEnabled && narration && narrationPlayer) {
       narrationPlayer.currentTime = Math.min(startAt, narration.audioDuration);
-      narrationPlayer.volume = 1;
-      void narrationPlayer.play().catch(() => undefined);
+      setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
+      playPreviewMedia(narrationPlayer);
     }
-    setIsPlaying(true);
     const tick = (now: number) => {
+      if (previewStartedAtRef.current === 0) previewStartedAtRef.current = now;
       const next = previewStartTimeRef.current + (now - previewStartedAtRef.current) / 1000;
+      const loop = previewLoopRef.current;
+      if (loop && next >= loop.end) {
+        previewStartTimeRef.current = loop.start;
+        previewStartedAtRef.current = now;
+        setPreviewTime(loop.start);
+        configurePreviewAt(loop.start, true);
+        updatePreviewTransition(loop.start);
+        updateNarrationOverlay(loop.start);
+        if (narrationPlayer && narration) {
+          narrationPlayer.currentTime = Math.min(loop.start, narration.audioDuration);
+          setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
+        }
+        animationRef.current = requestAnimationFrame(tick);
+        return;
+      }
       if (!mountedRef.current || next >= plan.duration) {
         setPreviewTime(plan.duration);
         configurePreviewAt(plan.duration - 0.001, false);
@@ -1418,7 +2396,10 @@ export default function VideoMixClient() {
         stopPreview();
         return;
       }
-      setPreviewTime(next);
+      if (now - lastPreviewUiUpdateRef.current >= 80) {
+        lastPreviewUiUpdateRef.current = now;
+        setPreviewTime(next);
+      }
       configurePreviewAt(next, true);
       updatePreviewTransition(next);
       updateNarrationOverlay(next);
@@ -1436,6 +2417,36 @@ export default function VideoMixClient() {
     animationRef.current = requestAnimationFrame(tick);
   };
 
+  const previewSingleClip = (sourceId: string, clipIndex: number) => {
+    if (!plan) return;
+    const clip = plan.clips.find((item) => item.sourceId === sourceId && item.clipIndex === clipIndex);
+    if (!clip) return;
+    stopPreview();
+    // Keep play() in the button's trusted click handler. Deferring startPreview
+    // to requestAnimationFrame loses user activation on iOS (including for the
+    // optional narration audio).
+    startPreview({ start: clip.editedStart, end: clip.editedEnd });
+  };
+
+  const setClipEdgeFromPreview = (
+    sourceId: string,
+    clipIndex: number,
+    field: "start" | "end",
+  ) => {
+    if (!plan) return;
+    const active = clipAtTime(plan, previewTime);
+    if (active.sourceId !== sourceId || active.clipIndex !== clipIndex) {
+      setSourceFeedback({ kind: "error", text: "先にこのカットをプレビューし、使いたい位置で停止してください。" });
+      return;
+    }
+    updateClip(
+      sourceId,
+      clipIndex,
+      field,
+      Math.min(active.end, active.start + Math.max(0, previewTime - active.editedStart)),
+    );
+  };
+
   const addVideos = async (event: ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -1449,11 +2460,12 @@ export default function VideoMixClient() {
     preparingRef.current = true;
     setPreparing(true);
     setError("");
+    setSourceFeedback(null);
     const currentSources = sourcesRef.current;
     const availableSlots = VIDEO_COMPOSITION_MAX_SOURCES - currentSources.length;
     const limited = picked.slice(0, Math.max(0, availableSlots));
     if (availableSlots <= 0) {
-      setError("動画は最大5つです。追加済みの動画を削除してから選んでください。");
+      announceSourceFeedback("error", "動画は最大5本です。追加済みの動画を削除してから選んでください。");
       preparingRef.current = false;
       setPreparing(false);
       return;
@@ -1486,7 +2498,12 @@ export default function VideoMixClient() {
           skipped.push(`${file.name}（合計5分超過）`);
           continue;
         }
-        const id = createSourceId(file);
+        const fingerprint = fileFingerprint(file);
+        const savedSource = findVideoMixDraftSource(loadedDraft, fingerprint);
+        const restoredClips = savedSource
+          ? clampVideoMixDraftClips(savedSource.clips, metadata.duration)
+          : null;
+        const id = savedSource?.id ?? createSourceId(file);
         added.push({
           id,
           file,
@@ -1494,7 +2511,13 @@ export default function VideoMixClient() {
           duration: metadata.duration,
           width: metadata.width,
           height: metadata.height,
-          clips: [],
+          clips: restoredClips ?? [],
+          framing: savedSource?.framing ?? defaultVideoMixFraming(metadata.width, metadata.height),
+          thumbnails: [],
+          // Keep upload responsive. A bounded selected-clip analysis updates
+          // this unity fallback shortly after the source appears in the UI.
+          audioNormalizationGain: 1,
+          audioNormalizationAnalysisKey: null,
         });
         existingFingerprints.add(fileFingerprint(file));
         nextBytes += file.size;
@@ -1511,7 +2534,7 @@ export default function VideoMixClient() {
       sourceGenerationRef.current += 1;
       stopPreview();
       clearResult();
-      clearNarrationDraft();
+      invalidateGeneratedNarration();
       const combined = [...currentSources, ...added].map((source) => ({
         ...source,
         clips: source.clips.length > 0 ? source.clips : [createInitialClip(source.duration)],
@@ -1521,10 +2544,66 @@ export default function VideoMixClient() {
       setBoundaryTransitionPreferences((current) =>
         pruneVideoMixBoundaryTransitionPreferences(combined, current),
       );
+      if (!draftSettingsApplied && loadedDraft && added.some((source) =>
+        Boolean(findVideoMixDraftSource(loadedDraft, fileFingerprint(source.file))))) {
+        setTransition(loadedDraft.transition);
+        setBoundaryTransitionPreferences(
+          pruneVideoMixBoundaryTransitionPreferences(
+            combined,
+            loadedDraft.boundaryTransitions,
+          ),
+        );
+        setNarrationEnabled(loadedDraft.narrationEnabled);
+        setNarrationCaptionsEnabled(loadedDraft.narrationCaptionsEnabled);
+        setNarrationStyle(loadedDraft.narrationStyle);
+        setNarrationGoal(loadedDraft.narrationGoal);
+        setNarrationBrief(loadedDraft.narrationBrief);
+        setDraftSettingsApplied(true);
+        setMessage("前回のカット範囲と設定を復元しました。動画ファイル本体は端末の外へ送信していません。");
+        trackClientEvent("draft_recovered", {
+          mode: "video_mix",
+          source_count: combined.length,
+          clip_count: combined.reduce((sum, source) => sum + source.clips.length, 0),
+          duration_bucket: productDurationBucket(combined.reduce((sum, source) => sum + source.duration, 0)),
+        });
+      }
+      thumbnailAbortRef.current?.abort();
+      const thumbnailController = new AbortController();
+      thumbnailAbortRef.current = thumbnailController;
+      void (async () => {
+        for (const source of added) {
+          if (thumbnailController.signal.aborted || exportRunningRef.current) return;
+          try {
+            const thumbnails = await extractVideoFilmstrip(
+              source.url,
+              source.duration,
+              thumbnailController.signal,
+            );
+            if (thumbnailController.signal.aborted || !mountedRef.current) return;
+            const withThumbnails = sourcesRef.current.map((current) =>
+              current.id === source.id ? { ...current, thumbnails } : current,
+            );
+            sourcesRef.current = withThumbnails;
+            setSources(withThumbnails);
+          } catch {
+            if (thumbnailController.signal.aborted) return;
+            // The gradient remains as a lightweight fallback for unreadable frames.
+          }
+        }
+      })();
     }
     if (picked.length > limited.length) skipped.push(`6本目以降（最大5本）`);
-    if (skipped.length > 0) setError(`追加しなかった動画：${skipped.join("、")}`);
-    else setMessage(`${added.length}本を追加しました。選んだ順につなぎます。`);
+    if (skipped.length > 0) {
+      announceSourceFeedback("error", `追加しなかった動画：${skipped.join("、")}`);
+      trackClientEvent("video_mix_add_failed", {
+        mode: "video_mix",
+        context: "general",
+        outcome: "blocked",
+        source_count: sourcesRef.current.length,
+      });
+    } else {
+      announceSourceFeedback("message", `${added.length}本を追加しました。選んだ順につなぎます。`);
+    }
     preparingRef.current = false;
     setPreparing(false);
   };
@@ -1537,22 +2616,49 @@ export default function VideoMixClient() {
       finalizeActionRef.current ||
       pendingFinalizeRef.current
     ) return;
+    thumbnailAbortRef.current?.abort();
     const current = sourcesRef.current;
     const target = current.find((source) => source.id === sourceId);
     if (!target) return;
+    const index = current.indexOf(target);
+    if (removedSourceRef.current) {
+      URL.revokeObjectURL(removedSourceRef.current.source.url);
+    }
+    const undoEntry: RemovedMixSource = {
+      source: target,
+      index,
+      boundaryTransitions: activeBoundaryTransitionPreferences,
+    };
+    removedSourceRef.current = undoEntry;
+    setRemovedSource(undoEntry);
     sourceGenerationRef.current += 1;
     stopPreview();
     clearResult();
-    clearNarrationDraft();
+    invalidateGeneratedNarration();
     const next = current.filter((source) => source.id !== sourceId);
     sourcesRef.current = next;
     setSources(next);
     setBoundaryTransitionPreferences((currentPreferences) =>
       pruneVideoMixBoundaryTransitionPreferences(next, currentPreferences),
     );
-    URL.revokeObjectURL(target.url);
     activeClipRef.current = -1;
     setPreviewTime(0);
+  };
+
+  const undoRemoveSource = () => {
+    const entry = removedSourceRef.current;
+    if (!entry || editingLocked) return;
+    sourceGenerationRef.current += 1;
+    const next = [...sourcesRef.current];
+    next.splice(Math.min(entry.index, next.length), 0, entry.source);
+    sourcesRef.current = next;
+    setSources(next);
+    setBoundaryTransitionPreferences(
+      pruneVideoMixBoundaryTransitionPreferences(next, entry.boundaryTransitions),
+    );
+    removedSourceRef.current = null;
+    setRemovedSource(null);
+    setSourceFeedback({ kind: "message", text: "削除した動画を元の位置へ戻しました。" });
   };
 
   const setClipCount = (sourceId: string, count: 1 | 2) => {
@@ -1568,21 +2674,50 @@ export default function VideoMixClient() {
       if (source.id !== sourceId) return source;
       if (source.clips.length === count) return source;
       if (count === 1) {
-        return { ...source, clips: [{ start: source.clips[0].start, end: source.clips.at(-1)!.end }] };
+        return {
+          ...source,
+          clips: [{ start: source.clips[0].start, end: source.clips.at(-1)!.end }],
+          audioNormalizationGain: 1,
+          audioNormalizationAnalysisKey: null,
+        };
       }
       if (source.duration < MINIMUM_CLIP_SECONDS * 2) return source;
-      return { ...source, clips: splitIntoTwoClips(source.duration, source.clips[0]) };
+      return {
+        ...source,
+        clips: splitIntoTwoClips(source.duration, source.clips[0]),
+        audioNormalizationGain: 1,
+        audioNormalizationAnalysisKey: null,
+      };
     });
     if (next.every((source, index) => source === current[index])) return;
     sourceGenerationRef.current += 1;
     stopPreview();
     clearResult();
-    clearNarrationDraft();
+    invalidateGeneratedNarration();
     sourcesRef.current = next;
     setSources(next);
     setBoundaryTransitionPreferences((currentPreferences) =>
       pruneVideoMixBoundaryTransitionPreferences(next, currentPreferences),
     );
+  };
+
+  const updateSourceFraming = (
+    sourceId: string,
+    patch: Partial<VideoMixSourceFraming>,
+  ) => {
+    if (editingLocked) return;
+    const current = sourcesRef.current;
+    const next = current.map((source) =>
+      source.id === sourceId
+        ? { ...source, framing: { ...source.framing, ...patch } }
+        : source,
+    );
+    if (next.every((source, index) => source === current[index])) return;
+    stopPreview();
+    clearResult();
+    sourcesRef.current = next;
+    setSources(next);
+    activeClipRef.current = -1;
   };
 
   const updateClip = (sourceId: string, clipIndex: number, field: "start" | "end", raw: number) => {
@@ -1612,13 +2747,18 @@ export default function VideoMixClient() {
       ) {
         return source;
       }
-      return { ...source, clips };
+      return {
+        ...source,
+        clips,
+        audioNormalizationGain: 1,
+        audioNormalizationAnalysisKey: null,
+      };
     });
     if (next.every((source, index) => source === current[index])) return;
     sourceGenerationRef.current += 1;
     stopPreview();
     clearResult();
-    clearNarrationDraft();
+    invalidateGeneratedNarration();
     sourcesRef.current = next;
     setSources(next);
   };
@@ -1642,12 +2782,15 @@ export default function VideoMixClient() {
     clearResult();
     setError("");
     setMessage("動画の場面を端末内で選んでいます…");
+    trackClientEvent("video_mix_narration_started", analyticsSnapshot());
     narrationGeneratingRef.current = true;
     setNarrationGenerating(true);
     const controller = new AbortController();
     narrationAbortRef.current = controller;
     try {
-      const reservation = await ensureMixUsageReservation(controller.signal);
+      // `true` also replaces an exhausted free reservation with the paid
+      // entitlement confirmed after returning from Checkout.
+      const reservation = await ensureMixUsageReservation(controller.signal, true);
       ensureVideoMixActionActive(controller.signal, mountedRef.current);
       const operationId = crypto.randomUUID();
       const frames = (
@@ -1740,18 +2883,26 @@ export default function VideoMixClient() {
         audio: speechResult.audio,
         url: URL.createObjectURL(speechResult.audio),
         captions: prepared.captions,
+        activity: prepared.activity,
+        normalizationGain: prepared.normalizationGain,
         audioDuration: prepared.audioDuration,
         style: narrationStyle,
       };
       const previous = narrationRef.current;
       narrationRef.current = next;
       setNarration(next);
-      if (previous) URL.revokeObjectURL(previous.url);
+      setNarrationStale(false);
+      if (previousNarrationRef.current) {
+        URL.revokeObjectURL(previousNarrationRef.current.url);
+      }
+      previousNarrationRef.current = previous;
+      setPreviousNarration(previous);
       setDisclosureConfirmed(false);
       updateNarrationOverlay(0);
       setMessage(
         `AIナレーションとテロップを作成しました。AI処理はあと${speechResult.quota.remaining ?? aiOperationsRemaining}回です。`,
       );
+      trackClientEvent("video_mix_narration_completed", analyticsSnapshot());
     } catch (caught) {
       reservationInvalidatedRef.current = true;
       void releaseActiveReservationForeground().catch(() => undefined);
@@ -1764,6 +2915,7 @@ export default function VideoMixClient() {
           : "AIナレーションを作成できませんでした。",
       );
       setMessage("");
+      trackClientEvent("video_mix_narration_failed", analyticsSnapshot());
     } finally {
       if (narrationAbortRef.current === controller) {
         narrationAbortRef.current = null;
@@ -1801,10 +2953,15 @@ export default function VideoMixClient() {
       setError("AIナレーションを作成してから書き出してください。");
       return;
     }
+    if (narrationEnabled && narrationStale) {
+      setError("設定が変わっています。前のAI音声は残っていますが、現在の映像に合わせて作り直してください。");
+      return;
+    }
     if (narrationEnabled && !disclosureConfirmed) {
       setError("AIナレーションを使う場合は、投稿時の表示を確認してください。");
       return;
     }
+    thumbnailAbortRef.current?.abort();
     stopPreview();
     clearResult();
     setError("");
@@ -1813,6 +2970,7 @@ export default function VideoMixClient() {
     exportRunningRef.current = true;
     setExporting(true);
     setExportProgress(0);
+    trackClientEvent("export_started", analyticsSnapshot());
     const controller = new AbortController();
     exportAbortRef.current = controller;
     let reservationId: string | null = null;
@@ -1820,7 +2978,9 @@ export default function VideoMixClient() {
     try {
       // Usage policy is based on the combined source duration, while the
       // resulting file still counts as one completed video.
-      const reservation = await ensureMixUsageReservation(controller.signal);
+      // Encoding can take several minutes on an iPhone, so extend or safely
+      // reactivate the lease immediately before the expensive export begins.
+      const reservation = await ensureMixUsageReservation(controller.signal, true);
       ensureVideoMixActionActive(controller.signal, mountedRef.current);
       reservationId = reservation.reservationId;
       if (!canSaveCompletedVideo(reservation.bucket)) {
@@ -1829,6 +2989,7 @@ export default function VideoMixClient() {
         }
         setShowPurchase(true);
         setMessage("編集とプレビューは無料です。完成動画を保存するにはプランを選んでください。");
+        trackClientEvent("video_mix_paywall_shown", analyticsSnapshot());
         return;
       }
       if (!reservation.bucket) throw new Error("保存できる利用枠を確認できませんでした。");
@@ -1838,10 +2999,20 @@ export default function VideoMixClient() {
       let audioMetadata: VideoMixAudioExportMetadata | null = null;
       let exportedPlan: VideoCompositionPlan | null = null;
       const blob = await exportVideoMixMp4({
-        sources: sources.map((source) => ({ id: source.id, file: source.file, clips: source.clips })),
+        sources: sources.map((source) => ({
+          id: source.id,
+          file: source.file,
+          clips: source.clips,
+          framing: source.framing,
+          // Use the same cached value as the live preview. If a user exports
+          // during the short analysis window, both intentionally use unity.
+          audioNormalizationGain: previewSourceNormalizationGain(source),
+        })),
         transition,
         boundaryTransitions: resolvedBoundaryTransitions,
         narrationAudio: narrationEnabled ? narration?.audio : undefined,
+        narrationNormalizationGain:
+          narrationEnabled ? narration?.normalizationGain : undefined,
         duckSourceAudioDuringNarration: narrationEnabled,
         signal: controller.signal,
         onProgress: setExportProgress,
@@ -1887,6 +3058,27 @@ export default function VideoMixClient() {
         qualityMessage,
       };
       if (reservationId) {
+        let durable;
+        try {
+          durable = await saveDurableVideoMixOutput({
+            blob,
+            filename: preparedResult.filename,
+            reservationId,
+            bucket: reservation.bucket,
+            qualityMessage,
+          });
+        } catch {
+          const stagedPending = { result: preparedResult, reservationId };
+          pendingFinalizeRef.current = stagedPending;
+          setPendingFinalize(stagedPending);
+          activeReservationRef.current = reservationId;
+          activeReservationStatusRef.current = "reserved";
+          setError("完成動画を端末へ安全に一時保存できなかったため、利用枠は確定していません。空き容量を確認して再試行してください。");
+          return;
+        }
+        preparedResult.durableId = durable.id;
+      }
+      if (reservationId) {
         const stagedPending = { result: preparedResult, reservationId };
         pendingFinalizeRef.current = stagedPending;
         try {
@@ -1897,10 +3089,14 @@ export default function VideoMixClient() {
           finalizingUsageRef.current = true;
           setFinalizingUsage(true);
           await completeReservationUsage(reservationId, reservation.bucket);
+          if (preparedResult.durableId) {
+            await markDurableVideoMixOutputCompleted(preparedResult.durableId);
+          }
         } catch (caught) {
           if (controller.signal.aborted || !mountedRef.current) throw caught;
           activeReservationRef.current = reservationId;
           activeReservationBucketRef.current = reservation.bucket;
+          activeReservationStatusRef.current = "reserved";
           setPendingFinalize(stagedPending);
           setError("動画は完成しましたが、利用記録を確認できませんでした。通信を確認して再試行してください。");
           return;
@@ -1908,6 +3104,10 @@ export default function VideoMixClient() {
       }
       reservationKeyRef.current = null;
       finalizeResult(preparedResult);
+      trackClientEvent("export_completed", {
+        ...analyticsSnapshot(),
+        bucket: reservation.bucket,
+      });
     } catch (caught) {
       if (pendingFinalizeRef.current?.result === preparedResult) {
         pendingFinalizeRef.current = null;
@@ -1927,6 +3127,7 @@ export default function VideoMixClient() {
           };
           pendingFinalizeRef.current = stagedPending;
           activeReservationRef.current = reservationId;
+          activeReservationStatusRef.current = "reserved";
           setPendingFinalize(stagedPending);
           setError(
             "動画は完成しましたが、保存枠の確定結果を確認できませんでした。再試行してください。",
@@ -1944,6 +3145,7 @@ export default function VideoMixClient() {
         }
       }
       setError(caught instanceof Error ? caught.message : "動画を書き出せませんでした。");
+      trackClientEvent("export_failed", analyticsSnapshot());
     } finally {
       exportAbortRef.current = null;
       exportRunningRef.current = false;
@@ -1961,11 +3163,54 @@ export default function VideoMixClient() {
     setExporting(true);
     setError("");
     try {
-      await completeReservationUsage(
+      let pendingResult = pendingFinalize.result;
+      let durableId = pendingResult.durableId;
+      if (!durableId) {
+        const durable = await saveDurableVideoMixOutput({
+          blob: pendingResult.blob,
+          filename: pendingResult.filename,
+          reservationId: pendingFinalize.reservationId,
+          bucket: pendingResult.bucket,
+          qualityMessage: pendingResult.qualityMessage,
+        });
+        durableId = durable.id;
+        pendingResult = { ...pendingResult, durableId };
+        const updatedPending = { ...pendingFinalize, result: pendingResult };
+        pendingFinalizeRef.current = updatedPending;
+        setPendingFinalize(updatedPending);
+      }
+      const retryDuration = sourcesRef.current.reduce((sum, source) => sum + source.duration, 0);
+      const refreshed = await renewMixUsage(
         pendingFinalize.reservationId,
-        pendingFinalize.result.bucket,
+        reservationKeyRef.current,
+        retryDuration > 0 ? retryDuration : undefined,
       );
-      finalizeResult(pendingFinalize.result);
+      if (refreshed.status !== "completed") {
+        if (refreshed.status !== "reserved") {
+          throw new Error("利用枠を再開できませんでした。通信を確認して、もう一度お試しください。");
+        }
+        if (!refreshed.bucket || !canSaveCompletedVideo(refreshed.bucket)) {
+          setShowPurchase(true);
+          throw new VideoMixRequestError(
+            "現在のアカウントでは保存できる利用枠を確認できませんでした。完成動画は端末内に保持しています。プランを確認してから再試行してください。",
+            402,
+          );
+        }
+        pendingResult = { ...pendingResult, bucket: refreshed.bucket };
+        const updatedPending = { ...pendingFinalize, result: pendingResult };
+        pendingFinalizeRef.current = updatedPending;
+        setPendingFinalize(updatedPending);
+        activeReservationRef.current = refreshed.reservationId;
+        activeReservationBucketRef.current = refreshed.bucket;
+        activeReservationStatusRef.current = refreshed.status;
+        activeReservationExpiresAtRef.current = refreshed.expiresAt;
+        await completeReservationUsage(
+          pendingFinalize.reservationId,
+          refreshed.bucket,
+        );
+      }
+      await markDurableVideoMixOutputCompleted(durableId);
+      finalizeResult(pendingResult);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "利用記録を確認できませんでした。");
     } finally {
@@ -1979,10 +3224,13 @@ export default function VideoMixClient() {
   const discardPending = async () => {
     if (!pendingFinalize || finalizeActionRef.current || exportRunningRef.current) return;
     finalizeActionRef.current = true;
-    setExporting(true);
+    setDiscardingPending(true);
     try {
       await releaseReservationUsage(pendingFinalize.reservationId);
       URL.revokeObjectURL(pendingFinalize.result.url);
+      if (pendingFinalize.result.durableId) {
+        await deleteDurableVideoMixOutput(pendingFinalize.result.durableId);
+      }
       pendingFinalizeRef.current = null;
       setPendingFinalize(null);
       reservationKeyRef.current = null;
@@ -1991,7 +3239,7 @@ export default function VideoMixClient() {
       setError(caught instanceof Error ? caught.message : "利用枠を戻せませんでした。");
     } finally {
       finalizeActionRef.current = false;
-      setExporting(false);
+      setDiscardingPending(false);
     }
   };
 
@@ -2002,6 +3250,15 @@ export default function VideoMixClient() {
     try {
       if (typeof navigator.share === "function" && (!navigator.canShare || navigator.canShare(shareData))) {
         await navigator.share(shareData);
+        if (result.durableId) {
+          const durableId = result.durableId;
+          await deleteDurableVideoMixOutput(durableId).catch(() => undefined);
+          if (resultRef.current?.durableId === durableId) {
+            const sharedResult = { ...resultRef.current, durableId: undefined };
+            resultRef.current = sharedResult;
+            setResult(sharedResult);
+          }
+        }
         return;
       }
     } catch (caught) {
@@ -2015,20 +3272,46 @@ export default function VideoMixClient() {
     link.remove();
   };
 
+  const deleteResultDurableCopy = async () => {
+    const current = resultRef.current;
+    if (!current?.durableId || deletingDurableCopy) return;
+    const durableId = current.durableId;
+    setDeletingDurableCopy(true);
+    setError("");
+    try {
+      await deleteDurableVideoMixOutput(durableId);
+      if (resultRef.current?.durableId === durableId) {
+        const retainedPlayback = {
+          ...resultRef.current,
+          durableId: undefined,
+        };
+        // Keep the in-memory URL alive so playback and an immediate download
+        // still work; only the device-persistent recovery copy is removed.
+        resultRef.current = retainedPlayback;
+        setResult(retainedPlayback);
+      }
+      setMessage("端末内の一時コピーを削除しました。現在の画面では引き続き保存できます。");
+    } catch {
+      setError("端末内の一時コピーを削除できませんでした。もう一度お試しください。");
+    } finally {
+      setDeletingDurableCopy(false);
+    }
+  };
+
   return (
-    <main className="videoMixShell">
+    <main className="videoMixShell" data-mobile-step={mobileStep}>
       <header className="videoMixHeader">
-        <Link href="/" className="videoMixBrand">撮るだけリール</Link>
+        <Link href="/" className="videoMixBrand" target="_blank" rel="noreferrer">撮るだけリール</Link>
         <div>
           <span>VIDEO MIX</span>
           <strong>複数動画をつなぐ</strong>
         </div>
-        <Link href="/account">アカウント</Link>
+        <Link href="/account" target="_blank" rel="noreferrer">アカウント</Link>
       </header>
 
       <section className="videoMixHero">
         <div>
-          <p className="videoMixEyebrow">最大5つの動画から、流れのある1本へ</p>
+          <p className="videoMixEyebrow">最大5本の動画から、流れのある1本へ</p>
           <h1>順番を守って、<br /><em>いい場面だけをつなぐ。</em></h1>
           <p>各動画から1〜2カットを選び、素材を選んだ順につなぎます。途中で前の動画へ戻る編集や、逆再生は行いません。つないだ後は、AIナレーションと発話に合うテロップも追加できます。</p>
         </div>
@@ -2048,9 +3331,15 @@ export default function VideoMixClient() {
           <div className="videoMixPhone">
             {sources.length > 0 ? (
               <>
-                <video ref={previewPrimaryRef} muted={false} playsInline preload="metadata" />
-                <video ref={previewSecondaryRef} muted={false} playsInline preload="metadata" />
-                <span className="videoMixTransitionOverlay" style={overlayStyle} />
+                <span ref={previewPrimaryLayerRef} className="videoMixMediaLayer" aria-hidden="true">
+                  <canvas ref={previewPrimaryBlurRef} className="videoMixBlurCanvas" width={540} height={960} />
+                  <video ref={previewPrimaryRef} muted={false} playsInline preload="metadata" />
+                </span>
+                <span ref={previewSecondaryLayerRef} className="videoMixMediaLayer" aria-hidden="true">
+                  <canvas ref={previewSecondaryBlurRef} className="videoMixBlurCanvas" width={540} height={960} />
+                  <video ref={previewSecondaryRef} muted={false} playsInline preload="metadata" />
+                </span>
+                <span ref={transitionOverlayRef} className="videoMixTransitionOverlay" />
                 <canvas
                   ref={previewCaptionRef}
                   className="videoMixCaptionCanvas"
@@ -2069,7 +3358,7 @@ export default function VideoMixClient() {
             )}
           </div>
           <div className="videoMixPlayback">
-            <button type="button" onClick={startPreview} disabled={!plan || exporting || narrationGenerating} aria-label={isPlaying ? "プレビューを停止" : "プレビューを再生"}>{isPlaying ? "Ⅱ" : "▶"}</button>
+            <button type="button" onClick={() => startPreview()} disabled={!plan || exporting || narrationGenerating} aria-label={isPlaying ? "プレビューを停止" : "プレビューを再生"}>{isPlaying ? "Ⅱ" : "▶"}</button>
             <input
               type="range"
               min={0}
@@ -2078,6 +3367,7 @@ export default function VideoMixClient() {
               value={Math.min(previewTime, plan?.duration ?? 0)}
               disabled={!plan || exporting || narrationGenerating}
               aria-label="プレビューの再生位置"
+              aria-valuetext={`${formatSeconds(previewTime)} / ${formatSeconds(plan?.duration ?? 0)}`}
               onChange={(event) => {
                 stopPreview();
                 const next = Number(event.target.value);
@@ -2099,11 +3389,11 @@ export default function VideoMixClient() {
             <span><strong>1080 × 1920</strong>完成動画</span>
             <span><strong>素材順を固定</strong>前後・逆再生なし</span>
           </div>
-          <p className="videoMixPreviewNote">プレビューでは映像・つなぎ目・AI音声・テロップを確認できます。素材ごとの最終的な音量調整は書き出し時に反映します。</p>
+          <p className="videoMixPreviewNote">プレビューでは映像・つなぎ目・AI音声・テロップを確認できます。素材ごとの音量は選んだ場面を端末内で短く解析し、プレビューと書き出しへ同じ調整を反映します。解析中に再生した場合は、完了後に自動で音量が整います。</p>
         </div>
 
         <div className="videoMixControls">
-          <section className="videoMixSection">
+          <section className="videoMixSection videoMixStep videoMixStep1">
             <div className="videoMixSectionTitle">
               <span>01</span>
               <div><h2>動画を選ぶ</h2><p>選んだ順が、そのまま完成動画の順番です。</p></div>
@@ -2113,6 +3403,8 @@ export default function VideoMixClient() {
               ref={inputRef}
               className="visuallyHidden"
               type="file"
+              tabIndex={-1}
+              aria-hidden="true"
               multiple
               accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
               disabled={editingLocked || sources.length >= VIDEO_COMPOSITION_MAX_SOURCES}
@@ -2122,6 +3414,23 @@ export default function VideoMixClient() {
               <span aria-hidden="true">＋</span>
               <span><strong>{sources.length === 0 ? "動画を選ぶ" : "動画を追加する"}</strong><small>最大5本・合計500MB・合計5分まで</small></span>
             </button>
+            {sourceFeedback ? (
+              <p
+                ref={sourceFeedbackRef}
+                className={sourceFeedback.kind === "error" ? "videoMixError videoMixSourceFeedback" : "videoMixMessage videoMixSourceFeedback"}
+                role={sourceFeedback.kind === "error" ? "alert" : "status"}
+                aria-live={sourceFeedback.kind === "error" ? "assertive" : "polite"}
+                tabIndex={sourceFeedback.kind === "error" ? -1 : undefined}
+              >
+                {sourceFeedback.text}
+              </p>
+            ) : null}
+            {removedSource ? (
+              <div className="videoMixUndo" role="status">
+                <span>「{removedSource.source.file.name}」を削除しました。</span>
+                <button type="button" onClick={undoRemoveSource} disabled={editingLocked}>元に戻す</button>
+              </div>
+            ) : null}
             {preparing ? <p className="videoMixPreparing" aria-live="polite">動画の長さと向きを端末内で確認しています…</p> : null}
             <div className="videoMixLimits" aria-label="素材の使用量">
               <span>容量 {formatBytes(totalBytes)} / 500MB</span>
@@ -2147,12 +3456,91 @@ export default function VideoMixClient() {
                       <button type="button" className={source.clips.length === 1 ? "isActive" : ""} aria-pressed={source.clips.length === 1} onClick={() => setClipCount(source.id, 1)} disabled={editingLocked}>1カット</button>
                       <button type="button" className={source.clips.length === 2 ? "isActive" : ""} aria-pressed={source.clips.length === 2} onClick={() => setClipCount(source.id, 2)} disabled={editingLocked || source.duration < MINIMUM_CLIP_SECONDS * 2}>2カット</button>
                     </fieldset>
+                    <fieldset className="videoMixFraming">
+                      <legend>縦画面への収め方</legend>
+                      {([
+                        ["blur", "ぼかし背景"],
+                        ["cover", "画面いっぱい"],
+                        ["contain", "全体を表示"],
+                      ] as const).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={source.framing.mode === mode ? "isActive" : ""}
+                          aria-pressed={source.framing.mode === mode}
+                          disabled={editingLocked}
+                          onClick={() => updateSourceFraming(source.id, { mode })}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      {source.framing.mode !== "contain" ? (
+                        <>
+                          <label>
+                            <span>主役の横位置</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              value={source.framing.focusX}
+                              aria-valuetext={`左から${Math.round(source.framing.focusX * 100)}%`}
+                              disabled={editingLocked}
+                              onChange={(event) => updateSourceFraming(source.id, { focusX: Number(event.target.value) })}
+                            />
+                          </label>
+                          <label>
+                            <span>主役の縦位置</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              value={source.framing.focusY}
+                              aria-valuetext={`上から${Math.round(source.framing.focusY * 100)}%`}
+                              disabled={editingLocked}
+                              onChange={(event) => updateSourceFraming(source.id, { focusY: Number(event.target.value) })}
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                    </fieldset>
                     <div className="videoMixClipList">
                       {source.clips.map((clip, clipIndex) => (
                         <fieldset key={`${source.id}-${clipIndex}`}>
                           <legend>{clipIndex + 1}つ目のカット <strong>{formatSeconds(clip.start)}〜{formatSeconds(clip.end)}</strong></legend>
-                          <label><span>開始</span><input type="range" min={0} max={source.duration} step={0.1} value={clip.start} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, "start", Number(event.target.value))} /></label>
-                          <label><span>終了</span><input type="range" min={0} max={source.duration} step={0.1} value={clip.end} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, "end", Number(event.target.value))} /></label>
+                          <div className="videoMixFilmstrip" aria-hidden="true">
+                            {source.thumbnails.map((thumbnail, frameIndex) => (
+                              // Generated locally and intentionally left as a data URL.
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img key={`${source.id}-frame-${frameIndex}`} src={thumbnail} alt="" />
+                            ))}
+                            <span style={{ left: `${(clip.start / source.duration) * 100}%`, width: `${((clip.end - clip.start) / source.duration) * 100}%` }} />
+                          </div>
+                          {(["start", "end"] as const).map((field) => {
+                            const value = field === "start" ? clip.start : clip.end;
+                            const label = field === "start" ? "開始" : "終了";
+                            return (
+                              <div className="videoMixClipEdge" key={field}>
+                                <label>
+                                  <span>{label}</span>
+                                  <input type="range" min={0} max={source.duration} step={0.1} value={value} aria-valuetext={formatSeconds(value)} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} />
+                                </label>
+                                <div>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 1)} disabled={editingLocked}>−1秒</button>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 0.1)} disabled={editingLocked}>−0.1</button>
+                                  <label><span className="visuallyHidden">{label}時刻（秒）</span><input type="number" min={0} max={source.duration} step={0.1} value={value.toFixed(1)} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} /></label>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 0.1)} disabled={editingLocked}>＋0.1</button>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 1)} disabled={editingLocked}>＋1秒</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div className="videoMixClipActions">
+                            <button type="button" onClick={() => previewSingleClip(source.id, clipIndex)} disabled={editingLocked}>このカットを繰り返し再生</button>
+                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")} disabled={editingLocked}>停止位置を開始に</button>
+                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")} disabled={editingLocked}>停止位置を終了に</button>
+                          </div>
                         </fieldset>
                       ))}
                     </div>
@@ -2162,8 +3550,8 @@ export default function VideoMixClient() {
             ) : null}
           </section>
 
-          <section className="videoMixSection">
-            <div className="videoMixSectionTitle"><span>02</span><div><h2>つなぎ方を選ぶ</h2><p>何度変えても追加料金やAI処理回数は発生しません。</p></div></div>
+          <section className="videoMixSection videoMixStep videoMixStep2">
+            <div className="videoMixSectionTitle"><span>02</span><div><h2>つなぎ方を選ぶ</h2><p>つなぎ方の変更自体は無料です。AI音声を作った後に完成尺が変わる場合、音声の作り直しにはAI処理を1回使います。</p></div></div>
             <div className="videoMixTransitionSummary">
               <strong>すべての切り目へ一括設定</strong>
               <small>
@@ -2173,7 +3561,8 @@ export default function VideoMixClient() {
               </small>
             </div>
             <div className="videoMixTransitionGrid" role="radiogroup" aria-label="すべての切り目のつなぎ方">
-              {TRANSITION_OPTIONS.map((option, optionIndex) => (
+              {TRANSITION_OPTIONS.map((option, optionIndex) =>
+                showAllTransitions || optionIndex < 3 || option.id === transition ? (
                 <button
                   key={option.id}
                   ref={(element) => { transitionButtonRefs.current[optionIndex] = element; }}
@@ -2190,8 +3579,16 @@ export default function VideoMixClient() {
                   <strong>{option.label}</strong><small>{option.note}</small>
                   {option.id === "crossfade" ? <em>おすすめ</em> : null}
                 </button>
-              ))}
+              ) : null)}
             </div>
+            <button
+              type="button"
+              className="videoMixTransitionMore"
+              aria-expanded={showAllTransitions}
+              onClick={() => setShowAllTransitions((current) => !current)}
+            >
+              {showAllTransitions ? "おすすめ3種類だけ表示" : "ほかの5種類も見る"}
+            </button>
             {plan && plan.boundaries.length > 0 ? (
               <div className="videoMixBoundarySettings">
                 <div className="videoMixBoundaryHeading">
@@ -2230,8 +3627,13 @@ export default function VideoMixClient() {
                             onChange={(event) => {
                               if (editingLocked) return;
                               const nextType = event.target.value as VideoCompositionTransitionType;
+                              trackClientEvent("video_mix_transition_changed", {
+                                mode: "video_mix",
+                                transition: nextType,
+                              });
                               stopPreview();
                               clearResult();
+                              invalidateGeneratedNarration();
                               setBoundaryTransitionPreferences((current) => {
                                 const active =
                                   pruneVideoMixBoundaryTransitionPreferences(
@@ -2262,7 +3664,7 @@ export default function VideoMixClient() {
             ) : null}
           </section>
 
-          <section className="videoMixSection videoMixNarrationSection">
+          <section className="videoMixSection videoMixNarrationSection videoMixStep videoMixStep3">
             <div className="videoMixSectionTitle">
               <span>03</span>
               <div>
@@ -2272,36 +3674,29 @@ export default function VideoMixClient() {
             </div>
             <div className="videoMixFinishMode" role="radiogroup" aria-label="完成動画の音声">
               <button
+                ref={(element) => { finishModeButtonRefs.current[0] = element; }}
                 type="button"
                 role="radio"
                 aria-checked={!narrationEnabled}
+                tabIndex={!narrationEnabled ? 0 : -1}
                 className={!narrationEnabled ? "isActive" : ""}
                 disabled={editingLocked}
-                onClick={() => {
-                  if (editingLocked) return;
-                  stopPreview();
-                  clearResult();
-                  setNarrationEnabled(false);
-                  clearNarrationDraft();
-                  const canvas = previewCaptionRef.current;
-                  canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-                }}
+                onKeyDown={(event) => handleFinishModeKeyDown(event, 0)}
+                onClick={() => selectFinishMode(false)}
               >
                 <strong>元音声のまま</strong>
                 <small>選んだ動画の音を自動でそろえてつなぎます</small>
               </button>
               <button
+                ref={(element) => { finishModeButtonRefs.current[1] = element; }}
                 type="button"
                 role="radio"
                 aria-checked={narrationEnabled}
+                tabIndex={narrationEnabled ? 0 : -1}
                 className={narrationEnabled ? "isActive" : ""}
                 disabled={editingLocked}
-                onClick={() => {
-                  if (editingLocked) return;
-                  stopPreview();
-                  clearResult();
-                  setNarrationEnabled(true);
-                }}
+                onKeyDown={(event) => handleFinishModeKeyDown(event, 1)}
+                onClick={() => selectFinishMode(true)}
               >
                 <strong>AIナレーションを入れる</strong>
                 <small>映像の順番を見て台本・声・テロップを自動作成</small>
@@ -2426,13 +3821,35 @@ export default function VideoMixClient() {
                       <strong>{narration.plan.title}</strong>
                       <small>{narration.audioDuration.toFixed(1)}秒・{NARRATION_STYLES.find((style) => style.id === narration.style)?.label}</small>
                     </div>
+                    {narrationStale ? (
+                      <p className="videoMixNarrationStale" role="status">設定変更前の音声です。現在の映像へ合わせるには作り直してください。</p>
+                    ) : null}
+                    {previousNarration ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = narrationRef.current;
+                          narrationRef.current = previousNarration;
+                          previousNarrationRef.current = current;
+                          setNarration(previousNarration);
+                          setPreviousNarration(current);
+                          setNarrationStale(false);
+                          setDisclosureConfirmed(false);
+                          setMessage("ひとつ前のAI音声へ戻しました。");
+                        }}
+                      >
+                        ひとつ前の音声へ戻す
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
                         stopPreview();
                         const player = narrationAudioRef.current;
                         if (!player) return;
+                        ensurePreviewAudioGraph();
                         player.currentTime = 0;
+                        setPreviewNarrationGain(player, narration.normalizationGain);
                         void player.play().catch(() => undefined);
                       }}
                     >
@@ -2477,8 +3894,9 @@ export default function VideoMixClient() {
           <section className="videoMixExportCard">
             <div><span aria-hidden="true">MP4</span><p><strong>高画質で1本に書き出す</strong><small>1080×1920・完成動画1本分</small></p></div>
             <ul><li>素材は選んだ順、各素材内は時間順を維持</li><li>{narrationEnabled ? "AI音声中は元音声を自動で小さく調整" : "素材ごとの音量差を自動で調整"}</li><li>つなぎ方とテロップ表示の変更は追加料金なし</li><li>有料枠は品質確認済みの書き出し成功時だけ使用</li></ul>
+            <p className="videoMixAlwaysPrice">編集・プレビュー無料　<span>保存は1本¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}／月額¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から</span></p>
             {planResult.error ? <p className="videoMixError" role="alert">{planResult.error}</p> : null}
-            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && !narration)}>
+            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed))}>
               {finalizingUsage
                 ? "保存枠を確定中…"
                 : exporting
@@ -2488,8 +3906,8 @@ export default function VideoMixClient() {
                     : "1本の動画として書き出す"}
               <span aria-hidden="true">↓</span>
             </button>
-            {exporting ? <><div className="videoMixProgress" aria-live="polite"><span style={{ width: `${Math.max(2, exportProgress * 100)}%` }} /></div><button type="button" className="videoMixCancel" disabled={finalizingUsage} onClick={() => exportAbortRef.current?.abort()}>{finalizingUsage ? "保存枠を確定中" : "書き出しを中止"}</button></> : null}
-            {pendingFinalize ? <div className="videoMixFinalize"><button type="button" onClick={retryFinalize}>利用確認を再試行して保存へ進む</button><button type="button" onClick={discardPending}>完成データを破棄して編集へ戻る</button></div> : null}
+            {exporting ? <><div className="videoMixProgress" role="progressbar" aria-label={finalizingUsage ? "保存枠を確定中" : "動画を書き出し中"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportProgress * 100)} aria-valuetext={finalizingUsage ? "動画は完成し、保存枠を確定しています" : `${Math.round(exportProgress * 100)}パーセント`}><span style={{ width: `${Math.max(2, exportProgress * 100)}%` }} /></div><button type="button" className="videoMixCancel" disabled={finalizingUsage} onClick={() => exportAbortRef.current?.abort()}>{finalizingUsage ? "保存枠を確定中" : "書き出しを中止"}</button></> : null}
+            {pendingFinalize ? <div className="videoMixFinalize"><button type="button" disabled={finalizingUsage || discardingPending} onClick={retryFinalize}>{finalizingUsage ? "利用確認中…" : "利用確認を再試行して保存へ進む"}</button><button type="button" disabled={finalizingUsage || discardingPending} onClick={discardPending}>{discardingPending ? "破棄を確認中…" : "完成データを破棄して編集へ戻る"}</button></div> : null}
           </section>
 
           <div className="videoMixStatus" aria-live="polite">
@@ -2512,13 +3930,32 @@ export default function VideoMixClient() {
             <section className="videoMixResult" aria-label="完成動画">
               <div><span>完成</span><strong>{result.qualityMessage}</strong></div>
               <video src={result.url} controls playsInline preload="metadata" />
-              <button type="button" onClick={saveResult}>完成動画を保存・共有</button>
+              <button type="button" onClick={saveResult} disabled={deletingDurableCopy}>完成動画を保存・共有</button>
+              {result.durableId ? (
+                <aside className="videoMixDurableCopy">
+                  <small>保存確認用の一時コピーはこの端末内に保持され、7日以内に自動削除されます。</small>
+                  <button
+                    type="button"
+                    className="videoMixDurableDelete"
+                    disabled={deletingDurableCopy || exporting || finalizingUsage}
+                    onClick={deleteResultDurableCopy}
+                  >
+                    {deletingDurableCopy ? "削除中…" : "端末内の一時コピーを削除"}
+                  </button>
+                </aside>
+              ) : null}
             </section>
           ) : null}
         </div>
       </section>
 
-      <footer className="videoMixFooter"><Link href="/">トップへ戻る</Link><Link href="/privacy">プライバシー</Link><Link href="/terms">利用規約</Link></footer>
+      <nav className="videoMixMobileSteps" aria-label="編集手順">
+        <button type="button" className={mobileStep === 1 ? "isActive" : ""} onClick={() => setMobileStep(1)}>1 素材</button>
+        <button type="button" className={mobileStep === 2 ? "isActive" : ""} disabled={!plan} onClick={() => setMobileStep(2)}>2 つなぎ</button>
+        <button type="button" className={mobileStep === 3 ? "isActive" : ""} disabled={!plan} onClick={() => setMobileStep(3)}>3 音声・保存</button>
+      </nav>
+
+      <footer className="videoMixFooter"><Link href="/" target="_blank" rel="noreferrer">トップへ戻る</Link><Link href="/privacy" target="_blank" rel="noreferrer">プライバシー</Link><Link href="/terms" target="_blank" rel="noreferrer">利用規約</Link></footer>
     </main>
   );
 }

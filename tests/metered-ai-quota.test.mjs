@@ -67,8 +67,48 @@ function createDatabase() {
       status text DEFAULT 'reserved' NOT NULL,
       created_at integer NOT NULL,
       expires_at integer NOT NULL,
-      completed_at integer
-    )
+      completed_at integer,
+      release_requested_at integer
+    );
+    CREATE TABLE operator_usage_operations (
+      id text PRIMARY KEY NOT NULL,
+      reservation_id text NOT NULL,
+      operation text NOT NULL,
+      count integer DEFAULT 1 NOT NULL,
+      successful_count integer DEFAULT 0 NOT NULL,
+      updated_at integer NOT NULL
+    );
+    CREATE TABLE usage_observed_durations (
+      reservation_id text PRIMARY KEY NOT NULL,
+      observed_milliseconds integer DEFAULT 0 NOT NULL,
+      blocked_at integer,
+      updated_at integer NOT NULL
+    );
+    CREATE TABLE usage_operation_leases (
+      id text PRIMARY KEY NOT NULL,
+      reservation_id text NOT NULL,
+      operation text NOT NULL,
+      lease_token text NOT NULL,
+      acquired_at integer NOT NULL,
+      expires_at integer NOT NULL,
+      updated_at integer NOT NULL
+    );
+    CREATE TABLE metered_ai_actions (
+      id text PRIMARY KEY NOT NULL,
+      reservation_id text NOT NULL,
+      action_id text NOT NULL,
+      operation text NOT NULL,
+      status text DEFAULT 'pending' NOT NULL,
+      attempt_count integer DEFAULT 1 NOT NULL,
+      observed_milliseconds integer DEFAULT 0 NOT NULL,
+      created_at integer NOT NULL,
+      expires_at integer NOT NULL,
+      succeeded_at integer,
+      failed_at integer,
+      updated_at integer NOT NULL
+    );
+    CREATE UNIQUE INDEX metered_ai_actions_reservation_action_unique
+      ON metered_ai_actions (reservation_id, action_id)
   `);
   return database;
 }

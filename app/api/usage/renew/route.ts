@@ -1,23 +1,24 @@
 import {
-  OperatorUsageLimitError,
   getAiEntitlementBudgetForReservation,
+  OperatorUsageLimitError,
   publicUsageReservationState,
-  reserveUsage,
+  renewUsageReservation,
+  UsageLimitError,
   UsageReservationBusyError,
   UsageReservationConflictError,
-  UsageLimitError,
 } from "../../../../lib/billing-store";
 import { getAiOperationSuccessLimit } from "../../../../lib/billing-policy";
 import { authenticationRequired } from "../../../../lib/current-user";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
-import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
-import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 import {
   parseJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "../../../../lib/request-safety";
+import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
+import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 
 const MAX_USAGE_REQUEST_BYTES = 8 * 1024;
+const USAGE_KEY_PATTERN = /^[a-zA-Z0-9_-]{8,100}$/;
 
 export async function POST(request: Request) {
   if (!isUsageEnforcementEnabled(request)) {
@@ -29,8 +30,9 @@ export async function POST(request: Request) {
   if (!currentUser) return authenticationRequired();
 
   let payload: {
-    sourceDurationSeconds?: unknown;
+    reservationId?: unknown;
     idempotencyKey?: unknown;
+    sourceDurationSeconds?: unknown;
   };
   try {
     payload = await parseJsonBodyWithLimit<typeof payload>(
@@ -39,62 +41,76 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     return Response.json(
-      {
-        error:
-          error instanceof RequestBodyTooLargeError
-            ? "送信データが大きすぎます。"
-            : "動画の長さを確認できませんでした。",
-      },
+      { error: "Usage reservation could not be renewed." },
       { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
     );
   }
-
-  const durationResult = validateVideoInputDuration(
-    payload.sourceDurationSeconds,
-  );
-  if (!durationResult.ok) {
+  const reservationId =
+    typeof payload.reservationId === "string" &&
+    USAGE_KEY_PATTERN.test(payload.reservationId)
+      ? payload.reservationId
+      : null;
+  const idempotencyKey =
+    typeof payload.idempotencyKey === "string" &&
+    USAGE_KEY_PATTERN.test(payload.idempotencyKey)
+      ? payload.idempotencyKey
+      : null;
+  if (!reservationId && !idempotencyKey) {
     return Response.json(
-      {
-        error: durationResult.message,
-        code: durationResult.code,
-        maximumSeconds: durationResult.maximumSeconds,
-      },
+      { error: "A reservation ID or idempotency key is required." },
       { status: 400 },
     );
   }
-  const duration = durationResult.durationSeconds;
-  if (
-    typeof payload.idempotencyKey !== "string" ||
-    !/^[a-zA-Z0-9_-]{8,100}$/.test(payload.idempotencyKey)
-  ) {
-    return Response.json({ error: "もう一度動画を選び直してください。" }, { status: 400 });
+
+  let duration: number | undefined;
+  if (payload.sourceDurationSeconds !== undefined) {
+    const durationResult = validateVideoInputDuration(
+      payload.sourceDurationSeconds,
+    );
+    if (!durationResult.ok) {
+      return Response.json(
+        {
+          error: durationResult.message,
+          code: durationResult.code,
+          maximumSeconds: durationResult.maximumSeconds,
+        },
+        { status: 400 },
+      );
+    }
+    duration = durationResult.durationSeconds;
   }
 
   try {
-    const reservation = await reserveUsage(
+    const reservation = await renewUsageReservation(
       currentUser,
-      duration,
-      payload.idempotencyKey,
-      { operator: isOperator },
+      { reservationId, idempotencyKey },
+      { sourceDurationSeconds: duration, operator: isOperator },
     );
+    if (!reservation) {
+      return Response.json(
+        { required: true, status: "not_found" },
+        { status: 404, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const perVideoLimit = getAiOperationSuccessLimit(reservation.bucket);
     const entitlementBudget = await getAiEntitlementBudgetForReservation(
       reservation,
     );
     const remaining = Math.min(perVideoLimit, entitlementBudget.remaining);
-    const publicState = publicUsageReservationState(reservation);
-    return Response.json({
-      required: true,
-      ...publicState,
-      bucket: reservation.bucket,
-      reservationOutcome: reservation.reservationOutcome,
-      reused: reservation.reservationOutcome !== "created",
-      aiOperationLimit: getAiOperationSuccessLimit(reservation.bucket),
-      aiOperationsRemaining: remaining,
-      // Compatibility for an editor tab opened before this deployment.
-      narrationGenerationLimit: perVideoLimit,
-      narrationGenerationsRemaining: remaining,
-    });
+    return Response.json(
+      {
+        required: true,
+        ...publicUsageReservationState(reservation),
+        bucket: reservation.bucket,
+        reservationOutcome: reservation.reservationOutcome,
+        reused: true,
+        aiOperationLimit: perVideoLimit,
+        aiOperationsRemaining: remaining,
+        narrationGenerationLimit: perVideoLimit,
+        narrationGenerationsRemaining: remaining,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     if (error instanceof UsageReservationConflictError) {
       return Response.json(
@@ -120,9 +136,9 @@ export async function POST(request: Request) {
         { status: 402 },
       );
     }
-    console.error("usage reservation failed", error);
+    console.error("usage reservation renewal failed", error);
     return Response.json(
-      { error: "利用枠を確認できませんでした。" },
+      { error: "Usage reservation could not be renewed." },
       { status: 500 },
     );
   }

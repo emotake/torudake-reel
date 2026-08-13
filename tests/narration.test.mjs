@@ -6,6 +6,7 @@ import {
   buildDisclosedPostCaption,
   buildNarrationEditRanges,
   buildNarrationTimeline,
+  canonicalizeNarrationTextForComparison,
   canonicalizeNarrationPronunciationGuide,
   countNarrationPronunciationOccurrences,
   getNarrationBufferSlice,
@@ -67,6 +68,35 @@ test("falls back to sentence boundaries when segments are missing", () => {
     plan.segments.map((segment) => segment.text),
     splitNarrationScript(plan.script),
   );
+});
+
+test("rebuilds captions from the spoken script when model segments omit text", () => {
+  const plan = normalizeNarrationPlan({
+    script: "最初の場面です。続いて完成した料理を紹介します！",
+    segments: [{ text: "最初の場面です", emphasis: true }],
+  });
+
+  assert.equal(
+    canonicalizeNarrationTextForComparison(
+      plan.segments.map((segment) => segment.text).join(""),
+    ),
+    canonicalizeNarrationTextForComparison(plan.script),
+  );
+  assert.ok(plan.segments.some((segment) => segment.text.includes("完成した料理")));
+});
+
+test("keeps intentional caption splits when only punctuation and spacing differ", () => {
+  const plan = normalizeNarrationPlan({
+    script: "軽くて、毎日使えます。",
+    segments: [
+      { text: "軽くて", emphasis: true },
+      { text: "毎日使えます", emphasis: false },
+    ],
+  });
+  assert.deepEqual(plan.segments.map((segment) => segment.text), [
+    "軽くて",
+    "毎日使えます",
+  ]);
 });
 
 test("changes only the narration reading while preserving the display script", () => {

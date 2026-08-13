@@ -12009,7 +12009,7 @@ footer > small {
   --mix-ink: #152035;
   --mix-subtle: #667085;
   --mix-paper: #fffdf8;
-  --mix-coral: #ef5c42;
+  --mix-coral: #c8442f;
   min-height: 100vh;
   overflow: hidden;
   color: var(--mix-ink);
@@ -12025,9 +12025,19 @@ footer > small {
   min-height: 44px;
 }
 
-.videoMixShell :is(button, a, input):focus-visible {
+.videoMixShell :is(button, a, input, select, textarea, summary):focus-visible {
   outline: 3px solid rgba(239, 92, 66, 0.38);
   outline-offset: 3px;
+}
+
+.videoMixNarrationStale {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #d97706;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-weight: 700;
 }
 
 .videoMixHeader {
@@ -12191,7 +12201,7 @@ footer > small {
   box-shadow: 0 34px 72px rgba(17, 24, 39, 0.25);
 }
 
-.videoMixPhone video,
+.videoMixMediaLayer,
 .videoMixTransitionOverlay {
   position: absolute;
   inset: 0;
@@ -12199,21 +12209,43 @@ footer > small {
   height: 100%;
 }
 
+.videoMixMediaLayer {
+  overflow: hidden;
+  opacity: 0;
+  transform-origin: center;
+}
+
+.videoMixMediaLayer video,
+.videoMixMediaLayer .videoMixBlurCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.videoMixBlurCanvas {
+  z-index: 0;
+  opacity: 1;
+  background: #000;
+  pointer-events: none;
+}
+
 .videoMixPhone video {
+  z-index: 1;
   /* Match the exporter's contain-and-letterbox framing exactly. */
   object-fit: contain;
   object-position: center;
-  background: #0e1523;
+  background: transparent;
 }
 
 .videoMixTransitionOverlay {
-  z-index: 3;
+  z-index: 5;
   pointer-events: none;
 }
 
 .videoMixCaptionCanvas {
   position: absolute;
-  z-index: 4;
+  z-index: 6;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -12522,6 +12554,81 @@ footer > small {
   background: var(--mix-ink);
 }
 
+.videoMixSourceFeedback:focus {
+  outline: 3px solid rgba(200, 68, 47, 0.32);
+  outline-offset: 3px;
+}
+
+.videoMixUndo {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 13px;
+  border-radius: 13px;
+  color: #405066;
+  font-size: 13px;
+  background: #f4f1eb;
+}
+
+.videoMixUndo button,
+.videoMixTransitionMore {
+  padding: 0 14px;
+  border: 1px solid rgba(21, 32, 53, 0.14);
+  border-radius: 12px;
+  color: var(--mix-ink);
+  font-weight: 800;
+  background: white;
+}
+
+.videoMixFraming {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 13px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.videoMixFraming legend {
+  width: 100%;
+  margin-bottom: 2px;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.videoMixFraming button {
+  min-height: 44px;
+  padding: 0 11px;
+  border: 1px solid rgba(21, 32, 53, 0.13);
+  border-radius: 11px;
+  color: var(--mix-ink);
+  background: white;
+}
+
+.videoMixFraming button.isActive {
+  border-color: var(--mix-ink);
+  color: white;
+  background: var(--mix-ink);
+}
+
+.videoMixFraming label {
+  display: grid;
+  grid-template-columns: auto minmax(100px, 1fr);
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  color: var(--mix-subtle);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.videoMixFraming input {
+  width: 100%;
+  accent-color: var(--mix-coral);
+}
+
 .videoMixClipList {
   display: grid;
   gap: 10px;
@@ -12559,6 +12666,73 @@ footer > small {
   color: var(--mix-subtle);
   font-size: 12px;
   font-weight: 700;
+}
+
+.videoMixFilmstrip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  position: relative;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 9px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.28) 0 1px, transparent 1px 20%),
+    linear-gradient(110deg, #6f7c91, #b4c3bd 52%, #7b889d);
+}
+
+.videoMixFilmstrip img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  object-fit: cover;
+}
+
+.videoMixFilmstrip span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border: 2px solid var(--mix-coral);
+  background: rgba(200, 68, 47, 0.16);
+}
+
+.videoMixClipEdge {
+  display: grid;
+  gap: 6px;
+}
+
+.videoMixClipEdge > div {
+  display: grid;
+  grid-template-columns: repeat(2, auto) minmax(72px, 1fr) repeat(2, auto);
+  gap: 4px;
+}
+
+.videoMixClipEdge button,
+.videoMixClipActions button {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 9px;
+  color: var(--mix-ink);
+  font-size: 11px;
+  font-weight: 800;
+  background: white;
+}
+
+.videoMixClipEdge input[type="number"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 7px;
+  border: 1px solid rgba(21, 32, 53, 0.13);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.videoMixClipActions {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 5px;
 }
 
 .videoMixClipList input {
@@ -12622,6 +12796,11 @@ footer > small {
   align-items: baseline;
   justify-content: space-between;
   margin: 2px 0 10px;
+}
+
+.videoMixTransitionMore {
+  width: 100%;
+  margin-top: 10px;
 }
 
 .videoMixTransitionSummary strong {
@@ -13157,6 +13336,24 @@ footer > small {
   opacity: 0.5;
 }
 
+.videoMixAlwaysPrice {
+  display: flex !important;
+  gap: 5px !important;
+  flex-wrap: wrap;
+  margin: 0 0 14px !important;
+  color: #b9f5d0;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.videoMixAlwaysPrice span {
+  color: white;
+}
+
+.videoMixMobileSteps {
+  display: none;
+}
+
 .videoMixProgress {
   height: 7px;
   margin-top: 14px;
@@ -13309,6 +13506,28 @@ footer > small {
   cursor: pointer;
 }
 
+.videoMixDurableCopy {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 14px;
+  color: var(--mix-subtle);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.videoMixResult .videoMixDurableDelete {
+  min-height: 44px;
+  border: 1px solid rgba(21, 32, 53, 0.2);
+  color: var(--mix-ink);
+  background: white;
+}
+
+.videoMixResult button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .videoMixFooter {
   display: flex;
   min-height: 96px;
@@ -13361,11 +13580,59 @@ footer > small {
   }
 
   .videoMixHero {
-    padding-top: 46px;
+    gap: 18px;
+    padding-top: 26px;
   }
 
   .videoMixHero h1 {
-    font-size: clamp(35px, 11vw, 52px);
+    font-size: clamp(32px, 10vw, 46px);
+  }
+
+  .videoMixShell[data-mobile-step="1"] .videoMixStep2,
+  .videoMixShell[data-mobile-step="1"] .videoMixStep3,
+  .videoMixShell[data-mobile-step="1"] .videoMixExportCard,
+  .videoMixShell[data-mobile-step="2"] .videoMixStep1,
+  .videoMixShell[data-mobile-step="2"] .videoMixStep3,
+  .videoMixShell[data-mobile-step="2"] .videoMixExportCard,
+  .videoMixShell[data-mobile-step="3"] .videoMixStep1,
+  .videoMixShell[data-mobile-step="3"] .videoMixStep2 {
+    display: none;
+  }
+
+  .videoMixWorkspace {
+    padding-bottom: 106px;
+  }
+
+  .videoMixMobileSteps {
+    position: fixed;
+    z-index: 30;
+    right: 12px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid rgba(21, 32, 53, 0.12);
+    border-radius: 17px;
+    background: rgba(255, 253, 248, 0.96);
+    box-shadow: 0 12px 34px rgba(21, 32, 53, 0.2);
+    backdrop-filter: blur(18px);
+  }
+
+  .videoMixMobileSteps button {
+    min-height: 48px;
+    border: 0;
+    border-radius: 12px;
+    color: var(--mix-subtle);
+    font-size: 12px;
+    font-weight: 900;
+    background: transparent;
+  }
+
+  .videoMixMobileSteps button.isActive {
+    color: white;
+    background: var(--mix-coral);
   }
 
   .videoMixWorkspace {
@@ -13400,6 +13667,19 @@ footer > small {
   .videoMixClipCount legend {
     grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .videoMixClipEdge > div {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .videoMixClipEdge button,
+  .videoMixClipActions button {
+    padding: 0 4px;
+  }
+
+  .videoMixClipActions {
+    grid-template-columns: 1fr;
   }
 
   .videoMixFinishMode,

@@ -1406,7 +1406,11 @@ async function requestNarrationPlan({
 }) {
   const response = await fetch("/api/narration/script", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Usage-Reservation-Id": usageReservationId ?? "",
+      "X-AI-Operation-Id": aiOperationId,
+    },
     body: JSON.stringify({
       frames,
       brief,

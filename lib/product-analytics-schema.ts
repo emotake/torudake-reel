@@ -12,6 +12,12 @@ export const CLIENT_PRODUCT_EVENTS = [
   "export_started",
   "export_completed",
   "export_failed",
+  "video_mix_narration_started",
+  "video_mix_narration_completed",
+  "video_mix_narration_failed",
+  "video_mix_paywall_shown",
+  "video_mix_transition_changed",
+  "video_mix_add_failed",
   "feedback_submitted",
 ] as const;
 
@@ -35,7 +41,7 @@ export type ProductEventName = ClientProductEvent | ServerProductEvent;
 const CLIENT_EVENT_SET = new Set<string>(CLIENT_PRODUCT_EVENTS);
 
 const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  mode: new Set(["spoken", "narration", "photo"]),
+  mode: new Set(["spoken", "narration", "photo", "video_mix"]),
   duration_bucket: new Set([
     "up_to_15s",
     "16_to_30s",
@@ -59,6 +65,18 @@ const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     "unknown",
   ]),
   source: new Set(["landing", "result", "hero_video"]),
+  transition: new Set([
+    "crossfade",
+    "cut",
+    "fade-black",
+    "fade-white",
+    "flash",
+    "wipe-left",
+    "slide-left",
+    "zoom-dissolve",
+    "mixed",
+  ]),
+  narration: new Set(["enabled", "disabled"]),
   voice: new Set(["bright", "calm", "comedy", "party"]),
   rating: new Set(["helpful", "needs_work"]),
   context: new Set(["preview", "export", "checkout", "general"]),
@@ -77,6 +95,10 @@ const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     "result_settings",
     "setup_settings",
     "silent",
+    "restored",
+    "stale",
+    "cancelled",
+    "blocked",
   ]),
   error_code: new Set([
     "stripe_checkout_failed",
@@ -122,6 +144,9 @@ const INTEGER_PROPERTY_RANGES: Readonly<
 > = {
   credits: { minimum: 0, maximum: 10_000 },
   count: { minimum: 0, maximum: 10_000 },
+  source_count: { minimum: 0, maximum: 5 },
+  clip_count: { minimum: 0, maximum: 10 },
+  boundary_count: { minimum: 0, maximum: 9 },
 };
 
 const FEEDBACK_TAGS = new Set([
