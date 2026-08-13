@@ -19,6 +19,7 @@
     "ops:health": "node scripts/operations/synthetic-readiness.mjs",
     "ops:health:detailed": "node scripts/operations/synthetic-readiness.mjs --detailed",
     "ops:account-deletions": "node scripts/operations/account-deletions.mjs",
+    "ops:deploy-account-deletion-scheduler": "wrangler deploy --config wrangler.account-deletion-scheduler.jsonc",
     "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
     "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs"
   },

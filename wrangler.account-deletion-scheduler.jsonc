@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "torudake-reel-account-deletion-scheduler",
+  "main": "workers/account-deletion-scheduler.mjs",
+  "compatibility_date": "2026-08-13",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    }
+  },
+  "vars": {
+    "TORUDAKE_SITE_ORIGIN": "https://torudake-reel.pages.dev",
+    "ACCOUNT_DELETION_BATCH_LIMIT": "5"
+  },
+  "triggers": {
+    "crons": ["15 18 * * *"]
+  }
+}

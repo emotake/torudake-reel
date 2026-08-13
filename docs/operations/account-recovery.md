@@ -69,6 +69,8 @@ pnpm ops:account-deletions -- --limit 5
 pnpm ops:account-deletions -- --execute --confirm execute-due-account-deletions --limit 5
 ```
 
+本番では `torudake-reel-account-deletion-scheduler` が毎日03:15（日本時間）に同じ上限5件で実行します。Cron Workerは公開URLを持たず、削除専用secretだけを保持します。手動コマンドは定期処理の障害調査と再実行に使用します。
+
 - 1回の上限は25件、標準は5件です。大量処理でStripeやR2を圧迫しません。
 - `processing` は30分leaseです。中断した処理はlease失効後に再取得でき、R2削除とD1削除はいずれも再実行可能です。multipart uploadのabortは「既に不存在」と通信障害を安全に区別できないため、どの失敗も成功扱いにせず、D1メタデータを残して次回へ再試行します。
 - `active_subscription`、`open_dispute`、`active_usage_operation`、`billing_sync_in_progress` は削除せず `scheduled` へ戻します。原因解消後の日次処理で再確認します。
