@@ -22,6 +22,10 @@ All three works are used under the [Pexels License](https://www.pexels.com/licen
 
 The existing Japanese narration WAV under `scripts/demo-composition/assets/narration.wav` was generated on 2026-08-10 with the same `gpt-realtime-2.1-mini` model family used by the production narration route. The temporary generation key was revoked immediately after the WAV was saved. This update does not regenerate or imitate a new voice; it only applies restrained local processing for clarity (70 Hz high-pass, 11 kHz low-pass, mild presence EQ and compression) and final loudness normalization.
 
+## Voice previews
+
+The four `public/demo/voices/*-v3.wav` previews were generated on 2026-08-13 with the production `gpt-realtime-2.1-mini` model and the same voice, speed, and instruction profile used by each production delivery template. Generation was performed through a temporary authenticated operations route that accepted only the four fixed sample scripts; that route was removed immediately after generation. The selected takes were processed locally with edge-silence trimming, light filtering and compression, short edge fades, and loudness matching. Exact scripts, profiles, measurements, byte lengths, and SHA-256 hashes are recorded in `public/demo/voices/manifest-v3.json`.
+
 ## Final media
 
 - File: `public/demo/torudake-demo.mp4`

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const [pageSource, cssSource, photoReelSource, videoMixSource] = await Promise.all([
@@ -60,7 +61,7 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   assert.match(pageSource, /用途別の例文で、4つの話し方を聴き比べられます/);
   assert.match(
     pageSource,
-    /src=\{`\/demo\/voices\/\$\{style\.id\}-v2\.wav`\}/,
+    /src=\{`\/demo\/voices\/\$\{style\.id\}-v3\.wav`\}/,
   );
   assert.match(pageSource, /aria-describedby=\{exampleId\}/);
   assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
@@ -72,22 +73,71 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   );
   assert.match(cssSource, /\.voiceSampleExample q\s*\{[\s\S]*?quotes:\s*"「" "」"/);
   const voiceManifestUrl = new URL(
-    "../public/demo/voices/manifest-v2.json",
+    "../public/demo/voices/manifest-v3.json",
     import.meta.url,
   );
   const voiceManifest = JSON.parse(await readFile(voiceManifestUrl, "utf8"));
+  const expectedSamples = {
+    calm: {
+      voice: "cedar",
+      speed: 0.99,
+      script:
+        "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
+    },
+    bright: {
+      voice: "marin",
+      speed: 1,
+      script:
+        "休日に見つけた海辺のカフェは、窓から夕日が見えてクロワッサンも絶品でした。",
+    },
+    comedy: {
+      voice: "cedar",
+      speed: 1.03,
+      script:
+        "週末のナイトマーケットは大盛況で、音楽もフードも最高、気づけば二周してました。",
+    },
+    party: {
+      voice: "marin",
+      speed: 1.03,
+      script:
+        "友だちと見つけた夜景スポットは雰囲気も最高で、写真も動画も盛れて今日は大当たりでした。",
+    },
+  };
   assert.equal(voiceManifest.samples.length, 4);
+  assert.equal(voiceManifest.sampleModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
-  assert.equal(voiceManifest.productionParity, false);
-  assert.match(voiceManifest.productionModelDifferenceNote, /different models/);
-  assert.match(pageSource, /固定見本は試聴用モデル（gpt-4o-mini-tts）/);
-  assert.match(pageSource, /実際の動画では本番モデル（gpt-realtime-2\.1-mini）/);
+  assert.equal(voiceManifest.productionParity, true);
+  assert.match(voiceManifest.parityScope, /Same model, voice, speed/);
+  assert.doesNotMatch(pageSource, /固定見本は試聴用モデル/);
+  assert.doesNotMatch(pageSource, /実際の動画では本番モデル/);
   for (const sample of voiceManifest.samples) {
-    await access(new URL(`../public/demo/voices/${sample.file}`, import.meta.url));
-    assert.ok(sample.durationSeconds >= 7 && sample.durationSeconds <= 10);
-    assert.ok(sample.integratedLufs >= -20.2 && sample.integratedLufs <= -19.2);
+    const expected = expectedSamples[sample.id];
+    assert.ok(expected);
+    assert.equal(sample.model, voiceManifest.productionModel);
+    assert.equal(sample.voice, expected.voice);
+    assert.equal(sample.speed, expected.speed);
+    assert.equal(sample.script, expected.script);
+    assert.match(sample.profile, new RegExp(`:${sample.id}:gpt-realtime-2\\.1-mini:${expected.voice}:`));
+    const audio = await readFile(
+      new URL(`../public/demo/voices/${sample.file}`, import.meta.url),
+    );
+    assert.equal(audio.byteLength, sample.bytes);
+    assert.equal(createHash("sha256").update(audio).digest("hex"), sample.sha256);
+    assert.equal(audio.toString("ascii", 0, 4), "RIFF");
+    assert.equal(audio.toString("ascii", 8, 12), "WAVE");
+    assert.equal(audio.readUInt16LE(20), 1);
+    assert.equal(audio.readUInt16LE(22), 1);
+    assert.equal(audio.readUInt32LE(24), 24_000);
+    assert.equal(audio.readUInt16LE(34), 16);
+    assert.ok(sample.durationSeconds >= 4.5 && sample.durationSeconds <= 8);
+    assert.ok(sample.integratedLufs >= -20 && sample.integratedLufs <= -19);
     assert.ok(sample.truePeakDbtp <= -2);
   }
+});
+
+test("labels the permanent hero value instead of presenting it as news", () => {
+  assert.match(pageSource, /<span>AI自動編集<\/span>/);
+  assert.doesNotMatch(pageSource, /<span>新着<\/span>/);
 });
 
 test("keeps first-screen trial and purchase claims precise", () => {

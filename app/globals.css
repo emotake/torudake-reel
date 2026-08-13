@@ -11684,21 +11684,11 @@ footer > small {
   font-size: clamp(20px, 2.4vw, 29px);
 }
 
-.voiceSampleShelf .voiceSampleDescription,
-.voiceSampleShelf .voiceSampleModelNote {
+.voiceSampleShelf .voiceSampleDescription {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
-}
-
-.voiceSampleShelf .voiceSampleModelNote {
-  margin-top: 10px;
-  padding: 9px 11px;
-  border-left: 3px solid var(--mint-dark);
-  border-radius: 0 9px 9px 0;
-  background: rgba(255, 255, 255, 0.74);
-  color: #4f5d70;
 }
 
 .voiceSampleTypes {

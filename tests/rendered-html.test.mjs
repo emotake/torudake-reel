@@ -31,6 +31,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集の手間を、もっと軽く。/);
+  assert.match(html, /<span>AI自動編集<\/span>/);
+  assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /class="heroVisual realDemo"/);
   assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);
   assert.match(html, /poster="\/demo\/torudake-demo-poster\.jpg"/);
@@ -38,14 +40,14 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /実際の動画・音声・テロップで確認/);
   assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
   assert.match(html, /用途別の例文で、4つの話し方を聴き比べられます/);
-  assert.match(html, /固定見本は試聴用モデル（gpt-4o-mini-tts）/);
-  assert.match(html, /実際の動画では本番モデル（gpt-realtime-2\.1-mini）/);
+  assert.doesNotMatch(html, /固定見本は試聴用モデル/);
+  assert.doesNotMatch(html, /実際の動画では本番モデル/);
   assert.match(html, /朝七時に駅を出発して、海沿いのカフェで/);
   assert.match(html, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
   assert.match(html, /週末のナイトマーケットは大盛況で/);
   assert.match(html, /友だちと見つけた夜景スポットは雰囲気も最高で/);
   for (const voice of ["calm", "bright", "comedy", "party"]) {
-    assert.match(html, new RegExp(`/demo/voices/${voice}-v2\\.wav`));
+    assert.match(html, new RegExp(`/demo/voices/${voice}-v3\\.wav`));
   }
   assert.doesNotMatch(html, /同じ短い文章を4つの声で/);
   assert.doesNotMatch(html, /用途別の例文で、4つの声を/);

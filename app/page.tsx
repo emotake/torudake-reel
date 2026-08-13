@@ -3814,7 +3814,7 @@ function Landing({
             </aside>
           )}
           <p className="eyebrow">
-            <span>新着</span>
+            <span>AI自動編集</span>
             日常で撮った動画から、投稿できる1本へ
           </p>
           <h1>
@@ -3908,9 +3908,6 @@ function Landing({
           <p className="voiceSampleDescription">
             それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。
           </p>
-          <p className="voiceSampleModelNote">
-            固定見本は試聴用モデル（gpt-4o-mini-tts）で作成しています。実際の動画では本番モデル（gpt-realtime-2.1-mini）を使うため、声の抑揚や間は完全には同じになりません。
-          </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
           {NARRATION_STYLES.map((style) => {
@@ -3928,7 +3925,7 @@ function Landing({
                 <audio
                   controls
                   preload="none"
-                  src={`/demo/voices/${style.id}-v2.wav`}
+                  src={`/demo/voices/${style.id}-v3.wav`}
                   aria-label={`${style.label}の用途別固定音声サンプル`}
                   aria-describedby={exampleId}
                   onPlay={() =>
