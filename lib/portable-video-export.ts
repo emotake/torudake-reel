@@ -1197,11 +1197,19 @@ function measureScheduledOriginalAudio(items: ScheduledAudioBuffer[]) {
  * decoders fail open at unity gain; playback must never be blocked merely
  * because a loudness preview could not be measured.
  */
-export async function measurePortableOriginalAudioNormalization(
+export type PortableOriginalAudioMeasurement = Readonly<{
+  hasAudioTrack: boolean | null;
+  hasDecodedSamples: boolean;
+  rms: number | null;
+  peak: number | null;
+  normalizationGain: number;
+}>;
+
+export async function measurePortableOriginalAudioProfile(
   file: File,
   ranges: readonly PortableVideoRange[],
   signal?: AbortSignal,
-) {
+): Promise<PortableOriginalAudioMeasurement> {
   let input: InstanceType<(typeof import("mediabunny"))["Input"]> | null =
     null;
   try {
@@ -1211,32 +1219,99 @@ export async function measurePortableOriginalAudioNormalization(
       source: new media.BlobSource(file),
       formats: media.ALL_FORMATS,
     });
-    if (!(await input.canRead())) return 1;
+    if (!(await input.canRead())) {
+      return {
+        hasAudioTrack: null,
+        hasDecodedSamples: false,
+        rms: null,
+        peak: null,
+        normalizationGain: 1,
+      };
+    }
     const audioTrack = await getPreferredPortableInputAudioTrack(input);
-    if (!audioTrack || !(await audioTrack.canDecode())) return 1;
+    if (!audioTrack) {
+      return {
+        hasAudioTrack: false,
+        hasDecodedSamples: false,
+        rms: null,
+        peak: null,
+        normalizationGain: 1,
+      };
+    }
+    if (!(await audioTrack.canDecode())) {
+      return {
+        hasAudioTrack: true,
+        hasDecodedSamples: false,
+        rms: null,
+        peak: null,
+        normalizationGain: 1,
+      };
+    }
     const sourceDuration = await audioTrack.computeDuration();
     const normalizedRanges = normalizePortableVideoRanges(
       ranges,
       sourceDuration,
     );
-    if (normalizedRanges.length === 0) return 1;
+    if (normalizedRanges.length === 0) {
+      return {
+        hasAudioTrack: true,
+        hasDecodedSamples: false,
+        rms: null,
+        peak: null,
+        normalizationGain: 1,
+      };
+    }
     const decoded = await collectDecodedOriginalAudio(
       media,
       audioTrack,
       normalizedRanges,
       signal,
     );
-    if (decoded.length === 0) return 1;
+    if (decoded.length === 0) {
+      return {
+        hasAudioTrack: true,
+        hasDecodedSamples: false,
+        rms: null,
+        peak: null,
+        normalizationGain: 1,
+      };
+    }
     const level = measureScheduledOriginalAudio(decoded);
-    return level.loudness.integratedLufs === null
+    const normalizationGain = level.loudness.integratedLufs === null
       ? computePortableOriginalNormalizationGain(level.rms, level.peak)
       : computeLoudnessNormalizationGain(level.loudness);
+    return {
+      hasAudioTrack: true,
+      hasDecodedSamples: true,
+      rms: level.rms,
+      peak: level.peak,
+      normalizationGain,
+    };
   } catch (error) {
     if (error instanceof PortableVideoExportAbortedError) throw error;
-    return 1;
+    return {
+      hasAudioTrack: null,
+      hasDecodedSamples: false,
+      rms: null,
+      peak: null,
+      normalizationGain: 1,
+    };
   } finally {
     input?.dispose();
   }
+}
+
+export async function measurePortableOriginalAudioNormalization(
+  file: File,
+  ranges: readonly PortableVideoRange[],
+  signal?: AbortSignal,
+) {
+  const measurement = await measurePortableOriginalAudioProfile(
+    file,
+    ranges,
+    signal,
+  );
+  return measurement.normalizationGain;
 }
 
 function narrationActivityFromBuffer(

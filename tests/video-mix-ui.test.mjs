@@ -84,11 +84,11 @@ test("adds an optional metered AI narration with locally aligned captions", () =
   assert.match(clientSource, /\/api\/narration\/disclosure/);
   assert.match(
     clientSource,
-    /会話・解説など元の話し声を活かすなら「元音声のまま」/,
+    /「元音声のまま」ではテロップを追加しません/,
   );
   assert.match(
     clientSource,
-    /会話・解説など元の話し声を活かしたいときにおすすめ/,
+    /会話・解説など元の話し声を、テロップなしで活かしたいときにおすすめ/,
   );
   assert.match(
     clientSource,
@@ -101,6 +101,12 @@ test("adds an optional metered AI narration with locally aligned captions", () =
   assert.doesNotMatch(
     clientSource,
     /元音声のまま仕上げるか、映像に合わせたAIナレーションを追加できます/,
+  );
+  assert.match(clientSource, /「元音声のまま」ではテロップを追加しません/);
+  assert.match(clientSource, /元の話し声を、テロップなしで活かしたいときにおすすめ/);
+  assert.match(
+    clientSource,
+    /narrationCaptionsEnabled \? "AIナレーションとテロップ" : "AIナレーション"/,
   );
 });
 

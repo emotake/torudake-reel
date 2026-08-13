@@ -426,6 +426,51 @@ test("fails closed when a required audio track or audible signal is missing", ()
   assert.ok(silentTrack.issues.some((issue) => issue.code === "audio-silent"));
 });
 
+test("can require an original audio track without rejecting an intentionally silent track", () => {
+  const trackOnly = assessVideoExportQuality(
+    qualityMetrics({
+      audioTrackPresent: true,
+      audioRms: null,
+      audioPeak: null,
+      audioActivityRanges: null,
+    }),
+    {
+      requireAudioTrack: true,
+      requireAudibleAudio: false,
+      expectedDurationSeconds: 10,
+    },
+  );
+  assert.equal(trackOnly.verdict, "pass");
+  assert.equal(trackOnly.isComplete, true);
+  assert.ok(!trackOnly.issues.some((issue) => issue.code === "audio-silent"));
+
+  const missingTrack = assessVideoExportQuality(
+    qualityMetrics({
+      audioTrackPresent: false,
+      audioCodec: null,
+      audioCodecParameterString: null,
+      audioDurationSeconds: null,
+      audioRms: null,
+      audioPeak: null,
+      audioActivityRanges: null,
+    }),
+    { requireAudioTrack: true, requireAudibleAudio: false },
+  );
+  assert.equal(missingTrack.verdict, "fail");
+  assert.ok(
+    missingTrack.issues.some((issue) => issue.code === "audio-track-missing"),
+  );
+
+  const inaudibleTrack = assessVideoExportQuality(
+    qualityMetrics({ audioRms: 0.0001, audioPeak: 0.0005 }),
+    { requireAudioTrack: true, requireAudibleAudio: true },
+  );
+  assert.equal(inaudibleTrack.verdict, "fail");
+  assert.ok(
+    inaudibleTrack.issues.some((issue) => issue.code === "audio-silent"),
+  );
+});
+
 test("requires AAC-compatible MP4 audio and matching audio/video duration", () => {
   const assessment = assessVideoExportQuality(
     qualityMetrics({

@@ -2926,7 +2926,7 @@ export default function VideoMixClient() {
       setDisclosureConfirmed(false);
       updateNarrationOverlay(0);
       setMessage(
-        `AIナレーションとテロップを作成しました。AI処理はあと${speechResult.quota.remaining ?? aiOperationsRemaining}回です。`,
+        `${narrationCaptionsEnabled ? "AIナレーションとテロップ" : "AIナレーション"}を作成しました。AI処理はあと${speechResult.quota.remaining ?? aiOperationsRemaining}回です。`,
       );
       trackClientEvent("video_mix_narration_completed", analyticsSnapshot());
     } catch (caught) {
@@ -3707,8 +3707,8 @@ export default function VideoMixClient() {
             <div className="videoMixSectionTitle">
               <span>03</span>
               <div>
-                <h2>声とテロップを選ぶ</h2>
-                <p>会話・解説など元の話し声を活かすなら「元音声のまま」、AI音声へ置き換える場合や話し声のない素材には「AIナレーション」を選べます。</p>
+                <h2>音声の仕上げを選ぶ</h2>
+                <p>「元音声のまま」ではテロップを追加しません。AI音声へ置き換える場合や話し声のない素材では、AIナレーションとテロップ表示を選べます。</p>
               </div>
             </div>
             <div className="videoMixFinishMode" role="radiogroup" aria-label="完成動画の音声">
@@ -3724,7 +3724,7 @@ export default function VideoMixClient() {
                 onClick={() => selectFinishMode(false)}
               >
                 <strong>元音声のまま</strong>
-                <small>会話・解説など元の話し声を活かしたいときにおすすめ</small>
+                <small>会話・解説など元の話し声を、テロップなしで活かしたいときにおすすめ</small>
               </button>
               <button
                 ref={(element) => { finishModeButtonRefs.current[1] = element; }}

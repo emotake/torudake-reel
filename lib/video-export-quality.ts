@@ -111,6 +111,11 @@ export type VideoExportQualityTarget = {
   preferH264HighProfile?: boolean;
   expectedDurationSeconds?: number;
   durationToleranceSeconds?: number;
+  /** Require a valid, duration-matched audio track without requiring audibility. */
+  requireAudioTrack?: boolean;
+  /** Require the audio track to contain measurable audible activity. */
+  requireAudibleAudio?: boolean;
+  /** Backward-compatible shorthand requiring both a track and audibility. */
   requireAudio?: boolean;
   requireCompatibleAudio?: boolean;
   expectedNarrationRanges?: readonly VideoExportTimedRange[];
@@ -1223,7 +1228,12 @@ export function assessVideoExportQuality(
     }
   }
 
-  if (target.requireAudio) {
+  const requireAudibleAudio =
+    target.requireAudibleAudio ?? target.requireAudio ?? false;
+  const requireAudioTrack =
+    target.requireAudioTrack ??
+    Boolean(target.requireAudio || requireAudibleAudio);
+  if (requireAudioTrack || requireAudibleAudio) {
     if (metrics.audioTrackPresent === null) {
       issues.push({
         code: "audio-track-unavailable",
@@ -1279,13 +1289,17 @@ export function assessVideoExportQuality(
         });
       }
 
-      if (metrics.audioRms === null) {
+      if (requireAudibleAudio && metrics.audioRms === null) {
         issues.push({
           code: "audio-audibility-unavailable",
           severity: "error",
           message: "完成動画の音声が聞こえる状態か確認できませんでした。",
         });
-      } else if (metrics.audioRms < (target.minimumAudibleRms ?? 0.0025)) {
+      } else if (
+        requireAudibleAudio &&
+        metrics.audioRms !== null &&
+        metrics.audioRms < (target.minimumAudibleRms ?? 0.0025)
+      ) {
         issues.push({
           code: "audio-silent",
           severity: "error",
@@ -1367,10 +1381,10 @@ export function assessVideoExportQuality(
     metrics.averageFrameRate !== null &&
     hasCodec &&
     (expectedDuration === null || metrics.durationSeconds !== null) &&
-    (!target.requireAudio ||
+    (!(requireAudioTrack || requireAudibleAudio) ||
       (metrics.audioTrackPresent === true &&
         metrics.audioDurationSeconds !== null &&
-        metrics.audioRms !== null));
+        (!requireAudibleAudio || metrics.audioRms !== null)));
 
   return {
     verdict: hasError

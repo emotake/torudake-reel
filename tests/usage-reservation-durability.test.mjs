@@ -670,6 +670,50 @@ test("returns completed idempotency keys as terminal without charging again", as
   );
 });
 
+test("renews an expired completed free reservation for later AI refinements without charging again", async () => {
+  const now = 2_025_000_000;
+  const currentUser = user("usage-completed-renew-user");
+  addUser(currentUser, now);
+  addFreeReservation({
+    id: "usage-completed-renew-reservation",
+    currentUser,
+    key: "usage-completed-renew-key",
+    createdAt: now,
+    expiresAt: now + 60,
+  });
+  database.sqlite
+    .prepare(`
+      UPDATE usage_reservations
+      SET status = 'completed', completed_at = ?
+      WHERE id = ?
+    `)
+    .run(now + 1, "usage-completed-renew-reservation");
+
+  const renewalTime = now + 2 * 60 * 60;
+  const renewed = await renewUsageReservation(
+    currentUser,
+    { reservationId: "usage-completed-renew-reservation" },
+    { sourceDurationSeconds: 30 },
+    renewalTime,
+  );
+
+  assert.equal(renewed.id, "usage-completed-renew-reservation");
+  assert.equal(renewed.status, "completed");
+  assert.equal(renewed.reservationOutcome, "renewed");
+  assert.equal(
+    renewed.expiresAt,
+    renewalTime + USAGE_RESERVATION_LIFETIME_SECONDS,
+  );
+  assert.equal(
+    database.sqlite
+      .prepare(
+        "SELECT COUNT(*) AS count FROM usage_reservations WHERE user_id = ?",
+      )
+      .get(currentUser.id).count,
+    1,
+  );
+});
+
 test("persists pagehide release intent until the active AI lease finishes", async () => {
   const now = 2_020_000_000;
   const currentUser = user("usage-release-pending-user");

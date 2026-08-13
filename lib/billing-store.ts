@@ -1175,9 +1175,6 @@ export async function renewUsageReservation(
   if (roundedDuration !== existing.sourceDurationSeconds) {
     throw new UsageReservationConflictError("idempotency_payload_mismatch");
   }
-  if (existing.status === "completed") {
-    return withUsageReservationOutcome(existing, "existing");
-  }
   if (existing.bucket === "operator" && options.operator !== true) {
     throw new OperatorUsageLimitError();
   }
@@ -1187,6 +1184,31 @@ export async function renewUsageReservation(
     throw new Error("Usage database binding is unavailable.");
   }
   const expiresAt = nowSeconds + USAGE_RESERVATION_LIFETIME_SECONDS;
+  if (existing.status === "completed") {
+    const originalEntitlementIsActive =
+      existing.bucket === "free" ||
+      existing.bucket === "operator" ||
+      (existing.bucket === "one_time" &&
+        (await oneTimeReservationHasActiveCredit(existing))) ||
+      (existing.bucket === "subscription" &&
+        (await subscriptionReservationHasActivePeriod(existing)));
+    if (!originalEntitlementIsActive) throw new UsageLimitError();
+
+    await database
+      .prepare(`
+        UPDATE usage_reservations
+        SET expires_at = MAX(expires_at, ?)
+        WHERE id = ? AND user_id = ? AND status = 'completed'
+      `)
+      .bind(expiresAt, existing.id, user.id)
+      .run();
+    const renewed = await findUsageReservationForUser(user.id, {
+      reservationId: existing.id,
+    });
+    return renewed
+      ? withUsageReservationOutcome(renewed, "renewed")
+      : null;
+  }
   const currentStatus = await getBillingStatusForUser(user.id, nowSeconds);
   const preferredBucket = chooseBillingBucket(
     {

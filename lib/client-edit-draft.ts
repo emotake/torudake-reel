@@ -62,17 +62,50 @@ export function matchesVideoDraftFingerprint(
   );
 }
 
-function isLocalEditDraft(value: unknown): value is LocalEditDraft {
-  if (!value || typeof value !== "object") return false;
+export function normalizeLocalEditDraft(value: unknown): LocalEditDraft | null {
+  if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<LocalEditDraft>;
-  return (
+  const validGoal = ["follow", "sales", "reach"].includes(candidate.goal ?? "");
+  const validAudioMode = ["spoken", "narration"].includes(
+    candidate.audioMode ?? "",
+  );
+  const validSpokenCutMode = ["auto", "manual", "none"].includes(
+    candidate.spokenCutMode ?? "",
+  );
+  const validNarrationStyle = ["bright", "calm", "comedy", "party"].includes(
+    candidate.narrationStyle ?? "",
+  );
+  if (!(
     candidate.version === 1 &&
     typeof candidate.savedAt === "number" &&
+    Number.isFinite(candidate.savedAt) &&
     Boolean(candidate.fingerprint) &&
     typeof candidate.fingerprint?.name === "string" &&
     typeof candidate.fingerprint?.size === "number" &&
+    typeof candidate.fingerprint?.lastModified === "number" &&
+    typeof candidate.fingerprint?.type === "string" &&
+    typeof candidate.fingerprint?.durationSeconds === "number" &&
+    typeof candidate.resultReady === "boolean" &&
+    validGoal &&
+    typeof candidate.length === "number" &&
+    Number.isFinite(candidate.length) &&
+    validAudioMode &&
+    validSpokenCutMode &&
+    validNarrationStyle &&
+    typeof candidate.narrationOriginalAudio === "number" &&
+    typeof candidate.narrationBrief === "string" &&
+    typeof candidate.narrationAutoCutEnabled === "boolean" &&
+    typeof candidate.usedHighAccuracy === "boolean" &&
+    (candidate.asrDictionary === undefined ||
+      (Array.isArray(candidate.asrDictionary) &&
+        candidate.asrDictionary.every((term) => typeof term === "string"))) &&
     Array.isArray(candidate.transcript)
-  );
+  )) return null;
+  return {
+    ...(candidate as LocalEditDraft),
+    spokenCaptionsEnabled: candidate.spokenCaptionsEnabled === true,
+    narrationCaptionsEnabled: candidate.narrationCaptionsEnabled !== false,
+  };
 }
 
 function openDraftDatabase() {
@@ -132,7 +165,8 @@ export async function loadLocalEditDraft() {
       const draft = await withDraftStore<unknown>("readonly", (store) =>
         store.get(EDIT_DRAFT_KEY),
       );
-      if (isLocalEditDraft(draft)) return draft;
+      const normalizedDraft = normalizeLocalEditDraft(draft);
+      if (normalizedDraft) return normalizedDraft;
     } catch {
       // Continue to the session fallback.
     }
@@ -140,7 +174,7 @@ export async function loadLocalEditDraft() {
   try {
     const serialized = window.sessionStorage.getItem(EDIT_DRAFT_SESSION_KEY);
     const draft = serialized ? JSON.parse(serialized) : null;
-    return isLocalEditDraft(draft) ? draft : null;
+    return normalizeLocalEditDraft(draft);
   } catch {
     return null;
   }

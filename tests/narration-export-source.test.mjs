@@ -89,7 +89,7 @@ test("keeps preview and recorder fallback aligned with local loudness and duckin
   const exportStart = workspaceFlow.indexOf("async function exportCaptionedVideo(");
   const exportFlow = workspaceFlow.slice(exportStart);
 
-  assert.match(workspaceFlow, /measurePortableOriginalAudioNormalization\(/);
+  assert.match(workspaceFlow, /measurePortableOriginalAudioProfile\(/);
   assert.match(workspaceFlow, /detectPortableNarrationActivity\(/);
   assert.match(workspaceFlow, /remapPortableNarrationActivity\(/);
   assert.match(workspaceFlow, /buildPortableDuckingEnvelope\(/);
@@ -270,7 +270,7 @@ test("charges a paid video only after a validated export and releases abandoned 
   );
   assert.match(
     pageSource,
-    /newlyReservedUsage &&[\s\S]*usageReservationPendingExportRef\.current = true/,
+    /processingReservationId &&[\s\S]*settleVideoUsageAfterProcessing\(/,
   );
   assert.match(pageSource, /if \(!usageReservationPendingExport\) return/);
   assert.match(pageSource, /await updateVideoUsage\("complete", usageReservationId\)/);
@@ -735,6 +735,67 @@ test("keeps spoken caption and cut choices aligned across preview and export", (
     /audioMode === "spoken" && spokenCutMode === "manual"[\s\S]*`目安\$\{length\}秒`/,
   );
   assert.doesNotMatch(pageSource, /spokenAutoCutEnabled/);
+});
+
+test("skips speech transcription when original video needs neither cuts nor telops", () => {
+  assert.match(
+    pageSource,
+    /const shouldAnalyzeSpokenAudio =\s*forceSpokenAudioAnalysis \|\|\s*spokenCaptionsEnabled \|\|\s*spokenCutMode !== "none"/,
+  );
+  assert.match(
+    pageSource,
+    /if \(!shouldAnalyzeSpokenAudio\) \{\s*updateProgress\(88\);\s*\} else if \(needsBrowserAudioExtraction\(file\)\)/,
+  );
+  assert.match(
+    pageSource,
+    /shouldAnalyzeSpokenAudio &&\s*nextTranscript\.length === 0/,
+  );
+  assert.match(pageSource, /文字起こしやテロップ作成も行いません/);
+  assert.match(
+    pageSource,
+    /音声解析してテロップを追加（AI処理1回）/,
+  );
+  assert.match(
+    pageSource,
+    /file && !isDemoSample && !usageReservationRef\.current/,
+  );
+  assert.match(pageSource, /fetch\("\/api\/usage\/renew"/);
+  assert.match(
+    pageSource,
+    /shouldAnalyzeSpokenAudio &&\s*usageReservationRef\.current[\s\S]*renewVideoUsage\(/,
+  );
+  assert.match(
+    pageSource,
+    /const wasPendingExport =\s*usageReservationPendingExportRef\.current;[\s\S]*rememberUsageReservation\(\s*renewed\.reservationId,\s*renewed\.bucket,\s*wasPendingExport/,
+  );
+  assert.match(
+    pageSource,
+    /processingReservationId = usageReservationRef\.current/,
+  );
+  assert.match(
+    pageSource,
+    /settleVideoUsageAfterProcessing\(\s*processingReservationId,\s*processingReservationBucket/,
+  );
+  assert.match(pageSource, /void startEditing\(false, true\)/);
+  assert.match(pageSource, /measurePortableOriginalAudioProfile\(/);
+  assert.match(pageSource, /requireAudioTrack:/);
+  assert.match(pageSource, /requireAudibleAudio:/);
+  assert.ok(
+    pageSource.indexOf("isExportingRef.current = true") <
+      pageSource.indexOf("await awaitOriginalAudioMeasurement()"),
+  );
+  assert.match(
+    pageSource,
+    /window\.setTimeout\(\(\) => finish\(null\), 8_000\)/,
+  );
+  assert.match(
+    pageSource,
+    /exportSignal\.addEventListener\("abort", abort, \{ once: true \}\)/,
+  );
+  assert.match(
+    pageSource,
+    /if \(exportAbortRef\.current === exportController\) \{\s*isExportingRef\.current = false;[\s\S]*setIsExporting\(false\)/,
+  );
 });
 
 test("renders the Vlog simple caption consistently in preview and video export", () => {

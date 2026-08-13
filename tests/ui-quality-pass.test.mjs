@@ -280,6 +280,29 @@ test("guides voiced videos toward original audio while keeping AI replacement av
   assert.doesNotMatch(pageSource, /会話や周りの音が入った動画にも使えます/);
 });
 
+test("defaults voiced videos to no burned-in telops while keeping them optional", () => {
+  assert.match(
+    pageSource,
+    /const \[spokenCaptionsEnabled, setSpokenCaptionsEnabled\] = useState\(false\)/,
+  );
+  assert.match(
+    pageSource,
+    /setAudioMode\("spoken"\);\s*setSpokenCaptionsEnabled\(true\);/,
+  );
+  assert.match(
+    pageSource,
+    /setAudioMode\("spoken"\);\s*setSpokenCaptionsEnabled\(false\);\s*setSpokenCutMode\("auto"\)/,
+  );
+  assert.match(pageSource, /テロップを付けない[\s\S]*?元の話し声をそのまま聞かせる[\s\S]*?<b>おすすめ<\/b>/);
+  assert.match(pageSource, /自動テロップを付ける/);
+  assert.match(pageSource, /テロップは必要なときだけ追加/);
+  assert.match(pageSource, /必要に応じたテロップ/);
+  assert.match(
+    pageSource,
+    /const \[narrationCaptionsEnabled, setNarrationCaptionsEnabled\] =\s*useState\(true\)/,
+  );
+});
+
 test("describes post copy only where AI narration provides it", () => {
   assert.match(pageSource, /AIナレーションモードなら投稿文も作れます/);
   assert.match(pageSource, /AIナレーションなら投稿文も作成/);
@@ -389,7 +412,10 @@ test("keeps setup choices accessible and labels the actual video shape", () => {
 });
 
 test("keeps the built-in sample free of narration API use", () => {
-  assert.match(pageSource, /if \(options\.demo\) setAudioMode\("spoken"\)/);
+  assert.match(
+    pageSource,
+    /if \(options\.demo\) \{\s*setAudioMode\("spoken"\);\s*setSpokenCaptionsEnabled\(true\);/,
+  );
   assert.match(
     pageSource,
     /aria-describedby=\{isDemoSample \? "sampleNarrationNotice" : undefined\}/,

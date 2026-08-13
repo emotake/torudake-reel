@@ -80,7 +80,8 @@ import {
   detectPortableNarrationActivity,
   getPortableExportMemoryPreflight,
   HIGH_QUALITY_VIDEO_BITRATE,
-  measurePortableOriginalAudioNormalization,
+  measurePortableOriginalAudioProfile,
+  type PortableOriginalAudioMeasurement,
   PortableVideoExportAbortedError,
   PORTABLE_AUDIO_CUT_FADE_SECONDS,
   PORTABLE_VIDEO_CROSSFADE_SECONDS,
@@ -355,7 +356,8 @@ async function inspectCompletedVideoQuality(
   expectedDimensions: VideoDimensions,
   validation: {
     expectedDurationSeconds: number;
-    requireAudio: boolean;
+    requireAudioTrack: boolean;
+    requireAudibleAudio: boolean;
     expectedNarrationRanges: ReadonlyArray<{ start: number; end: number }>;
     captionRanges: ReadonlyArray<{ start: number; end: number }>;
   },
@@ -367,7 +369,7 @@ async function inspectCompletedVideoQuality(
     } = await import("../lib/video-export-quality");
     const inspection = await inspectExportedVideoQuality(output, {
       packetSampleCount: 360,
-      inspectAudioActivity: validation.requireAudio,
+      inspectAudioActivity: validation.requireAudibleAudio,
       expectedNarrationRanges: validation.expectedNarrationRanges,
     });
     const assessment = assessExportedVideoQuality(
@@ -375,7 +377,8 @@ async function inspectCompletedVideoQuality(
       expectedDimensions,
       {
         expectedDurationSeconds: validation.expectedDurationSeconds,
-        requireAudio: validation.requireAudio,
+        requireAudioTrack: validation.requireAudioTrack,
+        requireAudibleAudio: validation.requireAudibleAudio,
         expectedNarrationRanges: validation.expectedNarrationRanges,
         captionRanges: validation.captionRanges,
       },
@@ -1501,6 +1504,66 @@ async function reserveVideoUsage(selectedFile: File, signal?: AbortSignal) {
   };
 }
 
+async function renewVideoUsage(
+  reservationId: string,
+  selectedFile: File,
+  signal?: AbortSignal,
+) {
+  throwIfProcessingAborted(signal);
+  const response = await fetch("/api/usage/renew", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reservationId,
+      sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
+    }),
+    signal,
+  });
+  const payload = await readApiResponse<
+    ApiPayload & {
+      bucket?: unknown;
+      required?: boolean;
+      reservationId?: string;
+      aiOperationLimit?: number;
+      aiOperationsRemaining?: number;
+      narrationGenerationLimit?: number;
+      narrationGenerationsRemaining?: number;
+    }
+  >(response, "利用枠の有効期限を更新できませんでした。");
+  const rawAiOperationLimit =
+    payload.aiOperationLimit ?? payload.narrationGenerationLimit;
+  const aiOperationLimit =
+    Number.isInteger(rawAiOperationLimit) && Number(rawAiOperationLimit) > 0
+      ? Math.min(MAX_AI_OPERATION_LIMIT, Number(rawAiOperationLimit))
+      : MAX_AI_OPERATION_LIMIT;
+  const rawAiOperationsRemaining =
+    payload.aiOperationsRemaining ?? payload.narrationGenerationsRemaining;
+  const aiOperationsRemaining =
+    Number.isInteger(rawAiOperationsRemaining) &&
+    Number(rawAiOperationsRemaining) >= 0
+      ? Math.min(aiOperationLimit, Number(rawAiOperationsRemaining))
+      : aiOperationLimit;
+  const bucket = payload.required
+    ? isBillingBucket(payload.bucket)
+      ? payload.bucket
+      : null
+    : null;
+  if (
+    payload.required &&
+    (!bucket ||
+      typeof payload.reservationId !== "string" ||
+      payload.reservationId !== reservationId)
+  ) {
+    throw new ApiRequestError("更新した利用枠を確認できませんでした。", 500);
+  }
+  return {
+    reservationId: payload.required ? reservationId : null,
+    bucket,
+    aiOperationLimit,
+    aiOperationsRemaining,
+  };
+}
+
 async function updateVideoUsage(
   action: "complete" | "release",
   reservationId: string,
@@ -1956,7 +2019,7 @@ export default function Home() {
   const [captionProfile, setCaptionProfile] = useCaptionProfileSync();
   const [length, setLength] = useState(60);
   const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
-  const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(true);
+  const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(false);
   const [spokenCutMode, setSpokenCutMode] =
     useState<SpokenCutMode>("auto");
   const [asrDictionaryInput, setAsrDictionaryInput] = useState("");
@@ -2290,7 +2353,7 @@ export default function Home() {
       return false;
     }
     if (selected.size > MAX_EDIT_VIDEO_BYTES) {
-      notify("字幕の自動生成は500MBまでです");
+      notify("動画編集は500MBまでです");
       return false;
     }
     let selectedDurationSeconds = 0;
@@ -2346,7 +2409,12 @@ export default function Home() {
           }),
     });
     setIsDemoSample(Boolean(options.demo));
-    if (options.demo) setAudioMode("spoken");
+    if (options.demo) {
+      setAudioMode("spoken");
+      setSpokenCaptionsEnabled(true);
+    } else if (!matchingDraft) {
+      setSpokenCaptionsEnabled(false);
+    }
     setEditError("");
     setSilentFallback(false);
     setUsedHighAccuracy(false);
@@ -2364,7 +2432,7 @@ export default function Home() {
       setGoal(matchingDraft.goal);
       setLength(matchingDraft.length);
       setAudioMode(matchingDraft.audioMode);
-      setSpokenCaptionsEnabled(matchingDraft.spokenCaptionsEnabled);
+      setSpokenCaptionsEnabled(matchingDraft.spokenCaptionsEnabled === true);
       setSpokenCutMode(matchingDraft.spokenCutMode);
       setAsrDictionaryInput(
         sanitizeAsrUserDictionary(matchingDraft.asrDictionary).join("、"),
@@ -2372,7 +2440,7 @@ export default function Home() {
       setNarrationStyle(matchingDraft.narrationStyle);
       setNarrationOriginalAudio(matchingDraft.narrationOriginalAudio);
       setNarrationBrief(matchingDraft.narrationBrief);
-      setNarrationCaptionsEnabled(matchingDraft.narrationCaptionsEnabled);
+      setNarrationCaptionsEnabled(matchingDraft.narrationCaptionsEnabled !== false);
       setNarrationAutoCutEnabled(matchingDraft.narrationAutoCutEnabled);
       setCaptionProfile(normalizeCaptionProfile(matchingDraft.captionProfile));
       const restoredTranscript = matchingDraft.transcript.filter(
@@ -2390,7 +2458,7 @@ export default function Home() {
       setUsedHighAccuracy(matchingDraft.usedHighAccuracy);
       notify(
         matchingDraft.resultReady
-          ? "前回の編集設定を復元しました。再解析すると、字幕とカットも同じ状態から確認できます"
+          ? "前回の編集設定を復元しました。現在のテロップとカット設定で、もう一度仕上がりを作成できます"
           : "前回の設定を復元しました",
       );
       trackClientEvent("draft_recovered", {
@@ -2432,10 +2500,13 @@ export default function Home() {
     }
   }
 
-  async function startEditing(highAccuracy = false) {
+  async function startEditing(
+    highAccuracy = false,
+    forceSpokenAudioAnalysis = false,
+  ) {
     if (file && file.size > MAX_EDIT_VIDEO_BYTES) {
       setEditError(
-        "字幕の自動生成は500MBまでです。動画を短くするか圧縮してお試しください。",
+        "動画編集は500MBまでです。動画を短くするか圧縮してお試しください。",
       );
       return;
     }
@@ -2458,22 +2529,61 @@ export default function Home() {
 
     let progressTimer: number | undefined;
     let newlyReservedUsage: string | null = null;
-    let newlyReservedBucket: BillingBucket | null = null;
+    let processingReservationId = usageReservationRef.current;
+    let processingReservationBucket = usageBucket;
     const transcriptionOperationId = crypto.randomUUID();
 
     try {
+      const shouldAnalyzeSpokenAudio =
+        forceSpokenAudioAnalysis ||
+        spokenCaptionsEnabled ||
+        spokenCutMode !== "none";
       let nextTranscript: TranscriptLine[] = isDemoSample
         ? DEMO_CAPTIONS.map((caption, index) => ({
             id: index + 1,
             ...caption,
             removed: false,
           }))
-        : initialTranscript;
+        : shouldAnalyzeSpokenAudio
+          ? initialTranscript
+          : [];
       let refined = false;
-      if (file && !isDemoSample && !highAccuracy) {
+      if (
+        file &&
+        !isDemoSample &&
+        shouldAnalyzeSpokenAudio &&
+        usageReservationRef.current
+      ) {
+        const wasPendingExport = usageReservationPendingExportRef.current;
+        try {
+          const renewed = await renewVideoUsage(
+            usageReservationRef.current,
+            file,
+            controller.signal,
+          );
+          processingReservationId = renewed.reservationId;
+          processingReservationBucket = renewed.bucket;
+          throwIfProcessingAborted(controller.signal);
+          rememberUsageReservation(
+            renewed.reservationId,
+            renewed.bucket,
+            wasPendingExport,
+          );
+          rememberReservationAiQuota(renewed);
+        } catch (error) {
+          if (!(error instanceof ApiRequestError) || error.status !== 404) {
+            throw error;
+          }
+          rememberUsageReservation(null);
+          processingReservationId = null;
+          processingReservationBucket = null;
+        }
+      }
+      if (file && !isDemoSample && !usageReservationRef.current) {
         const reservation = await reserveVideoUsage(file, controller.signal);
         newlyReservedUsage = reservation.reservationId;
-        newlyReservedBucket = reservation.bucket;
+        processingReservationId = reservation.reservationId;
+        processingReservationBucket = reservation.bucket;
         throwIfProcessingAborted(controller.signal);
         rememberUsageReservation(newlyReservedUsage, reservation.bucket);
         rememberReservationAiQuota(reservation);
@@ -2481,7 +2591,9 @@ export default function Home() {
       const usageReservationId = usageReservationRef.current;
 
       if (file && !isDemoSample) {
-        if (needsBrowserAudioExtraction(file)) {
+        if (!shouldAnalyzeSpokenAudio) {
+          updateProgress(88);
+        } else if (needsBrowserAudioExtraction(file)) {
           const transcriptionResult = await transcribeLargeVideo(
             file,
             updateProgress,
@@ -2522,7 +2634,12 @@ export default function Home() {
       }
 
       throwIfProcessingAborted(controller.signal);
-      if (file && !isDemoSample && nextTranscript.length === 0) {
+      if (
+        file &&
+        !isDemoSample &&
+        shouldAnalyzeSpokenAudio &&
+        nextTranscript.length === 0
+      ) {
         if (progressTimer !== undefined) {
           window.clearInterval(progressTimer);
         }
@@ -2563,20 +2680,24 @@ export default function Home() {
       setTranscript(nextTranscript);
       setUsedHighAccuracy(refined);
       if (
-        newlyReservedUsage &&
+        processingReservationId &&
         isCurrent() &&
-        usageReservationRef.current === newlyReservedUsage
+        usageReservationRef.current === processingReservationId
       ) {
         await settleVideoUsageAfterProcessing(
-          newlyReservedUsage,
-          newlyReservedBucket,
+          processingReservationId,
+          processingReservationBucket,
         );
       }
       if (!isCurrent()) return;
       setProgress(100);
       window.setTimeout(() => {
         if (!isCurrent()) return;
-        setPreviewMode(spokenCaptionsEnabled ? "after" : "before");
+        setPreviewMode(
+          spokenCaptionsEnabled || forceSpokenAudioAnalysis
+            ? "after"
+            : "before",
+        );
         setStage("result");
         trackClientEvent("preview_completed", {
           mode: "spoken",
@@ -3243,7 +3364,7 @@ export default function Home() {
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setAudioMode("spoken");
-    setSpokenCaptionsEnabled(true);
+    setSpokenCaptionsEnabled(false);
     setSpokenCutMode("auto");
     setAsrDictionaryInput("");
     setNarrationOriginalAudio(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT);
@@ -3553,6 +3674,14 @@ export default function Home() {
           previewMode={previewMode}
           spokenCaptionsEnabled={spokenCaptionsEnabled}
           setSpokenCaptionsEnabled={(enabled) => {
+            if (
+              enabled &&
+              !transcript.some((line) => line.text.trim().length > 0)
+            ) {
+              setSpokenCaptionsEnabled(true);
+              void startEditing(false, true);
+              return;
+            }
             setSpokenCaptionsEnabled(enabled);
             setPreviewMode(enabled ? "after" : "before");
           }}
@@ -3813,7 +3942,7 @@ function Landing({
             <em>編集の手間を、もっと軽く。</em>
           </h1>
           <p className="heroLead">
-            自動カット、自動テロップ、AIナレーション、表紙候補まで。
+            自動カット、必要に応じたテロップ、AIナレーション、表紙候補まで。
             AIナレーションモードなら投稿文も作れます。
             <br />
             仕上がりを見て、気になるところだけ直せます。
@@ -4535,7 +4664,7 @@ function SetupWorkspace({
             <span>●</span>
             {audioMode === "narration"
               ? "元の話し声をAI音声へ置き換えたい動画にも使えます。初期設定では元動画の音を0%にします。"
-              : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
+              : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出し、選んだ設定に応じてカット判定やテロップ作成に使用します（最大500MB）。"}
           </div>
         </aside>
 
@@ -4584,7 +4713,7 @@ function SetupWorkspace({
                 >
                   <i aria-hidden="true">元</i>
                   <strong>元の音声を活かす</strong>
-                  <small>会話・解説がある動画におすすめ。話した内容から字幕と自然なカットを作成</small>
+                  <small>会話・解説がある動画におすすめ。元の声を活かして編集し、テロップは必要なときだけ追加</small>
                   <b>{audioMode === "spoken" ? "✓" : ""}</b>
                 </button>
                 <button
@@ -4621,7 +4750,9 @@ function SetupWorkspace({
                 </strong>
                 <small>
                   {audioMode === "spoken"
-                    ? "AI音声は追加せず、元の話し声をもとに字幕とカットを整えます。"
+                    ? spokenCaptionsEnabled
+                      ? "AI音声は追加せず、話した内容をテロップにも表示します。"
+                      : "AI音声とテロップは追加しません。おまかせ編集では、自然なカット判定のために音声を解析します。"
                     : narrationOriginalAudio === 0
                       ? "元動画の音量は0%です。環境音やBGMを残したい場合だけ調整できます。"
                       : `元動画の音量は${Math.round(narrationOriginalAudio)}%です。話し声を重ねたくない場合は0%にしてください。`}
@@ -4636,7 +4767,9 @@ function SetupWorkspace({
                   {recommendedPresetTitle}
                 </strong>
                 <small>
-                  テロップは見やすい初期設定で作成し、色とデザインは仕上がりを見てから無料で変更できます。
+                  {audioMode === "spoken" && !spokenCaptionsEnabled
+                    ? "元音声ではテロップを付けない設定です。必要な場合だけ「細かく設定」から追加できます。"
+                    : "テロップは見やすい設定で作成し、色とデザインは仕上がりを見てから無料で変更できます。"}
                 </small>
               </p>
             </div>
@@ -4646,7 +4779,7 @@ function SetupWorkspace({
             <summary>
               <span>
                 <strong>細かく設定</strong>
-                <small>目的・長さ・カット・声・環境音の音量を調整</small>
+                <small>目的・長さ・カット・声・テロップ・環境音の音量を調整</small>
               </span>
               <b aria-hidden="true">＋</b>
             </summary>
@@ -4715,11 +4848,13 @@ function SetupWorkspace({
                 ? narrationAutoCutEnabled
                   ? "AI音声は自然な1倍速のまま、選んだ長さ以内に映像とテロップをまとめます。"
                   : "映像は元動画の長さのままです。AIナレーションは最大90秒で映像に収まる自然な長さにし、音声が終わった後も映像は最後まで続きます。"
-                : spokenCutMode === "auto"
-                  ? "自然に短くするため元動画全体を1度だけ文字起こしします。構成判定は端末内で行い、追加のAI呼び出しはしません。"
+                  : spokenCutMode === "auto"
+                  ? "テロップを付けない場合も、自然なカット判定のため元動画の音声を1度だけ解析します。構成判定は端末内で行い、追加のAI呼び出しはしません。"
                   : spokenCutMode === "manual"
                     ? "話している区間をすべて残した状態から、自分で使わない部分を選べます。選んだ長さは仕上がりの目安です。"
-                    : "映像・順番・動画の長さは変えません。文字起こしはテロップと字幕データのために1度だけ行います。"}
+                    : spokenCaptionsEnabled
+                      ? "映像・順番・動画の長さは変えません。テロップと字幕データのために1度だけ文字起こしします。"
+                      : "映像・順番・動画の長さは変えず、文字起こしやテロップ作成も行いません。"}
             </p>
           </fieldset>
 
@@ -4735,22 +4870,22 @@ function SetupWorkspace({
                   <div className="narrationChoiceCards">
                     <button
                       type="button"
-                      className={spokenCaptionsEnabled ? "selected" : ""}
-                      aria-pressed={spokenCaptionsEnabled}
-                      onClick={() => setSpokenCaptionsEnabled(true)}
-                    >
-                      <strong>テロップを付ける</strong>
-                      <small>元の音声を読み取り、話した内容を見やすく表示</small>
-                      <b>おすすめ</b>
-                    </button>
-                    <button
-                      type="button"
                       className={!spokenCaptionsEnabled ? "selected" : ""}
                       aria-pressed={!spokenCaptionsEnabled}
                       onClick={() => setSpokenCaptionsEnabled(false)}
                     >
                       <strong>テロップを付けない</strong>
-                      <small>映像と元の音声だけでシンプルに仕上げる</small>
+                      <small>元の話し声をそのまま聞かせる</small>
+                      <b>おすすめ</b>
+                    </button>
+                    <button
+                      type="button"
+                      className={spokenCaptionsEnabled ? "selected" : ""}
+                      aria-pressed={spokenCaptionsEnabled}
+                      onClick={() => setSpokenCaptionsEnabled(true)}
+                    >
+                      <strong>自動テロップを付ける</strong>
+                      <small>話した内容を画面にも表示したいとき</small>
                     </button>
                   </div>
                 </div>
@@ -5002,7 +5137,9 @@ function SetupWorkspace({
             <p className="optionCostNote">
               {audioMode === "narration"
                 ? "初回のAI台本とAI音声は、まとめてAI処理を1回使用します。内部の自動調整では追加消費しません。"
-                : "この編集では、文字起こしにAI処理を1回使用します。動画を分割して処理しても追加消費しません。"}
+                : spokenCutMode === "none" && !spokenCaptionsEnabled
+                  ? "文字起こしやテロップ生成は行いません。"
+                  : "この編集では、カット判定またはテロップ作成のため、音声解析にAI処理を1回使用します。動画を分割して処理しても追加消費しません。"}
               正常に完了したAI処理の回数は、この編集を保存せず終了した場合も戻りません。
             </p>
             <button className="mainCta" onClick={startEditing}>
@@ -5053,6 +5190,9 @@ function Processing({
   narrationAutoCutEnabled: boolean;
   cancel: () => void;
 }) {
+  const skipsSpokenAnalysis = Boolean(
+    !narration && spokenCutMode === "none" && !spokenCaptionsEnabled,
+  );
   const steps = narration
     ? [
         { threshold: 18, label: "場面を選んでいます", note: "動画全体から代表的な場面を抽出" },
@@ -5069,7 +5209,20 @@ function Processing({
         },
         { threshold: 100, label: "仕上げ中", note: "投稿文とプレビューを準備" },
       ]
-    : [
+    : skipsSpokenAnalysis
+      ? [
+          {
+            threshold: 88,
+            label: "元動画を確認しています",
+            note: "音声解析やテロップ生成をせず、映像・順番・長さを保持",
+          },
+          {
+            threshold: 100,
+            label: "仕上げ中",
+            note: "元動画の流れを保ったプレビューを準備",
+          },
+        ]
+      : [
     { threshold: 18, label: "音声を整えています", note: "音量をそろえて声を聞き取りやすく調整" },
     {
       threshold: 42,
@@ -5138,13 +5291,17 @@ function Processing({
         </div>
 
         <div className="processingCopy">
-          <p className="eyebrow">AIで編集中</p>
+          <p className="eyebrow">
+            {skipsSpokenAnalysis ? "端末内で準備中" : "AIで編集中"}
+          </p>
           <h1>投稿できる状態に整えています。</h1>
           <p>
             {file?.name ?? "サンプル動画"}の
             {narration
               ? `場面を読み取り、映像に合う台本とAI音声を作っています。${narrationAutoCutEnabled ? "選んだ長さを目安に映像をつなぎます。" : "元動画はカットしません。"}${narrationCaptionsEnabled ? "テロップも同期します。" : "テロップは付けません。"}`
-              : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}${spokenCutMode === "auto" ? "音声に合わせて映像を自然につなぎ直しています。" : spokenCutMode === "manual" ? "文章ごとに残す区間を選べる状態へ準備しています。" : "元動画の映像・順番・長さを保って仕上げています。"}${spokenCaptionsEnabled ? "テロップも準備します。" : "テロップは付けません。"}`}
+              : skipsSpokenAnalysis
+                ? "音声解析やテロップ生成をせず、元動画の映像・順番・長さを保って仕上げています。"
+                : `${highAccuracy ? "言葉を高精度で確認し、" : "音量と発話区間を整え、"}${spokenCutMode === "auto" ? "音声に合わせて映像を自然につなぎ直しています。" : spokenCutMode === "manual" ? "文章ごとに残す区間を選べる状態へ準備しています。" : "元動画の映像・順番・長さを保って仕上げています。"}${spokenCaptionsEnabled ? "テロップも準備します。" : "テロップは付けません。"}`}
           </p>
           <div className="bigProgress">
             <span style={{ width: `${progress}%` }} />
@@ -5328,6 +5485,9 @@ function ResultWorkspace({
   const [currentTime, setCurrentTime] = useState(0);
   const [originalAudioNormalizationGain, setOriginalAudioNormalizationGain] =
     useState(1);
+  const originalAudioMeasurementRef = useRef<
+    Promise<PortableOriginalAudioMeasurement> | null
+  >(null);
   const [sourceDuration, setSourceDuration] = useState(0);
   const [sourceVideoDimensions, setSourceVideoDimensions] =
     useState<VideoDimensions | null>(null);
@@ -5691,20 +5851,32 @@ function ResultWorkspace({
   useEffect(() => {
     const controller = new AbortController();
     window.queueMicrotask(() => {
-      if (!controller.signal.aborted) setOriginalAudioNormalizationGain(1);
+      if (!controller.signal.aborted) {
+        setOriginalAudioNormalizationGain(1);
+      }
     });
-    if (!file || editRanges.length === 0) return () => controller.abort();
+    if (!file || editRanges.length === 0) {
+      originalAudioMeasurementRef.current = null;
+      return () => controller.abort();
+    }
 
-    void measurePortableOriginalAudioNormalization(
+    const measurementPromise = measurePortableOriginalAudioProfile(
       file,
       editRanges,
       controller.signal,
-    ).then((gain) => {
+    );
+    originalAudioMeasurementRef.current = measurementPromise;
+    void measurementPromise.then((measurement) => {
       if (!controller.signal.aborted) {
-        setOriginalAudioNormalizationGain(gain);
+        setOriginalAudioNormalizationGain(measurement.normalizationGain);
       }
-    });
-    return () => controller.abort();
+    }).catch(() => undefined);
+    return () => {
+      controller.abort();
+      if (originalAudioMeasurementRef.current === measurementPromise) {
+        originalAudioMeasurementRef.current = null;
+      }
+    };
   }, [editRanges, file]);
   const previewRanges = useMemo(
     () => buildPreviewRanges(editRanges),
@@ -5747,6 +5919,9 @@ function ResultWorkspace({
   const captionsVisible = narrationPlan
     ? narrationCaptionsEnabled
     : spokenCaptionsEnabled;
+  const needsSpokenCaptionAnalysis = Boolean(
+    !narrationPlan && !transcript.some((line) => line.text.trim().length > 0),
+  );
   const unreadableCaptionCount = useMemo(
     () =>
       editedTranscript.filter((line) => {
@@ -8083,12 +8258,102 @@ function ResultWorkspace({
       );
       return;
     }
+    const canUseLegacyRecorder =
+      typeof MediaRecorder !== "undefined" &&
+      typeof HTMLCanvasElement.prototype.captureStream === "function";
+    const exportController = new AbortController();
+    exportAbortRef.current?.abort();
+    exportAbortRef.current = exportController;
+    const exportSignal = exportController.signal;
+    const throwIfExportAborted = () => {
+      if (exportSignal.aborted) throw new PortableVideoExportAbortedError();
+    };
+    isExportingRef.current = true;
+    setIsExporting(true);
+    setExportedVideoFile(null);
+    setExportedVideoQualityMessage(null);
+    setExportedVideoRevision(null);
+    setExportProgress(0);
+
+    const awaitOriginalAudioMeasurement = async (): Promise<
+      PortableOriginalAudioMeasurement | null
+    > => {
+      if (narrationPlan) return null;
+      const pendingMeasurement = originalAudioMeasurementRef.current;
+      if (!pendingMeasurement) return null;
+
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        let timeout = 0;
+        const cleanup = () => {
+          window.clearTimeout(timeout);
+          exportSignal.removeEventListener("abort", abort);
+        };
+        const finish = (measurement: PortableOriginalAudioMeasurement | null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(measurement);
+        };
+        const abort = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new PortableVideoExportAbortedError());
+        };
+        timeout = window.setTimeout(() => finish(null), 8_000);
+        exportSignal.addEventListener("abort", abort, { once: true });
+        void pendingMeasurement.then(finish, () => finish(null));
+        if (exportSignal.aborted) abort();
+      });
+    };
+
     const audibleTranscript = editedTranscript.filter(
       (line) => !line.removed && line.text.trim(),
     );
+    let originalAudioMeasurement: PortableOriginalAudioMeasurement | null = null;
+    try {
+      originalAudioMeasurement = await awaitOriginalAudioMeasurement();
+      throwIfExportAborted();
+    } catch (error) {
+      const cancelled =
+        exportSignal.aborted ||
+        error instanceof PortableVideoExportAbortedError ||
+        (error instanceof DOMException && error.name === "AbortError");
+      await preparedAudioContext?.close().catch(() => undefined);
+      if (exportAbortRef.current === exportController) {
+        isExportingRef.current = false;
+        exportAbortRef.current = null;
+        setIsExporting(false);
+        setExportProgress(null);
+      }
+      if (!exportPageHidingRef.current) {
+        notify(
+          cancelled
+            ? "動画の書き出しを中止しました。"
+            : error instanceof Error
+              ? error.message
+              : "動画の音声を確認できませんでした。",
+        );
+      }
+      return;
+    }
+    const normalizedOriginalAudioRms =
+      originalAudioMeasurement?.hasDecodedSamples &&
+      originalAudioMeasurement.rms !== null
+        ? originalAudioMeasurement.rms *
+          originalAudioMeasurement.normalizationGain
+        : null;
     const completedVideoValidation = {
       expectedDurationSeconds: editedDurationSeconds,
-      requireAudio: Boolean(narrationPlan || audibleTranscript.length > 0),
+      requireAudioTrack: Boolean(
+        narrationPlan || originalAudioMeasurement?.hasAudioTrack !== false,
+      ),
+      requireAudibleAudio: Boolean(
+        narrationPlan ||
+          (normalizedOriginalAudioRms !== null &&
+            normalizedOriginalAudioRms >= 0.0025),
+      ),
       expectedNarrationRanges: narrationPlan
         ? audibleTranscript.map((line) => ({
             start: line.start,
@@ -8103,24 +8368,7 @@ function ResultWorkspace({
         : [],
     };
 
-    const canUseLegacyRecorder =
-      typeof MediaRecorder !== "undefined" &&
-      typeof HTMLCanvasElement.prototype.captureStream === "function";
     let portableColorConversionMessage = "";
-    const exportController = new AbortController();
-    exportAbortRef.current?.abort();
-    exportAbortRef.current = exportController;
-    const exportSignal = exportController.signal;
-    const throwIfExportAborted = () => {
-      if (exportSignal.aborted) throw new PortableVideoExportAbortedError();
-    };
-
-    isExportingRef.current = true;
-    setIsExporting(true);
-    setExportedVideoFile(null);
-    setExportedVideoQualityMessage(null);
-    setExportedVideoRevision(null);
-    setExportProgress(0);
     const previous = {
       currentTime: video.currentTime,
       editedTime: editedCurrentTime,
@@ -8880,12 +9128,12 @@ function ResultWorkspace({
       video.loop = previous.loop;
       video.muted = previous.muted;
       video.volume = previous.volume;
-      isExportingRef.current = false;
       if (exportAbortRef.current === exportController) {
+        isExportingRef.current = false;
         exportAbortRef.current = null;
+        setIsExporting(false);
+        setExportProgress(null);
       }
-      setIsExporting(false);
-      setExportProgress(null);
       if (!exportPageHidingRef.current) {
         await seekVideoBeforePlayback(video, previous.currentTime).catch(
           () => undefined,
@@ -9753,13 +10001,21 @@ function ResultWorkspace({
               <button
                 className={captionsVisible ? "active" : ""}
                 aria-pressed={captionsVisible}
+                disabled={
+                  isMediaBusy ||
+                  (needsSpokenCaptionAnalysis && narrationGenerationLimitReached)
+                }
                 onClick={() =>
                   narrationPlan
                     ? setNarrationCaptionsEnabled(true)
                     : setSpokenCaptionsEnabled(true)
                 }
               >
-                テロップあり
+                {needsSpokenCaptionAnalysis
+                  ? narrationGenerationLimitReached
+                    ? "AI処理の上限に達しました"
+                    : "音声解析してテロップを追加（AI処理1回）"
+                  : "テロップあり"}
               </button>
             </div>
             <span>仕上がりプレビュー</span>
@@ -10519,6 +10775,7 @@ function ResultWorkspace({
         </div>
       </details>
 
+      {editedTranscript.some((line) => line.text.trim().length > 0) && (
       <details className="deliverables resultDetailCard">
         <summary className="resultDetailSummary">
           <span aria-hidden="true">文</span>
@@ -10575,6 +10832,7 @@ function ResultWorkspace({
           </button>
         </div>
       </details>
+      )}
 
       {!file && (
         <div className="handoffPrompt">
@@ -10657,7 +10915,10 @@ function ResultWorkspace({
           >
             別の動画を作る
           </button>
-          {file && !usedHighAccuracy && !narrationPlan && (
+          {file &&
+            transcript.some((line) => line.text.trim().length > 0) &&
+            !usedHighAccuracy &&
+            !narrationPlan && (
             <button
               className="quietButton highAccuracyButton"
               onClick={() => void regenerateHighAccuracy()}
