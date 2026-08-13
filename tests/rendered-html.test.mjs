@@ -45,10 +45,13 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /実際の動画では本番モデル/);
   assert.match(html, /朝七時に駅を出発して、海沿いのカフェで/);
   assert.match(html, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
-  assert.match(html, /週末のナイトマーケットは大盛況で/);
+  assert.match(html, /焼きたてのクロワッサンも絶品でした/);
+  assert.match(html, /週末に出かけた夏祭りは大にぎわいで/);
+  assert.doesNotMatch(html, /ナイトマーケット/);
   assert.match(html, /友だちと見つけた夜景スポットは雰囲気も最高で/);
+  assert.match(html, /写真もきれいに撮れて、今日は大満足でした/);
   for (const voice of ["calm", "bright", "comedy", "party"]) {
-    assert.match(html, new RegExp(`/demo/voices/${voice}-v3\\.wav`));
+    assert.match(html, new RegExp(`/demo/voices/${voice}-v4\\.wav`));
   }
   assert.doesNotMatch(html, /同じ短い文章を4つの声で/);
   assert.doesNotMatch(html, /用途別の例文で、4つの声を/);

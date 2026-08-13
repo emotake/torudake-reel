@@ -55,13 +55,14 @@ test("loads the sample as a real File and keeps the caption-synchronised demo fa
 test("presents four readable, no-cost AI voice examples for distinct use cases", async () => {
   assert.match(pageSource, /const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string>/);
   assert.match(pageSource, /朝七時に駅を出発して、海沿いのカフェで/);
-  assert.match(pageSource, /休日に見つけた海辺のカフェは、窓から夕日が見えて/);
-  assert.match(pageSource, /週末のナイトマーケットは大盛況で/);
-  assert.match(pageSource, /友だちと見つけた夜景スポットは雰囲気も最高で/);
+  assert.match(pageSource, /休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたての/);
+  assert.match(pageSource, /週末に出かけた夏祭りは大にぎわいで/);
+  assert.doesNotMatch(pageSource, /ナイトマーケット/);
+  assert.match(pageSource, /写真もきれいに撮れて、今日は大満足でした/);
   assert.match(pageSource, /用途別の例文で、4つの話し方を聴き比べられます/);
   assert.match(
     pageSource,
-    /src=\{`\/demo\/voices\/\$\{style\.id\}-v3\.wav`\}/,
+    /src=\{`\/demo\/voices\/\$\{style\.id\}-v4\.wav`\}/,
   );
   assert.match(pageSource, /aria-describedby=\{exampleId\}/);
   assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
@@ -73,7 +74,7 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   );
   assert.match(cssSource, /\.voiceSampleExample q\s*\{[\s\S]*?quotes:\s*"「" "」"/);
   const voiceManifestUrl = new URL(
-    "../public/demo/voices/manifest-v3.json",
+    "../public/demo/voices/manifest-v4.json",
     import.meta.url,
   );
   const voiceManifest = JSON.parse(await readFile(voiceManifestUrl, "utf8"));
@@ -88,19 +89,19 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
       voice: "marin",
       speed: 1,
       script:
-        "休日に見つけた海辺のカフェは、窓から夕日が見えてクロワッサンも絶品でした。",
+        "休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたてのクロワッサンも絶品でした。",
     },
     comedy: {
       voice: "cedar",
       speed: 1.03,
       script:
-        "週末のナイトマーケットは大盛況で、音楽もフードも最高、気づけば二周してました。",
+        "週末に出かけた夏祭りは大にぎわいで、屋台の焼きそばも音楽も楽しめて、最後の花火まで満喫しました。",
     },
     party: {
       voice: "marin",
       speed: 1.03,
       script:
-        "友だちと見つけた夜景スポットは雰囲気も最高で、写真も動画も盛れて今日は大当たりでした。",
+        "友だちと見つけた夜景スポットは雰囲気も最高で、写真もきれいに撮れて、今日は大満足でした。",
     },
   };
   assert.equal(voiceManifest.samples.length, 4);
@@ -129,9 +130,10 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
     assert.equal(audio.readUInt16LE(22), 1);
     assert.equal(audio.readUInt32LE(24), 24_000);
     assert.equal(audio.readUInt16LE(34), 16);
-    assert.ok(sample.durationSeconds >= 4.5 && sample.durationSeconds <= 8);
-    assert.ok(sample.integratedLufs >= -20 && sample.integratedLufs <= -19);
-    assert.ok(sample.truePeakDbtp <= -2);
+    assert.ok(sample.durationSeconds >= 6 && sample.durationSeconds <= 8);
+    assert.ok(sample.integratedLufs >= -19 && sample.integratedLufs <= -18);
+    assert.ok(sample.truePeakDbtp <= -2.5);
+    assert.equal(sample.postRollSeconds, 0.35);
   }
 });
 

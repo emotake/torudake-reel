@@ -313,11 +313,11 @@ const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string> = {
   calm:
     "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
   bright:
-    "休日に見つけた海辺のカフェは、窓から夕日が見えてクロワッサンも絶品でした。",
+    "休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたてのクロワッサンも絶品でした。",
   comedy:
-    "週末のナイトマーケットは大盛況で、音楽もフードも最高、気づけば二周してました。",
+    "週末に出かけた夏祭りは大にぎわいで、屋台の焼きそばも音楽も楽しめて、最後の花火まで満喫しました。",
   party:
-    "友だちと見つけた夜景スポットは雰囲気も最高で、写真も動画も盛れて今日は大当たりでした。",
+    "友だちと見つけた夜景スポットは雰囲気も最高で、写真もきれいに撮れて、今日は大満足でした。",
 };
 
 function readAiOperationQuota(response: Response): AiOperationQuotaResult {
@@ -3925,7 +3925,7 @@ function Landing({
                 <audio
                   controls
                   preload="none"
-                  src={`/demo/voices/${style.id}-v3.wav`}
+                  src={`/demo/voices/${style.id}-v4.wav`}
                   aria-label={`${style.label}の用途別固定音声サンプル`}
                   aria-describedby={exampleId}
                   onPlay={() =>

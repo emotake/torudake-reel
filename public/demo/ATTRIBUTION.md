@@ -26,6 +26,8 @@ The existing Japanese narration WAV under `scripts/demo-composition/assets/narra
 
 The four `public/demo/voices/*-v3.wav` previews were generated on 2026-08-13 with the production `gpt-realtime-2.1-mini` model and the same voice, speed, and instruction profile used by each production delivery template. Generation was performed through a temporary authenticated operations route that accepted only the four fixed sample scripts; that route was removed immediately after generation. The selected takes were processed locally with edge-silence trimming, light filtering and compression, short edge fades, and loudness matching. Exact scripts, profiles, measurements, byte lengths, and SHA-256 hashes are recorded in `public/demo/voices/manifest-v3.json`.
 
+The four `public/demo/voices/*-v4.wav` previews replace v3 after a trailing-syllable audit. They were generated on 2026-08-13 with the production `gpt-realtime-2.1-mini` model and the same voice, speed, and `2026-08-13-quality-v3` delivery profile used in production. A temporary authenticated, fixed-script-only route was used and removed immediately after generation. Three takes per style were compared; the complete selected raw take was preserved without edge trimming, loudness-normalized to about -18.5 LUFS with a -2.5 dBTP ceiling, and followed by 350 ms of digital silence. The reproducible non-secret mastering procedure is `scripts/master-voice-samples.mjs`; provenance, raw and final hashes, measurements, and scripts are in `public/demo/voices/manifest-v4.json`.
+
 ## Final media
 
 - File: `public/demo/torudake-demo.mp4`

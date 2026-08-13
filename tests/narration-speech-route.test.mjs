@@ -167,7 +167,7 @@ test("generates four delivery templates with the recommended realtime voices", a
       assert.equal(response.headers.get("x-narration-voice"), voices[index]);
       assert.equal(
         response.headers.get("x-narration-profile"),
-        `2026-08-12-quality-v2:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
+        `2026-08-13-quality-v3:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
       );
       const wav = new Uint8Array(await response.arrayBuffer());
       assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
@@ -239,14 +239,19 @@ test("generates four delivery templates with the recommended realtime voices", a
     assert.match(responses[1].instructions, /温かくクリア/);
     assert.match(
       responses[2].instructions,
-      /20代のクラブや音楽イベント.*成人男性/,
+      /休日のお出かけや楽しかった体験.*成人男性/,
     );
-    assert.match(responses[2].instructions, /華やかで抜けのよい男性/);
+    assert.match(responses[2].instructions, /自然な笑顔が伝わるクリアな声/);
     assert.match(
       responses[3].instructions,
-      /20代のクラブや音楽イベント.*成人女性/,
+      /友人とのお出かけやおすすめの場所.*成人女性/,
     );
-    assert.match(responses[3].instructions, /ギャル系の親しみやすさ/);
+    assert.match(responses[3].instructions, /自然な笑顔と前向きさ/);
+    assert.ok(
+      responses.every((response) =>
+        response.instructions.includes("台本の最後の音節と語尾まで明瞭に言い切る"),
+      ),
+    );
     assert.doesNotMatch(
       responses.slice(2).map((response) => response.instructions).join("\n"),
       /コメディ|オチ|笑いを作る/,
@@ -417,7 +422,7 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.equal(response.headers.get("x-narration-voice"), "marin");
     assert.equal(
       response.headers.get("x-narration-profile"),
-      "2026-08-12-quality-v2:bright:gpt-realtime-2.1-mini:marin:1",
+      "2026-08-13-quality-v3:bright:gpt-realtime-2.1-mini:marin:1",
     );
     const session = socket.sent[0].session;
     assert.equal(session.audio.output.voice, "marin");
