@@ -54,7 +54,8 @@ PCM 24kHzのWAVへ変換してプレビューと書き出しへ渡します。�
 
 通常の動画編集はR2を使用せず、25MB以下の対応動画を直接音声認識へ送り、
 それを超える動画やMOV/M4Vはブラウザ内で音声だけを分割します。
-R2の `MEDIA` bindingは、公開導線のない開発用ファイル転送APIを使う場合だけ任意です。
+R2の `MEDIA` bindingは既定では宣言しません。公開導線のない開発用ファイル転送APIを
+明示的に有効化するときだけ、Cloudflare側へ別途追加します。
 
 Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
 `STRIPE_PRICE_STARTER_MONTHLY`、`STRIPE_PRICE_STANDARD_MONTHLY`、
@@ -75,8 +76,85 @@ Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
 - `pnpm run test`: ビルドと全回帰テスト
 - `pnpm run lint`: 静的検査
 - `pnpm run db:generate`: Drizzleマイグレーション生成
+- `pnpm run release:preflight`: 公開先・Git・本番D1を読み取り専用で事前確認
+- `pnpm run release:preflight:offline`: ローカル項目だけ確認（公開許可には使用不可）
+
+## リリース安全手順（Dドライブのみ）
+
+本番はOpenAI Sitesではなく、Cloudflare Pagesの `torudake-reel` です。
+誤って別のSitesプロジェクトへ公開しないよう、`.openai/hosting.json` は置きません。
+ローカル開発用bindingは `config/local-bindings.json`、固定した本番対象は
+`config/release-targets.json`、D1保守専用設定は `wrangler.d1.jsonc` に分離しています。
+`wrangler.d1.jsonc` をPages公開に使ってはいけません。
+
+PowerShellでは、Node、pnpm、一時ファイル、Wrangler認証情報とログをすべて
+Dドライブへ固定してから作業します。
+
+```powershell
+$releaseRoot = 'D:\CodexTemp\torudake-release-src-20260810'
+$runtimeRoot = 'D:\CodexTemp\torudake-node-runtime'
+$releaseTemp = 'D:\CodexTemp\torudake-runtime-temp'
+$wranglerState = 'D:\CodexTemp\wrangler-auth'
+
+New-Item -ItemType Directory -Force $releaseTemp | Out-Null
+New-Item -ItemType Directory -Force "$wranglerState\config" | Out-Null
+New-Item -ItemType Directory -Force "$wranglerState\cache" | Out-Null
+$env:TEMP = $releaseTemp
+$env:TMP = $releaseTemp
+$env:XDG_CONFIG_HOME = "$wranglerState\config"
+$env:XDG_CACHE_HOME = "$wranglerState\cache"
+$env:WRANGLER_LOG_PATH = "$wranglerState\wrangler.log"
+$env:PATH = "$runtimeRoot\bin;$env:PATH"
+Set-Location -LiteralPath $releaseRoot
+
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run release:preflight
+```
+
+事前確認は次の状態を1つでも検出すると終了コード1で停止します。
+
+- 作業場所または関連する一時領域がDドライブ以外
+- OpenAI Sites用metadataの再混入、Pages/D1対象IDの変更、R2の再宣言
+- 設定済みの `origin` がCドライブや `file://` などのローカルコピーを指している
+- 未コミット変更
+- `drizzle/` と本番 `d1_migrations` の不一致
+- D1の `quick_check` または外部キー検査の異常
+
+正式な共有リポジトリURLが未確定の場合は `origin` を設定せず、レビュー済みcommitを
+Cloudflare PagesへDirect Uploadします。旧Cドライブなどローカルコピーをremoteへ
+設定してはいけません。正式URLが確定した後だけ `git remote add origin` を行います。
+
+事前確認、全テスト、Pages用ビルドがすべて成功し、差分とcommit SHAを確認した後だけ、
+固定したプロジェクト名とproduction branchを明示して公開します。
+
+```powershell
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run test
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run lint
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run build:cloudflare-pages
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" exec wrangler pages deploy dist/cloudflare-pages --project-name torudake-reel --branch main
+```
+
+### D1 migration ledgerの整合
+
+`d1_migrations` と `drizzle/` が一致しない間は、
+`wrangler d1 migrations apply --remote` を実行してはいけません。既に反映済みのSQLを
+Wranglerが未適用と判断し、再実行する危険があるためです。`release:preflight` 自体は
+`SELECT` と `PRAGMA` だけを実行し、履歴を書き換えません。
+
+2026-08-13に、0000〜0019を空DBへ順番に適用した結果と本番を照合し、
+アプリ用179列、79索引、その全列順・一意性が一致することを確認しました。
+直前のTime Travel bookmarkと完全exportをDドライブへ保存したうえで、
+`scripts/operations/baseline-d1-migration-ledger-0000-0019.sql` により、既に適用済みの
+20ファイル名だけを履歴へ記録しました。`quick_check=ok`、外部キー違反0、
+`wrangler d1 migrations list` は未適用0件です。このbaseline SQLは一度限りの監査記録で、
+再実行してはいけません。照合値と切り戻し情報は
+`docs/operations/2026-08-13-d1-ledger-baseline.md` に記録しています。
+今後の新規migrationは通常どおりWranglerで適用します。
+
+`release:preflight:offline` は認証がない端末でローカル設定を点検するためだけのものです。
+本番D1を確認しないため、成功してもリリース許可にはなりません。
 
 ## 関連資料
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [Dependency risk register](docs/operations/dependency-risk-register.md)

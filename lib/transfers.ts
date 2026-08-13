@@ -74,6 +74,14 @@ export function getMediaBucket() {
   return bucket;
 }
 
+export function isMediaTransferAvailable() {
+  return Boolean((env as unknown as { MEDIA?: MediaBucket }).MEDIA);
+}
+
+export function mediaTransferUnavailable() {
+  return jsonError("動画の受け渡し機能は現在利用できません。", 503);
+}
+
 export function createTransferCode() {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);

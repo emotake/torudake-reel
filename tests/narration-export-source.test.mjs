@@ -105,6 +105,76 @@ test("keeps preview and recorder fallback aligned with local loudness and duckin
   assert.match(exportFlow, /scheduleGainEnvelope\(/);
 });
 
+test("cancels both export paths and releases a paid reservation exactly once", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const end = pageSource.indexOf("\n  function requestVideoExport()", start);
+  const exportFlow = pageSource.slice(start, end);
+  const cancelStart = pageSource.indexOf(
+    "async function cancelPendingExportReservation()",
+  );
+  const cancelEnd = pageSource.indexOf(
+    "\n  function rememberAiOperationsRemaining",
+    cancelStart,
+  );
+  const reservationCancellation = pageSource.slice(cancelStart, cancelEnd);
+
+  assert.match(exportFlow, /const exportController = new AbortController\(\)/);
+  assert.match(exportFlow, /signal: exportSignal/);
+  assert.match(
+    exportFlow,
+    /portableExportError instanceof PortableVideoExportAbortedError[\s\S]*throw new PortableVideoExportAbortedError\(\)/,
+  );
+  assert.match(exportFlow, /exportSignal\.addEventListener\("abort"/);
+  assert.match(exportFlow, /outputStream\?\.getTracks\(\)\.forEach/);
+  assert.match(pageSource, /function cancelVideoExport\(\)/);
+  assert.match(pageSource, /exportAbortRef\.current\?\.abort\(\)/);
+  assert.match(
+    pageSource,
+    /isFinalizingExport \? "利用枠を確定中…" : "書き出しを中止"/,
+  );
+  assert.match(
+    pageSource,
+    /window\.addEventListener\("pagehide", handlePageHide\)/,
+  );
+  assert.match(reservationCancellation, /usageReservationPendingExportRef\.current = false/);
+  assert.match(reservationCancellation, /await requestVideoUsageRelease\(reservationId\)/);
+  assert.match(reservationCancellation, /release\?\.status === "completed"/);
+  assert.match(reservationCancellation, /利用枠を戻しました/);
+  assert.match(reservationCancellation, /rememberUsageReservation\(null\)/);
+});
+
+test("locks cancellation while the paid export reservation is being finalized", () => {
+  const completeStart = pageSource.indexOf(
+    "async function completePendingExportReservation()",
+  );
+  const completeEnd = pageSource.indexOf(
+    "\n  const thumbnailInputRevision",
+    completeStart,
+  );
+  const completeFlow = pageSource.slice(completeStart, completeEnd);
+  const cancelStart = pageSource.indexOf("function cancelVideoExport()");
+  const cancelEnd = pageSource.indexOf(
+    "\n  async function confirmNarrationExport()",
+    cancelStart,
+  );
+  const cancelFlow = pageSource.slice(cancelStart, cancelEnd);
+
+  assert.match(
+    completeFlow,
+    /exportFinalizingRef\.current = true[\s\S]*setExportReservationFinalizing\(true\)[\s\S]*await updateVideoUsage\("complete"/,
+  );
+  assert.match(
+    completeFlow,
+    /finally \{[\s\S]*exportFinalizingRef\.current = false[\s\S]*setExportReservationFinalizing\(false\)/,
+  );
+  assert.match(cancelFlow, /if \(exportFinalizingRef\.current\)[\s\S]*return/);
+  assert.match(pageSource, /disabled=\{isFinalizingExport\}/);
+  assert.match(
+    pageSource,
+    /usageReservationPendingExportRef\.current &&[\s\S]*!usageReservationFinalizingRef\.current/,
+  );
+});
+
 test("normalizes spoken preview audio and softens manual cut boundaries", () => {
   const start = pageSource.indexOf("async function playPreviewFromEditedTime(");
   const end = pageSource.indexOf("\n  function seekTo(", start);

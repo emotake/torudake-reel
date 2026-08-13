@@ -1,10 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700;800;900&display=swap");
-
 :root {
   --ink: #101828;
   --ink-2: #273449;
-  --coral: #ff5a3c;
-  --coral-dark: #e74428;
+  --coral: #bd3825;
+  --coral-dark: #8f251c;
   --cream: #fff8ed;
   --cream-2: #f6efe4;
   --paper: #fffdf8;
@@ -14,6 +12,11 @@
   --line: #e4ded4;
   --white: #ffffff;
   --shadow: 0 24px 70px rgba(16, 24, 40, 0.12);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic",
+    Meiryo, sans-serif;
+  --font-display: "Avenir Next", "Segoe UI", system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
 }
 
 * {
@@ -28,7 +31,45 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Noto Sans JP", sans-serif;
+  font-family: var(--font-sans);
+}
+
+.skipToContent {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  z-index: 10000;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 24px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.28);
+  transform: translateY(calc(-100% - 20px));
+  transition: transform 160ms ease;
+}
+
+.skipToContent:focus-visible {
+  outline: 3px solid var(--mint);
+  outline-offset: 3px;
+  transform: translateY(0);
+}
+
+#main-content:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .skipToContent {
+    transition: none;
+  }
 }
 
 button,
@@ -436,7 +477,7 @@ a {
 
 .hero .mainCta {
   border-radius: 15px;
-  background: linear-gradient(135deg, #ff684c, var(--coral) 58%, #ef492d);
+  background: linear-gradient(135deg, var(--coral), var(--coral) 58%, var(--coral-dark));
   box-shadow:
     0 16px 36px rgba(231, 68, 40, 0.25),
     0 1px 0 rgba(255, 255, 255, 0.3) inset;
@@ -631,7 +672,7 @@ a {
 }
 
 .lineSaveCard > a:focus-visible {
-  outline: 3px solid rgba(6, 199, 85, 0.28);
+  outline: 3px solid #006b2f;
   outline-offset: 3px;
 }
 
@@ -1087,7 +1128,7 @@ a {
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.34);
   border-radius: 50%;
-  background: linear-gradient(135deg, #ff765e, var(--coral));
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
   color: white;
   font-size: 18px;
   font-weight: 900;
@@ -1886,7 +1927,7 @@ a {
   padding: 0 18px;
   border: 0;
   border-radius: 14px;
-  background: linear-gradient(135deg, #ff684c, var(--coral));
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
   color: white;
   font-size: 11px;
   font-weight: 900;
@@ -1980,7 +2021,7 @@ a {
 
 .bottomLineShare:focus-visible {
   border-radius: 8px;
-  outline: 3px solid rgba(185, 245, 208, 0.34);
+  outline: 3px solid var(--mint);
   outline-offset: 2px;
 }
 
@@ -3752,7 +3793,7 @@ footer > small {
 }
 
 .captionStyleChoices > button:focus-visible {
-  outline: 3px solid #e45f4d33;
+  outline: 3px solid var(--coral-dark);
   outline-offset: 2px;
 }
 
@@ -5002,7 +5043,7 @@ footer > small {
 }
 
 .audioModeCards button:last-child i {
-  background: linear-gradient(135deg, var(--coral), #ff9a62);
+  background: linear-gradient(135deg, var(--coral), var(--coral-dark));
 }
 
 .audioModeCards strong {
@@ -7009,7 +7050,7 @@ footer > small {
 .photoReelShell button:focus-visible,
 .photoReelShell a:focus-visible,
 .photoReelShell input:focus-visible {
-  outline: 3px solid rgba(255, 90, 60, 0.35);
+  outline: 3px solid var(--coral-dark);
   outline-offset: 3px;
 }
 
@@ -8805,7 +8846,7 @@ footer > small {
 
 .thumbnailCandidateList button:focus-visible,
 .thumbnailTitleControl textarea:focus-visible {
-  outline: 3px solid #e45f4d2b;
+  outline: 3px solid var(--coral-dark);
   outline-offset: 2px;
 }
 
@@ -9041,7 +9082,7 @@ footer > small {
 }
 
 .deliverableIcon.thumbnail {
-  background: linear-gradient(145deg, var(--coral), #f0a35f);
+  background: linear-gradient(145deg, var(--coral), var(--coral-dark));
 }
 
 .deliverableIcon.copy {
@@ -11301,7 +11342,7 @@ footer > small {
 }
 
 .thumbnailAnalysisRetry:focus-visible {
-  outline: 3px solid #e45f4d2b;
+  outline: 3px solid var(--coral-dark);
   outline-offset: 2px;
 }
 
@@ -11967,7 +12008,7 @@ footer > small {
 
 :is(.siteShell, .photoReelShell, .accountPage, .operatorAccessPage, .legalPage)
   :is(button, a, input, select, textarea, summary, [role="button"]):focus-visible {
-  outline: 3px solid rgba(229, 82, 60, 0.42);
+  outline: 3px solid var(--coral-dark);
   outline-offset: 3px;
 }
 
@@ -12009,7 +12050,7 @@ footer > small {
   --mix-ink: #152035;
   --mix-subtle: #667085;
   --mix-paper: #fffdf8;
-  --mix-coral: #c8442f;
+  --mix-coral: #bd3825;
   min-height: 100vh;
   overflow: hidden;
   color: var(--mix-ink);
@@ -12026,7 +12067,7 @@ footer > small {
 }
 
 .videoMixShell :is(button, a, input, select, textarea, summary):focus-visible {
-  outline: 3px solid rgba(239, 92, 66, 0.38);
+  outline: 3px solid #8f251c;
   outline-offset: 3px;
 }
 
@@ -12555,7 +12596,7 @@ footer > small {
 }
 
 .videoMixSourceFeedback:focus {
-  outline: 3px solid rgba(200, 68, 47, 0.32);
+  outline: 3px solid #8f251c;
   outline-offset: 3px;
 }
 
@@ -12930,7 +12971,7 @@ footer > small {
 }
 
 .videoMixBoundaryChoice select:focus-visible {
-  outline: 3px solid rgba(239, 92, 66, 0.22);
+  outline: 3px solid #8f251c;
   outline-offset: 2px;
 }
 

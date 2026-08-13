@@ -12,7 +12,9 @@ import {
   getMediaBucket,
   hashTransferCode,
   isSupportedVideo,
+  isMediaTransferAvailable,
   jsonError,
+  mediaTransferUnavailable,
   MAX_VIDEO_BYTES,
   safeFileName,
   TRANSFER_TTL_MS,
@@ -27,6 +29,8 @@ import {
 const MAX_TRANSFER_INIT_REQUEST_BYTES = 16 * 1024;
 
 export async function POST(request: Request) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   let upload:
     | {
         abort(): Promise<void>;

@@ -9,7 +9,9 @@ import {
   getMediaBucket,
   getRecordedTransferParts,
   isValidMultipartCompletion,
+  isMediaTransferAvailable,
   jsonError,
+  mediaTransferUnavailable,
   type UploadedPartReceipt,
 } from "../../../../../lib/transfers";
 import { isManagedUploadEnforcementEnabled } from "../../../../../lib/usage-enforcement";
@@ -25,6 +27,8 @@ type RouteContext = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   try {
     const { id } = await context.params;
     const managedUploadEnforcementEnabled =

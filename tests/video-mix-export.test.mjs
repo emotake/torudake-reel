@@ -9,6 +9,7 @@ import {
   createVideoMixSourceAudioAnalysisWindows,
   createVideoMixAudioExportMetadata,
   exportVideoMixMp4,
+  getVideoMixExportMemoryPreflight,
   getVideoMixTransitionCanvasWorkingBytes,
   getVideoMixDuckingGainAtTime,
   getVideoMixClipAudioOverlapEnvelope,
@@ -415,6 +416,61 @@ test("accounts for two reusable transition canvases instead of one per boundary"
     getVideoMixTransitionCanvasWorkingBytes(mixed),
     2 * 1080 * 1920 * 4,
   );
+});
+
+test("preflights concurrent PCM, narration, Blob copies, and decoder surfaces", () => {
+  const sources = Array.from({ length: 5 }, (_, sourceIndex) => ({
+    id: `source-${sourceIndex}`,
+    fileSize: 1,
+    duration: 20,
+    clips: [
+      { start: 0, end: 9 },
+      { start: 10, end: 19 },
+    ],
+  }));
+  const plan = createVideoCompositionPlan({
+    sources,
+    transition: "crossfade",
+  });
+  const estimate = getVideoMixExportMemoryPreflight({
+    plan,
+    includeSourceAudio: true,
+    narrationAudioBytes: 2 * 1024 * 1024,
+    userAgent: "Mozilla/5.0 (iPhone)",
+    maximumTouchPoints: 5,
+  });
+
+  assert.ok(estimate.sourcePcmBytes > 0);
+  assert.ok(estimate.narrationPcmBytes > 0);
+  assert.equal(estimate.narrationEncodedCopyBytes, 2 * 1024 * 1024);
+  assert.ok(estimate.outputBlobCopyBytes > 0);
+  assert.equal(estimate.decoderSurfaceBytes, 2 * 3840 * 2160 * 4);
+  assert.equal(estimate.transitionCanvasBytes, 2 * 1080 * 1920 * 4);
+  assert.ok(estimate.estimatedWorkingBytes > estimate.baseWorkingBytes);
+  assert.equal(estimate.ok, false);
+
+  const silentCut = getVideoMixExportMemoryPreflight({
+    plan: createVideoCompositionPlan({ sources, transition: "cut" }),
+    includeSourceAudio: false,
+  });
+  assert.equal(silentCut.sourcePcmBytes, 0);
+  assert.equal(silentCut.narrationPcmBytes, 0);
+  assert.equal(silentCut.transitionCanvasBytes, 0);
+});
+
+test("rejects unsafe mixes before importing or opening media decoders", async () => {
+  const source = await readFile(
+    new URL("../lib/video-mix-export.ts", import.meta.url),
+    "utf8",
+  );
+  const exportStart = source.indexOf("export async function exportVideoMixMp4");
+  const importIndex = source.indexOf('await import("mediabunny")', exportStart);
+  const preflightIndex = source.indexOf(
+    "getVideoMixExportMemoryPreflight({",
+    exportStart,
+  );
+  assert.ok(preflightIndex > exportStart);
+  assert.ok(importIndex > preflightIndex);
 });
 
 test("mixes all source audio and normalizes each source before the limiter", async () => {

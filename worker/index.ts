@@ -5,7 +5,7 @@ import handler from "vinext/server/app-router-entry";
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
-  MEDIA: R2Bucket;
+  MEDIA?: R2Bucket;
   OPENAI_API_KEY?: string;
   NARRATION_SPEECH_MODE?: string;
   IMAGES: {

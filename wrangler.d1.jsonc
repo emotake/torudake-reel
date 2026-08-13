@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "torudake-reel-d1-maintenance",
+  "compatibility_date": "2026-08-13",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "torudake-reel-db",
+      "database_id": "c0b9cc06-fc19-4e02-acac-2c19d32f3fdc",
+      "migrations_dir": "drizzle",
+      "migrations_table": "d1_migrations"
+    }
+  ]
+}

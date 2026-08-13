@@ -1,7 +1,9 @@
 import {
   contentDisposition,
   findTransferByCode,
+  isMediaTransferAvailable,
   jsonError,
+  mediaTransferUnavailable,
   removeTransfer,
   safeFileName,
 } from "../../../../../lib/transfers";
@@ -12,6 +14,8 @@ type RouteContext = {
 };
 
 export async function GET(_request: Request, context: RouteContext) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   try {
     const { code } = await context.params;
     const transfer = await findTransferByCode(code);

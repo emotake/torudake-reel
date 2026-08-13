@@ -5,7 +5,9 @@ import {
   finishTransferPart,
   getMediaBucket,
   getRecordedTransferPart,
+  isMediaTransferAvailable,
   jsonError,
+  mediaTransferUnavailable,
   releaseTransferPartClaim,
 } from "../../../../../lib/transfers";
 import { getUsagePrincipal } from "../../../../../lib/operator-access";
@@ -20,6 +22,8 @@ type RouteContext = {
 };
 
 export async function PUT(request: Request, context: RouteContext) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   try {
     const { id } = await context.params;
     const url = new URL(request.url);

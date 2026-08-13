@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,10 +51,14 @@ test("emits a valid Pages route manifest that bypasses only static files", async
   assert.deepEqual(manifest.include, ["/*"]);
   assert.deepEqual(manifest.exclude, [
     "/assets/*",
+    "/apple-touch-icon.png",
     "/favicon.svg",
     "/file.svg",
     "/globe.svg",
     "/manifest.webmanifest",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
     "/og.png",
     "/robots.txt",
     "/sitemap.xml",
@@ -79,4 +83,12 @@ test("emits a valid Pages route manifest that bypasses only static files", async
     "fixture",
     "the route manifest must be emitted alongside copied static assets",
   );
+  assert.equal(
+    manifest.exclude.some((rule) => routeMatches(rule, "/demo/sample.mp4")),
+    false,
+    "demo media must stay in the Worker route so it can return byte ranges",
+  );
+  await assert.rejects(access(join(outputDirectory, "_headers")), {
+    code: "ENOENT",
+  });
 });

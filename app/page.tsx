@@ -81,6 +81,7 @@ import {
   getPortableExportMemoryPreflight,
   HIGH_QUALITY_VIDEO_BITRATE,
   measurePortableOriginalAudioNormalization,
+  PortableVideoExportAbortedError,
   PORTABLE_AUDIO_CUT_FADE_SECONDS,
   PORTABLE_VIDEO_CROSSFADE_SECONDS,
   remapPortableNarrationActivity,
@@ -126,6 +127,7 @@ import {
 import { attachNarrationCaptionDisplayTiming } from "../lib/narration-alignment";
 import {
   assessCaptionReadability,
+  fitCaptionDisplayTimelineWithinEditRanges,
   getCaptionSafeArea,
 } from "../lib/caption-readability";
 import {
@@ -1730,6 +1732,43 @@ async function snapNarrationTimelineToAudioSilence(
   }
 }
 
+type VideoUsageReleaseResult = Readonly<{
+  released: boolean;
+  pending: boolean;
+  status: "released" | "release_pending" | "completed" | "not_found";
+}>;
+
+async function requestVideoUsageRelease(
+  reservationId: string,
+): Promise<VideoUsageReleaseResult | null> {
+  try {
+    const response = await fetch("/api/usage/release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservationId }),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | Partial<VideoUsageReleaseResult>
+      | null;
+    if (
+      !response.ok ||
+      !payload ||
+      !["released", "release_pending", "completed", "not_found"].includes(
+        payload.status ?? "",
+      )
+    ) {
+      return null;
+    }
+    return {
+      released: payload.released === true,
+      pending: payload.pending === true,
+      status: payload.status as VideoUsageReleaseResult["status"],
+    };
+  } catch {
+    return null;
+  }
+}
+
 const goals: { id: Goal; icon: string; title: string; note: string }[] = [
   { id: "follow", icon: "＋", title: "フォローを増やす", note: "結論を先に見せる" },
   { id: "sales", icon: "↗", title: "商品を紹介する", note: "信頼とCTAを重視" },
@@ -1905,6 +1944,7 @@ export default function Home() {
   const editGenerationRef = useRef(0);
   const usageReservationRef = useRef<string | null>(null);
   const usageReservationPendingExportRef = useRef(false);
+  const usageReservationFinalizingRef = useRef(false);
   const narrationRegenerationAbortRef = useRef<AbortController | null>(null);
   const paidAccessCheckRef = useRef(false);
   const paidAccessCheckCallbackRef = useRef<() => Promise<boolean>>(
@@ -2018,6 +2058,7 @@ export default function Home() {
   ) {
     usageReservationRef.current = nextReservationId;
     usageReservationPendingExportRef.current = pendingExport;
+    usageReservationFinalizingRef.current = false;
     setUsageReservationId(nextReservationId);
     setUsageBucket(nextBucket);
     setUsageReservationPendingExport(pendingExport);
@@ -2045,9 +2086,55 @@ export default function Home() {
 
   function releasePendingExportReservation() {
     const reservationId = usageReservationRef.current;
-    if (usageReservationPendingExportRef.current && reservationId) {
+    if (
+      usageReservationPendingExportRef.current &&
+      !usageReservationFinalizingRef.current &&
+      reservationId
+    ) {
+      usageReservationPendingExportRef.current = false;
+      setUsageReservationPendingExport(false);
       void releaseVideoUsageBestEffort(reservationId);
     }
+  }
+
+  async function cancelPendingExportReservation() {
+    const reservationId = usageReservationRef.current;
+    if (usageReservationFinalizingRef.current) {
+      setCheckoutReturnMessage(
+        "完成動画の利用枠を確定しています。確定が終わるまでお待ちください。",
+      );
+      return;
+    }
+    if (!usageReservationPendingExportRef.current || !reservationId) return;
+    usageReservationPendingExportRef.current = false;
+    setUsageReservationPendingExport(false);
+    rememberUsageReservation(null);
+    setCheckoutReturnMessage(
+      "書き出しを中止し、利用枠の返却を確認しています…",
+    );
+    const release = await requestVideoUsageRelease(reservationId);
+    if (release?.released || release?.status === "released") {
+      setCheckoutReturnMessage(
+        "書き出しを中止し、利用枠を戻しました。再開するときは購入状況を再確認してください。",
+      );
+      return;
+    }
+    if (release?.status === "completed") {
+      setCheckoutReturnMessage(
+        "書き出しの確定が先に完了したため、利用枠は返却されませんでした。購入状況を再確認してください。",
+      );
+      return;
+    }
+    if (release?.pending) {
+      setCheckoutReturnMessage(
+        "書き出しを中止し、利用枠の返却を受け付けました。反映後に購入状況を再確認できます。",
+      );
+      return;
+    }
+    sendVideoUsageReleaseBeacon(reservationId);
+    setCheckoutReturnMessage(
+      "書き出しを中止し、利用枠の返却を依頼しました。通信回復後に購入状況を再確認してください。",
+    );
   }
 
   function rememberAiOperationsRemaining(nextRemaining: number) {
@@ -2113,7 +2200,11 @@ export default function Home() {
     const releaseUnusedPaidExportReservation = (event: PageTransitionEvent) => {
       if (event.persisted) return;
       const reservationId = usageReservationRef.current;
-      if (usageReservationPendingExportRef.current && reservationId) {
+      if (
+        usageReservationPendingExportRef.current &&
+        !usageReservationFinalizingRef.current &&
+        reservationId
+      ) {
         if (!sendVideoUsageReleaseBeacon(reservationId)) {
           void updateVideoUsage("release", reservationId);
         }
@@ -3511,9 +3602,14 @@ export default function Home() {
           markCheckoutStarted={markCheckoutStarted}
           checkoutReturnMessage={checkoutReturnMessage}
           markExportReservationCompleted={() => {
+            usageReservationFinalizingRef.current = false;
             usageReservationPendingExportRef.current = false;
             setUsageReservationPendingExport(false);
           }}
+          setExportReservationFinalizing={(finalizing) => {
+            usageReservationFinalizingRef.current = finalizing;
+          }}
+          cancelPendingExportReservation={cancelPendingExportReservation}
         />
       )}
 
@@ -5093,6 +5189,8 @@ function ResultWorkspace({
   markCheckoutStarted,
   checkoutReturnMessage,
   markExportReservationCompleted,
+  setExportReservationFinalizing,
+  cancelPendingExportReservation,
 }: {
   file: File | null;
   videoUrl: string;
@@ -5147,6 +5245,8 @@ function ResultWorkspace({
   markCheckoutStarted: () => void;
   checkoutReturnMessage: string;
   markExportReservationCompleted: () => void;
+  setExportReservationFinalizing: (finalizing: boolean) => void;
+  cancelPendingExportReservation: () => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const captionPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -5205,6 +5305,10 @@ function ResultWorkspace({
   );
   const [isExporting, setIsExporting] = useState(false);
   const isExportingRef = useRef(false);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportPageHidingRef = useRef(false);
+  const exportFinalizingRef = useRef(false);
+  const [isFinalizingExport, setIsFinalizingExport] = useState(false);
   const [exportedVideoFile, setExportedVideoFile] = useState<File | null>(null);
   const [exportedVideoQualityMessage, setExportedVideoQualityMessage] =
     useState<string | null>(null);
@@ -5297,6 +5401,24 @@ function ResultWorkspace({
     useState(false);
   const [isUpdatingNarrationCutMode, setIsUpdatingNarrationCutMode] =
     useState(false);
+  useEffect(() => {
+    const handlePageHide = () => {
+      exportPageHidingRef.current = true;
+      if (!exportFinalizingRef.current) exportAbortRef.current?.abort();
+      videoRef.current?.pause();
+    };
+    const handlePageShow = () => {
+      exportPageHidingRef.current = false;
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      exportPageHidingRef.current = true;
+      if (!exportFinalizingRef.current) exportAbortRef.current?.abort();
+    };
+  }, []);
   const pronunciationValidation = useMemo(() => {
     const incompleteRowIndex = narrationPronunciationRows.findIndex(
       (row) => Boolean(row.surface.trim()) !== Boolean(row.reading.trim()),
@@ -5523,6 +5645,15 @@ function ResultWorkspace({
       transcript,
     ],
   );
+  const editDuration = getEditedDuration(editRanges);
+  const displayTranscript = useMemo(() => {
+    if (editRanges.length === 0 || editDuration <= 0) return transcript;
+    return fitCaptionDisplayTimelineWithinEditRanges(transcript, editRanges);
+  }, [editDuration, editRanges, transcript]);
+  const displayKeptLines = useMemo(
+    () => displayTranscript.filter(isIncludedCaption),
+    [displayTranscript],
+  );
   useEffect(() => {
     const controller = new AbortController();
     window.queueMicrotask(() => {
@@ -5546,10 +5677,16 @@ function ResultWorkspace({
     [editRanges],
   );
   const editedTranscript = useMemo(
-    () => remapCaptionsToEditedTimeline(transcript, editRanges),
-    [editRanges, transcript],
+    () =>
+      remapCaptionsToEditedTimeline(displayTranscript, editRanges).map(
+        (line) => ({
+          ...line,
+          displayStart: line.start,
+          displayEnd: line.end,
+        }),
+      ),
+    [displayTranscript, editRanges],
   );
-  const editDuration = getEditedDuration(editRanges);
   const editedCurrentTime = sourceTimeToEditedTime(
     editRanges,
     currentTime,
@@ -5578,7 +5715,7 @@ function ResultWorkspace({
     : spokenCaptionsEnabled;
   const unreadableCaptionCount = useMemo(
     () =>
-      keptLines.filter((line) => {
+      editedTranscript.filter((line) => {
         if (!line.text.trim()) return false;
         const display = getCaptionDisplayRange(line);
         return !assessCaptionReadability({
@@ -5587,18 +5724,18 @@ function ResultWorkspace({
           end: display.end,
         }).readable;
       }).length,
-    [keptLines],
+    [editedTranscript],
   );
   const narrationKeepsFullVideo = Boolean(
     narrationPlan && !narrationAutoCutEnabled,
   );
   const activeCaption =
-    keptLines.find(
+    displayKeptLines.find(
       (line) => {
         const display = getCaptionDisplayRange(line);
         return currentTime >= display.start && currentTime < display.end;
       },
-    ) ?? (!videoUrl ? keptLines[0] : undefined);
+    ) ?? (!videoUrl ? displayKeptLines[0] : undefined);
   const captionStyle = {
     "--caption-accent": captionDesign.palette.highlight,
     "--caption-border": captionDesign.palette.border,
@@ -5747,15 +5884,24 @@ function ResultWorkspace({
 
   async function completePendingExportReservation() {
     if (!usageReservationPendingExport) return;
-    if (
-      !usageReservationId ||
-      !(await updateVideoUsage("complete", usageReservationId))
-    ) {
-      throw new Error(
-        "完成動画は作成できましたが、購入済みの利用枠を確認できませんでした。通信を確認して、もう一度書き出してください。",
-      );
+    exportFinalizingRef.current = true;
+    setIsFinalizingExport(true);
+    setExportReservationFinalizing(true);
+    try {
+      if (
+        !usageReservationId ||
+        !(await updateVideoUsage("complete", usageReservationId))
+      ) {
+        throw new Error(
+          "完成動画は作成できましたが、購入済みの利用枠を確認できませんでした。通信を確認して、もう一度書き出してください。",
+        );
+      }
+      markExportReservationCompleted();
+    } finally {
+      exportFinalizingRef.current = false;
+      setIsFinalizingExport(false);
+      setExportReservationFinalizing(false);
     }
-    markExportReservationCompleted();
   }
   const thumbnailInputRevision = JSON.stringify({
     file: file ? [file.name, file.size, file.lastModified, file.type] : null,
@@ -7573,7 +7719,7 @@ function ResultWorkspace({
     sourceTime: number,
   ) {
     if (!captionsVisible) return;
-    const caption = transcript.find((line) => {
+    const caption = displayTranscript.find((line) => {
       if (line.removed || !line.text.trim()) return false;
       const display = getCaptionDisplayRange(line);
       return sourceTime >= display.start && sourceTime < display.end;
@@ -7582,7 +7728,9 @@ function ResultWorkspace({
     if (!caption) return;
 
     const displayRange = getCaptionDisplayRange(caption);
-    const keptIndex = keptLines.findIndex((line) => line.id === caption.id);
+    const keptIndex = displayKeptLines.findIndex(
+      (line) => line.id === caption.id,
+    );
     const presentation = getCaptionPresentation(
       caption,
       Math.max(0, keptIndex),
@@ -7925,6 +8073,13 @@ function ResultWorkspace({
       typeof MediaRecorder !== "undefined" &&
       typeof HTMLCanvasElement.prototype.captureStream === "function";
     let portableColorConversionMessage = "";
+    const exportController = new AbortController();
+    exportAbortRef.current?.abort();
+    exportAbortRef.current = exportController;
+    const exportSignal = exportController.signal;
+    const throwIfExportAborted = () => {
+      if (exportSignal.aborted) throw new PortableVideoExportAbortedError();
+    };
 
     isExportingRef.current = true;
     setIsExporting(true);
@@ -7967,10 +8122,13 @@ function ResultWorkspace({
     let exportPreviewOriginalGainValue = 1;
     let shouldCloseExportAudioContext = true;
     let recorder: MediaRecorder | null = null;
+    let fallbackCrossfadeFrame: HTMLCanvasElement | null = null;
+    let fallbackCrossfadeStartedAt: number | null = null;
     const seekExportMedia = async (
       media: HTMLMediaElement,
       seconds: number,
     ): Promise<void> => {
+      throwIfExportAborted();
       const maximum = Number.isFinite(media.duration)
         ? Math.max(0, media.duration - 0.02)
         : Math.max(0, seconds);
@@ -7985,6 +8143,7 @@ function ResultWorkspace({
           window.clearTimeout(timeout);
           media.removeEventListener(eventName, finish);
           media.removeEventListener("error", fail);
+          exportSignal.removeEventListener("abort", abort);
         };
         const finish = () => {
           if (settled) return;
@@ -8000,9 +8159,20 @@ function ResultWorkspace({
             new Error("動画とAI音声の位置を合わせられませんでした。"),
           );
         };
+        const abort = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new PortableVideoExportAbortedError());
+        };
         const timeout = window.setTimeout(fail, 8_000);
         media.addEventListener(eventName, finish, { once: true });
         media.addEventListener("error", fail, { once: true });
+        exportSignal.addEventListener("abort", abort, { once: true });
+        if (exportSignal.aborted) {
+          abort();
+          return;
+        }
         if (needsSeek) {
           media.currentTime = target;
         } else {
@@ -8025,13 +8195,17 @@ function ResultWorkspace({
           if (!exportAudioContext) {
             exportAudioContext = await createRunningNarrationAudioContext();
           }
-          const narrationResponse = await fetch(narrationAudioUrl);
+          throwIfExportAborted();
+          const narrationResponse = await fetch(narrationAudioUrl, {
+            signal: exportSignal,
+          });
           if (!narrationResponse.ok) {
             throw new Error("AI音声を読み込めませんでした。");
           }
           portableNarrationBuffer = await exportAudioContext.decodeAudioData(
             await narrationResponse.arrayBuffer(),
           );
+          throwIfExportAborted();
         }
 
         const { exportPortableVideoMp4 } = await import(
@@ -8046,6 +8220,7 @@ function ResultWorkspace({
           originalGain: mix.original,
           narrationBuffer: portableNarrationBuffer,
           narrationGain: mix.narration,
+          signal: exportSignal,
           drawCaption: ({ context, canvas, sourceTime }) => {
             drawCaptionOverlay(context, canvas, sourceTime);
           },
@@ -8055,8 +8230,11 @@ function ResultWorkspace({
                 " HDR・広色域の色をSNS互換のSDR色へ調整しました。";
             }
           },
-          onProgress: (progress) => setExportProgress(progress * 100),
+          onProgress: (progress) => {
+            if (!exportSignal.aborted) setExportProgress(progress * 100);
+          },
         });
+        throwIfExportAborted();
         if (!output.size) throw new Error("書き出した動画が空でした。");
         const portableQuality = await inspectCompletedVideoQuality(
           output,
@@ -8069,6 +8247,7 @@ function ResultWorkspace({
             `${portableQuality.userMessage} 端末互換の書き出し方法でもう一度試します。`,
           );
         }
+        throwIfExportAborted();
         const completedFile = new File(
           [output],
           `${exportName}_${exportSuffix}.mp4`,
@@ -8084,6 +8263,14 @@ function ResultWorkspace({
         notify("動画ができました。下の「動画を保存・共有」を押してください");
         return;
       } catch (portableExportError) {
+        if (
+          exportSignal.aborted ||
+          portableExportError instanceof PortableVideoExportAbortedError ||
+          (portableExportError instanceof DOMException &&
+            portableExportError.name === "AbortError")
+        ) {
+          throw new PortableVideoExportAbortedError();
+        }
         if (!canUseLegacyRecorder) throw portableExportError;
         console.warn(
           "Portable MP4 export was unavailable; using the browser recorder fallback.",
@@ -8116,10 +8303,11 @@ function ResultWorkspace({
       if (!context) throw new Error("動画の描画を開始できませんでした。");
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
-      let fallbackCrossfadeFrame: HTMLCanvasElement | null = null;
-      let fallbackCrossfadeStartedAt: number | null = null;
-
       const drawFrame = () => {
+        if (exportSignal.aborted) {
+          keepDrawing = false;
+          return;
+        }
         context.fillStyle = "#000";
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(
@@ -8154,6 +8342,7 @@ function ResultWorkspace({
       const liveOutputStream = outputStream;
       if (narrationPlan && narrationAudioUrl) {
         const previewEngine = await ensurePreviewNarrationEngine(true);
+        throwIfExportAborted();
         if (exportAudioContext && exportAudioContext !== previewEngine.context) {
           await exportAudioContext.close().catch(() => undefined);
         }
@@ -8171,6 +8360,7 @@ function ResultWorkspace({
         exportNarrationBuffer = previewEngine.buffer;
       } else {
         const videoAudioEngine = await ensureVideoAudioEngine(true);
+        throwIfExportAborted();
         if (
           exportAudioContext &&
           exportAudioContext !== videoAudioEngine.context
@@ -8223,15 +8413,25 @@ function ResultWorkspace({
 
       if (narrationPlan && narrationAudioUrl) {
         if (!exportNarrationBuffer) {
-        try {
-          const narrationResponse = await fetch(narrationAudioUrl);
-          if (!narrationResponse.ok) throw new Error();
-          const narrationBytes = await narrationResponse.arrayBuffer();
-          exportNarrationBuffer =
-            await exportAudioContext.decodeAudioData(narrationBytes);
-        } catch {
-          throw new Error("AI音声を読み込めませんでした。");
-        }
+          try {
+            const narrationResponse = await fetch(narrationAudioUrl, {
+              signal: exportSignal,
+            });
+            if (!narrationResponse.ok) throw new Error();
+            const narrationBytes = await narrationResponse.arrayBuffer();
+            throwIfExportAborted();
+            exportNarrationBuffer =
+              await exportAudioContext.decodeAudioData(narrationBytes);
+            throwIfExportAborted();
+          } catch (error) {
+            if (
+              exportSignal.aborted ||
+              (error instanceof DOMException && error.name === "AbortError")
+            ) {
+              throw new PortableVideoExportAbortedError();
+            }
+            throw new Error("AI音声を読み込めませんでした。");
+          }
         }
         if (
           !Number.isFinite(exportNarrationBuffer.duration) ||
@@ -8300,16 +8500,23 @@ function ResultWorkspace({
           const cleanup = () => {
             window.clearTimeout(timeout);
             target.removeEventListener(eventName, finish);
+            exportSignal.removeEventListener("abort", abort);
           };
           const finish = () => {
             cleanup();
             resolve();
+          };
+          const abort = () => {
+            cleanup();
+            reject(new PortableVideoExportAbortedError());
           };
           const timeout = window.setTimeout(() => {
             cleanup();
             reject(new Error(errorMessage));
           }, timeoutMs);
           target.addEventListener(eventName, finish, { once: true });
+          exportSignal.addEventListener("abort", abort, { once: true });
+          if (exportSignal.aborted) abort();
         });
       const pauseRecorderForSeek = async () => {
         if (activeRecorder.state !== "recording") return;
@@ -8344,6 +8551,7 @@ function ResultWorkspace({
             window.cancelAnimationFrame(rangeAnimationFrame);
             video.removeEventListener("ended", check);
             video.removeEventListener("error", fail);
+            exportSignal.removeEventListener("abort", abort);
           };
           const finish = () => {
             if (settled) return;
@@ -8368,6 +8576,13 @@ function ResultWorkspace({
             cleanup();
             reject(new Error("動画のカット位置を再生できませんでした。"));
           };
+          const abort = () => {
+            if (settled) return;
+            settled = true;
+            video.pause();
+            cleanup();
+            reject(new PortableVideoExportAbortedError());
+          };
           const timeout = window.setTimeout(() => {
             if (settled) return;
             settled = true;
@@ -8376,10 +8591,16 @@ function ResultWorkspace({
           }, timeoutMs);
           video.addEventListener("ended", check);
           video.addEventListener("error", fail, { once: true });
+          exportSignal.addEventListener("abort", abort, { once: true });
+          if (exportSignal.aborted) {
+            abort();
+            return;
+          }
           rangeAnimationFrame = window.requestAnimationFrame(check);
         });
 
       activeRecorder.start(1000);
+      throwIfExportAborted();
       drawFrame();
       if (exportAudioContext?.state !== "running") {
         await exportAudioContext?.resume().catch(() => undefined);
@@ -8396,6 +8617,7 @@ function ResultWorkspace({
         rangeIndex < playableRanges.length;
         rangeIndex += 1
       ) {
+        throwIfExportAborted();
         const range = playableRanges[rangeIndex];
         if (rangeIndex > 0) {
           const outgoingFrame = document.createElement("canvas");
@@ -8507,6 +8729,7 @@ function ResultWorkspace({
           );
         }
         await Promise.all([videoPlayback, rangeEnded]);
+        throwIfExportAborted();
         if (activeExportNarrationSource) {
           try {
             activeExportNarrationSource.stop();
@@ -8527,6 +8750,7 @@ function ResultWorkspace({
       keepDrawing = false;
       activeRecorder.stop();
       await stopped;
+      throwIfExportAborted();
 
       const output = new Blob(chunks, {
         type: activeRecorder.mimeType || mimeType || "video/webm",
@@ -8541,6 +8765,7 @@ function ResultWorkspace({
       if (!fallbackQuality.accepted) {
         throw new Error(fallbackQuality.userMessage);
       }
+      throwIfExportAborted();
 
       const outputType = output.type.toLowerCase();
       const extension = outputType.includes("mp4") ? "mp4" : "webm";
@@ -8556,11 +8781,19 @@ function ResultWorkspace({
       setExportedVideoRevision(exportInputRevision);
       notify("動画ができました。下の「動画を保存・共有」を押してください");
     } catch (error) {
-      notify(
-        error instanceof Error
-          ? error.message
-          : "動画の書き出しに失敗しました",
-      );
+      const cancelled =
+        exportSignal.aborted ||
+        error instanceof PortableVideoExportAbortedError ||
+        (error instanceof DOMException && error.name === "AbortError");
+      if (!exportPageHidingRef.current) {
+        notify(
+          cancelled
+            ? "動画の書き出しを中止しました。"
+            : error instanceof Error
+              ? error.message
+              : "動画の書き出しに失敗しました",
+        );
+      }
     } finally {
       keepDrawing = false;
       window.cancelAnimationFrame(animationFrame);
@@ -8572,6 +8805,11 @@ function ResultWorkspace({
         }
       }
       outputStream?.getTracks().forEach((track) => track.stop());
+      if (fallbackCrossfadeFrame) {
+        fallbackCrossfadeFrame.width = 0;
+        fallbackCrossfadeFrame.height = 0;
+        fallbackCrossfadeFrame = null;
+      }
       if (activeExportNarrationSource) {
         try {
           activeExportNarrationSource.stop();
@@ -8609,11 +8847,22 @@ function ResultWorkspace({
       video.muted = previous.muted;
       video.volume = previous.volume;
       isExportingRef.current = false;
-      await seekVideoBeforePlayback(video, previous.currentTime);
-      setCurrentTime(video.currentTime);
+      if (exportAbortRef.current === exportController) {
+        exportAbortRef.current = null;
+      }
       setIsExporting(false);
       setExportProgress(null);
-      if (previous.wasPlaying) {
+      if (!exportPageHidingRef.current) {
+        await seekVideoBeforePlayback(video, previous.currentTime).catch(
+          () => undefined,
+        );
+        setCurrentTime(video.currentTime);
+      }
+      if (
+        previous.wasPlaying &&
+        !exportSignal.aborted &&
+        !exportPageHidingRef.current
+      ) {
         const operation = previewOperationRef.current + 1;
         previewOperationRef.current = operation;
         await playPreviewFromEditedTime(previous.editedTime, operation).catch(
@@ -8706,6 +8955,18 @@ function ResultWorkspace({
       return;
     }
     void exportCaptionedVideo();
+  }
+
+  function cancelVideoExport() {
+    if (!isExportingRef.current) return;
+    if (exportFinalizingRef.current) {
+      notify("完成動画の利用枠を確定しています。少しお待ちください");
+      return;
+    }
+    exportAbortRef.current?.abort();
+    videoRef.current?.pause();
+    notify("動画の書き出しを中止しています…");
+    void cancelPendingExportReservation();
   }
 
   async function confirmNarrationExport() {
@@ -10377,6 +10638,16 @@ function ResultWorkspace({
             <p className="freeExportReturnNote" role="status">
               {checkoutReturnMessage}
             </p>
+          )}
+          {isExporting && (
+            <button
+              className="quietButton"
+              type="button"
+              onClick={cancelVideoExport}
+              disabled={isFinalizingExport}
+            >
+              {isFinalizingExport ? "利用枠を確定中…" : "書き出しを中止"}
+            </button>
           )}
           {file && !completedVideoSaveAllowed ? (
             <div className="freeExportGate" id="free-export-plans">

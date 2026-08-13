@@ -493,6 +493,132 @@ export function getVideoMixTransitionCanvasWorkingBytes(
     : 0;
 }
 
+export type VideoMixExportMemoryPreflight = Readonly<{
+  ok: boolean;
+  estimatedWorkingBytes: number;
+  maximumWorkingBytes: number;
+  baseWorkingBytes: number;
+  sourcePcmBytes: number;
+  narrationPcmBytes: number;
+  narrationEncodedCopyBytes: number;
+  outputBlobCopyBytes: number;
+  decoderSurfaceBytes: number;
+  transitionCanvasBytes: number;
+  message: string | null;
+}>;
+
+const VIDEO_MIX_CONSERVATIVE_SOURCE_AUDIO_CHANNELS = 6;
+const VIDEO_MIX_CONSERVATIVE_DECODER_WIDTH = 3840;
+const VIDEO_MIX_CONSERVATIVE_DECODER_HEIGHT = 2160;
+
+/**
+ * Estimates the peak allocations that coexist during a multi-video export.
+ * The portable baseline already includes the rendered output PCM and one
+ * encoded output buffer. This adds decoded source/narration PCM, the temporary
+ * narration ArrayBuffer, a Blob/File output copy, decoder surfaces, and the
+ * reusable transition canvases that can be live at the same time.
+ */
+export function getVideoMixExportMemoryPreflight(options: Readonly<{
+  plan: VideoCompositionPlan;
+  includeSourceAudio: boolean;
+  narrationAudioBytes?: number;
+  userAgent?: string;
+  maximumTouchPoints?: number;
+  deviceMemoryGb?: number | null;
+}>): VideoMixExportMemoryPreflight {
+  const narrationAudioBytes = options.narrationAudioBytes ?? 0;
+  if (!Number.isFinite(narrationAudioBytes) || narrationAudioBytes < 0) {
+    throw new RangeError("narrationAudioBytes must be finite and non-negative.");
+  }
+  const memory = getPortableExportMemoryPreflight({
+    editedDurationSeconds: options.plan.duration,
+    videoBitrate: HIGH_QUALITY_VIDEO_BITRATE,
+    audioBitrate: OUTPUT_AUDIO_BITRATE,
+    userAgent: options.userAgent,
+    maximumTouchPoints: options.maximumTouchPoints,
+    deviceMemoryGb: options.deviceMemoryGb,
+  });
+  const selectedClipSeconds = options.plan.clips.reduce(
+    (total, clip) => total + clip.duration,
+    0,
+  );
+  const sourcePcmBytes = options.includeSourceAudio
+    ? Math.ceil(
+        selectedClipSeconds *
+          OUTPUT_AUDIO_SAMPLE_RATE *
+          VIDEO_MIX_CONSERVATIVE_SOURCE_AUDIO_CHANNELS *
+          4,
+      )
+    : 0;
+  const narrationPcmBytes = narrationAudioBytes > 0
+    ? Math.ceil(
+        options.plan.duration *
+          OUTPUT_AUDIO_SAMPLE_RATE *
+          OUTPUT_AUDIO_CHANNELS *
+          4,
+      )
+    : 0;
+  const usesTwoDecodedFrames = options.plan.boundaries.some((boundary) =>
+    transitionTypeUsesOutgoingFrame(boundary.transition.type),
+  );
+  const decoderSurfaceCount = Math.min(
+    options.plan.clips.length,
+    usesTwoDecodedFrames ? 2 : 1,
+  );
+  const decoderSurfaceBytes =
+    decoderSurfaceCount *
+    VIDEO_MIX_CONSERVATIVE_DECODER_WIDTH *
+    VIDEO_MIX_CONSERVATIVE_DECODER_HEIGHT *
+    4;
+  const narrationEncodedCopyBytes = Math.ceil(narrationAudioBytes);
+  const outputBlobCopyBytes = memory.estimatedOutputBytes;
+  const transitionCanvasBytes =
+    getVideoMixTransitionCanvasWorkingBytes(options.plan);
+  const estimatedWorkingBytes = Math.ceil(
+    memory.estimatedWorkingBytes +
+      sourcePcmBytes +
+      narrationPcmBytes +
+      narrationEncodedCopyBytes +
+      outputBlobCopyBytes +
+      decoderSurfaceBytes +
+      transitionCanvasBytes,
+  );
+  const deviceMemoryBytes =
+    typeof options.deviceMemoryGb === "number" &&
+    Number.isFinite(options.deviceMemoryGb) &&
+    options.deviceMemoryGb > 0
+      ? options.deviceMemoryGb * 1024 * 1024 * 1024
+      : null;
+  const maximumWorkingBytes =
+    memory.deviceClass === "ios"
+      ? 384 * 1024 * 1024
+      : memory.deviceClass === "low-memory"
+        ? 768 * 1024 * 1024
+        : deviceMemoryBytes
+          ? Math.max(
+              1024 * 1024 * 1024,
+              Math.min(2 * 1024 * 1024 * 1024, deviceMemoryBytes * 0.25),
+            )
+          : 1536 * 1024 * 1024;
+  const ok = memory.ok && estimatedWorkingBytes <= maximumWorkingBytes;
+  return {
+    ok,
+    estimatedWorkingBytes,
+    maximumWorkingBytes,
+    baseWorkingBytes: memory.estimatedWorkingBytes,
+    sourcePcmBytes,
+    narrationPcmBytes,
+    narrationEncodedCopyBytes,
+    outputBlobCopyBytes,
+    decoderSurfaceBytes,
+    transitionCanvasBytes,
+    message: ok
+      ? null
+      : memory.message ??
+        "この端末では複数動画・音声・切り替え効果を同時に安全処理できません。カットを短くするか、切り替えを「カット」にして、もう一度お試しください。",
+  };
+}
+
 type VideoMixAudioMetadataSourceInput = Readonly<{
   sourceId: string;
   hasAudioTrack: boolean;
@@ -1413,6 +1539,37 @@ export async function exportVideoMixMp4(
   }
   const duckSourceAudioDuringNarration =
     options.duckSourceAudioDuringNarration ?? true;
+  const provisionalPlan = createVideoCompositionPlan({
+    sources: options.sources.map((source) => ({
+      id: source.id,
+      fileSize: source.file.size,
+      duration: Math.max(0.001, ...source.clips.map((clip) => clip.end)),
+      clips: source.clips,
+    })),
+    transition: options.transition,
+    boundaryTransitions: options.boundaryTransitions,
+  });
+  const deviceMemoryGb =
+    typeof navigator === "undefined"
+      ? null
+      : ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ??
+        null);
+  const memoryPreflight = getVideoMixExportMemoryPreflight({
+    plan: provisionalPlan,
+    includeSourceAudio: audioGain > 0,
+    narrationAudioBytes: narrationAudio?.size ?? 0,
+    userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+    maximumTouchPoints:
+      typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints,
+    deviceMemoryGb,
+  });
+  if (!memoryPreflight.ok) {
+    throw new PortableVideoExportUnsupportedError(
+      "browser",
+      memoryPreflight.message ??
+        "この端末では複数動画を安全に書き出せません。",
+    );
+  }
   const media = await import("mediabunny");
   const prepared: PreparedVideoMixSource[] = [];
   let output: InstanceType<(typeof import("mediabunny"))["Output"]> | null =
@@ -1507,36 +1664,8 @@ export async function exportVideoMixMp4(
         plan: item.colorConversionPlan,
       })),
     );
-    const memory = getPortableExportMemoryPreflight({
-      editedDurationSeconds: plan.duration,
-      videoBitrate: HIGH_QUALITY_VIDEO_BITRATE,
-      audioBitrate: OUTPUT_AUDIO_BITRATE,
-      userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
-      maximumTouchPoints:
-        typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints,
-      deviceMemoryGb:
-        typeof navigator === "undefined"
-          ? null
-          : ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ??
-            null),
-    });
     const transitionCanvasWorkingBytes =
       getVideoMixTransitionCanvasWorkingBytes(plan);
-    const estimatedWorkingBytes =
-      memory.estimatedWorkingBytes + transitionCanvasWorkingBytes;
-    const maximumWorkingBytes =
-      memory.deviceClass === "ios"
-        ? 384 * 1024 * 1024
-        : memory.deviceClass === "low-memory"
-          ? 768 * 1024 * 1024
-          : Number.POSITIVE_INFINITY;
-    if (!memory.ok || estimatedWorkingBytes > maximumWorkingBytes) {
-      throw new PortableVideoExportUnsupportedError(
-        "browser",
-        memory.message ??
-          "この端末では切り替え効果を含む複数動画を安全に書き出せません。カットを短くするか、PC版Chromeでお試しください。",
-      );
-    }
 
     const videoEncodingSettings = createPortableVideoEncodingSettings(
       VIDEO_COMPOSITION_OUTPUT_WIDTH,

@@ -1,6 +1,8 @@
 import {
   findTransfer,
+  isMediaTransferAvailable,
   jsonError,
+  mediaTransferUnavailable,
   removeTransfer,
 } from "../../../../lib/transfers";
 
@@ -9,6 +11,8 @@ type RouteContext = {
 };
 
 export async function GET(request: Request, context: RouteContext) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   try {
     const { id } = await context.params;
     const code = new URL(request.url).searchParams.get("code") ?? "";
@@ -35,6 +39,8 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
+  if (!isMediaTransferAvailable()) return mediaTransferUnavailable();
+
   try {
     const { id } = await context.params;
     const code = new URL(request.url).searchParams.get("code") ?? "";

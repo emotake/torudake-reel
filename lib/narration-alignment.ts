@@ -1,5 +1,12 @@
-import type { CaptionSegment, CaptionWordTiming } from "./captions";
-import { CAPTION_MIN_DISPLAY_SECONDS } from "./caption-readability";
+import {
+  getCaptionDisplayRange,
+  type CaptionSegment,
+  type CaptionWordTiming,
+} from "./captions";
+import {
+  CAPTION_MIN_DISPLAY_SECONDS,
+  fitCaptionDisplayTimeline,
+} from "./caption-readability";
 
 export type SpeechActivityRange = Readonly<{
   start: number;
@@ -305,16 +312,33 @@ export function attachNarrationCaptionDisplayTiming<
     activityRanges,
     { ...options, maximumDurationSeconds: options.maximumDurationSeconds ?? cursor },
   );
-  const alignedById = new Map(aligned.map((caption) => [caption.id, caption]));
+  const displayTimelineEnd = Math.min(
+    cursor,
+    options.maximumDurationSeconds ?? cursor,
+  );
+  const readableAligned =
+    displayTimelineEnd > 0
+      ? fitCaptionDisplayTimeline(aligned, {
+          timelineStartSeconds: 0,
+          timelineEndSeconds: displayTimelineEnd,
+        })
+      : aligned;
+  const alignedById = new Map(
+    readableAligned.map((caption) => [caption.id, caption]),
+  );
 
   return timeline.map((caption) => {
     const speechCaption = alignedById.get(caption.id);
     if (!speechCaption) return caption;
+    const speechDisplay = getCaptionDisplayRange(speechCaption);
     const displayStart = narrationClockToSourceClock(
       timeline,
-      speechCaption.start,
+      speechDisplay.start,
     );
-    const displayEnd = narrationClockToSourceClock(timeline, speechCaption.end);
+    const displayEnd = narrationClockToSourceClock(
+      timeline,
+      speechDisplay.end,
+    );
     if (displayEnd <= displayStart + 0.001) return caption;
     return {
       ...caption,
