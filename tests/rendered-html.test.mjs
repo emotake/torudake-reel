@@ -31,7 +31,8 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
   assert.match(html, /動画を選ぶだけ。/);
   assert.match(html, /編集の手間を、もっと軽く。/);
-  assert.match(html, /<span>AI自動編集<\/span>/);
+  assert.match(html, /<span>かんたん動画編集<\/span>/);
+  assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /class="heroVisual realDemo"/);
   assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);

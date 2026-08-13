@@ -136,7 +136,8 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
 });
 
 test("labels the permanent hero value instead of presenting it as news", () => {
-  assert.match(pageSource, /<span>AI自動編集<\/span>/);
+  assert.match(pageSource, /<span>かんたん動画編集<\/span>/);
+  assert.doesNotMatch(pageSource, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(pageSource, /<span>新着<\/span>/);
 });
 

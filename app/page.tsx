@@ -3814,7 +3814,7 @@ function Landing({
             </aside>
           )}
           <p className="eyebrow">
-            <span>AI自動編集</span>
+            <span>かんたん動画編集</span>
             日常で撮った動画から、投稿できる1本へ
           </p>
           <h1>
