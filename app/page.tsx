@@ -119,6 +119,7 @@ import {
   type NarrationStyle,
   type VideoAudioMode,
 } from "../lib/narration";
+import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
 import {
   buildNarrationAudioSpans,
   resolveNarrationAudioBoundaries,
@@ -309,17 +310,6 @@ const MAX_SAFE_BROWSER_AUDIO_DECODE_BYTES = 96 * 1024 * 1024;
 const NARRATION_DURATION_TOLERANCE_SECONDS = 0.08;
 const SUPPORTED_VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm)$/i;
 const UNSUPPORTED_VIDEO_EXTENSION = /\.(avi|mkv|wmv|flv|mts|m2ts)$/i;
-const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string> = {
-  calm:
-    "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
-  bright:
-    "休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたてのクロワッサンも絶品でした。",
-  comedy:
-    "週末に出かけた夏祭りは大にぎわいで、屋台の焼きそばも音楽も楽しめて、最後の花火まで満喫しました。",
-  party:
-    "友だちと見つけた夜景スポットは雰囲気も最高で、写真もきれいに撮れて、今日は大満足でした。",
-};
-
 function readAiOperationQuota(response: Response): AiOperationQuotaResult {
   const parsedLimit = Number(
     response.headers.get("X-AI-Operation-Limit") ??
@@ -3925,7 +3915,7 @@ function Landing({
                 <audio
                   controls
                   preload="none"
-                  src={`/demo/voices/${style.id}-v4.wav`}
+                  src={`/demo/voices/${style.id}-v5.wav`}
                   aria-label={`${style.label}の用途別固定音声サンプル`}
                   aria-describedby={exampleId}
                   onPlay={() =>

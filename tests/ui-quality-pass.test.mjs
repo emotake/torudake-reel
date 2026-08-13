@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, cssSource, photoReelSource, videoMixSource] = await Promise.all([
+const [pageSource, cssSource, photoReelSource, videoMixSource, voiceCatalogSource] = await Promise.all([
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(
@@ -14,6 +14,7 @@ const [pageSource, cssSource, photoReelSource, videoMixSource] = await Promise.a
     new URL("../app/video-mix/video-mix-client.tsx", import.meta.url),
     "utf8",
   ),
+  readFile(new URL("../lib/voice-sample-catalog.ts", import.meta.url), "utf8"),
 ]);
 
 test("keeps the recommended setup short and moves free caption styling to results", () => {
@@ -53,16 +54,16 @@ test("loads the sample as a real File and keeps the caption-synchronised demo fa
 });
 
 test("presents four readable, no-cost AI voice examples for distinct use cases", async () => {
-  assert.match(pageSource, /const VOICE_SAMPLE_SCRIPTS: Record<NarrationStyle, string>/);
-  assert.match(pageSource, /朝七時に駅を出発して、海沿いのカフェで/);
-  assert.match(pageSource, /休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたての/);
-  assert.match(pageSource, /週末に出かけた夏祭りは大にぎわいで/);
-  assert.doesNotMatch(pageSource, /ナイトマーケット/);
-  assert.match(pageSource, /写真もきれいに撮れて、今日は大満足でした/);
+  assert.match(pageSource, /import \{ VOICE_SAMPLE_SCRIPTS \} from "\.\.\/lib\/voice-sample-catalog"/);
+  assert.match(voiceCatalogSource, /朝の公園をゆっくり歩きました/);
+  assert.match(voiceCatalogSource, /海辺のカフェに立ち寄りました/);
+  assert.match(voiceCatalogSource, /週末は友だちと夏祭りへ行きました/);
+  assert.doesNotMatch(voiceCatalogSource, /ナイトマーケット/);
+  assert.match(voiceCatalogSource, /笑顔いっぱいの楽しい一日になりました/);
   assert.match(pageSource, /用途別の例文で、4つの話し方を聴き比べられます/);
   assert.match(
     pageSource,
-    /src=\{`\/demo\/voices\/\$\{style\.id\}-v4\.wav`\}/,
+    /src=\{`\/demo\/voices\/\$\{style\.id\}-v5\.wav`\}/,
   );
   assert.match(pageSource, /aria-describedby=\{exampleId\}/);
   assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
@@ -74,7 +75,7 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   );
   assert.match(cssSource, /\.voiceSampleExample q\s*\{[\s\S]*?quotes:\s*"「" "」"/);
   const voiceManifestUrl = new URL(
-    "../public/demo/voices/manifest-v4.json",
+    "../public/demo/voices/manifest-v5.json",
     import.meta.url,
   );
   const voiceManifest = JSON.parse(await readFile(voiceManifestUrl, "utf8"));
@@ -83,25 +84,25 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
       voice: "cedar",
       speed: 0.99,
       script:
-        "朝七時に駅を出発して、海沿いのカフェで静かな景色と焼きたてのパンを楽しみました。",
+        "朝の公園をゆっくり歩きました。木々の間から光が差し込み、穏やかな時間を楽しめました。",
     },
     bright: {
       voice: "marin",
       speed: 1,
       script:
-        "休日に見つけた海辺のカフェは、窓から夕日が見えて、焼きたてのクロワッサンも絶品でした。",
+        "海辺のカフェに立ち寄りました。窓から夕日が見えて、焼きたてのパンもとてもおいしかったです。",
     },
     comedy: {
       voice: "cedar",
-      speed: 1.03,
+      speed: 1,
       script:
-        "週末に出かけた夏祭りは大にぎわいで、屋台の焼きそばも音楽も楽しめて、最後の花火まで満喫しました。",
+        "週末は友だちと夏祭りへ行きました。焼きそばを食べて、音楽を聴いて、最後は大きな花火を楽しみました。",
     },
     party: {
       voice: "marin",
-      speed: 1.03,
+      speed: 1,
       script:
-        "友だちと見つけた夜景スポットは雰囲気も最高で、写真もきれいに撮れて、今日は大満足でした。",
+        "友だちと夜景を見に行きました。写真もきれいに撮れて、笑顔いっぱいの楽しい一日になりました。",
     },
   };
   assert.equal(voiceManifest.samples.length, 4);
@@ -130,10 +131,11 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
     assert.equal(audio.readUInt16LE(22), 1);
     assert.equal(audio.readUInt32LE(24), 24_000);
     assert.equal(audio.readUInt16LE(34), 16);
-    assert.ok(sample.durationSeconds >= 6 && sample.durationSeconds <= 8);
-    assert.ok(sample.integratedLufs >= -19 && sample.integratedLufs <= -18);
-    assert.ok(sample.truePeakDbtp <= -2.5);
+    assert.ok(sample.durationSeconds >= 6 && sample.durationSeconds <= 9);
+    assert.ok(sample.integratedLufs >= -21 && sample.integratedLufs <= -20);
+    assert.ok(sample.truePeakDbtp <= -3);
     assert.equal(sample.postRollSeconds, 0.35);
+    assert.equal(sample.transcriptionMatch, "exact_after_orthography_normalization");
   }
 });
 

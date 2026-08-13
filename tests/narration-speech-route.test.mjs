@@ -143,7 +143,7 @@ test("generates four delivery templates with the recommended realtime voices", a
     const worker = await loadWorker("narration-realtime-voices");
     const styles = ["calm", "bright", "comedy", "party"];
     const voices = ["cedar", "marin", "cedar", "marin"];
-    const speeds = [0.99, 1, 1.03, 1.03];
+    const speeds = [0.99, 1, 1, 1];
 
     for (const [index, style] of styles.entries()) {
       const response = await worker.fetch(
@@ -167,7 +167,7 @@ test("generates four delivery templates with the recommended realtime voices", a
       assert.equal(response.headers.get("x-narration-voice"), voices[index]);
       assert.equal(
         response.headers.get("x-narration-profile"),
-        `2026-08-13-quality-v3:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
+        `2026-08-13-quality-v4:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
       );
       const wav = new Uint8Array(await response.arrayBuffer());
       assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
@@ -250,6 +250,11 @@ test("generates four delivery templates with the recommended realtime voices", a
     assert.ok(
       responses.every((response) =>
         response.instructions.includes("台本の最後の音節と語尾まで明瞭に言い切る"),
+      ),
+    );
+    assert.ok(
+      responses.every((response) =>
+        response.instructions.includes("声のない区間はできるだけ静かに保つ"),
       ),
     );
     assert.doesNotMatch(
@@ -351,7 +356,7 @@ test("maps the retired pop voice to the bright female HD fallback", async () => 
     const fallbackBody = JSON.parse(requests[1].init.body);
     assert.equal(fallbackBody.model, "tts-1-hd");
     assert.equal(fallbackBody.voice, "shimmer");
-    assert.equal(fallbackBody.speed, 1.03);
+    assert.equal(fallbackBody.speed, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -422,7 +427,7 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.equal(response.headers.get("x-narration-voice"), "marin");
     assert.equal(
       response.headers.get("x-narration-profile"),
-      "2026-08-13-quality-v3:bright:gpt-realtime-2.1-mini:marin:1",
+      "2026-08-13-quality-v4:bright:gpt-realtime-2.1-mini:marin:1",
     );
     const session = socket.sent[0].session;
     assert.equal(session.audio.output.voice, "marin");

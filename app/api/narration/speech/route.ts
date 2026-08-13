@@ -55,7 +55,7 @@ const REALTIME_TIMEOUT_MS = 150_000;
 const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
 const MAX_SPEECH_REQUEST_BYTES = 64 * 1024;
-const NARRATION_PROFILE_VERSION = "2026-08-13-quality-v3";
+const NARRATION_PROFILE_VERSION = "2026-08-13-quality-v4";
 
 const VOICE_SETTINGS: Record<
   NarrationStyle,
@@ -90,7 +90,7 @@ const VOICE_SETTINGS: Record<
     realtimeVoice: "cedar",
     legacyVoice: "cedar",
     fallbackVoice: "fable",
-    speed: 1.03,
+    speed: 1,
     instructions:
       "話者像: 休日のお出かけや楽しかった体験を、友人へいきいきと伝える親しみやすい成人男性。\n声質とトーン: 若々しく明るく、自然な笑顔が伝わるクリアな声。楽しさは出すが、怒鳴り声、司会者の煽り、芝居がかった演技、過度な巻き舌は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。重要語へ自然にアクセントを置き、単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
   },
@@ -99,7 +99,7 @@ const VOICE_SETTINGS: Record<
     realtimeVoice: "marin",
     legacyVoice: "marin",
     fallbackVoice: "shimmer",
-    speed: 1.03,
+    speed: 1,
     instructions:
       "話者像: 友人とのお出かけやおすすめの場所を、楽しそうに共有する親しみやすい成人女性。\n声質とトーン: 若々しく明るく、自然な笑顔と前向きさが伝わるクリアな声。豊かな抑揚はつけるが、幼いアニメ声、鼻にかかった作り声、叫び声、過度な流行語の演技は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。語尾には軽い弾みをつけるが引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有のイントネーションを模倣しない。",
   },
@@ -205,6 +205,7 @@ function realtimeNarrationInstructions(
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
     "# Recording Quality",
     "文中で声量、声の高さ、声質、マイクからの距離感を急に変えない。破裂音、歯擦音、息、かすれを誇張せず、語と語の間を完全な無音で不自然に切らない。自然な呼吸と滑らかなつながりを保つ。",
+    "静かなスタジオで収録した、声だけのクリーンな音声にする。背景音、音楽、環境音、室内反響、ハム、ヒス、機械音、デジタルノイズを加えない。声のない区間はできるだけ静かに保つ。",
     "台本の最後の音節と語尾まで明瞭に言い切る。末尾を途中で弱めたり、最後の音節へフェードをかけるように消したりしない。",
     "# Delivery Rules",
     DELIVERY_GUARD,

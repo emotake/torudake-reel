@@ -22,22 +22,35 @@ function wavPcm16(bytes) {
   return { pcm, sampleRate: 24_000 };
 }
 
-test("keeps a clean 300 ms post-roll after every fixed voice preview", async () => {
+function dbfs(value) {
+  return value > 0 ? 20 * Math.log10(value / 32_768) : -120;
+}
+
+function percentile(values, fraction) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+}
+
+test("keeps a clean, quiet post-speech tail after every fixed voice preview", async () => {
   for (const style of styles) {
     const bytes = await readFile(
-      new URL(`../public/demo/voices/${style}-v4.wav`, import.meta.url),
+      new URL(`../public/demo/voices/${style}-v5.wav`, import.meta.url),
     );
     const { pcm, sampleRate } = wavPcm16(bytes);
-    const postRoll = pcm.subarray(pcm.length - Math.round(sampleRate * 0.3));
-    assert.ok(postRoll.length > 0);
+    const finalTwentyMs = pcm.subarray(
+      pcm.length - Math.round(sampleRate * 0.02),
+    );
     assert.equal(
-      postRoll.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0),
+      finalTwentyMs.reduce(
+        (peak, sample) => Math.max(peak, Math.abs(sample)),
+        0,
+      ),
       0,
-      `${style} must end with 300 ms of digital silence`,
+      `${style} must end in digital silence`,
     );
     const precedingVoiceWindow = pcm.subarray(
-      Math.max(0, pcm.length - Math.round(sampleRate * 0.9)),
-      pcm.length - Math.round(sampleRate * 0.35),
+      Math.max(0, pcm.length - Math.round(sampleRate * 0.75)),
+      pcm.length - Math.round(sampleRate * 0.3),
     );
     assert.ok(
       precedingVoiceWindow.some((sample) => Math.abs(sample) >= 64),
@@ -50,6 +63,27 @@ test("keeps a clean 300 ms post-roll after every fixed voice preview", async () 
       ),
       0,
       `${style} must not contain clipped samples`,
+    );
+    const frameSamples = Math.round(sampleRate * 0.02);
+    const quietFrames = [];
+    let lastActiveFrameEnd = 0;
+    for (let start = 0; start < pcm.length; start += frameSamples) {
+      const end = Math.min(pcm.length, start + frameSamples);
+      let energy = 0;
+      for (let index = start; index < end; index += 1) {
+        energy += pcm[index] ** 2;
+      }
+      const frameDbfs = dbfs(Math.sqrt(energy / Math.max(1, end - start)));
+      if (frameDbfs > -35) lastActiveFrameEnd = end;
+      if (frameDbfs < -45 && frameDbfs > -100) quietFrames.push(frameDbfs);
+    }
+    assert.ok(
+      (pcm.length - lastActiveFrameEnd) / sampleRate >= 0.3,
+      `${style} must preserve at least 300 ms after active speech`,
+    );
+    assert.ok(
+      quietFrames.length > 0 && percentile(quietFrames, 0.5) <= -60,
+      `${style} quiet-frame median must stay at or below -60 dBFS`,
     );
   }
 });

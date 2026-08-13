@@ -3,10 +3,17 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const TARGET_LUFS = -18.5;
-const TARGET_TRUE_PEAK_DBTP = -2.5;
+const TARGET_LUFS = -20.8;
+const TARGET_TRUE_PEAK_DBTP = -3;
 const TARGET_LRA = 9;
 const POST_ROLL_SECONDS = 0.35;
+const ACTIVE_FRAME_SECONDS = 0.005;
+const ACTIVE_RMS_DBFS = -35;
+const DENOISE_FILTER = [
+  "highpass=f=70:p=2",
+  "lowpass=f=10500:p=2",
+  "afftdn=nr=6:nf=-60:tn=1:tr=1:gs=10",
+].join(",");
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -52,11 +59,52 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function inspectPcm16Wav(bytes) {
+  if (bytes.toString("ascii", 0, 4) !== "RIFF") {
+    throw new Error("Expected a RIFF WAV input");
+  }
+  const dataIndex = bytes.indexOf(Buffer.from("data"));
+  if (dataIndex < 36) throw new Error("WAV data chunk is missing");
+  const sampleRate = bytes.readUInt32LE(24);
+  const channels = bytes.readUInt16LE(22);
+  const bitsPerSample = bytes.readUInt16LE(34);
+  if (sampleRate !== 24_000 || channels !== 1 || bitsPerSample !== 16) {
+    throw new Error("Expected 24 kHz mono PCM16 input");
+  }
+  const dataLength = bytes.readUInt32LE(dataIndex + 4);
+  const pcm = new Int16Array(
+    bytes.buffer,
+    bytes.byteOffset + dataIndex + 8,
+    Math.floor(dataLength / 2),
+  );
+  const frameSamples = Math.round(sampleRate * ACTIVE_FRAME_SECONDS);
+  const threshold = 10 ** (ACTIVE_RMS_DBFS / 20) * 32_768;
+  let lastActiveSample = 0;
+  for (let start = 0; start < pcm.length; start += frameSamples) {
+    const end = Math.min(pcm.length, start + frameSamples);
+    let energy = 0;
+    for (let index = start; index < end; index += 1) {
+      energy += pcm[index] ** 2;
+    }
+    const rms = Math.sqrt(energy / Math.max(1, end - start));
+    if (rms > threshold) lastActiveSample = end;
+  }
+  return {
+    durationSeconds: pcm.length / sampleRate,
+    activeEndSeconds: lastActiveSample / sampleRate,
+  };
+}
+
 await mkdir(outputDirectory, { recursive: true });
 const outputs = [];
 for (const [id, sourceName] of Object.entries(selections)) {
   const input = path.resolve(inputDirectory, sourceName);
-  const output = path.resolve(outputDirectory, `${id}-v4.wav`);
+  const output = path.resolve(outputDirectory, `${id}-v5.wav`);
+  const raw = await readFile(input);
+  const rawTiming = inspectPcm16Wav(raw);
+  const targetDuration = rawTiming.activeEndSeconds + POST_ROLL_SECONDS;
+  const retainedDuration = Math.min(rawTiming.durationSeconds, targetDuration);
+  const timingFilter = `atrim=end=${retainedDuration.toFixed(6)}`;
   const firstPass = parseLoudnessReport(
     runFfmpeg([
       "-hide_banner",
@@ -64,7 +112,7 @@ for (const [id, sourceName] of Object.entries(selections)) {
       "-i",
       input,
       "-af",
-      `loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TRUE_PEAK_DBTP}:LRA=${TARGET_LRA}:print_format=json`,
+      `${DENOISE_FILTER},${timingFilter},loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TRUE_PEAK_DBTP}:LRA=${TARGET_LRA}:print_format=json`,
       "-f",
       "null",
       "NUL",
@@ -80,6 +128,7 @@ for (const [id, sourceName] of Object.entries(selections)) {
     "linear=true",
     "print_format=json",
   ].join(":");
+  const fadeStart = Math.max(0, retainedDuration - 0.02);
   const secondPass = parseLoudnessReport(
     runFfmpeg([
       "-y",
@@ -88,7 +137,7 @@ for (const [id, sourceName] of Object.entries(selections)) {
       "-i",
       input,
       "-af",
-      `${filter},apad=pad_dur=${POST_ROLL_SECONDS}`,
+      `${DENOISE_FILTER},${timingFilter},${filter},asetpts=N/SR/TB,afade=t=out:st=${fadeStart.toFixed(6)}:d=0.02,apad=whole_dur=${targetDuration.toFixed(6)},atrim=end=${targetDuration.toFixed(6)}`,
       "-ar",
       "24000",
       "-ac",
@@ -98,7 +147,7 @@ for (const [id, sourceName] of Object.entries(selections)) {
       output,
     ]),
   );
-  const [raw, mastered] = await Promise.all([readFile(input), readFile(output)]);
+  const mastered = await readFile(output);
   outputs.push({
     id,
     sourceName,
@@ -109,12 +158,17 @@ for (const [id, sourceName] of Object.entries(selections)) {
     sha256: sha256(mastered),
     measuredIntegratedLufs: Number(secondPass.output_i),
     measuredTruePeakDbtp: Number(secondPass.output_tp),
+    rawDurationSeconds: rawTiming.durationSeconds,
+    activeEndSeconds: rawTiming.activeEndSeconds,
+    retainedNaturalTailSeconds:
+      retainedDuration - rawTiming.activeEndSeconds,
+    finalDurationSeconds: targetDuration,
     postRollSeconds: POST_ROLL_SECONDS,
   });
 }
 
 await writeFile(
-  path.join(outputDirectory, "mastering-v4-results.json"),
+  path.join(outputDirectory, "mastering-v5-results.json"),
   `${JSON.stringify(outputs, null, 2)}\n`,
   "utf8",
 );
