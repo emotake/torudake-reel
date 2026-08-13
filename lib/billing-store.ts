@@ -344,6 +344,17 @@ export async function getBillingStatusForUser(
   };
 }
 
+export class AccountDeletionProcessingError extends Error {
+  readonly code = "account_deletion_processing";
+
+  constructor() {
+    super(
+      "アカウントの削除処理を確認中のため、新しい動画処理を開始できません。",
+    );
+    this.name = "AccountDeletionProcessingError";
+  }
+}
+
 export class UsageReservationConflictError extends Error {
   readonly code:
     | "idempotency_key_owned_by_another_user"
@@ -738,6 +749,23 @@ async function loadReservationAfterReleaseIntent(
   return findUsageReservationForUser(userId, { idempotencyKey });
 }
 
+async function assertAccountDeletionNotProcessing(userId: string) {
+  const database = env.DB as unknown as QueryD1Database | undefined;
+  if (!database?.prepare) {
+    throw new Error("Usage database binding is unavailable.");
+  }
+  const row = await database
+    .prepare(`
+      SELECT 1 AS processing
+      FROM account_deletion_requests
+      WHERE user_id = ? AND status = 'processing'
+      LIMIT 1
+    `)
+    .bind(userId)
+    .first<{ processing: number }>();
+  if (row?.processing === 1) throw new AccountDeletionProcessingError();
+}
+
 export async function reserveUsage(
   currentUser: CurrentUser,
   sourceDurationSeconds: number,
@@ -746,6 +774,7 @@ export async function reserveUsage(
 ) {
   const db = getDb();
   const user = await getOrCreateBillingUser(currentUser);
+  await assertAccountDeletionNotProcessing(user.id);
   const roundedDuration = Math.max(1, Math.ceil(sourceDurationSeconds));
   const requestStartedAt = Math.floor(Date.now() / 1_000);
   const existing = await db
@@ -1136,6 +1165,7 @@ export async function renewUsageReservation(
   nowSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<UsageReservationWithOutcome | null> {
   const user = await getOrCreateBillingUser(currentUser);
+  await assertAccountDeletionNotProcessing(user.id);
   const existing = await findUsageReservationForUser(user.id, selector);
   if (!existing) return null;
   const roundedDuration =

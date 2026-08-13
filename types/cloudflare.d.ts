@@ -12,6 +12,7 @@ declare module "cloudflare:workers" {
     MEDIA?: R2Bucket;
     OPENAI_API_KEY?: string;
     OPS_HEALTH_SECRET?: string;
+    ACCOUNT_DELETION_OPERATIONS_SECRET?: string;
     NARRATION_SPEECH_MODE?: string;
     TRUST_SITES_AUTH_HEADERS?: string;
     PUBLIC_ORIGIN?: string;

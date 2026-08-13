@@ -59,6 +59,7 @@ export const users = sqliteTable(
     billingEmail: text("billing_email"),
     fullName: text("full_name"),
     stripeCustomerId: text("stripe_customer_id"),
+    accountDeletedAt: integer("account_deleted_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -102,6 +103,11 @@ export const accountAuthChallenges = sqliteTable(
     expectedOrigin: text("expected_origin").notNull(),
     rpId: text("rp_id").notNull(),
     networkHash: text("network_hash").notNull(),
+    requiresReauthentication: integer("requires_reauthentication", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     consumedAt: integer("consumed_at"),
@@ -123,6 +129,7 @@ export const accountSessions = sqliteTable(
     createdAt: integer("created_at").notNull(),
     lastSeenAt: integer("last_seen_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
+    reauthenticatedAt: integer("reauthenticated_at"),
   },
   (table) => [
     index("account_sessions_user_id_idx").on(table.userId),
@@ -226,7 +233,7 @@ export const accountDeletionRequests = sqliteTable(
   {
     userId: text("user_id").primaryKey(),
     status: text("status", {
-      enum: ["scheduled", "cancelled", "completed"],
+      enum: ["scheduled", "cancelled", "processing", "completed"],
     })
       .notNull()
       .default("scheduled"),
@@ -234,12 +241,44 @@ export const accountDeletionRequests = sqliteTable(
     executeAfter: integer("execute_after").notNull(),
     cancelledAt: integer("cancelled_at"),
     completedAt: integer("completed_at"),
+    executionToken: text("execution_token"),
+    executionStartedAt: integer("execution_started_at"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastBlockReason: text("last_block_reason"),
+    lastErrorCode: text("last_error_code"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
     index("account_deletion_status_execute_idx").on(
       table.status,
       table.executeAfter,
+    ),
+  ],
+);
+
+export const accountDeletionExecutionAudit = sqliteTable(
+  "account_deletion_execution_audit",
+  {
+    id: text("id").primaryKey(),
+    accountReference: text("account_reference").notNull(),
+    requestId: text("request_id").notNull(),
+    dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(true),
+    outcome: text("outcome", {
+      enum: ["ready", "blocked", "completed", "failed"],
+    }).notNull(),
+    reasonCode: text("reason_code"),
+    summary: text("summary").notNull().default("{}"),
+    startedAt: integer("started_at").notNull(),
+    completedAt: integer("completed_at").notNull(),
+  },
+  (table) => [
+    index("account_deletion_audit_reference_started_idx").on(
+      table.accountReference,
+      table.startedAt,
+    ),
+    index("account_deletion_audit_outcome_started_idx").on(
+      table.outcome,
+      table.startedAt,
     ),
   ],
 );

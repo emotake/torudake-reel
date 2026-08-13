@@ -147,10 +147,11 @@ test("a promoted trial cannot recover account entitlement after logout", async (
   database.sqlite
     .prepare(`
       INSERT INTO account_sessions (
-        token_hash, user_id, created_at, last_seen_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?)
+        token_hash, user_id, created_at, last_seen_at, expires_at,
+        reauthenticated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `)
-    .run(accountHash, userId, now, now, now + 3_600);
+    .run(accountHash, userId, now, now, now + 3_600, now);
 
   const authenticatedRequest = accountRequest(accountToken, trialId);
   const backup = await registrationOptions(authenticatedRequest);

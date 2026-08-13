@@ -9,6 +9,11 @@ not authorize a deployment, a D1 mutation, or a real payment.
   exposes only `ready`/`not_ready`, timestamp, and a request ID.
 - `GET /api/internal/health` checks D1, OpenAI configuration and Stripe account
   and catalog readiness. Send `Authorization: Bearer $OPS_HEALTH_SECRET`.
+- `POST /api/internal/account-deletions` is the secret-gated, bounded executor
+  for deletion requests whose 30-day grace period has ended. It defaults to a
+  dry run and requires its dedicated `ACCOUNT_DELETION_OPERATIONS_SECRET`;
+  the routine `OPS_HEALTH_SECRET` must not authorize it. See
+  `account-recovery.md` before enabling execution.
   Configure the secret with `wrangler pages secret put`; never commit it.
 - Every Pages response carries `X-Request-Id` and `X-Correlation-Id`. Only
   bounded safe identifiers are accepted from clients; otherwise the entry point

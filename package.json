@@ -18,6 +18,7 @@
     "release:preflight:offline": "node scripts/release-preflight.mjs --offline",
     "ops:health": "node scripts/operations/synthetic-readiness.mjs",
     "ops:health:detailed": "node scripts/operations/synthetic-readiness.mjs --detailed",
+    "ops:account-deletions": "node scripts/operations/account-deletions.mjs",
     "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
     "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs"
   },

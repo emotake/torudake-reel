@@ -62,6 +62,7 @@ type AuthChallenge = {
   user_id: string | null;
   expected_origin: string;
   rp_id: string;
+  requires_reauthentication: number;
 };
 
 type StoredPasskey = {
@@ -176,6 +177,9 @@ export async function registrationOptions(request: Request) {
       "この無料体験にはアカウントが登録済みです。「ログイン」を選んでください。",
     );
   }
+  if (existing.length > 0) {
+    await requireRecentAccountReauthentication(request, user.id);
+  }
   if (existing.length >= MAX_PASSKEYS_PER_ACCOUNT) {
     throw new AccountAuthError(
       "passkey_limit_reached",
@@ -207,6 +211,7 @@ export async function registrationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "registration",
     userId: user.id,
+    requiresReauthentication: existing.length > 0,
     context,
     now,
   });
@@ -223,6 +228,22 @@ export async function verifyRegistration(
 ) {
   const challenge = await consumeChallenge(request, "registration");
   if (!challenge.user_id) throw new Error("Registration user is missing.");
+  const database = databaseOrThrow();
+  const existingPasskeys = await database
+    .prepare(`
+      SELECT COUNT(*) AS count
+      FROM account_passkeys
+      WHERE user_id = ?
+    `)
+    .bind(challenge.user_id)
+    .first<{ count: number }>();
+  const backupRegistration = (existingPasskeys?.count ?? 0) > 0;
+  if (backupRegistration && challenge.requires_reauthentication !== 1) {
+    throw backupPasskeyReauthenticationRequired();
+  }
+  if (challenge.requires_reauthentication === 1) {
+    await requireRecentAccountReauthentication(request, challenge.user_id);
+  }
   const authenticatedAccount = await getAccountIdentity(request);
   let trialSessionId: string | null = null;
   if (
@@ -283,7 +304,6 @@ export async function verifyRegistration(
     );
   }
 
-  const database = databaseOrThrow();
   const now = Math.floor(Date.now() / 1_000);
   const { registrationInfo } = verification;
   const sessionToken = randomAccountToken();
@@ -363,6 +383,7 @@ export async function authenticationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "authentication",
     userId: null,
+    requiresReauthentication: false,
     context,
     now,
   });
@@ -408,6 +429,7 @@ export async function reauthenticationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "authentication",
     userId: identity.id,
+    requiresReauthentication: false,
     context,
     now,
   });
@@ -430,6 +452,16 @@ export async function verifyAuthentication(
     );
   }
   const database = databaseOrThrow();
+  if (challenge.user_id) {
+    const authenticatedAccount = await getAccountIdentity(request);
+    if (authenticatedAccount?.id !== challenge.user_id) {
+      throw new AccountAuthError(
+        "reauthentication_identity_changed",
+        401,
+        "現在のアカウントのパスキーで本人確認してください。",
+      );
+    }
+  }
   const passkey = await database
     .prepare(`
       SELECT credential_id, user_id, public_key, counter, transports
@@ -491,7 +523,13 @@ export async function verifyAuthentication(
         now,
         passkey.credential_id,
       ),
-    sessionInsertStatement(database, sessionHash, passkey.user_id, now),
+    sessionInsertStatement(
+      database,
+      sessionHash,
+      passkey.user_id,
+      now,
+      challenge.user_id ? now : null,
+    ),
   ]);
   return authenticationResult(request, sessionToken);
 }
@@ -759,7 +797,7 @@ export async function isAccountDeletionScheduled(userId: string) {
     .prepare(`
       SELECT 1 AS scheduled
       FROM account_deletion_requests
-      WHERE user_id = ? AND status = 'scheduled'
+      WHERE user_id = ? AND status IN ('scheduled', 'processing')
       LIMIT 1
     `)
     .bind(userId)
@@ -830,6 +868,40 @@ export async function requireRecentAccountSession(request: Request) {
   return { userId: session.user_id, tokenHash };
 }
 
+export async function requireRecentAccountReauthentication(
+  request: Request,
+  expectedUserId: string,
+) {
+  const token = getAccountSessionToken(request);
+  if (!token) throw backupPasskeyReauthenticationRequired();
+  const now = Math.floor(Date.now() / 1_000);
+  const tokenHash = await hashAccountToken(token);
+  const session = await databaseOrThrow()
+    .prepare(`
+      SELECT user_id, reauthenticated_at
+      FROM account_sessions
+      WHERE token_hash = ? AND expires_at > ?
+      LIMIT 1
+    `)
+    .bind(tokenHash, now)
+    .first<{ user_id: string; reauthenticated_at: number | null }>();
+  if (!session) throw backupPasskeyReauthenticationRequired();
+  if (session.user_id !== expectedUserId) {
+    throw new AccountAuthError(
+      "registration_identity_changed",
+      401,
+      "本人確認を始めたアカウントと現在のアカウントが異なります。もう一度お試しください。",
+    );
+  }
+  if (
+    session.reauthenticated_at === null ||
+    session.reauthenticated_at < now - RECENT_AUTHENTICATION_SECONDS
+  ) {
+    throw backupPasskeyReauthenticationRequired();
+  }
+  return { userId: session.user_id, tokenHash };
+}
+
 async function saveChallenge(
   request: Request,
   database: D1Database,
@@ -837,6 +909,7 @@ async function saveChallenge(
     challenge: string;
     ceremony: "registration" | "authentication";
     userId: string | null;
+    requiresReauthentication: boolean;
     context: { origin: string; rpId: string; secure: boolean };
     now: number;
   },
@@ -856,9 +929,10 @@ async function saveChallenge(
     .prepare(`
         INSERT INTO account_auth_challenges (
           token_hash, challenge, ceremony, user_id, expected_origin,
-          rp_id, network_hash, created_at, expires_at, consumed_at
+          rp_id, network_hash, requires_reauthentication, created_at,
+          expires_at, consumed_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL
         WHERE (
           SELECT COUNT(*) FROM account_auth_challenges
           WHERE network_hash = ? AND created_at >= ?
@@ -876,6 +950,7 @@ async function saveChallenge(
       values.context.origin,
       values.context.rpId,
       networkHash,
+      values.requiresReauthentication ? 1 : 0,
       values.now,
       values.now + CHALLENGE_LIFETIME_SECONDS,
       networkHash,
@@ -916,7 +991,8 @@ async function consumeChallenge(
         AND ceremony = ?
         AND consumed_at IS NULL
         AND expires_at >= ?
-      RETURNING challenge, ceremony, user_id, expected_origin, rp_id
+      RETURNING challenge, ceremony, user_id, expected_origin, rp_id,
+        requires_reauthentication
     `)
     .bind(now, await hashAccountToken(token), ceremony, now)
     .first<AuthChallenge>();
@@ -935,14 +1011,31 @@ function sessionInsertStatement(
   tokenHash: string,
   userId: string,
   now: number,
+  reauthenticatedAt: number | null = null,
 ) {
   return database
     .prepare(`
       INSERT INTO account_sessions (
-        token_hash, user_id, created_at, last_seen_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?)
+        token_hash, user_id, created_at, last_seen_at, expires_at,
+        reauthenticated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `)
-    .bind(tokenHash, userId, now, now, now + SESSION_LIFETIME_SECONDS);
+    .bind(
+      tokenHash,
+      userId,
+      now,
+      now,
+      now + SESSION_LIFETIME_SECONDS,
+      reauthenticatedAt,
+    );
+}
+
+function backupPasskeyReauthenticationRequired() {
+  return new AccountAuthError(
+    "backup_passkey_reauthentication_required",
+    401,
+    "予備のパスキーを追加する前に、現在のパスキーで本人確認をやり直してください。",
+  );
 }
 
 function authenticationResult(request: Request, sessionToken: string) {

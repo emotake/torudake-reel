@@ -33,7 +33,7 @@ type D1Database = {
 };
 
 type DeletionRow = {
-  status: "scheduled" | "cancelled" | "completed";
+  status: "scheduled" | "processing" | "cancelled" | "completed";
   requested_at: number;
   execute_after: number;
 };
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
     }
     const now = Math.floor(Date.now() / 1_000);
     const executeAfter = now + DELETION_GRACE_SECONDS;
-    await databaseOrThrow()
+    const scheduled = await databaseOrThrow()
       .prepare(`
         INSERT INTO account_deletion_requests (
           user_id, status, requested_at, execute_after, cancelled_at,
@@ -129,11 +129,28 @@ export async function POST(request: Request) {
           execute_after = excluded.execute_after,
           cancelled_at = NULL,
           completed_at = NULL,
+          execution_token = NULL,
+          execution_started_at = NULL,
+          last_block_reason = NULL,
+          last_error_code = NULL,
           updated_at = excluded.updated_at
-        WHERE account_deletion_requests.status <> 'completed'
+        WHERE account_deletion_requests.status IN ('scheduled', 'cancelled')
       `)
       .bind(session.userId, now, executeAfter, now)
       .run();
+    if (scheduled.meta?.changes !== 1) {
+      const current = await getScheduledDeletion(session.userId);
+      if (current?.status === "processing") {
+        return privateJson(
+          {
+            error:
+              "削除処理の安全確認を開始しているため、予約内容を変更できません。処理結果を確認してからもう一度お試しください。",
+            code: "account_deletion_processing",
+          },
+          { status: 409 },
+        );
+      }
+    }
     return privateJson({
       scheduled: true,
       requestedAt: now,
@@ -157,7 +174,7 @@ export async function DELETE(request: Request) {
       );
     }
     const now = Math.floor(Date.now() / 1_000);
-    await databaseOrThrow()
+    const cancelled = await databaseOrThrow()
       .prepare(`
         UPDATE account_deletion_requests
         SET status = 'cancelled', cancelled_at = ?, updated_at = ?
@@ -165,6 +182,19 @@ export async function DELETE(request: Request) {
       `)
       .bind(now, now, identity.id)
       .run();
+    if (cancelled.meta?.changes !== 1) {
+      const current = await getScheduledDeletion(identity.id);
+      if (current?.status === "processing") {
+        return privateJson(
+          {
+            error:
+              "削除処理の安全確認を開始しているため、現在は取り消せません。処理結果を確認してからもう一度お試しください。",
+            code: "account_deletion_processing",
+          },
+          { status: 409 },
+        );
+      }
+    }
     return privateJson({ cancelled: true });
   } catch (error) {
     return deletionErrorResponse(error);
@@ -176,7 +206,7 @@ async function getScheduledDeletion(userId: string) {
     .prepare(`
       SELECT status, requested_at, execute_after
       FROM account_deletion_requests
-      WHERE user_id = ? AND status = 'scheduled'
+      WHERE user_id = ? AND status IN ('scheduled', 'processing')
       LIMIT 1
     `)
     .bind(userId)

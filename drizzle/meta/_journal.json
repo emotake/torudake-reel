@@ -162,6 +162,20 @@
       "when": 1786621052219,
       "tag": "0022_outstanding_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1786622263431,
+      "tag": "0023_tough_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1786622724589,
+      "tag": "0024_careless_jubilee",
+      "breakpoints": true
     }
   ]
 }

@@ -46,11 +46,11 @@ test("polls the authenticated account after Stripe redirects back", () => {
   );
 });
 
-test("lets an authenticated user add a backup passkey without restarting the trial", () => {
+test("reauthenticates an existing account before adding a backup passkey", () => {
   assert.match(accountSource, /status\?\.authenticated === true/);
   assert.match(
     accountSource,
-    /if \(!addingBackupPasskey\) \{\s*await postJson<\{ ready: boolean \}>\("\/api\/session\/trial"\)/,
+    /if \(addingBackupPasskey\) \{\s*await reauthenticate\(\);\s*\} else \{\s*await postJson<\{ ready: boolean \}>\("\/api\/session\/trial"\)/,
   );
   assert.match(accountSource, /予備パスキーを追加/);
   assert.match(accountSource, /予備のパスキーを追加しました/);

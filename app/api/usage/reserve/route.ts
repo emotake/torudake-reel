@@ -1,4 +1,5 @@
 import {
+  AccountDeletionProcessingError,
   OperatorUsageLimitError,
   getAiEntitlementBudgetForReservation,
   publicUsageReservationState,
@@ -96,6 +97,12 @@ export async function POST(request: Request) {
       narrationGenerationsRemaining: remaining,
     });
   } catch (error) {
+    if (error instanceof AccountDeletionProcessingError) {
+      return Response.json(
+        { error: error.message, code: error.code },
+        { status: 409 },
+      );
+    }
     if (error instanceof UsageReservationConflictError) {
       return Response.json(
         { error: error.message, code: error.code },

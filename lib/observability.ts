@@ -5,7 +5,13 @@ export type OperationalLogSeverity = "error" | "warn" | "info";
 
 export type OperationalLogFields = {
   event: string;
-  component: "billing" | "stripe_webhook" | "ai" | "health" | "runtime";
+  component:
+    | "billing"
+    | "stripe_webhook"
+    | "ai"
+    | "health"
+    | "runtime"
+    | "account_deletion";
   operation?: string;
   status?: number;
   outcome?: string;

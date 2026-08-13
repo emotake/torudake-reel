@@ -81,7 +81,7 @@ type BillingDocument = {
 };
 
 type AccountDeletion = {
-  status: "scheduled";
+  status: "scheduled" | "processing";
   requestedAt: number;
   executeAfter: number;
 };
@@ -278,7 +278,9 @@ export default function AccountClient() {
     setError("");
     const addingBackupPasskey = status?.authenticated === true;
     try {
-      if (!addingBackupPasskey) {
+      if (addingBackupPasskey) {
+        await reauthenticate();
+      } else {
         await postJson<{ ready: boolean }>("/api/session/trial");
       }
       const prepared = await postJson<
@@ -908,7 +910,9 @@ export default function AccountClient() {
                 disabled={busy !== null || !newPasskeyName.trim()}
                 onClick={registerPasskey}
               >
-                {busy === "register" ? "本人確認中…" : "予備パスキーを追加"}
+                {busy === "register"
+                  ? "本人確認中…"
+                  : "本人確認して予備パスキーを追加"}
               </button>
               <small>最大10件。追加時にFace ID・Touch ID・端末の画面ロックで本人確認します。</small>
             </article>
@@ -1137,18 +1141,24 @@ export default function AccountClient() {
             </header>
             {accountDeletion ? (
               <article className="accountPlanCard accountCompactCard featured">
-                <p>削除予約中</p>
+                <p>{accountDeletion.status === "processing" ? "削除処理を確認中" : "削除予約中"}</p>
                 <h2>
                   削除手続き開始予定日 {new Date(accountDeletion.executeAfter * 1000).toLocaleDateString("ja-JP")}
                 </h2>
-                <span>予定日まではログインでき、この画面から予約を取り消せます。予定日以降、運営が安全確認のうえ削除処理を進めます。</span>
-                <button
-                  className="accountSecondaryAction"
-                  disabled={busy !== null}
-                  onClick={cancelAccountDeletion}
-                >
-                  {busy === "cancel_deletion" ? "取消中…" : "削除予約を取り消す"}
-                </button>
+                <span>
+                  {accountDeletion.status === "processing"
+                    ? "契約・返金・支払い異議と処理中の保存がないことを確認しています。確認中は安全のため予約を取り消せません。問題がある場合は削除を延期します。"
+                    : "予定日まではログインでき、この画面から予約を取り消せます。予定日以降、運営の定期処理で契約・返金・支払い異議を再確認してから順次削除します。"}
+                </span>
+                {accountDeletion.status === "scheduled" ? (
+                  <button
+                    className="accountSecondaryAction"
+                    disabled={busy !== null}
+                    onClick={cancelAccountDeletion}
+                  >
+                    {busy === "cancel_deletion" ? "取消中…" : "削除予約を取り消す"}
+                  </button>
+                ) : null}
               </article>
             ) : (
               <button

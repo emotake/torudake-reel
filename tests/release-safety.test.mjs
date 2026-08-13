@@ -111,8 +111,8 @@ test("migration ledger comparison detects missing, unexpected, and duplicate row
 test("repository migration sequence is continuous and Wrangler JSON is parsed", () => {
   const migrations = discoverMigrationNames(projectRoot);
   assert.equal(migrations[0], "0000_video_transfers.sql");
-  assert.equal(migrations.at(-1), "0022_outstanding_captain_cross.sql");
-  assert.equal(migrations.length, 23);
+  assert.equal(migrations.at(-1), "0024_careless_jubilee.sql");
+  assert.equal(migrations.length, 25);
 
   const rows = extractRowsFromWranglerJson(
     '[{"results":[{"name":"0000_video_transfers.sql"}],"success":true}]',
