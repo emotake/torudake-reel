@@ -78,6 +78,11 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /動画を預ける|安全な受け渡し画面へ/);
   assert.match(html, /あなたがするのは、/);
   assert.match(html, /目的に合わせて自動編集/);
+  assert.match(html, /会話・解説は元の音声を活かし、必要ならAI音声に切り替え/);
+  assert.match(html, /動画に合わせて音声の仕上げ方を選択/);
+  assert.match(html, /元の話し声を活かすか、AIナレーションに置き換える/);
+  assert.doesNotMatch(html, /元の音声とAIナレーションを自然に組み合わせる/);
+  assert.doesNotMatch(html, /元の音声があっても、なくても対応/);
   assert.doesNotMatch(html, /AIが全部整える/);
   assert.match(html, /使い方に合う保存方法を。/);
   assert.match(html, /最大500MB/);
@@ -151,7 +156,8 @@ test("renders the ordered five-video editor as a separate public route", async (
   assert.match(html, /黒へフェード/);
   assert.match(html, /ほかの5種類も見る/);
   assert.match(html, /AIナレーションを入れる/);
-  assert.match(html, /AIナレーションと発話に合うテロップも追加できます/);
+  assert.match(html, /会話・解説を活かすか、AIナレーションを主役にするかも選べます/);
+  assert.match(html, /元の声をAI音声へ置き換えたいとき/);
   assert.match(html, /動画を選んで無料でプレビュー/);
   assert.match(html, /プラン購入時に決済・書き出し成功時に完成動画1本分の利用枠を使用/);
   assert.match(

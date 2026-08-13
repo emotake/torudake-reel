@@ -166,6 +166,10 @@ type MixNarration = Readonly<{
   style: NarrationStyle;
 }>;
 
+type NarrationSourceAudioMode = "mute" | "ambient";
+
+const VIDEO_MIX_AMBIENT_AUDIO_GAIN = 0.12;
+
 class VideoMixRequestError extends Error {
   constructor(
     message: string,
@@ -941,6 +945,8 @@ export default function VideoMixClient() {
   const [narrationStyle, setNarrationStyle] = useState<NarrationStyle>("bright");
   const [narrationGoal, setNarrationGoal] = useState<CaptionGoal>("follow");
   const [narrationBrief, setNarrationBrief] = useState("");
+  const [narrationSourceAudioMode, setNarrationSourceAudioMode] =
+    useState<NarrationSourceAudioMode>("mute");
   const [narration, setNarration] = useState<MixNarration | null>(null);
   const [previousNarration, setPreviousNarration] = useState<MixNarration | null>(null);
   const [narrationStale, setNarrationStale] = useState(false);
@@ -1032,16 +1038,31 @@ export default function VideoMixClient() {
     Object.keys(activeBoundaryTransitionPreferences).length > 0;
   const editingLocked =
     preparing || exporting || narrationGenerating || discardingPending || Boolean(pendingFinalize);
+  const narrationSourceAudioGain =
+    narrationEnabled
+      ? narrationSourceAudioMode === "mute"
+        ? 0
+        : VIDEO_MIX_AMBIENT_AUDIO_GAIN
+      : 1;
   const previewDuckingMetadata = useMemo(() =>
-    narration && plan
+    plan
       ? buildVideoMixNarrationDuckingMetadata({
-          activity: narration.activity,
-          baseGain: 1,
+          activity: narration?.activity ?? [],
+          baseGain: narrationSourceAudioGain,
           duration: plan.duration,
-          enabled: narrationEnabled,
+          enabled:
+            narrationEnabled &&
+            narrationSourceAudioMode === "ambient" &&
+            Boolean(narration),
         })
       : null,
-    [narration, narrationEnabled, plan],
+    [
+      narration,
+      narrationEnabled,
+      narrationSourceAudioGain,
+      narrationSourceAudioMode,
+      plan,
+    ],
   );
 
   const analyticsSnapshot = useCallback(() => ({
@@ -1444,6 +1465,7 @@ export default function VideoMixClient() {
         transition,
         boundaryTransitions: activeBoundaryTransitionPreferences,
         narrationEnabled,
+        narrationSourceAudioMode,
         narrationCaptionsEnabled,
         narrationStyle,
         narrationGoal,
@@ -1457,6 +1479,7 @@ export default function VideoMixClient() {
     narrationCaptionsEnabled,
     narrationEnabled,
     narrationGoal,
+    narrationSourceAudioMode,
     narrationStyle,
     sources,
     transition,
@@ -1990,7 +2013,9 @@ export default function VideoMixClient() {
     stopPreview();
     clearResult();
     setNarrationEnabled(useNarration);
-    if (!useNarration) {
+    if (useNarration) {
+      setNarrationSourceAudioMode("mute");
+    } else {
       clearNarrationDraft();
       setNarrationStale(false);
     }
@@ -2554,6 +2579,7 @@ export default function VideoMixClient() {
           ),
         );
         setNarrationEnabled(loadedDraft.narrationEnabled);
+        setNarrationSourceAudioMode(loadedDraft.narrationSourceAudioMode);
         setNarrationCaptionsEnabled(loadedDraft.narrationCaptionsEnabled);
         setNarrationStyle(loadedDraft.narrationStyle);
         setNarrationGoal(loadedDraft.narrationGoal);
@@ -3010,10 +3036,12 @@ export default function VideoMixClient() {
         })),
         transition,
         boundaryTransitions: resolvedBoundaryTransitions,
+        audioGain: narrationSourceAudioGain,
         narrationAudio: narrationEnabled ? narration?.audio : undefined,
         narrationNormalizationGain:
           narrationEnabled ? narration?.normalizationGain : undefined,
-        duckSourceAudioDuringNarration: narrationEnabled,
+        duckSourceAudioDuringNarration:
+          narrationEnabled && narrationSourceAudioMode === "ambient",
         signal: controller.signal,
         onProgress: setExportProgress,
         onAudioMetadata: (metadata) => {
@@ -3313,7 +3341,7 @@ export default function VideoMixClient() {
         <div>
           <p className="videoMixEyebrow">最大5本の動画から、流れのある1本へ</p>
           <h1>順番を守って、<br /><em>いい場面だけをつなぐ。</em></h1>
-          <p>各動画から1〜2カットを選び、素材を選んだ順につなぎます。途中で前の動画へ戻る編集や、逆再生は行いません。つないだ後は、AIナレーションと発話に合うテロップも追加できます。</p>
+          <p>各動画から1〜2カットを選び、素材を選んだ順につなぎます。途中で前の動画へ戻る編集や、逆再生は行いません。会話・解説を活かすか、AIナレーションを主役にするかも選べます。</p>
           {sources.length === 0 ? (
             <button
               className="videoMixHeroCta"
@@ -3400,7 +3428,7 @@ export default function VideoMixClient() {
             <span><strong>1080 × 1920</strong>完成動画</span>
             <span><strong>素材順を固定</strong>前後・逆再生なし</span>
           </div>
-          <p className="videoMixPreviewNote">プレビューでは映像・つなぎ目・AI音声・テロップを確認できます。素材ごとの音量は選んだ場面を端末内で短く解析し、プレビューと書き出しへ同じ調整を反映します。解析中に再生した場合は、完了後に自動で音量が整います。</p>
+          <p className="videoMixPreviewNote">プレビューでは映像とつなぎ目を確認でき、AIナレーションを選んだ場合は音声とテロップも確認できます。素材ごとの音量は選んだ場面を端末内で短く解析し、プレビューと書き出しへ同じ調整を反映します。解析中に再生した場合は、完了後に自動で音量が整います。</p>
         </div>
 
         <div className="videoMixControls">
@@ -3680,7 +3708,7 @@ export default function VideoMixClient() {
               <span>03</span>
               <div>
                 <h2>声とテロップを選ぶ</h2>
-                <p>元音声のまま仕上げるか、映像に合わせたAIナレーションを追加できます。</p>
+                <p>会話・解説など元の話し声を活かすなら「元音声のまま」、AI音声へ置き換える場合や話し声のない素材には「AIナレーション」を選べます。</p>
               </div>
             </div>
             <div className="videoMixFinishMode" role="radiogroup" aria-label="完成動画の音声">
@@ -3696,7 +3724,7 @@ export default function VideoMixClient() {
                 onClick={() => selectFinishMode(false)}
               >
                 <strong>元音声のまま</strong>
-                <small>選んだ動画の音を自動でそろえてつなぎます</small>
+                <small>会話・解説など元の話し声を活かしたいときにおすすめ</small>
               </button>
               <button
                 ref={(element) => { finishModeButtonRefs.current[1] = element; }}
@@ -3710,12 +3738,45 @@ export default function VideoMixClient() {
                 onClick={() => selectFinishMode(true)}
               >
                 <strong>AIナレーションを入れる</strong>
-                <small>映像の順番を見て台本・声・テロップを自動作成</small>
+                <small>話し声のない動画、または元の声をAI音声へ置き換えたいとき</small>
               </button>
             </div>
 
             {narrationEnabled ? (
               <div className="videoMixNarrationSettings">
+                <fieldset className="videoMixVoiceOptions">
+                  <legend>元動画の音</legend>
+                  <button
+                    type="button"
+                    aria-pressed={narrationSourceAudioMode === "mute"}
+                    className={narrationSourceAudioMode === "mute" ? "isActive" : ""}
+                    disabled={editingLocked}
+                    onClick={() => {
+                      if (narrationSourceAudioMode === "mute") return;
+                      stopPreview();
+                      clearResult();
+                      setNarrationSourceAudioMode("mute");
+                    }}
+                  >
+                    <strong>元動画の音を消す</strong>
+                    <small>話し声の置き換えにおすすめ</small>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={narrationSourceAudioMode === "ambient"}
+                    className={narrationSourceAudioMode === "ambient" ? "isActive" : ""}
+                    disabled={editingLocked}
+                    onClick={() => {
+                      if (narrationSourceAudioMode === "ambient") return;
+                      stopPreview();
+                      clearResult();
+                      setNarrationSourceAudioMode("ambient");
+                    }}
+                  >
+                    <strong>環境音を薄く残す</strong>
+                    <small>話し声のない素材向け</small>
+                  </button>
+                </fieldset>
                 <fieldset className="videoMixGoalOptions">
                   <legend>この動画の目的</legend>
                   {([
@@ -3904,7 +3965,7 @@ export default function VideoMixClient() {
 
           <section className="videoMixExportCard">
             <div><span aria-hidden="true">MP4</span><p><strong>高画質で1本に書き出す</strong><small>1080×1920・完成動画1本分</small></p></div>
-            <ul><li>素材は選んだ順、各素材内は時間順を維持</li><li>{narrationEnabled ? "AI音声中は元音声を自動で小さく調整" : "素材ごとの音量差を自動で調整"}</li><li>つなぎ方とテロップ表示の変更は追加料金なし</li><li>有料枠は品質確認済みの書き出し成功時だけ使用</li></ul>
+            <ul><li>素材は選んだ順、各素材内は時間順を維持</li><li>{narrationEnabled ? narrationSourceAudioMode === "mute" ? "元動画の音を消し、AI音声を主役にします" : "AI音声を主役にし、環境音を薄く残します" : "素材ごとの音量差を自動で調整"}</li><li>つなぎ方とテロップ表示の変更は追加料金なし</li><li>有料枠は品質確認済みの書き出し成功時だけ使用</li></ul>
             <p className="videoMixAlwaysPrice">編集・プレビュー無料　<span>保存は1本¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}／月額¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から</span></p>
             {planResult.error ? <p className="videoMixError" role="alert">{planResult.error}</p> : null}
             <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed))}>

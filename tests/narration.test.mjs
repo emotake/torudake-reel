@@ -9,6 +9,7 @@ import {
   canonicalizeNarrationTextForComparison,
   canonicalizeNarrationPronunciationGuide,
   countNarrationPronunciationOccurrences,
+  DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT,
   getNarrationBufferSlice,
   getNarrationMixLevels,
   getNarrationOriginalAudioGain,
@@ -32,6 +33,10 @@ import {
   buildEditRanges,
   getEditedDuration,
 } from "../lib/edit-plan.ts";
+
+test("starts AI narration without the original voice mixed in", () => {
+  assert.equal(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT, 0);
+});
 
 test("sets the shared per-video AI processing allowance by plan", () => {
   assert.equal(FREE_AI_OPERATION_SUCCESS_LIMIT, 3);

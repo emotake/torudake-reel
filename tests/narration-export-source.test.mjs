@@ -425,7 +425,7 @@ test("lets the result switch to a full-length source without another AI request"
   assert.match(cutModeFlow, /buildNarrationTimeline\(/);
   assert.match(cutModeFlow, /setNarrationAutoCutEnabled\(autoCut\)/);
   assert.doesNotMatch(cutModeFlow, /requestNarrationPlan|requestNarrationSpeech/);
-  assert.match(pageSource, /元動画にAI音声だけ追加/);
+  assert.match(pageSource, /元動画を保ち、AI音声で伝える/);
   assert.match(pageSource, /映像・順番・長さを変更しない/);
 });
 

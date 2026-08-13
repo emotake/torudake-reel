@@ -82,6 +82,73 @@ test("adds an optional metered AI narration with locally aligned captions", () =
   assert.match(clientSource, /AI処理 残り/);
   assert.match(clientSource, /NARRATION_DISCLOSURE_TEXT/);
   assert.match(clientSource, /\/api\/narration\/disclosure/);
+  assert.match(
+    clientSource,
+    /会話・解説など元の話し声を活かすなら「元音声のまま」/,
+  );
+  assert.match(
+    clientSource,
+    /会話・解説など元の話し声を活かしたいときにおすすめ/,
+  );
+  assert.match(
+    clientSource,
+    /話し声のない動画、または元の声をAI音声へ置き換えたいとき/,
+  );
+  assert.match(
+    pageSource,
+    /元の音声を活かす仕上げと、AIナレーションを主役にする仕上げ/,
+  );
+  assert.doesNotMatch(
+    clientSource,
+    /元音声のまま仕上げるか、映像に合わせたAIナレーションを追加できます/,
+  );
+});
+
+test("defaults AI narration to replacing source speech with preview-export parity", () => {
+  assert.match(
+    clientSource,
+    /useState<NarrationSourceAudioMode>\("mute"\)/,
+  );
+  assert.match(clientSource, /元動画の音を消す/);
+  assert.match(clientSource, /話し声の置き換えにおすすめ/);
+  assert.match(clientSource, /環境音を薄く残す/);
+  assert.match(clientSource, /話し声のない素材向け/);
+  assert.match(
+    clientSource,
+    /const VIDEO_MIX_AMBIENT_AUDIO_GAIN = 0\.12/,
+  );
+  assert.match(
+    clientSource,
+    /narrationEnabled[\s\S]*?narrationSourceAudioMode === "mute"[\s\S]*?\? 0[\s\S]*?: VIDEO_MIX_AMBIENT_AUDIO_GAIN[\s\S]*?: 1/,
+  );
+  assert.match(
+    clientSource,
+    /baseGain: narrationSourceAudioGain/,
+  );
+  assert.match(
+    clientSource,
+    /enabled:\s*narrationEnabled &&\s*narrationSourceAudioMode === "ambient"/,
+  );
+  assert.match(
+    clientSource,
+    /audioGain: narrationSourceAudioGain/,
+  );
+  assert.match(
+    clientSource,
+    /duckSourceAudioDuringNarration:\s*narrationEnabled && narrationSourceAudioMode === "ambient"/,
+  );
+  assert.match(
+    clientSource,
+    /if \(narrationSourceAudioMode === "mute"\) return;[\s\S]*?stopPreview\(\);[\s\S]*?clearResult\(\);[\s\S]*?setNarrationSourceAudioMode\("mute"\)/,
+  );
+  assert.match(
+    clientSource,
+    /if \(narrationSourceAudioMode === "ambient"\) return;[\s\S]*?stopPreview\(\);[\s\S]*?clearResult\(\);[\s\S]*?setNarrationSourceAudioMode\("ambient"\)/,
+  );
+  assert.match(
+    clientSource,
+    /setNarrationEnabled\(useNarration\);[\s\S]*?if \(useNarration\) \{[\s\S]*?setNarrationSourceAudioMode\("mute"\)/,
+  );
 });
 
 test("reserves once for all sources and consumes one entitlement only after a verified export", () => {

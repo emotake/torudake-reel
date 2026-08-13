@@ -32,6 +32,8 @@ test("keeps the recommended setup short and moves free caption styling to result
   assert.match(setupSource, /仕上がりプレビューを見ながら何度でも変更/);
   assert.match(setupSource, /aria-pressed=\{audioMode === "spoken"\}/);
   assert.match(setupSource, /aria-pressed=\{audioMode === "narration"\}/);
+  assert.match(setupSource, /会話・解説がある動画におすすめ/);
+  assert.match(setupSource, /元の声をAI音声へ置き換えたいとき/);
   assert.match(setupSource, /recommendedPresetTitle/);
   assert.match(setupSource, /`\$\{length\}秒以内/);
   assert.match(setupSource, /spokenCutMode === "manual"/);
@@ -258,6 +260,24 @@ test("offers useful silent-video paths instead of ending with an empty transcrip
   assert.match(pageSource, /音声なしのまま仕上げる/);
   assert.match(pageSource, /setSpokenCutMode\("none"\)/);
   assert.match(pageSource, /setSpokenCaptionsEnabled\(false\)/);
+});
+
+test("guides voiced videos toward original audio while keeping AI replacement available", () => {
+  assert.match(pageSource, /元の音声を活かす/);
+  assert.match(pageSource, /AIナレーションにする/);
+  assert.match(pageSource, /会話・解説がある動画におすすめ/);
+  assert.match(pageSource, /話し声のない動画、または元の声をAI音声へ置き換えたいとき/);
+  assert.match(pageSource, /setAudioMode\("narration"\);[\s\S]*?setNarrationOriginalAudio\(0\)/);
+  assert.match(pageSource, /元動画に話し声がある場合は0%がおすすめ/);
+  assert.match(pageSource, /narrationOriginalAudio === 0/);
+  assert.match(pageSource, /話し声を重ねたくない場合は0%にしてください/);
+  assert.doesNotMatch(pageSource, /narrationSpeechFreeConfirmed/);
+  assert.doesNotMatch(pageSource, /話し声がある場合、AIナレーションは使用しません/);
+  assert.doesNotMatch(pageSource, /話し声が見つからなかった動画だけで利用できます/);
+  assert.doesNotMatch(pageSource, /会話ありにおすすめ/);
+  assert.doesNotMatch(pageSource, /元の声を控えめに残す/);
+  assert.doesNotMatch(pageSource, /元の音声の有無を問わず/);
+  assert.doesNotMatch(pageSource, /会話や周りの音が入った動画にも使えます/);
 });
 
 test("describes post copy only where AI narration provides it", () => {

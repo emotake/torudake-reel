@@ -53,6 +53,7 @@ export type VideoMixClientDraft = Readonly<{
   transition: VideoCompositionTransitionType;
   boundaryTransitions: VideoMixBoundaryTransitionPreferences;
   narrationEnabled: boolean;
+  narrationSourceAudioMode: "mute" | "ambient";
   narrationCaptionsEnabled: boolean;
   narrationStyle: NarrationStyle;
   narrationGoal: CaptionGoal;
@@ -138,6 +139,9 @@ export function readVideoMixClientDraft(
       !value.boundaryTransitions ||
       typeof value.boundaryTransitions !== "object" ||
       typeof value.narrationEnabled !== "boolean" ||
+      (value.narrationSourceAudioMode !== undefined &&
+        value.narrationSourceAudioMode !== "mute" &&
+        value.narrationSourceAudioMode !== "ambient") ||
       typeof value.narrationCaptionsEnabled !== "boolean" ||
       !NARRATION_STYLES.has(value.narrationStyle as NarrationStyle) ||
       !NARRATION_GOALS.has(value.narrationGoal as CaptionGoal) ||
@@ -149,7 +153,12 @@ export function readVideoMixClientDraft(
     ) {
       return null;
     }
-    return { ...value, sources: sources as VideoMixDraftSource[] } as VideoMixClientDraft;
+    return {
+      ...value,
+      narrationSourceAudioMode:
+        value.narrationSourceAudioMode === "ambient" ? "ambient" : "mute",
+      sources: sources as VideoMixDraftSource[],
+    } as VideoMixClientDraft;
   } catch {
     return null;
   }

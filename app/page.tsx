@@ -2633,6 +2633,7 @@ export default function Home() {
     setSilentFallback(false);
     setEditError("");
     setAudioMode("narration");
+    setNarrationOriginalAudio(0);
     setNarrationAutoCutEnabled(false);
     setNarrationCaptionsEnabled(true);
   }
@@ -2671,7 +2672,6 @@ export default function Home() {
       );
       return;
     }
-
     editAbortRef.current?.abort();
     const controller = new AbortController();
     editAbortRef.current = controller;
@@ -3974,8 +3974,8 @@ function Landing({
             <span className="stepNo">02</span>
             <div className="stepIcon magicIcon">✦</div>
             <h3>目的に合わせて自動編集</h3>
-            <p>映像、音声、字幕、AIナレーションをまとめて設計。</p>
-            <small>元の音声があっても、なくても対応</small>
+            <p>会話・解説は元の音声を活かし、必要ならAI音声に切り替え。</p>
+            <small>動画に合わせて音声の仕上げ方を選択</small>
           </article>
           <article>
             <span className="stepNo">03</span>
@@ -4002,7 +4002,7 @@ function Landing({
           <ul>
             <li>
               <span>✓</span>
-              元の音声とAIナレーションを自然に組み合わせる
+              元の話し声を活かすか、AIナレーションに置き換える
             </li>
             <li>
               <span>✓</span>
@@ -4211,8 +4211,8 @@ const ORIGINAL_AUDIO_PRESETS = [
   {
     percent: 8,
     label: "8%",
-    badge: "会話ありにおすすめ",
-    note: "元の声を控えめに残す",
+    badge: "周りの音を薄く残す",
+    note: "風景や料理の環境音向け",
   },
   {
     percent: 12,
@@ -4234,12 +4234,12 @@ function OriginalAudioMixControl({
   const roundedValue = Math.round(value);
   const advice =
     roundedValue === 0
-      ? "元動画の音は入りません。AIナレーションだけを最も明瞭に聞かせたいときに向いています。"
+      ? "元の話し声を入れず、AIナレーションだけで伝えたいときにおすすめです。"
       : roundedValue <= 8
-        ? "元動画に会話がある場合は8%がおすすめです。AIナレーションを主役にしながら、元の雰囲気を薄く残せます。"
+        ? "環境音やBGMを薄く残せます。元動画に話し声がある場合は0%がおすすめです。"
         : roundedValue <= 12
-          ? "声のない料理・街歩き・作業動画は12%がおすすめです。その場の音が自然に伝わります。"
-          : "元動画の音がはっきり残ります。会話がある動画ではAIナレーションと重なりやすいため、仕上がりプレビューで確認してください。";
+          ? "声のない料理・街歩き・作業動画向けです。元動画に話し声がある場合は0%がおすすめです。"
+          : "元動画の音がはっきり残ります。話し声があるとAIナレーションと重なるため、仕上がりプレビューで確認してください。";
 
   return (
     <section
@@ -4250,7 +4250,7 @@ function OriginalAudioMixControl({
         <div>
           <strong>元動画の音量</strong>
           <small>
-            AIナレーションを100%としたときの、元の声・周りの音・BGM
+            AIナレーションを100%としたときの、周りの音・BGM
           </small>
         </div>
         <output aria-live="polite">{roundedValue}%</output>
@@ -4285,7 +4285,7 @@ function OriginalAudioMixControl({
           step={1}
           value={roundedValue}
           onChange={(event) => onChange(Number(event.target.value))}
-          aria-label="AIナレーションに重ねる元動画の音量"
+          aria-label="AIナレーションと一緒に残す環境音とBGMの音量"
           aria-valuetext={`${roundedValue}%`}
           disabled={disabled}
         />
@@ -4457,8 +4457,8 @@ function SetupWorkspace({
   const recommendedPresetTitle =
     audioMode === "narration"
       ? narrationAutoCutEnabled
-        ? `${length}秒以内に整え、AIナレーションを追加`
-        : "元動画の順番と長さを保ち、AIナレーションを追加"
+        ? `${length}秒以内に整え、AIナレーションで伝える`
+        : "元動画の順番と長さを保ち、AIナレーションで伝える"
       : spokenCutMode === "auto"
         ? `${length}秒以内を目安に、会話を活かして自動編集`
         : spokenCutMode === "manual"
@@ -4472,7 +4472,7 @@ function SetupWorkspace({
           <p className="eyebrow">新しい動画</p>
           <h1>どんなリールにしますか？</h1>
           <p>
-            元の音声を活かす編集と、AIナレーションを重ねる編集から選べます。
+            会話・解説を活かすか、AIナレーションで伝え直すかを選べます。
           </p>
         </div>
         <span>ステップ 1 / 2</span>
@@ -4534,7 +4534,7 @@ function SetupWorkspace({
           <div className="localNote">
             <span>●</span>
             {audioMode === "narration"
-              ? "会話や周りの音が入った動画にも使えます。動画の内容に合わせて台本を作り、AIナレーションを重ねます。"
+              ? "元の話し声をAI音声へ置き換えたい動画にも使えます。初期設定では元動画の音を0%にします。"
               : "iPhoneのMOVや25MBを超える動画は、端末内で音声だけを取り出して字幕を生成します（最大500MB）。"}
           </div>
         </aside>
@@ -4571,44 +4571,63 @@ function SetupWorkspace({
                 <span>おすすめ</span>
                 <h2 id="quickStartTitle">おすすめで作る</h2>
               </div>
-              <p>音声の使い方だけ選べば、見やすい設定でそのまま始められます。</p>
+              <p>会話・解説を活かすか、AI音声で伝え直すかを選べます。</p>
             </div>
-          <fieldset className="quickAudioMode">
-            <legend>
-              音声の仕上げ方
-            </legend>
-            <div className="audioModeCards">
-              <button
-                type="button"
-                className={audioMode === "spoken" ? "selected" : ""}
-                aria-pressed={audioMode === "spoken"}
-                onClick={() => setAudioMode("spoken")}
-              >
-                <i aria-hidden="true">元</i>
-                <strong>元の音声を活かす</strong>
-                <small>元動画の会話・解説・その場の音から字幕と自然なカット</small>
-                <b>{audioMode === "spoken" ? "✓" : ""}</b>
-              </button>
-              <button
-                type="button"
-                className={audioMode === "narration" ? "selected" : ""}
-                aria-pressed={audioMode === "narration"}
-                aria-describedby={isDemoSample ? "sampleNarrationNotice" : undefined}
-                disabled={isDemoSample}
-                onClick={() => setAudioMode("narration")}
-              >
-                <i aria-hidden="true">AI</i>
-                <strong>AIナレーションモード</strong>
-                <small>元の音声の有無を問わず、台本とAI音声を追加</small>
-                <b>{audioMode === "narration" ? "✓" : ""}</b>
-              </button>
-            </div>
-            {isDemoSample && (
-              <p id="sampleNarrationNotice" className="optionCostNote" role="status">
-                サンプルは元音声モードのみです。API利用や無料体験の回数を消費せずに仕上がりを確認できます。
+            <fieldset className="quickAudioMode">
+              <legend>音声の仕上げ方</legend>
+              <div className="audioModeCards">
+                <button
+                  type="button"
+                  className={audioMode === "spoken" ? "selected" : ""}
+                  aria-pressed={audioMode === "spoken"}
+                  onClick={() => setAudioMode("spoken")}
+                >
+                  <i aria-hidden="true">元</i>
+                  <strong>元の音声を活かす</strong>
+                  <small>会話・解説がある動画におすすめ。話した内容から字幕と自然なカットを作成</small>
+                  <b>{audioMode === "spoken" ? "✓" : ""}</b>
+                </button>
+                <button
+                  type="button"
+                  className={audioMode === "narration" ? "selected" : ""}
+                  aria-pressed={audioMode === "narration"}
+                  aria-describedby={isDemoSample ? "sampleNarrationNotice" : undefined}
+                  disabled={isDemoSample}
+                  onClick={() => {
+                    setAudioMode("narration");
+                    setNarrationOriginalAudio(0);
+                  }}
+                >
+                  <i aria-hidden="true">AI</i>
+                  <strong>AIナレーションにする</strong>
+                  <small>話し声のない動画、または元の声をAI音声へ置き換えたいとき</small>
+                  <b>{audioMode === "narration" ? "✓" : ""}</b>
+                </button>
+              </div>
+              {isDemoSample && (
+                <p id="sampleNarrationNotice" className="optionCostNote" role="status">
+                  サンプルは元音声モードのみです。API利用や無料体験の回数を消費せずに仕上がりを確認できます。
+                </p>
+              )}
+            </fieldset>
+
+            <div className="recommendedPreset">
+              <span aria-hidden="true">{audioMode === "spoken" ? "声" : "AI"}</span>
+              <p>
+                <strong>
+                  {audioMode === "spoken"
+                    ? "会話・解説をそのまま活かしたい動画におすすめ"
+                    : "元の声を使わず、AI音声で伝え直す設定"}
+                </strong>
+                <small>
+                  {audioMode === "spoken"
+                    ? "AI音声は追加せず、元の話し声をもとに字幕とカットを整えます。"
+                    : narrationOriginalAudio === 0
+                      ? "元動画の音量は0%です。環境音やBGMを残したい場合だけ調整できます。"
+                      : `元動画の音量は${Math.round(narrationOriginalAudio)}%です。話し声を重ねたくない場合は0%にしてください。`}
+                </small>
               </p>
-            )}
-          </fieldset>
+            </div>
 
             <div className="recommendedPreset" role="status">
               <span aria-hidden="true">✦</span>
@@ -4627,7 +4646,7 @@ function SetupWorkspace({
             <summary>
               <span>
                 <strong>細かく設定</strong>
-                <small>目的・長さ・カット・声・元動画の音量を調整</small>
+                <small>目的・長さ・カット・声・環境音の音量を調整</small>
               </span>
               <b aria-hidden="true">＋</b>
             </summary>
@@ -4880,7 +4899,7 @@ function SetupWorkspace({
                       aria-pressed={!narrationAutoCutEnabled}
                       onClick={() => setNarrationAutoCutEnabled(false)}
                     >
-                      <strong>元動画にAI音声だけ追加</strong>
+                      <strong>元動画を保ち、AI音声で伝える</strong>
                       <small>映像・順番・再生速度・動画の長さを変えない</small>
                       <b>おすすめ</b>
                     </button>
@@ -4899,7 +4918,7 @@ function SetupWorkspace({
                       <span aria-hidden="true">✓</span>
                       <p>
                         <strong>元動画の映像と長さは変更しません</strong>
-                        <small>AI音声と必要なテロップだけを上から重ねます。</small>
+                        <small>AI音声を主役にして、必要なテロップを追加します。元動画の音は下で調整できます。</small>
                       </p>
                     </div>
                   )}
@@ -4971,7 +4990,7 @@ function SetupWorkspace({
                 <strong>{goals.find((item) => item.id === goal)?.title}</strong>
                 ・
                 {audioMode === "narration"
-                  ? `「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」のAI音声・元動画の音${Math.round(narrationOriginalAudio)}%・${narrationCaptionsEnabled ? "テロップあり" : "テロップなし"}・${narrationAutoCutEnabled ? "短く自動編集" : "元動画のまま"}`
+                  ? `「${NARRATION_STYLES.find((item) => item.id === narrationStyle)?.label}」のAI音声・環境音とBGM${Math.round(narrationOriginalAudio)}%・${narrationCaptionsEnabled ? "テロップあり" : "テロップなし"}・${narrationAutoCutEnabled ? "短く自動編集" : "元動画のまま"}`
                   : `${spokenCaptionsEnabled ? `${CAPTION_MOODS.find((item) => item.id === captionProfile.mood)?.label ?? "ナチュラル"}テロップ` : "テロップなし"}・${spokenCutMode === "auto" ? "おまかせ編集" : spokenCutMode === "manual" ? "自分で区間を選ぶ" : "カットしない"}`}
                 ・{keepsOriginalVideo
                   ? "元動画の長さ"
@@ -9033,7 +9052,7 @@ function ResultWorkspace({
             {narrationPlan
               ? narrationCaptionsEnabled
                 ? "映像の流れに合わせて、声とテロップを組み立てました。"
-                : "映像に合わせて、AIナレーションを自然に重ねました。"
+                : "映像に合わせたAIナレーションで仕上げました。"
               : spokenCutMode === "auto"
                 ? spokenCaptionsEnabled
                   ? "元の音声に合わせて、映像とテロップを整えました。"
@@ -9126,7 +9145,7 @@ function ResultWorkspace({
             <span aria-hidden="true">声</span>
             <p>
               <strong>AIナレーション・台本・投稿文を調整</strong>
-              <small>声の雰囲気、読み方、元動画の音量も変更できます</small>
+              <small>声の雰囲気、読み方、環境音・BGMの音量も変更できます</small>
             </p>
             <i aria-hidden="true">⌄</i>
           </summary>
@@ -9143,7 +9162,7 @@ function ResultWorkspace({
               <strong>
                 {narrationAutoCutEnabled
                   ? "AI音声に合わせて短く編集"
-                  : "元動画にAI音声だけ追加"}
+                  : "元動画を保ち、AI音声で伝える"}
               </strong>
               <small>ここで変更しても、AI処理の残り回数は減らず、追加料金も発生しません。</small>
             </div>

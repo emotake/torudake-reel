@@ -73,6 +73,11 @@ test("shortens only an overlong narration while preserving its intent", async ()
     assert.match(prompt, /台本の文字数: 75〜90字/);
     assert.match(prompt, /再調整する元台本/);
     assert.match(prompt, /元台本の意味・事実・冒頭の引き・結びを保ち/);
+    assert.match(prompt, /元動画の話し声をそのまま使うのではなく/);
+    assert.match(prompt, /内容をAIナレーションで伝え直す独立した台本/);
+    assert.match(prompt, /環境音やBGM/);
+    assert.doesNotMatch(prompt, /話し声が見つからなかった動画だけに使用/);
+    assert.doesNotMatch(prompt, /会話や環境音が含まれている場合でも、その上に重ね/);
   } finally {
     globalThis.fetch = originalFetch;
     delete globalThis.__cloudflareEnv;

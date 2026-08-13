@@ -23,7 +23,7 @@ export type NarrationPronunciationEntry = {
   reading: string;
 };
 
-export const DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT = 8;
+export const DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT = 0;
 export const MAX_NARRATION_ORIGINAL_AUDIO_PERCENT = 20;
 
 export type NarrationSegment = {

@@ -45,6 +45,7 @@ test("reads a valid video mix draft and rejects corrupt data", () => {
     transition: "crossfade",
     boundaryTransitions: {},
     narrationEnabled: false,
+    narrationSourceAudioMode: "ambient",
     narrationCaptionsEnabled: true,
     narrationStyle: "bright",
     narrationGoal: "follow",
@@ -52,6 +53,21 @@ test("reads a valid video mix draft and rejects corrupt data", () => {
   };
   const storage = { getItem: (key) => key === VIDEO_MIX_DRAFT_STORAGE_KEY ? JSON.stringify(draft) : null };
   assert.equal(readVideoMixClientDraft(storage)?.sources[0].name, "clip.mov");
+  assert.equal(readVideoMixClientDraft(storage)?.narrationSourceAudioMode, "ambient");
+  const legacyStorage = {
+    getItem: (key) =>
+      key === VIDEO_MIX_DRAFT_STORAGE_KEY
+        ? JSON.stringify({ ...draft, narrationSourceAudioMode: undefined })
+        : null,
+  };
+  assert.equal(readVideoMixClientDraft(legacyStorage)?.narrationSourceAudioMode, "mute");
+  const invalidStorage = {
+    getItem: (key) =>
+      key === VIDEO_MIX_DRAFT_STORAGE_KEY
+        ? JSON.stringify({ ...draft, narrationSourceAudioMode: "full" })
+        : null,
+  };
+  assert.equal(readVideoMixClientDraft(invalidStorage), null);
   assert.equal(readVideoMixClientDraft({ getItem: () => "not-json" }), null);
 });
 
