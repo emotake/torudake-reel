@@ -57,9 +57,12 @@ import {
   type NarrationStyle,
 } from "../../lib/narration";
 import {
+  DEFAULT_VIDEO_MIX_CAPTION_STYLE,
+  VIDEO_MIX_CAPTION_STYLE_OPTIONS,
   drawVideoMixNarrationCaption,
   extractVideoMixNarrationFrames,
   prepareVideoMixNarration,
+  type VideoMixCaptionStyle,
 } from "../../lib/video-mix-narration";
 import type { CaptionGoal } from "../../lib/caption-design";
 import { getCaptionDisplayRange, type CaptionSegment } from "../../lib/captions";
@@ -88,6 +91,14 @@ import {
 } from "../../lib/client-video-mix-output";
 import { trackClientEvent } from "../../lib/client-analytics";
 import { productDurationBucket } from "../../lib/product-analytics-schema";
+import {
+  analyzeClientVideoMixSourceScenes,
+  type ClientVideoMixSceneAnalysis,
+} from "../../lib/client-video-mix-scene-analysis";
+import {
+  createVideoMixNarrationSceneTimeline,
+  type VideoMixNarrationScene,
+} from "../../lib/video-mix-scene-timeline";
 
 const ACCEPTED_VIDEO_TYPES = new Set([
   "video/mp4",
@@ -110,6 +121,8 @@ type MixSource = {
   thumbnails: readonly string[];
   audioNormalizationGain: number;
   audioNormalizationAnalysisKey: string | null;
+  sceneSelectionStatus: "analyzing" | "recommended" | "manual" | "restored" | "fallback";
+  sceneSelectionRevision: number;
 };
 
 type RemovedMixSource = Readonly<{
@@ -251,6 +264,10 @@ function sourceAudioNormalizationAnalysisKey(
   return `${fileFingerprint(file)}:${ranges}`;
 }
 
+function sourceSceneAnalysisKey(source: Pick<MixSource, "file" | "duration" | "width" | "height">) {
+  return `scene-v1:${fileFingerprint(source.file)}:${source.duration.toFixed(3)}:${source.width}x${source.height}`;
+}
+
 function createSourceId(file: File) {
   return `${fileFingerprint(file)}:${crypto.randomUUID()}`;
 }
@@ -350,71 +367,6 @@ function buildFilename() {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
   return `torudake-video-mix-${stamp}.mp4`;
-}
-
-async function extractVideoFilmstrip(
-  sourceUrl: string,
-  duration: number,
-  signal: AbortSignal,
-) {
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.preload = "auto";
-  video.src = sourceUrl;
-  const canvas = document.createElement("canvas");
-  canvas.width = 120;
-  canvas.height = 68;
-  const context = canvas.getContext("2d");
-  if (!context) return [];
-  const waitFor = (eventName: "loadedmetadata" | "seeked") =>
-    new Promise<void>((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        cleanup();
-        reject(new Error("Thumbnail frame timed out."));
-      }, 5_000);
-      const cleanup = () => {
-        window.clearTimeout(timeoutId);
-        signal.removeEventListener("abort", onAbort);
-        video.removeEventListener(eventName, onReady);
-        video.removeEventListener("error", onError);
-      };
-      const onAbort = () => {
-        cleanup();
-        reject(new DOMException("Thumbnail generation aborted.", "AbortError"));
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("Thumbnail frame could not be read."));
-      };
-      const onReady = () => {
-        cleanup();
-        resolve();
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      video.addEventListener(eventName, onReady, { once: true });
-      video.addEventListener("error", onError, { once: true });
-      if (signal.aborted) onAbort();
-    });
-  try {
-    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
-      video.load();
-      await waitFor("loadedmetadata");
-    }
-    const frames: string[] = [];
-    for (let index = 0; index < 6; index += 1) {
-      if (signal.aborted) throw new DOMException("Thumbnail generation aborted.", "AbortError");
-      video.currentTime = Math.min(Math.max(0, duration - 0.02), duration * ((index + 0.5) / 6));
-      await waitFor("seeked");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.62));
-    }
-    return frames;
-  } finally {
-    video.pause();
-    video.removeAttribute("src");
-    video.load();
-  }
 }
 
 async function readApiError(response: Response, fallback: string) {
@@ -595,6 +547,7 @@ function readAiQuota(response: Response) {
 
 async function requestMixNarrationPlan(options: Readonly<{
   frames: readonly string[];
+  sceneTimeline: readonly VideoMixNarrationScene[];
   brief: string;
   goal: CaptionGoal;
   style: NarrationStyle;
@@ -615,6 +568,7 @@ async function requestMixNarrationPlan(options: Readonly<{
     },
     body: JSON.stringify({
       frames: options.frames,
+      sceneTimeline: options.sceneTimeline,
       brief: options.brief,
       goal: options.goal,
       length: narrationLengthForDuration(options.duration),
@@ -885,6 +839,7 @@ export default function VideoMixClient() {
   const transitionOverlayRef = useRef<HTMLSpanElement>(null);
   const previewCaptionRef = useRef<HTMLCanvasElement>(null);
   const narrationAudioRef = useRef<HTMLAudioElement>(null);
+  const sourcePlayerRefs = useRef(new Map<string, HTMLVideoElement>());
   const previewAudioContextRef = useRef<AudioContext | null>(null);
   const previewPrimaryGainRef = useRef<GainNode | null>(null);
   const previewSecondaryGainRef = useRef<GainNode | null>(null);
@@ -907,6 +862,7 @@ export default function VideoMixClient() {
   const thumbnailAbortRef = useRef<AbortController | null>(null);
   const audioNormalizationAbortRef = useRef<AbortController | null>(null);
   const audioNormalizationCacheRef = useRef(new Map<string, number>());
+  const sceneAnalysisCacheRef = useRef(new Map<string, ClientVideoMixSceneAnalysis>());
   const resultRef = useRef<MixResult | null>(null);
   const pendingFinalizeRef = useRef<PendingFinalize | null>(null);
   const sourcesRef = useRef<MixSource[]>([]);
@@ -942,6 +898,8 @@ export default function VideoMixClient() {
     useState<VideoMixBoundaryTransitionPreferences>({});
   const [narrationEnabled, setNarrationEnabled] = useState(false);
   const [narrationCaptionsEnabled, setNarrationCaptionsEnabled] = useState(true);
+  const [narrationCaptionStyle, setNarrationCaptionStyle] =
+    useState<VideoMixCaptionStyle>(DEFAULT_VIDEO_MIX_CAPTION_STYLE);
   const [narrationStyle, setNarrationStyle] = useState<NarrationStyle>("bright");
   const [narrationGoal, setNarrationGoal] = useState<CaptionGoal>("follow");
   const [narrationBrief, setNarrationBrief] = useState("");
@@ -974,6 +932,7 @@ export default function VideoMixClient() {
   const [removedSource, setRemovedSource] = useState<RemovedMixSource | null>(null);
   const [mobileStep, setMobileStep] = useState<1 | 2 | 3>(1);
   const [showAllTransitions, setShowAllTransitions] = useState(false);
+  const [expandedSourcePlayerId, setExpandedSourcePlayerId] = useState<string | null>(null);
   const [loadedDraft] = useState<VideoMixClientDraft | null>(() =>
     typeof window === "undefined" ? null : readVideoMixClientDraft(window.localStorage),
   );
@@ -1036,6 +995,9 @@ export default function VideoMixClient() {
   );
   const hasIndividualTransitions =
     Object.keys(activeBoundaryTransitionPreferences).length > 0;
+  const sceneSelectionBusy = sources.some(
+    (source) => source.sceneSelectionStatus === "analyzing",
+  );
   const editingLocked =
     preparing || exporting || narrationGenerating || discardingPending || Boolean(pendingFinalize);
   const narrationSourceAudioGain =
@@ -1104,6 +1066,30 @@ export default function VideoMixClient() {
     isPlayingRef.current = false;
     setIsPlaying(false);
   }, []);
+
+  const pauseSourcePlayers = useCallback((exceptSourceId?: string) => {
+    for (const [sourceId, player] of sourcePlayerRefs.current) {
+      if (sourceId !== exceptSourceId) player.pause();
+    }
+  }, []);
+
+  const toggleSourcePlayer = useCallback((sourceId: string) => {
+    stopPreview();
+    pauseSourcePlayers();
+    setExpandedSourcePlayerId((current) =>
+      current === sourceId ? null : sourceId,
+    );
+  }, [pauseSourcePlayers, stopPreview]);
+
+  const handleSourcePlayerPlay = useCallback((sourceId: string) => {
+    stopPreview();
+    pauseSourcePlayers(sourceId);
+  }, [pauseSourcePlayers, stopPreview]);
+
+  const closeSourcePlayers = useCallback(() => {
+    pauseSourcePlayers();
+    setExpandedSourcePlayerId(null);
+  }, [pauseSourcePlayers]);
 
   const ensurePreviewAudioGraph = useCallback(() => {
     if (previewAudioContextRef.current) {
@@ -1378,7 +1364,7 @@ export default function VideoMixClient() {
 
   useEffect(() => {
     audioNormalizationAbortRef.current?.abort();
-    if (!audioNormalizationRequestKey) return;
+    if (!audioNormalizationRequestKey || sceneSelectionBusy) return;
     const controller = new AbortController();
     audioNormalizationAbortRef.current = controller;
     const requestedSources = sourcesRef.current.map((source) => ({
@@ -1444,10 +1430,13 @@ export default function VideoMixClient() {
         audioNormalizationAbortRef.current = null;
       }
     };
-  }, [audioNormalizationRequestKey]);
+  }, [audioNormalizationRequestKey, sceneSelectionBusy]);
 
   useEffect(() => {
-    if (sources.length === 0) return;
+    if (
+      sources.length === 0 ||
+      sources.some((source) => source.sceneSelectionStatus === "analyzing")
+    ) return;
     const timer = window.setTimeout(() => {
       saveVideoMixClientDraft(window.localStorage, {
         version: 1,
@@ -1467,6 +1456,7 @@ export default function VideoMixClient() {
         narrationEnabled,
         narrationSourceAudioMode,
         narrationCaptionsEnabled,
+        narrationCaptionStyle,
         narrationStyle,
         narrationGoal,
         narrationBrief,
@@ -1476,6 +1466,7 @@ export default function VideoMixClient() {
   }, [
     activeBoundaryTransitionPreferences,
     narrationBrief,
+    narrationCaptionStyle,
     narrationCaptionsEnabled,
     narrationEnabled,
     narrationGoal,
@@ -1564,6 +1555,7 @@ export default function VideoMixClient() {
     const primaryVideo = previewPrimaryRef.current;
     const secondaryVideo = previewSecondaryRef.current;
     const narrationAudio = narrationAudioRef.current;
+    const sourcePlayers = sourcePlayerRefs.current;
     const releaseOnPageHide = (event: PageTransitionEvent) => {
       if (!event.persisted) {
         pageHidingRef.current = true;
@@ -1579,6 +1571,8 @@ export default function VideoMixClient() {
       primaryVideo?.pause();
       secondaryVideo?.pause();
       narrationAudio?.pause();
+      sourcePlayers.forEach((player) => player.pause());
+      sourcePlayers.clear();
       void previewAudioContextRef.current?.close().catch(() => undefined);
       previewAudioContextRef.current = null;
       previewPrimaryGainRef.current = null;
@@ -2037,7 +2031,7 @@ export default function VideoMixClient() {
   };
 
   const updateNarrationOverlay = useCallback(
-    (time: number) => {
+    (time: number, style: VideoMixCaptionStyle = narrationCaptionStyle) => {
       const canvas = previewCaptionRef.current;
       if (!canvas) return;
       if (canvas.width !== 1080) canvas.width = 1080;
@@ -2052,10 +2046,11 @@ export default function VideoMixClient() {
           canvas.height,
           time,
           narration.captions,
+          style,
         );
       }
     },
-    [narration, narrationCaptionsEnabled, narrationEnabled],
+    [narration, narrationCaptionStyle, narrationCaptionsEnabled, narrationEnabled],
   );
 
   const previewBackgroundForVideo = useCallback((video: HTMLVideoElement) =>
@@ -2334,11 +2329,12 @@ export default function VideoMixClient() {
   ]);
 
   const startPreview = (loopRange?: { start: number; end: number }) => {
-    if (!plan || exporting || narrationGenerating) return;
+    if (!plan || sceneSelectionBusy || exporting || narrationGenerating) return;
     if (isPlayingRef.current) {
       stopPreview();
       return;
     }
+    closeSourcePlayers();
     const startAt = loopRange?.start ?? (previewTime >= plan.duration - 0.04 ? 0 : previewTime);
     previewLoopRef.current = loopRange ?? null;
     ensurePreviewAudioGraph();
@@ -2478,10 +2474,12 @@ export default function VideoMixClient() {
     if (
       picked.length === 0 ||
       preparingRef.current ||
+      sceneSelectionBusy ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
     ) return;
+    closeSourcePlayers();
     preparingRef.current = true;
     setPreparing(true);
     setError("");
@@ -2543,6 +2541,8 @@ export default function VideoMixClient() {
           // this unity fallback shortly after the source appears in the UI.
           audioNormalizationGain: 1,
           audioNormalizationAnalysisKey: null,
+          sceneSelectionStatus: restoredClips ? "restored" : "analyzing",
+          sceneSelectionRevision: restoredClips ? 1 : 0,
         });
         existingFingerprints.add(fileFingerprint(file));
         nextBytes += file.size;
@@ -2581,6 +2581,7 @@ export default function VideoMixClient() {
         setNarrationEnabled(loadedDraft.narrationEnabled);
         setNarrationSourceAudioMode(loadedDraft.narrationSourceAudioMode);
         setNarrationCaptionsEnabled(loadedDraft.narrationCaptionsEnabled);
+        setNarrationCaptionStyle(loadedDraft.narrationCaptionStyle);
         setNarrationStyle(loadedDraft.narrationStyle);
         setNarrationGoal(loadedDraft.narrationGoal);
         setNarrationBrief(loadedDraft.narrationBrief);
@@ -2600,21 +2601,74 @@ export default function VideoMixClient() {
         for (const source of added) {
           if (thumbnailController.signal.aborted || exportRunningRef.current) return;
           try {
-            const thumbnails = await extractVideoFilmstrip(
-              source.url,
-              source.duration,
-              thumbnailController.signal,
-            );
+            const cacheKey = sourceSceneAnalysisKey(source);
+            let analysis = sceneAnalysisCacheRef.current.get(cacheKey);
+            if (!analysis) {
+              analysis = await analyzeClientVideoMixSourceScenes(
+                source.url,
+                source.duration,
+                thumbnailController.signal,
+              );
+              if (thumbnailController.signal.aborted) return;
+              sceneAnalysisCacheRef.current.set(cacheKey, analysis);
+              while (sceneAnalysisCacheRef.current.size > 8) {
+                const oldestKey = sceneAnalysisCacheRef.current.keys().next().value;
+                if (typeof oldestKey !== "string") break;
+                sceneAnalysisCacheRef.current.delete(oldestKey);
+              }
+            }
             if (thumbnailController.signal.aborted || !mountedRef.current) return;
-            const withThumbnails = sourcesRef.current.map((current) =>
-              current.id === source.id ? { ...current, thumbnails } : current,
+            let recommendationApplied = false;
+            const analyzedSources = sourcesRef.current.map((current) => {
+              if (current.id !== source.id) return current;
+              const mayApplyRecommendation =
+                current.sceneSelectionStatus === "analyzing" &&
+                current.sceneSelectionRevision === source.sceneSelectionRevision;
+              const recommendedClips = analysis.recommendation.clips.map((clip) => ({
+                start: clip.start,
+                end: clip.end,
+              }));
+              recommendationApplied =
+                mayApplyRecommendation && recommendedClips.length > 0;
+              return {
+                ...current,
+                thumbnails: analysis.thumbnails,
+                clips:
+                  mayApplyRecommendation && recommendedClips.length > 0
+                    ? recommendedClips
+                    : current.clips,
+                sceneSelectionStatus: mayApplyRecommendation
+                  ? recommendedClips.length > 0
+                    ? "recommended" as const
+                    : "fallback" as const
+                  : current.sceneSelectionStatus,
+              };
+            });
+            sourcesRef.current = analyzedSources;
+            setSources(analyzedSources);
+            if (recommendationApplied) sourceGenerationRef.current += 1;
+            setBoundaryTransitionPreferences((currentPreferences) =>
+              pruneVideoMixBoundaryTransitionPreferences(
+                analyzedSources,
+                currentPreferences,
+              ),
             );
-            sourcesRef.current = withThumbnails;
-            setSources(withThumbnails);
           } catch {
             if (thumbnailController.signal.aborted) return;
-            // The gradient remains as a lightweight fallback for unreadable frames.
+            const fallbackSources = sourcesRef.current.map((current) =>
+              current.id === source.id && current.sceneSelectionStatus === "analyzing"
+                ? { ...current, sceneSelectionStatus: "fallback" as const }
+                : current,
+            );
+            sourcesRef.current = fallbackSources;
+            setSources(fallbackSources);
           }
+        }
+        if (!thumbnailController.signal.aborted && mountedRef.current) {
+          announceSourceFeedback(
+            "message",
+            "端末内で見やすい場面を選びました。再生しながら開始・終了を調整できます。",
+          );
         }
       })();
     }
@@ -2636,16 +2690,18 @@ export default function VideoMixClient() {
 
   const removeSource = (sourceId: string) => {
     if (
+      sceneSelectionBusy ||
       preparingRef.current ||
       narrationGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
     ) return;
-    thumbnailAbortRef.current?.abort();
     const current = sourcesRef.current;
     const target = current.find((source) => source.id === sourceId);
     if (!target) return;
+    sourcePlayerRefs.current.get(sourceId)?.pause();
+    setExpandedSourcePlayerId((currentId) => currentId === sourceId ? null : currentId);
     const index = current.indexOf(target);
     if (removedSourceRef.current) {
       URL.revokeObjectURL(removedSourceRef.current.source.url);
@@ -2673,7 +2729,7 @@ export default function VideoMixClient() {
 
   const undoRemoveSource = () => {
     const entry = removedSourceRef.current;
-    if (!entry || editingLocked) return;
+    if (!entry || editingLocked || sceneSelectionBusy) return;
     sourceGenerationRef.current += 1;
     const next = [...sourcesRef.current];
     next.splice(Math.min(entry.index, next.length), 0, entry.source);
@@ -2698,6 +2754,7 @@ export default function VideoMixClient() {
     const current = sourcesRef.current;
     const next = current.map((source) => {
       if (source.id !== sourceId) return source;
+      if (source.sceneSelectionStatus === "analyzing") return source;
       if (source.clips.length === count) return source;
       if (count === 1) {
         return {
@@ -2705,6 +2762,8 @@ export default function VideoMixClient() {
           clips: [{ start: source.clips[0].start, end: source.clips.at(-1)!.end }],
           audioNormalizationGain: 1,
           audioNormalizationAnalysisKey: null,
+          sceneSelectionStatus: "manual" as const,
+          sceneSelectionRevision: source.sceneSelectionRevision + 1,
         };
       }
       if (source.duration < MINIMUM_CLIP_SECONDS * 2) return source;
@@ -2713,6 +2772,8 @@ export default function VideoMixClient() {
         clips: splitIntoTwoClips(source.duration, source.clips[0]),
         audioNormalizationGain: 1,
         audioNormalizationAnalysisKey: null,
+        sceneSelectionStatus: "manual" as const,
+        sceneSelectionRevision: source.sceneSelectionRevision + 1,
       };
     });
     if (next.every((source, index) => source === current[index])) return;
@@ -2757,6 +2818,7 @@ export default function VideoMixClient() {
     const current = sourcesRef.current;
     const next = current.map((source) => {
       if (source.id !== sourceId) return source;
+      if (source.sceneSelectionStatus === "analyzing") return source;
       const clips = source.clips.map((clip) => ({ ...clip }));
       const clip = clips[clipIndex];
       if (!clip) return source;
@@ -2778,6 +2840,8 @@ export default function VideoMixClient() {
         clips,
         audioNormalizationGain: 1,
         audioNormalizationAnalysisKey: null,
+        sceneSelectionStatus: "manual" as const,
+        sceneSelectionRevision: source.sceneSelectionRevision + 1,
       };
     });
     if (next.every((source, index) => source === current[index])) return;
@@ -2793,6 +2857,7 @@ export default function VideoMixClient() {
     if (
       !plan ||
       !narrationEnabled ||
+      sceneSelectionBusy ||
       narrationGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
@@ -2804,6 +2869,7 @@ export default function VideoMixClient() {
       setError("AIナレーションを入れるには、完成動画を1秒以上にしてください。");
       return;
     }
+    closeSourcePlayers();
     stopPreview();
     clearResult();
     setError("");
@@ -2819,19 +2885,22 @@ export default function VideoMixClient() {
       const reservation = await ensureMixUsageReservation(controller.signal, true);
       ensureVideoMixActionActive(controller.signal, mountedRef.current);
       const operationId = crypto.randomUUID();
-      const frames = (
-        await extractVideoMixNarrationFrames(
-          sources.map((source) => ({ file: source.file, clips: source.clips })),
-          6,
-          controller.signal,
-        )
-      ).filter((frame) => frame.length <= 700_000);
+      const sceneTimeline = createVideoMixNarrationSceneTimeline(plan);
+      const frames = await extractVideoMixNarrationFrames(
+        sources.map((source) => ({ file: source.file, clips: source.clips })),
+        6,
+        controller.signal,
+      );
       if (frames.length === 0) {
         throw new Error("AIナレーションに使う場面を読み取れませんでした。");
+      }
+      if (frames.some((frame) => frame.length > 700_000)) {
+        throw new Error("AIナレーションに使う場面画像が大きすぎます。カットを調整して、もう一度お試しください。");
       }
       setMessage("映像の順番に合わせて台本を作っています…");
       let scriptResult = await requestMixNarrationPlan({
         frames,
+        sceneTimeline,
         brief: narrationBrief.trim(),
         goal: narrationGoal,
         style: narrationStyle,
@@ -2857,6 +2926,7 @@ export default function VideoMixClient() {
         scriptResult.plan,
         plan.duration,
         controller.signal,
+        sceneTimeline,
       );
       ensureVideoMixActionActive(controller.signal, mountedRef.current);
       if (prepared.decodedDuration > plan.duration + 0.08) {
@@ -2867,6 +2937,7 @@ export default function VideoMixClient() {
         setMessage("音声が動画に自然に収まるよう、台本を短く整えています…");
         scriptResult = await requestMixNarrationPlan({
           frames,
+          sceneTimeline,
           brief: narrationBrief.trim(),
           goal: narrationGoal,
           style: narrationStyle,
@@ -2893,6 +2964,7 @@ export default function VideoMixClient() {
           scriptResult.plan,
           plan.duration,
           controller.signal,
+          sceneTimeline,
         );
         ensureVideoMixActionActive(controller.signal, mountedRef.current);
       }
@@ -2970,6 +3042,7 @@ export default function VideoMixClient() {
   const startExport = async () => {
     if (
       !plan ||
+      sceneSelectionBusy ||
       narrationGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
@@ -2988,6 +3061,7 @@ export default function VideoMixClient() {
       return;
     }
     thumbnailAbortRef.current?.abort();
+    closeSourcePlayers();
     stopPreview();
     clearResult();
     setError("");
@@ -3059,6 +3133,7 @@ export default function VideoMixClient() {
                   canvas.height,
                   editedTime,
                   narration.captions,
+                  narrationCaptionStyle,
                 );
               }
             : undefined,
@@ -3397,14 +3472,14 @@ export default function VideoMixClient() {
             )}
           </div>
           <div className="videoMixPlayback">
-            <button type="button" onClick={() => startPreview()} disabled={!plan || exporting || narrationGenerating} aria-label={isPlaying ? "プレビューを停止" : "プレビューを再生"}>{isPlaying ? "Ⅱ" : "▶"}</button>
+            <button type="button" onClick={() => startPreview()} disabled={!plan || sceneSelectionBusy || exporting || narrationGenerating} aria-label={isPlaying ? "プレビューを停止" : "プレビューを再生"}>{isPlaying ? "Ⅱ" : "▶"}</button>
             <input
               type="range"
               min={0}
               max={plan?.duration ?? 1}
               step={0.03}
               value={Math.min(previewTime, plan?.duration ?? 0)}
-              disabled={!plan || exporting || narrationGenerating}
+              disabled={!plan || sceneSelectionBusy || exporting || narrationGenerating}
               aria-label="プレビューの再生位置"
               aria-valuetext={`${formatSeconds(previewTime)} / ${formatSeconds(plan?.duration ?? 0)}`}
               onChange={(event) => {
@@ -3446,10 +3521,10 @@ export default function VideoMixClient() {
               aria-hidden="true"
               multiple
               accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
-              disabled={editingLocked || sources.length >= VIDEO_COMPOSITION_MAX_SOURCES}
+              disabled={editingLocked || sceneSelectionBusy || sources.length >= VIDEO_COMPOSITION_MAX_SOURCES}
               onChange={addVideos}
             />
-            <button className="videoMixAddButton" type="button" onClick={() => inputRef.current?.click()} disabled={editingLocked || sources.length >= VIDEO_COMPOSITION_MAX_SOURCES}>
+            <button className="videoMixAddButton" type="button" onClick={() => inputRef.current?.click()} disabled={editingLocked || sceneSelectionBusy || sources.length >= VIDEO_COMPOSITION_MAX_SOURCES}>
               <span aria-hidden="true">＋</span>
               <span><strong>{sources.length === 0 ? "動画を選ぶ" : "動画を追加する"}</strong><small>最大5本・合計500MB・合計5分まで</small></span>
             </button>
@@ -3467,10 +3542,15 @@ export default function VideoMixClient() {
             {removedSource ? (
               <div className="videoMixUndo" role="status">
                 <span>「{removedSource.source.file.name}」を削除しました。</span>
-                <button type="button" onClick={undoRemoveSource} disabled={editingLocked}>元に戻す</button>
+                <button type="button" onClick={undoRemoveSource} disabled={editingLocked || sceneSelectionBusy}>元に戻す</button>
               </div>
             ) : null}
             {preparing ? <p className="videoMixPreparing" aria-live="polite">動画の長さと向きを端末内で確認しています…</p> : null}
+            {!preparing && sceneSelectionBusy ? (
+              <p className="videoMixPreparing" aria-live="polite">
+                見やすさと場面の変化を端末内で解析し、おすすめの使用範囲を選んでいます…
+              </p>
+            ) : null}
             <div className="videoMixLimits" aria-label="素材の使用量">
               <span>容量 {formatBytes(totalBytes)} / 500MB</span>
               <span>元動画 {formatSeconds(aggregateDuration)} / 5:00</span>
@@ -3486,14 +3566,51 @@ export default function VideoMixClient() {
                       <div>
                         <strong>{source.file.name}</strong>
                         <small>{source.width}×{source.height}・{formatSeconds(source.duration)}・{formatBytes(source.file.size)}</small>
-                        <em>{source.clips.length}カット・時間順</em>
+                        <em>
+                          {source.sceneSelectionStatus === "analyzing"
+                            ? "おすすめ場面を端末内で選別中…"
+                            : source.sceneSelectionStatus === "recommended"
+                              ? `おすすめ ${source.clips.length}カットを選択済み`
+                              : source.sceneSelectionStatus === "restored"
+                                ? `前回の${source.clips.length}カットを復元`
+                                : source.sceneSelectionStatus === "fallback"
+                                  ? `${source.clips.length}カット・中央付近を仮選択`
+                                  : `${source.clips.length}カット・手動で調整済み`}
+                        </em>
+                        <button
+                          type="button"
+                          className="videoMixSourcePreviewToggle"
+                          aria-expanded={expandedSourcePlayerId === source.id}
+                          aria-controls={`video-mix-source-player-${source.id}`}
+                          onClick={() => toggleSourcePlayer(source.id)}
+                          disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}
+                        >
+                          {expandedSourcePlayerId === source.id ? "素材の再生を閉じる" : "素材全体を再生する"}
+                        </button>
                       </div>
-                      <button type="button" onClick={() => removeSource(source.id)} disabled={editingLocked} aria-label={`${sourceIndex + 1}番目の動画 ${source.file.name}を削除`}>削除</button>
+                      <button type="button" onClick={() => removeSource(source.id)} disabled={editingLocked || sceneSelectionBusy} aria-label={`${sourceIndex + 1}番目の動画 ${source.file.name}を削除`}>削除</button>
                     </div>
+                    {expandedSourcePlayerId === source.id ? (
+                      <div className="videoMixSourcePlayback" id={`video-mix-source-player-${source.id}`}>
+                        <video
+                          ref={(element) => {
+                            if (element) sourcePlayerRefs.current.set(source.id, element);
+                            else sourcePlayerRefs.current.delete(source.id);
+                          }}
+                          src={source.url}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          onPlay={() => handleSourcePlayerPlay(source.id)}
+                          aria-label={`${sourceIndex + 1}番目の素材 ${source.file.name} の全体再生`}
+                        />
+                        <p>元動画全体を、音声付きで確認できます。ここでの再生位置は使用範囲を変更しません。</p>
+                      </div>
+                    ) : null}
                     <fieldset className="videoMixClipCount">
                       <legend>この動画から使う場面</legend>
-                      <button type="button" className={source.clips.length === 1 ? "isActive" : ""} aria-pressed={source.clips.length === 1} onClick={() => setClipCount(source.id, 1)} disabled={editingLocked}>1カット</button>
-                      <button type="button" className={source.clips.length === 2 ? "isActive" : ""} aria-pressed={source.clips.length === 2} onClick={() => setClipCount(source.id, 2)} disabled={editingLocked || source.duration < MINIMUM_CLIP_SECONDS * 2}>2カット</button>
+                      <button type="button" className={source.clips.length === 1 ? "isActive" : ""} aria-pressed={source.clips.length === 1} onClick={() => setClipCount(source.id, 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>1カット</button>
+                      <button type="button" className={source.clips.length === 2 ? "isActive" : ""} aria-pressed={source.clips.length === 2} onClick={() => setClipCount(source.id, 2)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing" || source.duration < MINIMUM_CLIP_SECONDS * 2}>2カット</button>
                     </fieldset>
                     <fieldset className="videoMixFraming">
                       <legend>縦画面への収め方</legend>
@@ -3563,22 +3680,22 @@ export default function VideoMixClient() {
                               <div className="videoMixClipEdge" key={field}>
                                 <label>
                                   <span>{label}</span>
-                                  <input type="range" min={0} max={source.duration} step={0.1} value={value} aria-valuetext={formatSeconds(value)} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} />
+                                  <input type="range" min={0} max={source.duration} step={0.1} value={value} aria-valuetext={formatSeconds(value)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} />
                                 </label>
                                 <div>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 1)} disabled={editingLocked}>−1秒</button>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 0.1)} disabled={editingLocked}>−0.1</button>
-                                  <label><span className="visuallyHidden">{label}時刻（秒）</span><input type="number" min={0} max={source.duration} step={0.1} value={value.toFixed(1)} disabled={editingLocked} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} /></label>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 0.1)} disabled={editingLocked}>＋0.1</button>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 1)} disabled={editingLocked}>＋1秒</button>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>−1秒</button>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 0.1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>−0.1</button>
+                                  <label><span className="visuallyHidden">{label}時刻（秒）</span><input type="number" min={0} max={source.duration} step={0.1} value={value.toFixed(1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} /></label>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 0.1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>＋0.1</button>
+                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>＋1秒</button>
                                 </div>
                               </div>
                             );
                           })}
                           <div className="videoMixClipActions">
-                            <button type="button" onClick={() => previewSingleClip(source.id, clipIndex)} disabled={editingLocked}>このカットを繰り返し再生</button>
-                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")} disabled={editingLocked}>停止位置を開始に</button>
-                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")} disabled={editingLocked}>停止位置を終了に</button>
+                            <button type="button" onClick={() => previewSingleClip(source.id, clipIndex)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>このカットを繰り返し再生</button>
+                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>停止位置を開始に</button>
+                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>停止位置を終了に</button>
                           </div>
                         </fieldset>
                       ))}
@@ -3860,11 +3977,39 @@ export default function VideoMixClient() {
                     <small>発話の「間」を端末内で解析し、実際に話す位置へ合わせます</small>
                   </span>
                 </label>
+                {narrationCaptionsEnabled ? (
+                  <fieldset className="videoMixCaptionStyles">
+                    <legend>テロップの見た目</legend>
+                    <p>音声を作り直さず、プレビューと完成動画へ同じデザインを反映します。</p>
+                    <div>
+                      {VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          aria-pressed={narrationCaptionStyle === option.id}
+                          className={narrationCaptionStyle === option.id ? "isActive" : ""}
+                          disabled={editingLocked}
+                          onClick={() => {
+                            if (narrationCaptionStyle === option.id) return;
+                            stopPreview();
+                            clearResult();
+                            setNarrationCaptionStyle(option.id);
+                            window.requestAnimationFrame(() => updateNarrationOverlay(previewTime, option.id));
+                          }}
+                        >
+                          <span className={`videoMixCaptionStylePreview ${option.id}`} aria-hidden="true">あの日の景色</span>
+                          <strong>{option.label}</strong>
+                          <small>{option.note}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
                 <div className="videoMixNarrationAction">
                   <button
                     type="button"
                     onClick={generateMixNarration}
-                    disabled={!plan || narrationGenerating || exporting || aiOperationsRemaining <= 0}
+                    disabled={!plan || sceneSelectionBusy || narrationGenerating || exporting || aiOperationsRemaining <= 0}
                   >
                     {narrationGenerating
                       ? "台本と音声を作成中…"
@@ -3968,7 +4113,7 @@ export default function VideoMixClient() {
             <ul><li>素材は選んだ順、各素材内は時間順を維持</li><li>{narrationEnabled ? narrationSourceAudioMode === "mute" ? "元動画の音を消し、AI音声を主役にします" : "AI音声を主役にし、環境音を薄く残します" : "素材ごとの音量差を自動で調整"}</li><li>つなぎ方とテロップ表示の変更は追加料金なし</li><li>有料枠は品質確認済みの書き出し成功時だけ使用</li></ul>
             <p className="videoMixAlwaysPrice">編集・プレビュー無料　<span>保存は1本¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}／月額¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から</span></p>
             {planResult.error ? <p className="videoMixError" role="alert">{planResult.error}</p> : null}
-            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed))}>
+            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || sceneSelectionBusy || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed))}>
               {finalizingUsage
                 ? "保存枠を確定中…"
                 : exporting

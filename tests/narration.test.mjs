@@ -55,13 +55,14 @@ test("normalizes a structured narration plan", () => {
     script: "軽くて、毎日持ちたくなるバッグです。",
     socialCaption: "今日の新作をご紹介。",
     segments: [
-      { text: "軽くて、", emphasis: true },
+      { text: "軽くて、", emphasis: true, sceneId: "scene-1" },
       { text: "毎日持ちたくなるバッグです。", emphasis: false },
     ],
   });
   assert.equal(plan.title, "朝のバッグ紹介");
   assert.equal(plan.segments.length, 2);
   assert.equal(plan.segments[0].emphasis, true);
+  assert.equal(plan.segments[0].sceneId, "scene-1");
 });
 
 test("falls back to sentence boundaries when segments are missing", () => {

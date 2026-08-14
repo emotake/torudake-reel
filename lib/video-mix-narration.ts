@@ -13,9 +13,37 @@ import {
   VIDEO_COMPOSITION_MAX_SOURCES,
   type VideoCompositionClip,
 } from "./video-composition";
+import {
+  buildVideoMixSceneNarrationTimeline,
+  type VideoMixNarrationScene,
+} from "./video-mix-scene-timeline";
 
 const FRAME_LONG_EDGE = 512;
 const FRAME_JPEG_QUALITY = 0.66;
+
+export const VIDEO_MIX_CAPTION_STYLE_OPTIONS = [
+  {
+    id: "panel",
+    label: "読みやすい帯",
+    note: "半透明の帯で、どんな映像でも読みやすく",
+  },
+  {
+    id: "outline",
+    label: "くっきり文字",
+    note: "太いふち取りで、映像を広く見せる",
+  },
+  {
+    id: "minimal",
+    label: "シンプル",
+    note: "細めの白文字で、映像を主役に",
+  },
+] as const;
+
+export type VideoMixCaptionStyle =
+  (typeof VIDEO_MIX_CAPTION_STYLE_OPTIONS)[number]["id"];
+
+/** Retains the original video-mix caption appearance for existing drafts. */
+export const DEFAULT_VIDEO_MIX_CAPTION_STYLE: VideoMixCaptionStyle = "panel";
 
 export type VideoMixNarrationFrameSource = Readonly<{
   file: File;
@@ -383,6 +411,7 @@ export async function prepareVideoMixNarration(
   plan: NarrationPlan,
   compositionDuration: number,
   signal?: AbortSignal,
+  sceneTimeline?: readonly VideoMixNarrationScene[],
 ): Promise<PreparedVideoMixNarration> {
   throwIfAborted(signal);
   const AudioContextConstructor =
@@ -425,13 +454,23 @@ export async function prepareVideoMixNarration(
       maximumDuration,
     );
     throwIfAborted(signal);
-    const timeline = buildNarrationTimeline(
-      plan.segments,
-      compositionDuration,
-      compositionDuration,
-      maximumDuration,
-      { autoCut: false },
-    );
+    const sceneAlignedTimeline = sceneTimeline?.length
+      ? buildVideoMixSceneNarrationTimeline(
+          plan.segments,
+          sceneTimeline,
+          compositionDuration,
+          maximumDuration,
+        )
+      : [];
+    const timeline = sceneAlignedTimeline.length > 0
+      ? sceneAlignedTimeline
+      : buildNarrationTimeline(
+          plan.segments,
+          compositionDuration,
+          compositionDuration,
+          maximumDuration,
+          { autoCut: false },
+        );
     throwIfAborted(signal);
     const captions = attachNarrationCaptionDisplayTiming(timeline, activity, {
       maximumDurationSeconds: maximumDuration,
@@ -477,6 +516,7 @@ export function drawVideoMixNarrationCaption(
   height: number,
   editedTime: number,
   captions: readonly CaptionSegment[],
+  style: VideoMixCaptionStyle = DEFAULT_VIDEO_MIX_CAPTION_STYLE,
 ) {
   const caption = getActiveVideoMixCaption(captions, editedTime);
   if (!caption) return false;
@@ -488,7 +528,8 @@ export function drawVideoMixNarrationCaption(
   const paddingX = Math.round(fontSize * 0.72);
   const paddingY = Math.round(fontSize * 0.45);
   context.save();
-  context.font = `700 ${fontSize}px "Noto Sans JP", "Hiragino Sans", sans-serif`;
+  const fontWeight = style === "minimal" ? 600 : 700;
+  context.font = `${fontWeight} ${fontSize}px "Noto Sans JP", "Hiragino Sans", sans-serif`;
   const boxWidth = Math.min(
     width * 0.86,
     Math.max(...lines.map((line) => context.measureText(line).width)) + paddingX * 2,
@@ -497,26 +538,40 @@ export function drawVideoMixNarrationCaption(
   const x = (width - boxWidth) / 2;
   const baseY = height * 0.8 - boxHeight;
   const y = baseY + (1 - entrance) * fontSize * 0.22;
-  const radius = Math.min(28, fontSize * 0.42);
 
   context.globalAlpha = 0.35 + entrance * 0.65;
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillStyle = "rgba(8, 14, 24, 0.78)";
-  context.beginPath();
-  context.roundRect(x, y, boxWidth, boxHeight, radius);
-  context.fill();
-  context.lineWidth = Math.max(2, width * 0.0025);
-  context.strokeStyle = "rgba(255,255,255,0.24)";
-  context.stroke();
+  if (style === "panel") {
+    const radius = Math.min(28, fontSize * 0.42);
+    context.fillStyle = "rgba(8, 14, 24, 0.78)";
+    context.beginPath();
+    context.roundRect(x, y, boxWidth, boxHeight, radius);
+    context.fill();
+    context.lineWidth = Math.max(2, width * 0.0025);
+    context.strokeStyle = "rgba(255,255,255,0.24)";
+    context.stroke();
+  }
   context.fillStyle = "#fff";
-  context.shadowColor = "rgba(0,0,0,0.55)";
-  context.shadowBlur = Math.max(4, width * 0.008);
+  context.shadowColor = style === "minimal" ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.55)";
+  context.shadowBlur = style === "minimal"
+    ? Math.max(2, width * 0.004)
+    : Math.max(4, width * 0.008);
+  context.shadowOffsetY = style === "minimal" ? Math.max(1, width * 0.002) : 0;
+  if (style === "outline") {
+    context.lineWidth = Math.max(5, fontSize * 0.12);
+    context.lineJoin = "round";
+    context.strokeStyle = "rgba(8,14,24,0.94)";
+  }
   lines.forEach((line, index) => {
+    const lineY = y + paddingY + lineHeight * (index + 0.5);
+    if (style === "outline") {
+      context.strokeText(line, width / 2, lineY, boxWidth - paddingX * 1.4);
+    }
     context.fillText(
       line,
       width / 2,
-      y + paddingY + lineHeight * (index + 0.5),
+      lineY,
       boxWidth - paddingX * 1.4,
     );
   });

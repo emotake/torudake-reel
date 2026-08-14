@@ -24,6 +24,13 @@ import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { isDurationWithinReservation } from "../../../../lib/usage-duration";
 import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
 import {
+  describeVideoMixNarrationImage,
+  ensureVideoMixNarrationSceneAssignments,
+  normalizeVideoMixNarrationSceneTimeline,
+  videoMixNarrationScenePromptRules,
+  type VideoMixNarrationScene,
+} from "../../../../lib/video-mix-scene-timeline";
+import {
   createUpstreamAbortSignal,
   parseJsonBodyWithLimit,
   RequestBodyTooLargeError,
@@ -243,6 +250,7 @@ export async function POST(request: Request) {
       narrationBundleToken?: unknown;
       timingScale?: unknown;
       previousScript?: unknown;
+      sceneTimeline?: unknown;
     };
   try {
     payload = await parseJsonBodyWithLimit<typeof payload>(
@@ -313,6 +321,21 @@ export async function POST(request: Request) {
       { error: "動画の場面を確認できませんでした。動画を選び直してください。" },
       { status: 400 },
     );
+  }
+
+  let sceneTimeline: readonly VideoMixNarrationScene[] | null = null;
+  if (payload.sceneTimeline !== undefined) {
+    const sceneTimelineResult = normalizeVideoMixNarrationSceneTimeline(
+      payload.sceneTimeline,
+      { frameCount: frames.length, durationSeconds: sourceDuration },
+    );
+    if (!sceneTimelineResult.ok) {
+      return Response.json(
+        { error: sceneTimelineResult.error },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    sceneTimeline = sceneTimelineResult.scenes;
   }
 
   let authorizedReservationDuration: number | null = null;
@@ -499,6 +522,36 @@ export async function POST(request: Request) {
 - 実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しないでください。
 - 商品情報・効果・価格・実績を誇張せず、映像にない出来事や感情を作らないでください。`
     : "";
+  const sceneRules = sceneTimeline
+    ? videoMixNarrationScenePromptRules(sceneTimeline)
+    : "";
+  const sceneCharacterRate =
+    NATURAL_CHARACTERS_PER_SECOND[style] * 0.88 * timingScale;
+  const frameContent = frames.flatMap((frame, imageIndex) =>
+    sceneTimeline
+      ? [
+          {
+            type: "input_text" as const,
+            text: describeVideoMixNarrationImage(
+              sceneTimeline,
+              imageIndex,
+              sceneCharacterRate,
+            ),
+          },
+          {
+            type: "input_image" as const,
+            image_url: frame,
+            detail: "low" as const,
+          },
+        ]
+      : [
+          {
+            type: "input_image" as const,
+            image_url: frame,
+            detail: "low" as const,
+          },
+        ],
+  );
   const content: Array<
     | { type: "input_text"; text: string }
     | { type: "input_image"; image_url: string; detail: "low" }
@@ -522,14 +575,26 @@ export async function POST(request: Request) {
 - 最初の1文で引きつけ、最後の1文は映像だけの余韻へ自然につながる短い結びにしてください。
 - 元動画の音声内容は提供されないため、会話を引用・推測したり、映像内の人物が実際に話した内容として断定したりしないでください。
 - segmentsはテロップ1枚あたり8〜24文字を目安に、文の切れ目で分割してください。
-- socialCaptionは投稿本文です。AI音声の開示文はサービス側で固定追加するため、ここには含めないでください。${characterRules}`,
+- socialCaptionは投稿本文です。AI音声の開示文はサービス側で固定追加するため、ここには含めないでください。${characterRules}${sceneRules}`,
     },
-    ...frames.map((frame) => ({
-      type: "input_image" as const,
-      image_url: frame,
-      detail: "low" as const,
-    })),
+    ...frameContent,
   ];
+
+  const segmentSchemaProperties = {
+    text: { type: "string" },
+    emphasis: { type: "boolean" },
+    ...(sceneTimeline
+      ? {
+          sceneId: {
+            type: "string",
+            enum: sceneTimeline.map((scene) => scene.id),
+          },
+        }
+      : {}),
+  };
+  const segmentSchemaRequired = sceneTimeline
+    ? ["text", "emphasis", "sceneId"]
+    : ["text", "emphasis"];
 
   const upstreamAbort = createUpstreamAbortSignal(
     request.signal,
@@ -567,11 +632,8 @@ export async function POST(request: Request) {
                 items: {
                   type: "object",
                   additionalProperties: false,
-                  properties: {
-                    text: { type: "string" },
-                    emphasis: { type: "boolean" },
-                  },
-                  required: ["text", "emphasis"],
+                  properties: segmentSchemaProperties,
+                  required: segmentSchemaRequired,
                 },
               },
             },
@@ -655,7 +717,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const plan = normalizeNarrationPlan(JSON.parse(outputText(responsePayload)));
+    const normalizedPlan = normalizeNarrationPlan(
+      JSON.parse(outputText(responsePayload)),
+    );
+    const plan = sceneTimeline
+      ? ensureVideoMixNarrationSceneAssignments(normalizedPlan, sceneTimeline)
+      : normalizedPlan;
     if (!plan.script || !plan.segments.length) {
       throw new Error("empty narration plan");
     }

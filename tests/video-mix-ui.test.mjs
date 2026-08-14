@@ -406,17 +406,41 @@ test("retains stale narration, durable output, framing, and mobile steps", () =>
 
 test("exposes fine cut controls and accessible playback progress", () => {
   assert.match(clientSource, /videoMixFilmstrip/);
-  assert.match(clientSource, /extractVideoFilmstrip/);
-  assert.match(clientSource, /window\.setTimeout[\s\S]*?5_000/);
-  assert.match(clientSource, /window\.clearTimeout\(timeoutId\)/);
-  assert.match(clientSource, /video\.removeAttribute\("src"\)/);
+  assert.match(clientSource, /analyzeClientVideoMixSourceScenes/);
+  assert.match(clientSource, /sceneSelectionStatus === "analyzing"/);
+  assert.match(clientSource, /おすすめ場面を端末内で選別中/);
   assert.match(clientSource, /source\.thumbnails\.map/);
+  assert.match(clientSource, /素材全体を再生する/);
+  assert.match(clientSource, /controls[\s\S]*?onPlay=\{\(\) => handleSourcePlayerPlay\(source\.id\)\}/);
+  assert.match(clientSource, /pauseSourcePlayers\(sourceId\)/);
   assert.match(clientSource, /このカットを繰り返し再生/);
   assert.match(clientSource, /停止位置を開始に/);
   assert.match(clientSource, /type="number"/);
   assert.match(clientSource, /aria-valuetext/);
   assert.match(clientSource, /role="progressbar"/);
   assert.match(clientSource, /tabIndex=\{-1\}[\s\S]*?aria-hidden="true"/);
+});
+
+test("shares selectable caption styles and scene-grounded narration with preview and export", () => {
+  assert.match(clientSource, /VIDEO_MIX_CAPTION_STYLE_OPTIONS/);
+  assert.match(clientSource, /useState<VideoMixCaptionStyle>\(DEFAULT_VIDEO_MIX_CAPTION_STYLE\)/);
+  assert.match(clientSource, /narrationCaptionStyle,/);
+  assert.ok(
+    (clientSource.match(/drawVideoMixNarrationCaption\([\s\S]*?narrationCaptionStyle/g) ?? []).length >= 2,
+  );
+  assert.match(clientSource, /音声を作り直さず、プレビューと完成動画へ同じデザイン/);
+  assert.match(clientSource, /createVideoMixNarrationSceneTimeline\(plan\)/);
+  assert.match(clientSource, /sceneTimeline,/);
+  assert.match(clientSource, /prepareVideoMixNarration\([\s\S]*?controller\.signal,[\s\S]*?sceneTimeline/);
+});
+
+test("applies local scene recommendations only before a source is manually edited", () => {
+  assert.match(clientSource, /sceneSelectionRevision/);
+  assert.match(clientSource, /current\.sceneSelectionStatus === "analyzing"[\s\S]*?current\.sceneSelectionRevision === source\.sceneSelectionRevision/);
+  assert.match(clientSource, /sceneSelectionStatus: "manual" as const/);
+  assert.match(clientSource, /sources\.some\(\(source\) => source\.sceneSelectionStatus === "analyzing"\)/);
+  assert.match(clientSource, /sceneAnalysisCacheRef/);
+  assert.match(clientSource, /sceneAnalysisCacheRef\.current\.size > 8/);
 });
 
 test("reserves only after an explicit AI or export action and renews before export", () => {

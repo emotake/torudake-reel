@@ -5,10 +5,12 @@ import {
   createVideoMixNarrationFrameRequests,
   createVideoMixNarrationContactSheetRequests,
   computeVideoMixNarrationNormalizationGain,
+  DEFAULT_VIDEO_MIX_CAPTION_STYLE,
   drawVideoMixNarrationCaption,
   extractVideoMixNarrationFrames,
   getActiveVideoMixCaption,
   prepareVideoMixNarration,
+  VIDEO_MIX_CAPTION_STYLE_OPTIONS,
 } from "../lib/video-mix-narration.ts";
 
 test("shares a bounded narration normalization gain with preview and export", () => {
@@ -359,6 +361,19 @@ test("caption visibility follows locally aligned display timing", () => {
   assert.equal(getActiveVideoMixCaption(captions, 2.4), null);
 });
 
+test("offers three accessible caption styles with the legacy panel as default", () => {
+  assert.equal(DEFAULT_VIDEO_MIX_CAPTION_STYLE, "panel");
+  assert.deepEqual(
+    VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => option.id),
+    ["panel", "outline", "minimal"],
+  );
+  assert.ok(
+    VIDEO_MIX_CAPTION_STYLE_OPTIONS.every(
+      (option) => option.label.length > 0 && option.note.length > 0,
+    ),
+  );
+});
+
 test("shared Canvas renderer draws only during the aligned caption window", () => {
   const drawn = [];
   const context = {
@@ -371,6 +386,7 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     roundRect() {},
     fill() {},
     stroke() {},
+    strokeText() {},
     fillText(value) {
       drawn.push(value);
     },
@@ -383,6 +399,8 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     set strokeStyle(value) {},
     set shadowColor(value) {},
     set shadowBlur(value) {},
+    set shadowOffsetY(value) {},
+    set lineJoin(value) {},
   };
   const captions = [
     {
@@ -405,4 +423,62 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     true,
   );
   assert.equal(drawn.length, 2);
+});
+
+test("renders outline and minimal captions without the legacy panel", () => {
+  const operations = [];
+  const context = {
+    save() {},
+    restore() {},
+    measureText(value) {
+      return { width: Array.from(value).length * 48 };
+    },
+    beginPath() {
+      operations.push("panel-path");
+    },
+    roundRect() {},
+    fill() {},
+    stroke() {},
+    strokeText(value) {
+      operations.push(`outline:${value}`);
+    },
+    fillText(value) {
+      operations.push(`text:${value}`);
+    },
+    set font(value) {},
+    set globalAlpha(value) {},
+    set textAlign(value) {},
+    set textBaseline(value) {},
+    set fillStyle(value) {},
+    set lineWidth(value) {},
+    set lineJoin(value) {},
+    set strokeStyle(value) {},
+    set shadowColor(value) {},
+    set shadowBlur(value) {},
+    set shadowOffsetY(value) {},
+  };
+  const captions = [
+    {
+      id: 1,
+      start: 0,
+      end: 4,
+      text: "朝の海辺です。",
+      removed: false,
+    },
+  ];
+
+  assert.equal(
+    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "outline"),
+    true,
+  );
+  assert.ok(operations.some((operation) => operation.startsWith("outline:")));
+  assert.doesNotMatch(operations.join("|"), /panel-path/);
+
+  operations.length = 0;
+  assert.equal(
+    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "minimal"),
+    true,
+  );
+  assert.ok(operations.some((operation) => operation.startsWith("text:")));
+  assert.doesNotMatch(operations.join("|"), /outline:|panel-path/);
 });

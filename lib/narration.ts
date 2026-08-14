@@ -30,6 +30,8 @@ export type NarrationSegment = {
   text: string;
   speechText?: string;
   emphasis?: boolean;
+  /** Optional finished-video scene grounding used by multi-video narration. */
+  sceneId?: string;
 };
 
 export type NarrationPlan = {
@@ -274,6 +276,10 @@ export function normalizeNarrationPlan(value: unknown): NarrationPlan {
       return {
         text: cleanText(record.text, 120),
         emphasis: record.emphasis === true,
+        ...(typeof record.sceneId === "string" &&
+        /^scene-(?:[1-9]|10)$/u.test(record.sceneId.trim())
+          ? { sceneId: record.sceneId.trim() }
+          : {}),
       };
     })
     .filter((item) => item.text)
