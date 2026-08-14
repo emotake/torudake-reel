@@ -11,7 +11,7 @@ const accountClientSource = await readFile(
   "utf8",
 );
 const hookStart = pageSource.indexOf("function useCaptionProfileSync()");
-const hookEnd = pageSource.indexOf("export default function Home()", hookStart);
+const hookEnd = pageSource.indexOf("export default function Home(", hookStart);
 const syncHookSource = pageSource.slice(hookStart, hookEnd);
 
 test("keeps caption profiles local for visitors without an authentication hint", () => {

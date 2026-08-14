@@ -942,6 +942,7 @@ async function reactivateUsageReservationAtomically(
   bucket: BillingBucket,
   status: Awaited<ReturnType<typeof getBillingStatusForUser>>,
   nowSeconds: number,
+  resumeReleased: boolean,
 ) {
   const database = env.DB as unknown as QueryD1Database | undefined;
   if (!database?.prepare || !database.batch) {
@@ -961,6 +962,7 @@ async function reactivateUsageReservationAtomically(
             release_requested_at = NULL,
             billing_purchase_id = NULL
         WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND (? = 1 OR release_requested_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM usage_operation_leases
             WHERE reservation_id = usage_reservations.id
@@ -980,6 +982,7 @@ async function reactivateUsageReservationAtomically(
         expiresAt,
         existing.id,
         existing.userId,
+        resumeReleased ? 1 : 0,
         nowSeconds,
         existing.userId,
         startOfTokyoDaySeconds(nowSeconds),
@@ -997,6 +1000,7 @@ async function reactivateUsageReservationAtomically(
             release_requested_at = NULL,
             billing_purchase_id = NULL
         WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND (? = 1 OR release_requested_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM usage_operation_leases
             WHERE reservation_id = usage_reservations.id
@@ -1025,6 +1029,7 @@ async function reactivateUsageReservationAtomically(
         expiresAt,
         existing.id,
         existing.userId,
+        resumeReleased ? 1 : 0,
         nowSeconds,
         status.subscription.id,
         existing.userId,
@@ -1062,6 +1067,7 @@ async function reactivateUsageReservationAtomically(
               LIMIT 1
             )
         WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND (? = 1 OR release_requested_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM usage_operation_leases
             WHERE reservation_id = usage_reservations.id
@@ -1079,7 +1085,14 @@ async function reactivateUsageReservationAtomically(
               ) < purchase.credits
           )
       `)
-      .bind(nowSeconds, expiresAt, existing.id, existing.userId, nowSeconds);
+      .bind(
+        nowSeconds,
+        expiresAt,
+        existing.id,
+        existing.userId,
+        resumeReleased ? 1 : 0,
+        nowSeconds,
+      );
   } else {
     statement = database
       .prepare(`
@@ -1092,6 +1105,7 @@ async function reactivateUsageReservationAtomically(
             release_requested_at = NULL,
             billing_purchase_id = NULL
         WHERE id = ? AND user_id = ? AND status != 'completed'
+          AND (? = 1 OR release_requested_at IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM usage_operation_leases
             WHERE reservation_id = usage_reservations.id
@@ -1118,6 +1132,7 @@ async function reactivateUsageReservationAtomically(
         expiresAt,
         existing.id,
         existing.userId,
+        resumeReleased ? 1 : 0,
         nowSeconds,
         existing.userId,
         FREE_VIDEO_LIMIT,
@@ -1131,7 +1146,7 @@ async function reactivateUsageReservationAtomically(
     database
       .prepare(`
         DELETE FROM usage_release_intents
-        WHERE user_id = ? AND idempotency_key = ?
+        WHERE ? = 1 AND user_id = ? AND idempotency_key = ?
           AND EXISTS (
             SELECT 1 FROM usage_reservations
             WHERE id = ? AND user_id = ?
@@ -1141,6 +1156,7 @@ async function reactivateUsageReservationAtomically(
           )
       `)
       .bind(
+        resumeReleased ? 1 : 0,
         existing.userId,
         existing.idempotencyKey,
         existing.id,
@@ -1155,13 +1171,26 @@ async function reactivateUsageReservationAtomically(
     .from(usageReservations)
     .where(eq(usageReservations.id, existing.id))
     .limit(1);
-  return rows[0] ?? null;
+  const reactivated = rows[0] ?? null;
+  if (
+    reactivated &&
+    !resumeReleased &&
+    (reactivated.status === "completed" ||
+      reactivated.releaseRequestedAt !== null)
+  ) {
+    return null;
+  }
+  return reactivated;
 }
 
 export async function renewUsageReservation(
   currentUser: CurrentUser,
   selector: UsageReservationSelector,
-  options: { sourceDurationSeconds?: number; operator?: boolean } = {},
+  options: {
+    sourceDurationSeconds?: number;
+    operator?: boolean;
+    resumeReleased?: boolean;
+  } = {},
   nowSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<UsageReservationWithOutcome | null> {
   const user = await getOrCreateBillingUser(currentUser);
@@ -1174,6 +1203,13 @@ export async function renewUsageReservation(
       : Math.max(1, Math.ceil(options.sourceDurationSeconds));
   if (roundedDuration !== existing.sourceDurationSeconds) {
     throw new UsageReservationConflictError("idempotency_payload_mismatch");
+  }
+  const resumeReleased = options.resumeReleased !== false;
+  if (
+    !resumeReleased &&
+    (existing.status === "completed" || existing.releaseRequestedAt !== null)
+  ) {
+    return null;
   }
   if (existing.bucket === "operator" && options.operator !== true) {
     throw new OperatorUsageLimitError();
@@ -1226,18 +1262,18 @@ export async function renewUsageReservation(
     existing.expiresAt >= nowSeconds &&
     !shouldUpgradePaidPriority
   ) {
-    // Renewal is the sole explicit resume action. Deleting the key tombstone
-    // and extending the currently-bound entitlement share one D1 transaction,
-    // so a concurrent release is ordered entirely before or after the resume.
+    // Resume-capable renewals clear the key tombstone in the same D1 batch.
+    // Export renewals do neither, so a release ordered before this batch wins.
     const results = await database.batch([
       database
         .prepare(`
-          UPDATE usage_reservations
-          SET expires_at = MAX(expires_at, ?),
-              release_requested_at = NULL
-          WHERE id = ? AND user_id = ? AND status = 'reserved'
-            AND expires_at >= ?
-            AND (
+        UPDATE usage_reservations
+        SET expires_at = MAX(expires_at, ?),
+              release_requested_at = CASE WHEN ? = 1 THEN NULL ELSE release_requested_at END
+        WHERE id = ? AND user_id = ? AND status = 'reserved'
+          AND expires_at >= ?
+          AND (? = 1 OR release_requested_at IS NULL)
+          AND (
               bucket = 'free'
               OR (bucket = 'operator' AND ? = 1)
               OR (
@@ -1292,16 +1328,18 @@ export async function renewUsageReservation(
         `)
         .bind(
           expiresAt,
+          resumeReleased ? 1 : 0,
           existing.id,
           user.id,
           nowSeconds,
+          resumeReleased ? 1 : 0,
           options.operator === true ? 1 : 0,
           nowSeconds,
         ),
       database
         .prepare(`
           DELETE FROM usage_release_intents
-          WHERE user_id = ? AND idempotency_key = ?
+          WHERE ? = 1 AND user_id = ? AND idempotency_key = ?
             AND EXISTS (
               SELECT 1 FROM usage_reservations
               WHERE id = ? AND user_id = ?
@@ -1311,6 +1349,7 @@ export async function renewUsageReservation(
             )
         `)
         .bind(
+          resumeReleased ? 1 : 0,
           user.id,
           existing.idempotencyKey,
           existing.id,
@@ -1322,9 +1361,14 @@ export async function renewUsageReservation(
       const renewed = await findUsageReservationForUser(user.id, {
         reservationId: existing.id,
       });
-      return renewed
-        ? withUsageReservationOutcome(renewed, "renewed")
-        : null;
+      if (
+        renewed &&
+        !resumeReleased &&
+        (renewed.status === "completed" || renewed.releaseRequestedAt !== null)
+      ) {
+        return null;
+      }
+      return renewed ? withUsageReservationOutcome(renewed, "renewed") : null;
     }
   }
 
@@ -1351,6 +1395,7 @@ export async function renewUsageReservation(
     bucket,
     currentStatus,
     nowSeconds,
+    resumeReleased,
   );
   if (reactivated) {
     return withUsageReservationOutcome(reactivated, "reactivated");
@@ -1359,6 +1404,13 @@ export async function renewUsageReservation(
     reservationId: existing.id,
   });
   if (concurrent) {
+    if (
+      !resumeReleased &&
+      (concurrent.status === "completed" ||
+        concurrent.releaseRequestedAt !== null)
+    ) {
+      return null;
+    }
     return withUsageReservationOutcome(concurrent, "existing");
   }
   return null;

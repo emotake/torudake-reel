@@ -28,89 +28,90 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>撮るだけリール｜リール動画をAIで自動編集・字幕生成<\/title>/);
-  assert.match(html, /動画を選ぶだけ。/);
-  assert.match(html, /編集の手間を、もっと軽く。/);
+  assert.match(html, /<title>撮るだけリール｜動画・写真をかんたんリール編集<\/title>/);
+  assert.match(html, /素材を選んで、/);
+  assert.match(html, /作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);
   assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
+  assert.match(html, /id="create"/);
+  assert.match(html, /素材はどれですか？/);
+  assert.match(html, /1本の動画を整える/);
+  assert.match(html, /動画を順番につなぐ/);
+  assert.match(html, /2〜5本から使う場面を選び/);
+  assert.match(html, /写真から作る/);
+  assert.match(html, /最大10枚の写真を選び/);
+  assert.match(html, /href="\/video-mix"/);
+  assert.match(html, /href="\/photo-reel"/);
+  assert.match(html, /href="\/pricing"/);
   assert.match(html, /class="heroVisual realDemo"/);
   assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);
   assert.match(html, /poster="\/demo\/torudake-demo-poster\.jpg"/);
   assert.match(html, /再生すると音声付き1080p本編を読み込みます/);
   assert.match(html, /実際の動画・音声・テロップで確認/);
-  assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
-  assert.match(html, /用途別の例文で、4つの話し方を聴き比べられます/);
+  assert.doesNotMatch(html, /AIナレーションの仕上がりを、先に聴けます/);
   assert.doesNotMatch(html, /固定見本は試聴用モデル/);
   assert.doesNotMatch(html, /実際の動画では本番モデル/);
-  assert.match(html, /朝の公園をゆっくり歩きました/);
-  assert.match(html, /海辺のカフェに立ち寄りました/);
-  assert.match(html, /焼きたてのパンもとてもおいしかったです/);
-  assert.match(html, /週末は友だちと夏祭りへ行きました/);
   assert.doesNotMatch(html, /ナイトマーケット/);
-  assert.match(html, /笑顔いっぱいの楽しい一日になりました/);
-  for (const voice of ["calm", "bright", "comedy", "party"]) {
-    assert.match(html, new RegExp(`/demo/voices/${voice}-v5\\.wav`));
-  }
-  assert.doesNotMatch(html, /同じ短い文章を4つの声で/);
-  assert.doesNotMatch(html, /用途別の例文で、4つの声を/);
   assert.match(html, /動画本体は通常、端末内で編集/);
+  assert.match(html, /編集とプレビューは無料/);
+  assert.match(html, /最大1080p・透かしなし/);
   assert.doesNotMatch(html, /lifestyleGallery/);
   assert.doesNotMatch(html, /4工程|AUTO CUT/);
-  assert.match(html, /動画を選んで無料で試す/);
-  assert.match(html, /無料体験：合計3分以内・最大2動画まで/);
-  assert.match(html, /プラン購入時に決済・書き出し成功時に1本分を使用/);
-  assert.match(html, /動画1本だけ保存/);
-  assert.match(html, /料金を見る/);
-  assert.match(html, /href="\/video-mix"/);
-  assert.match(html, /動画をつないで作る/);
-  assert.match(html, /最大5本・素材の順番を保って1本に合成/);
-  assert.match(html, /写真からリールを作る/);
-  assert.match(html, /最大10枚・自動編集5パターン/);
-  assert.match(html, /スマホであとから試したい方へ/);
-  assert.match(html, /LINEに送る/);
-  assert.match(html, /LINEに送る（スマホであとから開く）/);
-  assert.match(
-    html,
-    /https:\/\/social-plugins\.line\.me\/lineit\/share\?[^\"]*url=/,
-  );
-  assert.match(html, /送信されるのは公開ページのURLと案内文だけです/);
-  assert.doesNotMatch(html, /動画を預ける|安全な受け渡し画面へ/);
-  assert.match(html, /あなたがするのは、/);
-  assert.match(html, /目的に合わせて自動編集/);
-  assert.match(html, /会話・解説は元の音声を活かし、必要ならAI音声に切り替え/);
-  assert.match(html, /動画に合わせて音声の仕上げ方を選択/);
-  assert.match(html, /元の話し声を活かすか、AIナレーションに置き換える/);
+  assert.match(html, /共通の3ステップ/);
+  assert.match(html, /素材を選ぶ/);
+  assert.match(html, /案内に沿って決める/);
+  assert.match(html, /確認して保存する/);
   assert.doesNotMatch(html, /元の音声とAIナレーションを自然に組み合わせる/);
   assert.doesNotMatch(html, /元の音声があっても、なくても対応/);
   assert.doesNotMatch(html, /AIが全部整える/);
-  assert.match(html, /使い方に合う保存方法を。/);
-  assert.match(html, /最大500MB/);
-  assert.match(
-    html,
-    /合計3分以内・最大2動画まで（いずれか先に達するまで）/,
-  );
-  assert.match(html, /編集・プレビューまで/);
-  assert.match(html, /完成動画の保存は有料/);
-  assert.match(html, /1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで/);
-  assert.match(html, /1か月に動画(?:<!-- -->)?3(?:<!-- -->)?本まで/);
-  assert.match(html, /月7本プランを始める/);
-  assert.match(html, /月3本プランを始める/);
-  assert.match(
-    html,
-    /1本あたり約(?:<!-- -->)?143(?:<!-- -->)?円/,
-  );
-  assert.match(html, /1本あたり約167円/);
+  assert.match(html, /仕上がりを見てから、保存方法を選べます/);
+  assert.match(html, /無料体験は合計3分以内・最大2動画まで/);
+  assert.match(html, /1回払い・税込・自動更新なし/);
+  assert.match(html, /月(?:<!-- -->)?3(?:<!-- -->)?本 ¥(?:<!-- -->)?500/);
+  assert.match(html, /月(?:<!-- -->)?7(?:<!-- -->)?本 ¥(?:<!-- -->)?1,000/);
   assert.match(html, /¥(?:<!-- -->)?200/);
-  assert.match(html, /カード情報は撮るだけリールに保存されません/);
-  assert.match(html, /無料体験は編集結果が完成した時点/);
-  assert.match(html, /有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります/);
-  assert.match(html, /月3本・月7本プランは1か月ごとの自動更新/);
-  assert.match(html, /動画1本プランは1回払い/);
+  assert.match(html, /始める前に知りたいこと/);
+  assert.match(html, /いつ料金がかかりますか？/);
   assert.doesNotMatch(
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
   );
+});
+
+test("renders the single-video editor as a focused public route", async () => {
+  const response = await render("/video-edit");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /<title>1本の動画をかんたん編集｜撮るだけリール<\/title>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/video-edit"/);
+  assert.match(html, /1本の動画を、/);
+  assert.match(html, /投稿できる形へ/);
+  assert.match(html, /動画を1本選ぶ/);
+  assert.match(html, /AIナレーションの4つの声を試聴する/);
+  assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
+  for (const voice of ["calm", "bright", "comedy", "party"]) {
+    assert.match(html, new RegExp(`/demo/voices/${voice}-v5\\.wav`));
+  }
+});
+
+test("renders a dedicated, frequency-first pricing page", async () => {
+  const response = await render("/pricing");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /<title>料金プラン｜撮るだけリール<\/title>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/pricing"/);
+  assert.match(html, /まず1本。/);
+  const planHtml = html.slice(html.indexOf('id="plans"'));
+  const oneTimeIndex = planHtml.indexOf("動画1本だけ保存");
+  const starterIndex = planHtml.search(/1か月に動画(?:<!-- -->)?3(?:<!-- -->)?本まで/);
+  const standardIndex = planHtml.search(/1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで/);
+  assert.ok(oneTimeIndex >= 0 && oneTimeIndex < starterIndex);
+  assert.ok(starterIndex < standardIndex);
+  assert.match(html, /本人確認後に、Stripeでお支払い/);
+  assert.match(html, /1か月ごとに自動更新/);
 });
 
 test("renders the five-pattern photo reel editor as a separate public route", async () => {
@@ -170,7 +171,7 @@ test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="撮るだけリール｜リール動画をAIで自動編集・字幕生成"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜動画・写真をかんたんリール編集"/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/"/,

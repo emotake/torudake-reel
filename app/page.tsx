@@ -145,6 +145,7 @@ import {
   MAX_ASR_DICTIONARY_TERMS,
   sanitizeAsrUserDictionary,
 } from "../lib/asr-user-dictionary";
+import { HomeLanding, VideoEditLanding } from "./landing-router";
 
 type Stage = "start" | "setup" | "processing" | "result";
 
@@ -1508,6 +1509,7 @@ async function renewVideoUsage(
   reservationId: string,
   selectedFile: File,
   signal?: AbortSignal,
+  options: { resumeReleased?: boolean } = {},
 ) {
   throwIfProcessingAborted(signal);
   const response = await fetch("/api/usage/renew", {
@@ -1516,6 +1518,7 @@ async function renewVideoUsage(
     body: JSON.stringify({
       reservationId,
       sourceDurationSeconds: await getVideoDurationSeconds(selectedFile),
+      resumeReleased: options.resumeReleased,
     }),
     signal,
   });
@@ -1991,7 +1994,11 @@ function useCaptionProfileSync() {
   return [captionProfile, setCaptionProfile] as const;
 }
 
-export default function Home() {
+type HomeProps = {
+  landingVariant?: "home" | "video-edit";
+};
+
+export default function Home({ landingVariant = "home" }: HomeProps = {}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const editAbortRef = useRef<AbortController | null>(null);
   const editGenerationRef = useRef(0);
@@ -3532,7 +3539,17 @@ export default function Home() {
   return (
     <main className="siteShell" data-build="20260809-refined-luxury">
       <header className="topbar">
-        <button className="brand" onClick={reset} aria-label="トップへ戻る">
+        <button
+          className="brand"
+          onClick={() => {
+            if (stage === "start" && landingVariant === "video-edit") {
+              window.location.assign("/");
+              return;
+            }
+            reset();
+          }}
+          aria-label="トップへ戻る"
+        >
           <span className="brandIcon">
             <span />
             <i>▶</i>
@@ -3545,9 +3562,9 @@ export default function Home() {
 
         {stage === "start" ? (
           <nav aria-label="メインメニュー">
+            <a href={landingVariant === "home" ? "#create" : "/#create"}>作り方</a>
             <a href="#how">使い方</a>
-            <a href="#difference">できること</a>
-            <a href="#price">料金</a>
+            <Link href="/pricing">料金</Link>
           </nav>
         ) : (
           <div className="workspaceStatus">
@@ -3558,9 +3575,9 @@ export default function Home() {
 
         <div className="topActions">
           {stage === "start" && (
-            <a className="mobilePriceLink" href="#price">
+            <Link className="mobilePriceLink" href="/pricing">
               料金
-            </a>
+            </Link>
           )}
           <a className="accountButton" href="/account">
             アカウント
@@ -3573,9 +3590,21 @@ export default function Home() {
           {stage === "start" && (
             <button
               className="trialButton"
-              onClick={() => inputRef.current?.click()}
+              onClick={() => {
+                if (landingVariant === "video-edit") {
+                  inputRef.current?.click();
+                  return;
+                }
+                document.getElementById("create")?.scrollIntoView({
+                  behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                    .matches
+                    ? "auto"
+                    : "smooth",
+                  block: "start",
+                });
+              }}
             >
-              無料で試す
+              {landingVariant === "video-edit" ? "動画を選ぶ" : "作り方を選ぶ"}
             </button>
           )}
         </div>
@@ -3594,6 +3623,7 @@ export default function Home() {
       />
       {stage === "start" && (
         <Landing
+          variant={landingVariant}
           openPicker={() => inputRef.current?.click()}
           openSample={loadSampleVideo}
           isSampleLoading={isSampleLoading}
@@ -3738,8 +3768,11 @@ export default function Home() {
           <span>動画を選ぶだけ。カット・AI音声・テロップ・表紙候補まで提案。</span>
         </div>
         <div className="footerLinks">
-          <a href="#how">使い方</a>
-          <a href="#price">料金</a>
+          <Link href="/#create">作り方</Link>
+          <Link href="/video-edit">1本の動画</Link>
+          <Link href="/video-mix">複数の動画</Link>
+          <Link href="/photo-reel">写真</Link>
+          <Link href="/pricing">料金</Link>
           <Link href="/guide/iphone-mov-reel">iPhone動画ガイド</Link>
           <Link href="/guide/silent-video-narration">無音動画ガイド</Link>
           <Link href="/guide/japanese-reading">読み方修正ガイド</Link>
@@ -3759,6 +3792,10 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+export function VideoEditExperience() {
+  return <Home landingVariant="video-edit" />;
 }
 
 const DEMO_CAPTIONS = [
@@ -3861,6 +3898,7 @@ function RealVideoDemo() {
 }
 
 function Landing({
+  variant,
   openPicker,
   openSample,
   isSampleLoading,
@@ -3871,6 +3909,7 @@ function Landing({
   recoverDraft,
   discardDraft,
 }: {
+  variant: "home" | "video-edit" | "legacy";
   openPicker: () => void;
   openSample: () => void | Promise<void>;
   isSampleLoading: boolean;
@@ -3905,6 +3944,24 @@ function Landing({
     observer.observe(pricingSection);
     return () => observer.disconnect();
   }, []);
+
+  const sharedProps = {
+    openPicker,
+    openSample,
+    isSampleLoading,
+    demo: <RealVideoDemo />,
+    recoverableDraftName: recoverableDraft?.fingerprint.name,
+    recoverDraft,
+    discardDraft,
+  };
+
+  if (variant === "home") {
+    return <HomeLanding {...sharedProps} />;
+  }
+
+  if (variant === "video-edit") {
+    return <VideoEditLanding {...sharedProps} />;
+  }
 
   return (
     <>
@@ -8268,6 +8325,10 @@ function ResultWorkspace({
     const throwIfExportAborted = () => {
       if (exportSignal.aborted) throw new PortableVideoExportAbortedError();
     };
+    const pendingExportReservationId =
+      usageReservationPendingExport && usageReservationId
+        ? usageReservationId
+        : null;
     isExportingRef.current = true;
     setIsExporting(true);
     setExportedVideoFile(null);
@@ -8313,6 +8374,23 @@ function ResultWorkspace({
     );
     let originalAudioMeasurement: PortableOriginalAudioMeasurement | null = null;
     try {
+      if (pendingExportReservationId) {
+        const renewedUsage = await renewVideoUsage(
+          pendingExportReservationId,
+          file,
+          exportSignal,
+          { resumeReleased: false },
+        );
+        throwIfExportAborted();
+        if (
+          renewedUsage.reservationId !== pendingExportReservationId ||
+          !canSaveCompletedVideo(renewedUsage.bucket)
+        ) {
+          throw new Error(
+            "保存できる利用枠の有効期限を更新できませんでした。",
+          );
+        }
+      }
       originalAudioMeasurement = await awaitOriginalAudioMeasurement();
       throwIfExportAborted();
     } catch (error) {

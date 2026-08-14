@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     reservationId?: unknown;
     idempotencyKey?: unknown;
     sourceDurationSeconds?: unknown;
+    resumeReleased?: unknown;
   };
   try {
     payload = await parseJsonBodyWithLimit<typeof payload>(
@@ -62,6 +63,16 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (
+    payload.resumeReleased !== undefined &&
+    typeof payload.resumeReleased !== "boolean"
+  ) {
+    return Response.json(
+      { error: "Usage reservation renewal mode is invalid." },
+      { status: 400 },
+    );
+  }
+  const resumeReleased = payload.resumeReleased !== false;
 
   let duration: number | undefined;
   if (payload.sourceDurationSeconds !== undefined) {
@@ -85,7 +96,11 @@ export async function POST(request: Request) {
     const reservation = await renewUsageReservation(
       currentUser,
       { reservationId, idempotencyKey },
-      { sourceDurationSeconds: duration, operator: isOperator },
+      {
+        sourceDurationSeconds: duration,
+        operator: isOperator,
+        resumeReleased,
+      },
     );
     if (!reservation) {
       return Response.json(

@@ -128,6 +128,43 @@ function addFreeReservation({ id, currentUser, key, createdAt, expiresAt }) {
     .run(id, currentUser.id, key, createdAt, expiresAt);
 }
 
+function addOneTimeReservation({
+  id,
+  currentUser,
+  key,
+  createdAt,
+  expiresAt,
+  credits = 1,
+}) {
+  const purchaseId = `${id}-purchase`;
+  addFreeReservation({ id, currentUser, key, createdAt, expiresAt });
+  database.sqlite
+    .prepare(`
+      INSERT INTO billing_purchases (
+        id, user_id, stripe_customer_id, stripe_payment_intent_id,
+        stripe_price_id, credits, refund_blocking_amount, dispute_state,
+        revoked_at, stripe_state_synced_at, stripe_state_sync_started_at,
+        purchased_at
+      ) VALUES (?, ?, ?, ?, 'price-once', ?, 0, NULL, NULL, ?, NULL, ?)
+    `)
+    .run(
+      purchaseId,
+      currentUser.id,
+      `cus-${id}`,
+      `pi-${id}`,
+      credits,
+      createdAt,
+      createdAt,
+    );
+  database.sqlite
+    .prepare(`
+      UPDATE usage_reservations
+      SET bucket = 'one_time', billing_purchase_id = ?
+      WHERE id = ?
+    `)
+    .run(purchaseId, id);
+}
+
 test("renews the same reservation before the 60-minute boundary", async () => {
   const now = 2_000_000_000;
   const currentUser = user("usage-renew-59-user");
@@ -196,6 +233,34 @@ test("reactivates the same idempotent row after the 60-minute boundary", async (
       .get("usage-renew-61-key").count,
     1,
   );
+});
+
+test("export renewal reactivates the same paid row after TTL when no release was requested", async () => {
+  const now = 2_011_000_000;
+  const currentUser = user("usage-export-renew-expired-user");
+  addUser(currentUser, now);
+  addOneTimeReservation({
+    id: "usage-export-renew-expired-reservation",
+    currentUser,
+    key: "usage-export-renew-expired-key",
+    createdAt: now,
+    expiresAt: now + USAGE_RESERVATION_LIFETIME_SECONDS,
+  });
+
+  const renewalTime = now + 61 * 60;
+  const renewed = await renewUsageReservation(
+    currentUser,
+    { reservationId: "usage-export-renew-expired-reservation" },
+    { sourceDurationSeconds: 30, resumeReleased: false },
+    renewalTime,
+  );
+
+  assert.ok(renewed);
+  assert.equal(renewed.id, "usage-export-renew-expired-reservation");
+  assert.equal(renewed.bucket, "one_time");
+  assert.equal(renewed.status, "reserved");
+  assert.equal(renewed.releaseRequestedAt, null);
+  assert.equal(renewed.reservationOutcome, "reactivated");
 });
 
 test("refuses to renew an operator reservation after operator access is revoked", async () => {
@@ -770,6 +835,75 @@ test("persists pagehide release intent until the active AI lease finishes", asyn
   assert.equal(state.releasePending, false);
 });
 
+test("export renewal cannot revive a paid reservation when release wins after the initial read", async () => {
+  const now = 2_021_000_000;
+  const currentUser = user("usage-export-release-race-user");
+  addUser(currentUser, now);
+  addOneTimeReservation({
+    id: "usage-export-release-race-reservation",
+    currentUser,
+    key: "usage-export-release-race-key",
+    createdAt: now,
+    expiresAt: now + USAGE_RESERVATION_LIFETIME_SECONDS,
+    credits: 2,
+  });
+
+  const originalBatch = database.batch;
+  let allowRenewalBatch = () => {};
+  const releaseApplied = new Promise((resolve) => {
+    allowRenewalBatch = resolve;
+  });
+  let markRenewalBatchReached = () => {};
+  const renewalBatchReached = new Promise((resolve) => {
+    markRenewalBatchReached = resolve;
+  });
+  database.batch = async (statements) => {
+    const isExportRenewal = statements.some((statement) =>
+      statement.query.includes(
+        "release_requested_at = CASE WHEN ? = 1 THEN NULL",
+      ),
+    );
+    if (isExportRenewal) {
+      markRenewalBatchReached();
+      await releaseApplied;
+    }
+    return originalBatch.call(database, statements);
+  };
+
+  let renewalPromise;
+  try {
+    renewalPromise = renewUsageReservation(
+      currentUser,
+      { reservationId: "usage-export-release-race-reservation" },
+      { sourceDurationSeconds: 30, resumeReleased: false },
+      now + 2,
+    );
+    await renewalBatchReached;
+    const release = await requestUsageRelease(
+      currentUser,
+      { reservationId: "usage-export-release-race-reservation" },
+      now + 1,
+    );
+    assert.equal(release.status, "released");
+    allowRenewalBatch();
+
+    assert.equal(await renewalPromise, null);
+    const row = database.sqlite
+      .prepare(`
+        SELECT status, release_requested_at
+        FROM usage_reservations
+        WHERE id = ?
+      `)
+      .get("usage-export-release-race-reservation");
+    assert.equal(row.status, "released");
+    assert.equal(row.release_requested_at, now + 1);
+  } finally {
+    allowRenewalBatch();
+    database.batch = originalBatch;
+    await renewalPromise?.catch(() => undefined);
+  }
+});
+
 test("treats renewal of release_pending as an explicit resume", async () => {
   const now = 2_022_000_000;
   const currentUser = user("usage-release-resume-user");
@@ -841,6 +975,8 @@ test("exposes the renewal contract and keeps schema DDL out of request code", as
   assert.match(reserveRoute, /publicUsageReservationState\(reservation\)/);
   assert.match(reserveRoute, /reservationOutcome:/);
   assert.match(renewRoute, /renewUsageReservation\(/);
+  assert.match(renewRoute, /resumeReleased\?: unknown/);
+  assert.match(renewRoute, /resumeReleased,/);
   assert.match(statusRoute, /getUsageReservationState\(/);
   assert.match(releaseRoute, /idempotencyKey/);
   assert.match(releaseRoute, /requestUsageRelease\(/);

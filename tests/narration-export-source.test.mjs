@@ -82,6 +82,44 @@ test("tries a deterministic MP4 export before the MediaRecorder fallback", () =>
   assert.match(exportFlow, /if \(!canUseLegacyRecorder\) throw portableExportError/);
 });
 
+test("renews one pending paid export reservation before audio measurement and encoding", () => {
+  const start = pageSource.indexOf("async function exportCaptionedVideo(");
+  const end = pageSource.indexOf("\n  function requestVideoExport()", start);
+  const exportFlow = pageSource.slice(start, end);
+  const saveGuardIndex = exportFlow.indexOf(
+    "if (!completedVideoSaveAllowed)",
+  );
+  const signalIndex = exportFlow.indexOf(
+    "const exportSignal = exportController.signal;",
+  );
+  const renewIndex = exportFlow.indexOf("await renewVideoUsage(");
+  const measurementIndex = exportFlow.indexOf(
+    "await awaitOriginalAudioMeasurement()",
+  );
+  const portableIndex = exportFlow.indexOf("exportPortableVideoMp4({");
+
+  assert.match(
+    exportFlow,
+    /const pendingExportReservationId =\s*usageReservationPendingExport && usageReservationId\s*\? usageReservationId\s*:\s*null/,
+  );
+  assert.equal(exportFlow.match(/await renewVideoUsage\(/g)?.length, 1);
+  assert.ok(saveGuardIndex >= 0 && saveGuardIndex < renewIndex);
+  assert.ok(signalIndex >= 0 && signalIndex < renewIndex);
+  assert.ok(renewIndex < measurementIndex);
+  assert.ok(renewIndex < portableIndex);
+  assert.match(
+    exportFlow,
+    /await renewVideoUsage\(\s*pendingExportReservationId,\s*file,\s*exportSignal,\s*\{ resumeReleased: false \}/,
+  );
+  assert.match(pageSource, /resumeReleased: options\.resumeReleased/);
+  assert.match(
+    exportFlow,
+    /renewedUsage\.reservationId !== pendingExportReservationId \|\|\s*!canSaveCompletedVideo\(renewedUsage\.bucket\)/,
+  );
+  assert.doesNotMatch(exportFlow, /reserveVideoUsage\(/);
+  assert.doesNotMatch(exportFlow, /setUsageReservationPendingExport\(/);
+});
+
 test("keeps preview and recorder fallback aligned with local loudness and ducking", () => {
   const start = pageSource.indexOf("function ResultWorkspace(");
   const end = pageSource.indexOf("\n  return (", start);

@@ -54,7 +54,9 @@ test("lists only canonical public pages in the sitemap", () => {
   assert.deepEqual(urls, [
     `${SITE_ORIGIN}/`,
     `${SITE_ORIGIN}/video-mix`,
+    `${SITE_ORIGIN}/video-edit`,
     `${SITE_ORIGIN}/photo-reel`,
+    `${SITE_ORIGIN}/pricing`,
     `${SITE_ORIGIN}/guide/iphone-mov-reel`,
     `${SITE_ORIGIN}/guide/silent-video-narration`,
     `${SITE_ORIGIN}/guide/japanese-reading`,
