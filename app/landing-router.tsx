@@ -68,8 +68,8 @@ function CreationChooser({
   return (
     <section className="creationChooser" id="create" aria-labelledby="creationChooserTitle">
       <header>
-        <h2 id="creationChooserTitle">素材はどれですか？</h2>
-        <p>まず作り方を選びます。どれも編集とプレビューまでは無料です。</p>
+        <h2 id="creationChooserTitle">何から作りますか？</h2>
+        <p>編集とプレビューは無料です。</p>
       </header>
       <div className="creationModeGrid">
         <article className="creationModeCard isRecommended">
@@ -77,7 +77,7 @@ function CreationChooser({
             <span aria-hidden="true">1</span>
             <em>はじめてにおすすめ</em>
           </div>
-          <h3>1本の動画を整える</h3>
+          <h3>動画1本から作る</h3>
           <p>自動カット、必要なテロップ、音声、表紙を順番に選んで仕上げます。</p>
           <button className="creationModeAction" type="button" onClick={openPicker}>
             動画を1本選ぶ <span aria-hidden="true">→</span>
@@ -96,7 +96,7 @@ function CreationChooser({
           <div className="creationModeLabel">
             <span aria-hidden="true">2–5</span>
           </div>
-          <h3>動画を順番につなぐ</h3>
+          <h3>複数の動画から作る</h3>
           <p>2〜5本から使う場面を選び、素材の順番を保ったまま1本にします。</p>
           <Link className="creationModeAction" href="/video-mix">
             複数動画で作る <span aria-hidden="true">→</span>
@@ -220,15 +220,14 @@ export function HomeLanding(props: LandingSharedProps) {
         <div className="landingIntroCopy">
           <p className="eyebrow">
             <span>かんたん動画編集</span>
-            迷わず、投稿できる1本へ
           </p>
           <h1>
-            素材を選んで、
+            動画や写真を、
             <br />
-            <em>作り方をひとつ選ぶだけ。</em>
+            <em>リールに。</em>
           </h1>
           <p>
-            1本の動画、複数の動画、写真。素材に合う入口から始めれば、必要な設定だけを順番に案内します。
+            画面の案内に沿って、必要な機能だけを選んで仕上げられます。
           </p>
         </div>
         <DraftRecovery
@@ -255,9 +254,11 @@ export function HomeLanding(props: LandingSharedProps) {
       <section className="homeBenefitBand" aria-label="共通する安心ポイント">
         <div className="homeBenefitGrid">
           <article>
-            <span aria-hidden="true">端末</span>
-            <h3>動画本体は通常、端末内で編集</h3>
-            <p>AI機能では必要な音声・静止画だけを安全に送信します。</p>
+            <span aria-hidden="true">データ</span>
+            <h3>動画データの取り扱い</h3>
+            <p>
+              カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います。AI機能を使う場合は、動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信します。
+            </p>
           </article>
           <article>
             <span aria-hidden="true">¥0</span>
@@ -306,11 +307,15 @@ export function HomeLanding(props: LandingSharedProps) {
         </header>
         <details>
           <summary>どの作り方を選べばよいですか？</summary>
-          <p>素材が動画1本なら「1本の動画を整える」、2〜5本なら「動画を順番につなぐ」、写真だけなら「写真から作る」を選んでください。</p>
+          <p>動画が1本なら「動画1本から作る」、2〜5本なら「複数の動画から作る」、写真だけなら「写真から作る」を選んでください。</p>
         </details>
         <details>
-          <summary>動画はサーバーへ保存されますか？</summary>
-          <p>動画本体は通常、端末内で処理します。AI機能を使う場合のみ、必要な音声や静止画を安全に送信します。詳しくはプライバシーポリシーをご確認ください。</p>
+          <summary>動画や写真はどこで処理されますか？</summary>
+          <p>
+            カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います。写真から作る機能では、写真と選んだ音源を外部のAIサービスへ送信しません。動画でAI機能を使う場合は、動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信します。送信先や保存期間は
+            <Link href="/privacy">プライバシーポリシー</Link>
+            をご確認ください。
+          </p>
         </details>
         <details>
           <summary>いつ料金がかかりますか？</summary>

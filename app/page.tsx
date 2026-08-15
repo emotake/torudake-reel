@@ -4001,9 +4001,9 @@ function Landing({
             </button>
           </div>
           <div className="operationTrustSummary" aria-label="動画データの取り扱い">
-            <strong>動画本体は通常、端末内で編集</strong>
+            <strong>動画データの取り扱い</strong>
             <span>
-              AI機能では必要な音声・静止画だけを安全に送信し、動画本体はサーバーへ保存しません。
+              カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います。AI機能を使う場合は、動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信します。
             </span>
             <a href="/privacy">詳しい取り扱いを見る</a>
           </div>

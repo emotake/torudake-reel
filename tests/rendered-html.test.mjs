@@ -29,15 +29,17 @@ test("renders the Torudake Reel product experience", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>撮るだけリール｜動画・写真をかんたんリール編集<\/title>/);
-  assert.match(html, /素材を選んで、/);
-  assert.match(html, /作り方をひとつ選ぶだけ。/);
+  assert.match(html, /動画や写真を、/);
+  assert.match(html, /リールに。/);
+  assert.match(html, /必要な機能だけを選んで仕上げられます。/);
+  assert.doesNotMatch(html, /素材を選んで、|作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);
   assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /id="create"/);
-  assert.match(html, /素材はどれですか？/);
-  assert.match(html, /1本の動画を整える/);
-  assert.match(html, /動画を順番につなぐ/);
+  assert.match(html, /何から作りますか？/);
+  assert.match(html, /動画1本から作る/);
+  assert.match(html, /複数の動画から作る/);
   assert.match(html, /2〜5本から使う場面を選び/);
   assert.match(html, /写真から作る/);
   assert.match(html, /最大10枚の写真を選び/);
@@ -53,7 +55,11 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /固定見本は試聴用モデル/);
   assert.doesNotMatch(html, /実際の動画では本番モデル/);
   assert.doesNotMatch(html, /ナイトマーケット/);
-  assert.match(html, /動画本体は通常、端末内で編集/);
+  assert.match(html, /動画データの取り扱い/);
+  assert.match(html, /カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います/);
+  assert.match(html, /写真と選んだ音源を外部のAIサービスへ送信しません/);
+  assert.match(html, /動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信/);
+  assert.doesNotMatch(html, /必要な音声・静止画だけを安全に送信/);
   assert.match(html, /編集とプレビューは無料/);
   assert.match(html, /最大1080p・透かしなし/);
   assert.doesNotMatch(html, /lifestyleGallery/);
@@ -248,6 +254,9 @@ test("publishes a privacy policy for uploaded media and external processors", as
   assert.match(html, /Stripe/);
   assert.match(html, /Google Analytics/);
   assert.match(html, /72時間/);
+  assert.match(html, /本サービス側で一時保管した処理用の動画・音声/);
+  assert.match(html, /外部事業者による保存期間/);
+  assert.match(html, /動画ファイルまたは動画から抽出した音声/);
   assert.match(html, /動画の静止画フレーム/);
   assert.match(html, /torudake\.reel@gmail\.com/);
   assert.match(html, /特定商取引法に基づく表記/);

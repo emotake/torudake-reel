@@ -3,8 +3,16 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, cssSource, photoReelSource, videoMixSource, voiceCatalogSource] = await Promise.all([
+const [
+  pageSource,
+  landingSource,
+  cssSource,
+  photoReelSource,
+  videoMixSource,
+  voiceCatalogSource,
+] = await Promise.all([
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(
     new URL("../app/photo-reel/photo-reel-client.tsx", import.meta.url),
@@ -142,9 +150,21 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
 });
 
 test("labels the permanent hero value instead of presenting it as news", () => {
-  assert.match(pageSource, /<span>かんたん動画編集<\/span>/);
-  assert.doesNotMatch(pageSource, /<span>AI自動編集<\/span>/);
-  assert.doesNotMatch(pageSource, /<span>新着<\/span>/);
+  assert.match(landingSource, /<span>かんたん動画編集<\/span>/);
+  assert.match(landingSource, /動画や写真を、/);
+  assert.match(landingSource, /<em>リールに。<\/em>/);
+  assert.match(landingSource, /必要な機能だけを選んで仕上げられます。/);
+  assert.doesNotMatch(landingSource, /<span>AI自動編集<\/span>/);
+  assert.doesNotMatch(landingSource, /<span>新着<\/span>/);
+  assert.doesNotMatch(landingSource, /素材を選んで、|作り方をひとつ選ぶだけ。/);
+});
+
+test("explains media processing without hiding full-video AI uploads", () => {
+  assert.match(landingSource, /カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います/);
+  assert.match(landingSource, /写真と選んだ音源を外部のAIサービスへ送信しません/);
+  assert.match(landingSource, /動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信/);
+  assert.doesNotMatch(landingSource, /必要な音声・静止画だけを安全に送信/);
+  assert.match(pageSource, /動画ファイル、または動画から取り出した音声・静止画を外部サービスへ送信/);
 });
 
 test("keeps first-screen trial and purchase claims precise", () => {

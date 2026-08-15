@@ -31,13 +31,14 @@ test("routes the home page through three equal creation choices before the demo"
   assert.doesNotMatch(home, /<VoiceSamples/);
 
   for (const copy of [
-    "素材はどれですか？",
-    "1本の動画を整える",
-    "動画を順番につなぐ",
+    "何から作りますか？",
+    "動画1本から作る",
+    "複数の動画から作る",
     "写真から作る",
   ]) {
     assert.match(landingSource, new RegExp(copy));
   }
+  assert.doesNotMatch(landingSource, /素材はどれですか？|まず作り方を選びます/);
   assert.match(landingSource, /href="\/video-mix"/);
   assert.match(landingSource, /href="\/photo-reel"/);
 });
