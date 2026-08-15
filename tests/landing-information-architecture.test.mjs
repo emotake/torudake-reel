@@ -274,9 +274,11 @@ test("uses full-width stacked promises with readable desktop typography", () => 
   assert.match(leadRule, /color:\s*#3f4b5e;/i);
   assert.match(termRule, /color:\s*#46536a;/i);
   assert.match(supportingRule, /color:\s*#4f5b70;/i);
-  assert.match(markRule, /width:\s*20px;/);
-  assert.match(markRule, /height:\s*1px;/);
-  assert.match(markRule, /background:\s*rgba\(25,\s*115,\s*70,\s*0\.68\);/);
+  assert.match(markRule, /width:\s*6px;/);
+  assert.match(markRule, /height:\s*6px;/);
+  assert.match(markRule, /border-radius:\s*50%;/);
+  assert.match(markRule, /background:\s*var\(--mint-dark\);/);
+  assert.doesNotMatch(markRule, /height:\s*1px|background:\s*rgba\(/);
 });
 
 test("keeps one video editor engine while giving it a focused public entry", () => {

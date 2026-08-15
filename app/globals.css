@@ -15829,11 +15829,11 @@ a {
   }
 
   .landingPromiseMark {
-    width: 20px;
-    height: 1px;
+    width: 6px;
+    height: 6px;
     margin-top: 0;
-    border-radius: 999px;
-    background: rgba(25, 115, 70, 0.68);
+    border-radius: 50%;
+    background: var(--mint-dark);
   }
 
   .landingPromiseCopy {
