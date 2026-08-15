@@ -171,7 +171,7 @@ test("publishes a Japanese web app manifest", () => {
   const value = JSON.parse(manifestSource);
   assert.equal(value.start_url, "/");
   assert.equal(value.lang, "ja");
-  assert.equal(value.icons[0].src, "/favicon.svg");
+  assert.equal(value.icons[0].src, "/favicon-v2.svg");
   assert.equal(value.description, SITE_DESCRIPTION);
   assert.equal(value.id, "/");
   assert.equal(value.scope, "/");

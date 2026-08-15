@@ -183,7 +183,9 @@ test("ships production metadata without starter markers", async () => {
   assert.match(html, /property="og:image"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.doesNotMatch(html, /nonoimageindex/);
-  assert.match(html, /rel="icon"[^>]+favicon\.svg/);
+  assert.match(html, /rel="icon"[^>]+favicon-v2\.svg/);
+  assert.match(html, /rel="icon"[^>]+favicon-v2-32\.png/);
+  assert.match(html, /rel="shortcut icon"[^>]+favicon\.ico/);
   assert.match(html, /rel="manifest"[^>]+manifest\.webmanifest/);
   assert.match(html, /type="application\/ld\+json"/);
   assert.match(html, /"@type":"WebApplication"/);

@@ -30,6 +30,48 @@ const pngDimensions = (buffer) => ({
   height: buffer.readUInt32BE(20),
 });
 
+test("uses the site brand mark for browser and installed-app icons", async () => {
+  const [favicon, faviconAlias, faviconPng, faviconIco, layout, manifestSource] =
+    await Promise.all([
+      readProjectFile("public/favicon-v2.svg"),
+      readProjectFile("public/favicon.svg"),
+      readProjectFile("public/favicon-v2-32.png", null),
+      readProjectFile("public/favicon.ico", null),
+      readProjectFile("app/layout.tsx"),
+      readProjectFile("public/manifest.webmanifest"),
+    ]);
+
+  for (const color of ["#162033", "#bd3825", "#b9f5d0", "#fff"]) {
+    assert.match(favicon, new RegExp(color, "i"));
+  }
+  assert.equal(faviconAlias, favicon);
+  assert.doesNotMatch(favicon, /#2e9eff|#0c79d8|#68c4ff/i);
+  assert.deepEqual(pngDimensions(faviconPng), { width: 32, height: 32 });
+  assert.equal(faviconIco.readUInt16LE(0), 0);
+  assert.equal(faviconIco.readUInt16LE(2), 1);
+  assert.equal(faviconIco.readUInt16LE(4), 1);
+  assert.equal(faviconIco.readUInt8(6), 32);
+  assert.equal(faviconIco.readUInt8(7), 32);
+  assert.equal(faviconIco.readUInt32LE(18), 22);
+  assert.equal(faviconIco.subarray(22, 30).toString("hex"), "89504e470d0a1a0a");
+  assert.doesNotMatch(layout, /url:\s*"\/favicon\.svg"/);
+  assert.doesNotMatch(manifestSource, /"\/favicon\.svg"/);
+
+  const compatibilityAliases = [
+    ["public/icon-192.png", "public/icon-192-v2.png"],
+    ["public/icon-512.png", "public/icon-512-v2.png"],
+    ["public/icon-maskable-512.png", "public/icon-maskable-512-v2.png"],
+    ["public/apple-touch-icon.png", "public/apple-touch-icon-v2.png"],
+  ];
+  for (const [legacyPath, currentPath] of compatibilityAliases) {
+    const [legacy, current] = await Promise.all([
+      readProjectFile(legacyPath, null),
+      readProjectFile(currentPath, null),
+    ]);
+    assert.deepEqual(legacy, current);
+  }
+});
+
 test("uses an accessible local font stack and coral surface color", async () => {
   const css = await readProjectFile("app/globals.css");
   assert.doesNotMatch(css, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
@@ -90,10 +132,11 @@ test("provides installable and Apple PWA icons at their declared sizes", async (
   ]);
   const manifest = JSON.parse(manifestSource);
   const expected = [
-    ["public/icon-192.png", 192],
-    ["public/icon-512.png", 512],
-    ["public/icon-maskable-512.png", 512],
-    ["public/apple-touch-icon.png", 180],
+    ["public/favicon-v2-32.png", 32],
+    ["public/icon-192-v2.png", 192],
+    ["public/icon-512-v2.png", 512],
+    ["public/icon-maskable-512-v2.png", 512],
+    ["public/apple-touch-icon-v2.png", 180],
   ];
 
   for (const [path, size] of expected) {
@@ -104,7 +147,7 @@ test("provides installable and Apple PWA icons at their declared sizes", async (
   assert.ok(
     manifest.icons.some(
       (icon) =>
-        icon.src === "/icon-192.png" &&
+        icon.src === "/icon-192-v2.png" &&
         icon.sizes === "192x192" &&
         icon.purpose === "any",
     ),
@@ -112,7 +155,7 @@ test("provides installable and Apple PWA icons at their declared sizes", async (
   assert.ok(
     manifest.icons.some(
       (icon) =>
-        icon.src === "/icon-512.png" &&
+        icon.src === "/icon-512-v2.png" &&
         icon.sizes === "512x512" &&
         icon.purpose === "any",
     ),
@@ -120,16 +163,19 @@ test("provides installable and Apple PWA icons at their declared sizes", async (
   assert.ok(
     manifest.icons.some(
       (icon) =>
-        icon.src === "/icon-maskable-512.png" &&
+        icon.src === "/icon-maskable-512-v2.png" &&
         icon.sizes === "512x512" &&
         icon.purpose === "maskable",
     ),
   );
-  assert.match(layout, /url:\s*"\/icon-192\.png"[^\n]+sizes:\s*"192x192"/);
-  assert.match(layout, /url:\s*"\/icon-512\.png"[^\n]+sizes:\s*"512x512"/);
+  assert.match(layout, /url:\s*"\/favicon-v2\.svg"[^\n]+type:\s*"image\/svg\+xml"/);
+  assert.match(layout, /url:\s*"\/favicon-v2-32\.png"[^\n]+sizes:\s*"32x32"/);
+  assert.match(layout, /url:\s*"\/icon-192-v2\.png"[^\n]+sizes:\s*"192x192"/);
+  assert.match(layout, /url:\s*"\/icon-512-v2\.png"[^\n]+sizes:\s*"512x512"/);
+  assert.match(layout, /shortcut:\s*"\/favicon\.ico"/);
   assert.match(
     layout,
-    /url:\s*"\/apple-touch-icon\.png"[\s\S]*?sizes:\s*"180x180"/,
+    /url:\s*"\/apple-touch-icon-v2\.png"[\s\S]*?sizes:\s*"180x180"/,
   );
 });
 
