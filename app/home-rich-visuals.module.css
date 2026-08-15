@@ -783,6 +783,7 @@
   background:
     radial-gradient(circle at 90% 10%, rgba(185, 245, 208, 0.55), transparent 36%),
     linear-gradient(145deg, #f9f6f0, #f0ece4);
+  container-type: inline-size;
 }
 
 .workflowVisual::before {
@@ -836,10 +837,16 @@
 }
 
 .mockBar small {
+  min-width: 0;
   margin-left: auto;
+  overflow: hidden;
   color: #6b7586;
   font-size: 7px;
   font-weight: 850;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
 }
 
 .selectArtwork {
@@ -924,138 +931,172 @@
 }
 
 .settingsArtwork {
+  position: relative;
   display: grid;
   height: calc(100% - 24px);
-  grid-template-columns: 0.62fr 1fr;
-  gap: 9px;
-  padding: 9px;
+  grid-template-columns: minmax(0, 68px) minmax(0, 76px);
+  gap: clamp(6px, 7%, 15px);
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
 }
 
-.settingPreview {
+.settingMiniPhone {
   position: relative;
+  width: 100%;
+  max-width: 68px;
+  aspect-ratio: 9 / 14;
   overflow: hidden;
-  border-radius: 9px;
+  padding: 3px;
+  border: 2px solid var(--visual-ink);
+  border-radius: 11px;
   background: var(--visual-ink);
+  box-shadow: 4px 4px 0 var(--visual-mint);
 }
 
 .settingPoster {
   position: absolute;
-  inset: 0;
-}
-
-.settingPreview > span {
-  position: absolute;
-  right: 7px;
-  bottom: 10px;
-  left: 7px;
-  padding: 4px 3px;
-  border-radius: 4px;
-  background: rgba(16, 24, 40, 0.8);
-  color: white;
-  font-size: 6px;
-  font-weight: 900;
-  text-align: center;
-}
-
-.settingControls {
-  display: grid;
-  min-width: 0;
-  align-content: center;
-  gap: 8px;
-}
-
-.settingControls > div {
-  display: grid;
-  gap: 4px;
-}
-
-.settingControls small {
-  color: #657084;
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.segmentedControl,
-.captionControl {
-  display: grid;
-  min-width: 0;
-  height: 25px;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid #e3e0da;
+  inset: 3px;
   border-radius: 7px;
-  background: #f5f3ef;
-  font-size: 6px;
-  font-style: normal;
-  text-align: center;
 }
 
-.segmentedControl {
-  grid-template-columns: 1fr 1fr;
-}
-
-.segmentedControl b {
+.settingCaptionLines {
+  position: absolute;
+  right: 9px;
+  bottom: 15px;
+  left: 9px;
   display: grid;
-  height: 100%;
-  place-items: center;
+  gap: 3px;
+  padding: 4px;
   border-radius: 5px;
-  background: white;
-  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.09);
+  background: rgba(16, 24, 40, 0.8);
 }
 
-.segmentedControl i {
-  color: #737d8d;
-  font-style: normal;
+.settingCaptionLines i,
+.previewCaptionLines i {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.captionControl {
-  grid-template-columns: 1fr 0.7fr 0.7fr;
-}
-
-.captionControl b {
-  color: var(--visual-ink);
-  font-size: 9px;
-}
-
-.captionControl i {
-  width: 13px;
-  height: 8px;
+.settingCaptionLines i:last-child,
+.previewCaptionLines i:last-child {
+  width: 68%;
   justify-self: center;
+}
+
+.settingTools {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.soundTool,
+.captionTool {
+  position: relative;
+  display: grid;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 43px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(16, 24, 40, 0.09);
+  border-radius: 10px;
+  background: #f7f5f1;
+}
+
+.soundTool {
+  border-color: rgba(25, 115, 70, 0.18);
+  background: #effaf3;
+}
+
+.soundTool svg {
+  width: min(65%, 35px);
+  fill: none;
+  stroke: var(--visual-mint-dark, #197346);
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.soundTool > i {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid white;
+  border-radius: 50%;
+  background: #25a967;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
+}
+
+.captionTool {
+  grid-template-columns: auto 10px 10px;
+  gap: 4px;
+  padding-inline: 6px;
+  border-color: rgba(189, 56, 37, 0.16);
+  background: #fff6f2;
+}
+
+.captionTool b {
+  color: var(--visual-ink);
+  font-family: Georgia, serif;
+  font-size: 13px;
+  letter-spacing: -0.08em;
+}
+
+.captionTool i {
+  display: block;
+  width: 10px;
+  height: 10px;
   border-radius: 2px;
   background: var(--visual-ink);
 }
 
-.captionControl i:last-child {
+.captionTool i:last-child {
   background: var(--visual-coral);
 }
 
 .settingsDone,
 .readyChip {
-  display: inline-flex;
-  width: max-content;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
-  border-radius: 999px;
-  background: #eaf8ef;
-  color: #17623b;
-  font-size: 6px;
-  font-weight: 900;
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #25a967;
+  color: white;
+  box-shadow: 0 5px 13px rgba(16, 24, 40, 0.2);
+}
+
+.settingsDone {
+  right: max(5px, calc(50% - 78px));
+  bottom: 10px;
 }
 
 .previewArtwork {
+  position: relative;
   display: grid;
   height: calc(100% - 24px);
-  grid-template-columns: 74px 1fr;
-  gap: 11px;
-  align-items: center;
-  padding: 8px 12px;
+  place-items: center;
+  padding: 7px;
+}
+
+.previewStage {
+  position: relative;
+  width: min(100%, 66px);
+  max-height: 110px;
+  aspect-ratio: 9 / 15;
 }
 
 .previewPhone {
   position: relative;
-  height: 120px;
+  width: 100%;
+  height: 100%;
   padding: 3px;
   overflow: hidden;
   border: 2px solid var(--visual-ink);
@@ -1069,18 +1110,16 @@
   border-radius: 7px;
 }
 
-.previewCaption {
+.previewCaptionLines {
   position: absolute;
-  right: 7px;
-  bottom: 17px;
-  left: 7px;
-  padding: 3px;
-  border-radius: 3px;
+  right: 9px;
+  bottom: 23px;
+  left: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 4px;
   background: rgba(16, 24, 40, 0.78);
-  color: white;
-  font-size: 5px;
-  font-weight: 900;
-  text-align: center;
 }
 
 .previewPlay {
@@ -1097,54 +1136,246 @@
   fill: currentColor;
 }
 
-.previewDetails {
-  display: grid;
-  min-width: 0;
-  align-content: center;
-  gap: 13px;
-}
-
 .previewProgress {
+  position: absolute;
+  right: 9px;
+  bottom: 10px;
+  left: 9px;
+  display: block;
   height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e0e4e8;
+  background: rgba(255, 255, 255, 0.38);
 }
 
-.previewProgress span {
+.previewProgress i {
   display: block;
   width: 72%;
   height: 100%;
   border-radius: inherit;
+  background: white;
+  animation: playerProgress 4.8s ease-in-out infinite;
+}
+
+.readyChip {
+  top: 2px;
+  right: 2px;
+  animation: statusPulse 2.4s ease-in-out infinite;
+}
+
+@container (max-width: 150px) {
+  .workflow_settings .mockBar,
+  .workflow_preview .mockBar {
+    height: 20px;
+    gap: 3px;
+    padding-inline: 5px;
+  }
+
+  .workflow_settings .mockBar > span,
+  .workflow_preview .mockBar > span {
+    width: 4px;
+    height: 4px;
+  }
+
+  .workflow_settings .mockBar small,
+  .workflow_preview .mockBar small {
+    display: none;
+  }
+
+  .settingsArtwork,
+  .previewArtwork {
+    height: calc(100% - 20px);
+  }
+
+  .settingsArtwork {
+    grid-template-columns: minmax(26px, 38px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 4px;
+    padding: 5px;
+  }
+
+  .settingMiniPhone {
+    width: clamp(30px, 100%, 38px);
+    align-self: center;
+    justify-self: center;
+    border-width: 1.5px;
+    border-radius: 8px;
+    box-shadow: 3px 3px 0 var(--visual-mint);
+  }
+
+  .settingPoster {
+    inset: 2px;
+    border-radius: 5px;
+  }
+
+  .settingCaptionLines {
+    right: 5px;
+    bottom: 8px;
+    left: 5px;
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .settingTools {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, 28px);
+    align-self: center;
+    gap: 4px;
+  }
+
+  .soundTool,
+  .captionTool {
+    height: 28px;
+    border-radius: 7px;
+  }
+
+  .soundTool svg {
+    width: min(75%, 28px);
+  }
+
+  .soundTool > i {
+    top: 3px;
+    right: 3px;
+    width: 5px;
+    height: 5px;
+  }
+
+  .captionTool {
+    grid-template-columns: minmax(0, 1fr) 8px;
+    gap: 2px;
+    padding-inline: 3px;
+  }
+
+  .captionTool b {
+    overflow: hidden;
+    font-size: 10px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .captionTool i {
+    width: 8px;
+    height: 8px;
+  }
+
+  .captionTool i:last-child {
+    display: none;
+  }
+
+  .settingsDone,
+  .readyChip {
+    width: 18px;
+    height: 18px;
+    border-width: 1.5px;
+  }
+
+  .settingsDone {
+    top: 4px;
+    right: 4px;
+    bottom: auto;
+  }
+
+  .previewArtwork {
+    padding: 7px 5px;
+  }
+
+  .previewStage {
+    width: auto;
+    max-width: 100%;
+    height: 100%;
+    max-height: none;
+    aspect-ratio: 9 / 15;
+  }
+
+  .previewPhone {
+    border-width: 1.5px;
+    border-radius: 9px;
+    box-shadow: 3px 3px 0 var(--visual-mint);
+  }
+
+  .previewPoster {
+    border-radius: 5px;
+  }
+
+  .previewCaptionLines {
+    right: 6px;
+    bottom: 16px;
+    left: 6px;
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .previewPlay {
+    width: 21px;
+    height: 21px;
+  }
+
+  .previewPlay svg {
+    width: 9px;
+  }
+
+  .previewProgress {
+    right: 6px;
+    bottom: 8px;
+    left: 6px;
+    height: 3px;
+  }
+
+  .readyChip {
+    top: 3px;
+    right: 3px;
+  }
+
+  .workflow_preview .previewFinishMark {
+    display: none;
+  }
+}
+
+@container (max-width: 100px) {
+  .workflow_settings .settingsDone {
+    display: none;
+  }
+
+  .workflow_settings .captionTool {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-inline: 1px;
+  }
+
+  .workflow_settings .captionTool b {
+    font-size: 8px;
+  }
+
+  .workflow_settings .captionTool i {
+    display: none;
+  }
+}
+
+.previewFinishMark {
+  position: absolute;
+  right: max(5px, calc(50% - 72px));
+  bottom: 15px;
+  display: grid;
+  width: 26px;
+  gap: 4px;
+  padding: 7px 6px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 6px 16px rgba(16, 24, 40, 0.12);
+}
+
+.previewFinishMark i {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
   background: var(--visual-coral);
 }
 
-.previewActions {
-  display: grid;
-  grid-template-columns: 0.55fr 1fr;
-  gap: 5px;
-  font-size: 6px;
-  font-style: normal;
-  text-align: center;
-}
-
-.previewActions i,
-.previewActions b {
-  display: grid;
-  min-height: 25px;
-  place-items: center;
-  border-radius: 6px;
-  font-style: normal;
-}
-
-.previewActions i {
-  border: 1px solid #dfddd8;
-  color: #6a7484;
-}
-
-.previewActions b {
+.previewFinishMark i:last-child {
+  width: 65%;
   background: var(--visual-ink);
-  color: white;
 }
 
 @keyframes sourceFloat {

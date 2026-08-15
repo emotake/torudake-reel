@@ -14565,7 +14565,7 @@ a {
 }
 
 .homeBenefitGrid span,
-.homeStepGrid span {
+.homeStepCopy > span {
   display: inline-grid;
   width: 34px;
   height: 34px;

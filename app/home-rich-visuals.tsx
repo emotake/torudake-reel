@@ -281,30 +281,31 @@ function SelectArtwork() {
 function SettingsArtwork() {
   return (
     <div className={styles.settingsArtwork}>
-      <div className={styles.settingPreview}>
+      <div className={styles.settingMiniPhone}>
         <div className={`${styles.settingPoster} ${styles.sceneSea}`} />
-        <span>海辺を歩いた午後</span>
-      </div>
-      <div className={styles.settingControls}>
-        <div>
-          <small>音声</small>
-          <span className={styles.segmentedControl}>
-            <b>元の音声</b>
-            <i>AI音声</i>
-          </span>
-        </div>
-        <div>
-          <small>テロップ</small>
-          <span className={styles.captionControl}>
-            <b>Aa</b>
-            <i />
-            <i />
-          </span>
-        </div>
-        <span className={styles.settingsDone}>
-          <CheckMark /> 設定できました
+        <span className={styles.settingCaptionLines}>
+          <i />
+          <i />
         </span>
       </div>
+
+      <div className={styles.settingTools}>
+        <span className={styles.soundTool}>
+          <svg viewBox="0 0 32 18" focusable="false">
+            <path d="M2 9h3m3-4v8m4-10v12m4-8v4m4-7v10m4-8v6m3-3h3" />
+          </svg>
+          <i />
+        </span>
+        <span className={styles.captionTool}>
+          <b>Aa</b>
+          <i />
+          <i />
+        </span>
+      </div>
+
+      <span className={styles.settingsDone}>
+        <CheckMark />
+      </span>
     </div>
   );
 }
@@ -312,25 +313,28 @@ function SettingsArtwork() {
 function PreviewArtwork() {
   return (
     <div className={styles.previewArtwork}>
-      <div className={styles.previewPhone}>
-        <div className={`${styles.previewPoster} ${styles.posterImage}`} />
-        <span className={styles.previewCaption}>今日の景色を、15秒に。</span>
-        <span className={styles.previewPlay}>
-          <PlayMark />
-        </span>
-      </div>
-      <div className={styles.previewDetails}>
+      <div className={styles.previewStage}>
+        <div className={styles.previewPhone}>
+          <div className={`${styles.previewPoster} ${styles.posterImage}`} />
+          <span className={styles.previewCaptionLines}>
+            <i />
+            <i />
+          </span>
+          <span className={styles.previewPlay}>
+            <PlayMark />
+          </span>
+          <span className={styles.previewProgress}>
+            <i />
+          </span>
+        </div>
         <span className={styles.readyChip}>
-          <CheckMark /> プレビュー準備完了
+          <CheckMark />
         </span>
-        <div className={styles.previewProgress}>
-          <span />
-        </div>
-        <div className={styles.previewActions}>
-          <i>戻る</i>
-          <b>仕上がりを見る</b>
-        </div>
       </div>
+      <span className={styles.previewFinishMark}>
+        <i />
+        <i />
+      </span>
     </div>
   );
 }

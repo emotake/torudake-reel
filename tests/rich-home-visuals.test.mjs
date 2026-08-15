@@ -35,6 +35,30 @@ function jpegDimensions(bytes) {
   throw new Error("JPEG size marker not found");
 }
 
+function sourceBetween(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.ok(start >= 0, `Missing source marker: ${startMarker}`);
+  const end = endMarker ? source.indexOf(endMarker, start + startMarker.length) : source.length;
+  assert.ok(end > start, `Missing source marker: ${endMarker}`);
+  return source.slice(start, end);
+}
+
+function cssBlock(source, selector) {
+  const selectorIndex = source.indexOf(selector);
+  assert.ok(selectorIndex >= 0, `Missing CSS selector: ${selector}`);
+  const openingBrace = source.indexOf("{", selectorIndex);
+  assert.ok(openingBrace >= 0, `Missing opening brace for: ${selector}`);
+
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(openingBrace + 1, index);
+  }
+
+  throw new Error(`Missing closing brace for: ${selector}`);
+}
+
 test("places visual proof before the three creation choices", () => {
   const heroIndex = landingSource.indexOf("<HeroOutcomeVisual");
   const chooserIndex = landingSource.indexOf("<CreationChooser");
@@ -67,6 +91,94 @@ test("shows the before-and-after story and three real workflow previews", () => 
     assert.match(landingSource, new RegExp(`<WorkflowMiniVisual step="${step}"`));
   }
   assert.match(visualSource, /aria-label=\{WORKFLOW_LABELS\[step\]\}/);
+});
+
+test("uses compact settings and preview artwork without squeezing explanatory copy", () => {
+  const settingsSource = sourceBetween(
+    visualSource,
+    "function SettingsArtwork()",
+    "function PreviewArtwork()",
+  );
+  const previewSource = sourceBetween(visualSource, "function PreviewArtwork()");
+
+  for (const className of [
+    "settingMiniPhone",
+    "settingCaptionLines",
+    "settingTools",
+    "soundTool",
+    "captionTool",
+    "settingsDone",
+  ]) {
+    assert.match(settingsSource, new RegExp(`styles\\.${className}\\b`));
+  }
+  for (const className of [
+    "previewStage",
+    "previewPhone",
+    "previewCaptionLines",
+    "previewProgress",
+    "readyChip",
+    "previewFinishMark",
+  ]) {
+    assert.match(previewSource, new RegExp(`styles\\.${className}\\b`));
+  }
+
+  assert.match(visualSource, /settings:\s*"音声とテロップを選ぶ操作画面のイメージ"/);
+  assert.match(visualSource, /preview:\s*"完成前に縦型動画を確認する画面のイメージ"/);
+  assert.doesNotMatch(settingsSource, /元の音声|AI音声|設定できました/);
+  assert.doesNotMatch(previewSource, /今日の景色を、15秒に。|プレビュー準備完了|仕上がりを見る|戻る/);
+});
+
+test("keeps settings and preview artwork contained at narrow card widths", () => {
+  const workflowVisualCss = cssBlock(visualCss, ".workflowVisual");
+  const mockWindowCss = cssBlock(visualCss, ".mockWindow");
+  const settingPhoneCss = cssBlock(visualCss, ".settingMiniPhone");
+  const settingToolsCss = cssBlock(visualCss, ".settingTools");
+  const settingControlCss = cssBlock(visualCss, ".soundTool,");
+  const previewPhoneCss = cssBlock(visualCss, ".previewPhone");
+  const narrowCss = cssBlock(visualCss, "@container (max-width: 150px)");
+  const narrowSettingsCss = cssBlock(narrowCss, ".settingsArtwork {");
+  const narrowSettingPhoneCss = cssBlock(narrowCss, ".settingMiniPhone");
+  const narrowSettingToolsCss = cssBlock(narrowCss, ".settingTools");
+  const narrowPreviewStageCss = cssBlock(narrowCss, ".previewStage");
+  const narrowMockLabelCss = cssBlock(narrowCss, ".workflow_settings .mockBar small,");
+  const narrowFinishMarkCss = cssBlock(narrowCss, ".workflow_preview .previewFinishMark");
+  const extraNarrowCss = cssBlock(visualCss, "@container (max-width: 100px)");
+  const extraNarrowSettingsDoneCss = cssBlock(
+    extraNarrowCss,
+    ".workflow_settings .settingsDone",
+  );
+
+  assert.match(workflowVisualCss, /container-type:\s*inline-size/);
+  assert.match(workflowVisualCss, /overflow:\s*hidden/);
+  assert.match(mockWindowCss, /overflow:\s*hidden/);
+  assert.match(settingPhoneCss, /width:\s*100%/);
+  assert.match(settingPhoneCss, /overflow:\s*hidden/);
+  assert.match(settingToolsCss, /min-width:\s*0/);
+  assert.match(settingControlCss, /min-width:\s*0/);
+  assert.match(settingControlCss, /overflow:\s*hidden/);
+  assert.match(settingControlCss, /box-sizing:\s*border-box/);
+  assert.match(previewPhoneCss, /width:\s*100%/);
+  assert.match(previewPhoneCss, /overflow:\s*hidden/);
+
+  assert.match(
+    narrowSettingsCss,
+    /grid-template-columns:\s*minmax\(26px,\s*38px\)\s+minmax\(0,\s*1fr\)/,
+  );
+  assert.match(narrowSettingsCss, /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+  assert.match(narrowSettingPhoneCss, /width:\s*clamp\([^;]*100%[^;]*\)/);
+  assert.match(narrowSettingToolsCss, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(narrowSettingToolsCss, /grid-template-rows:\s*repeat\(2,\s*28px\)/);
+  assert.match(narrowPreviewStageCss, /width:\s*auto/);
+  assert.match(narrowPreviewStageCss, /max-width:\s*100%/);
+  assert.match(narrowPreviewStageCss, /height:\s*100%/);
+  assert.match(narrowMockLabelCss, /display:\s*none/);
+  assert.match(narrowFinishMarkCss, /display:\s*none/);
+  assert.match(extraNarrowSettingsDoneCss, /display:\s*none/);
+  assert.doesNotMatch(narrowCss, /grid-template-columns:\s*74px\s+1fr/);
+  assert.doesNotMatch(narrowCss, /overflow:\s*(?:visible|auto|scroll)/);
+  assert.doesNotMatch(narrowCss, /writing-mode:\s*vertical/);
+  assert.match(globalCss, /\.homeBenefitGrid span,\s*\.homeStepCopy > span\s*\{/);
+  assert.doesNotMatch(globalCss, /\.homeStepGrid span\s*\{/);
 });
 
 test("keeps decorative motion optional and content order semantic", () => {
