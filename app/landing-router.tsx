@@ -21,6 +21,10 @@ import {
   ModeMiniVisual,
   WorkflowMiniVisual,
 } from "./home-rich-visuals";
+import {
+  HomeMotionExperience,
+  HomeTransformationCompare,
+} from "./home-premium-motion";
 
 type LandingSharedProps = {
   openPicker: () => void;
@@ -71,13 +75,21 @@ function CreationChooser({
   isSampleLoading,
 }: Pick<LandingSharedProps, "openPicker" | "openSample" | "isSampleLoading">) {
   return (
-    <section className="creationChooser" id="create" aria-labelledby="creationChooserTitle">
-      <header>
+    <section
+      className="creationChooser"
+      id="create"
+      aria-labelledby="creationChooserTitle"
+    >
+      <header data-home-reveal="chooser-heading">
         <h2 id="creationChooserTitle">何から作りますか？</h2>
         <p>編集とプレビューは無料です。</p>
       </header>
       <div className="creationModeGrid">
-        <article className="creationModeCard isRecommended creationModeSingle">
+        <article
+          className="creationModeCard isRecommended creationModeSingle"
+          data-home-reveal="mode"
+          data-home-reveal-order="0"
+        >
           <div className="creationModeLabel">
             <span aria-hidden="true">1</span>
             <em>はじめてにおすすめ</em>
@@ -100,7 +112,11 @@ function CreationChooser({
           </button>
         </article>
 
-        <article className="creationModeCard creationModeMultiple">
+        <article
+          className="creationModeCard creationModeMultiple"
+          data-home-reveal="mode"
+          data-home-reveal-order="1"
+        >
           <div className="creationModeLabel">
             <span aria-hidden="true">2–5</span>
           </div>
@@ -114,7 +130,11 @@ function CreationChooser({
           </Link>
         </article>
 
-        <article className="creationModeCard creationModePhotos">
+        <article
+          className="creationModeCard creationModePhotos"
+          data-home-reveal="mode"
+          data-home-reveal-order="2"
+        >
           <div className="creationModeLabel">
             <span aria-hidden="true">写真</span>
           </div>
@@ -153,7 +173,13 @@ function PricingTeaser() {
   }, []);
 
   return (
-    <section className="homePricingTeaser" id="price" ref={sectionRef} aria-labelledby="homePriceTitle">
+    <section
+      className="homePricingTeaser"
+      id="price"
+      ref={sectionRef}
+      aria-labelledby="homePriceTitle"
+      data-home-reveal="pricing"
+    >
       <header>
         <p className="eyebrow">料金</p>
         <h2 id="homePriceTitle">仕上がりを見てから、保存方法を選べます。</h2>
@@ -229,10 +255,10 @@ function VoiceSamples() {
 
 export function HomeLanding(props: LandingSharedProps) {
   return (
-    <div className="landingRouter">
-      <section className="landingIntro">
+    <HomeMotionExperience>
+      <section className="landingIntro" data-home-reveal="intro">
         <div className="landingHeroStage">
-          <div className="landingIntroCopy">
+          <div className="landingIntroCopy" data-home-reveal="hero-copy">
             <p className="eyebrow">
               <span>かんたん動画編集</span>
               素材を選ぶだけで、投稿できる動画へ
@@ -265,37 +291,28 @@ export function HomeLanding(props: LandingSharedProps) {
         />
       </section>
 
-      <section className="landingDemoSection" aria-labelledby="landingDemoTitle">
-        <div className="landingDemoStory">
+      <section
+        className="landingDemoSection"
+        aria-labelledby="landingDemoTitle"
+        data-home-reveal="transformation"
+      >
+        <div className="landingDemoStory" data-home-depth="story">
           <div className="landingSectionCopy">
             <p className="eyebrow">実際の仕上がり</p>
             <h2 id="landingDemoTitle">サンプル動画で、仕上がりを確認できます。</h2>
             <strong className="landingDemoTransformation">3つの場面が、投稿できる1本に。</strong>
             <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
           </div>
-          <ol className="demoSceneRail" aria-label="編集前に選んだ3つの場面">
-            <li>
-              <span className="demoSceneThumb isRain" aria-hidden="true" />
-              <span><small>素材 01</small>雨の街</span>
-            </li>
-            <li>
-              <span className="demoSceneThumb isSea" aria-hidden="true" />
-              <span><small>素材 02</small>海辺</span>
-            </li>
-            <li>
-              <span className="demoSceneThumb isRiver" aria-hidden="true" />
-              <span><small>素材 03</small>川沿い</span>
-            </li>
-          </ol>
-          <p className="demoSceneOutcome">
-            <span aria-hidden="true">↳</span>
-            カット・音声・テロップを整えた、10秒の完成動画へ
-          </p>
+          <HomeTransformationCompare />
         </div>
         {props.demo}
       </section>
 
-      <section className="homeBenefitBand" aria-label="共通する安心ポイント">
+      <section
+        className="homeBenefitBand"
+        aria-label="共通する安心ポイント"
+        data-home-reveal="benefits"
+      >
         <div className="homeBenefitLead">
           <span aria-hidden="true">●</span>
           <p><strong>無料で仕上がりを確認。</strong>保存するときだけ、料金を選びます。</p>
@@ -321,14 +338,18 @@ export function HomeLanding(props: LandingSharedProps) {
         </div>
       </section>
 
-      <section className="homeSteps" id="how" aria-labelledby="homeStepsTitle">
-        <header>
+      <section
+        className="homeSteps"
+        id="how"
+        aria-labelledby="homeStepsTitle"
+      >
+        <header data-home-reveal="workflow-heading">
           <p className="eyebrow">共通の3ステップ</p>
           <h2 id="homeStepsTitle">難しいタイムライン操作はありません。</h2>
           <p>素材を選ぶ、仕上げ方を選ぶ、プレビューを確認する。必要なところだけ直せます。</p>
         </header>
         <div className="homeStepGrid homeStepRichGrid">
-          <article>
+          <article data-home-reveal="step" data-home-reveal-order="0">
             <WorkflowMiniVisual step="select" />
             <div className="homeStepCopy">
               <span>01</span>
@@ -336,7 +357,7 @@ export function HomeLanding(props: LandingSharedProps) {
               <p>動画1本、複数動画、写真から、作りたいものに合う入口を選択。</p>
             </div>
           </article>
-          <article>
+          <article data-home-reveal="step" data-home-reveal-order="1">
             <WorkflowMiniVisual step="settings" />
             <div className="homeStepCopy">
               <span>02</span>
@@ -344,7 +365,7 @@ export function HomeLanding(props: LandingSharedProps) {
               <p>音声、カット、テロップ、つなぎ方など、必要な項目だけ表示。</p>
             </div>
           </article>
-          <article>
+          <article data-home-reveal="step" data-home-reveal-order="2">
             <WorkflowMiniVisual step="preview" />
             <div className="homeStepCopy">
               <span>03</span>
@@ -357,7 +378,7 @@ export function HomeLanding(props: LandingSharedProps) {
 
       <PricingTeaser />
 
-      <section className="homeFaq" aria-labelledby="homeFaqTitle">
+      <section className="homeFaq" aria-labelledby="homeFaqTitle" data-home-reveal="faq">
         <header>
           <p className="eyebrow">よくある質問</p>
           <h2 id="homeFaqTitle">始める前に知りたいこと。</h2>
@@ -380,7 +401,11 @@ export function HomeLanding(props: LandingSharedProps) {
         </details>
       </section>
 
-      <section className="homeFinalChooser" aria-labelledby="homeFinalTitle">
+      <section
+        className="homeFinalChooser"
+        aria-labelledby="homeFinalTitle"
+        data-home-reveal="final"
+      >
         <h2 id="homeFinalTitle">素材に合う作り方から始める</h2>
         <p>仕上がりを確認するまでは無料です。</p>
         <div className="homeFinalActions">
@@ -389,7 +414,7 @@ export function HomeLanding(props: LandingSharedProps) {
           <Link href="/photo-reel">写真から作る</Link>
         </div>
       </section>
-    </div>
+    </HomeMotionExperience>
   );
 }
 

@@ -10,6 +10,9 @@
   --visual-mint: #b9f5d0;
   --visual-mint-dark: #197346;
   --visual-paper: #fffdf8;
+  --home-motion-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --home-motion-morph: cubic-bezier(0.65, 0, 0.35, 1);
+  --home-motion-micro: cubic-bezier(0.2, 0.8, 0.2, 1);
   width: min(100%, 720px);
   margin: 0 auto;
 }
@@ -32,7 +35,27 @@
   box-shadow:
     0 32px 90px rgba(16, 24, 40, 0.13),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: perspective(1100px)
+    translate3d(var(--home-depth-x), var(--home-depth-y), 0)
+    rotateX(var(--home-depth-rotate-x))
+    rotateY(var(--home-depth-rotate-y));
+  transition: transform 420ms var(--home-motion-micro);
   isolation: isolate;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :global([data-home-motion="enhanced"]) .heroCanvas[data-home-depth] {
+    will-change: transform;
+  }
+}
+
+.heroOutcome [data-home-motion-part],
+.modeVisual[data-home-motion-visual],
+.workflowVisual[data-home-motion-visual] {
+  backface-visibility: hidden;
+  transition:
+    transform 640ms var(--home-motion-enter, cubic-bezier(0.16, 1, 0.3, 1)),
+    opacity 420ms var(--home-motion-micro, cubic-bezier(0.2, 0.8, 0.2, 1));
 }
 
 .heroCanvas::before {
@@ -60,7 +83,6 @@
   height: 16px;
   border: 4px solid var(--visual-mint-dark);
   background: white;
-  animation: orbitDot 5.6s ease-in-out infinite;
 }
 
 .brandDotCoral {
@@ -71,7 +93,6 @@
   border: 8px solid var(--visual-coral-soft);
   background: var(--visual-coral);
   opacity: 0.82;
-  animation: orbitDot 6.4s 0.4s ease-in-out infinite reverse;
 }
 
 .brandDash {
@@ -132,7 +153,6 @@
   background: white;
   box-shadow: 0 18px 44px rgba(16, 24, 40, 0.17);
   transform-origin: center;
-  will-change: transform;
 }
 
 .sourceCardRain {
@@ -140,7 +160,6 @@
   left: 0;
   z-index: 1;
   rotate: -7deg;
-  animation: sourceFloat 5.3s ease-in-out infinite;
 }
 
 .sourceCardSea {
@@ -148,7 +167,6 @@
   right: 0;
   z-index: 3;
   rotate: 5deg;
-  animation: sourceFloat 5.9s 0.5s ease-in-out infinite reverse;
 }
 
 .sourceCardRiver {
@@ -156,7 +174,6 @@
   left: 9%;
   z-index: 2;
   rotate: -2deg;
-  animation: sourceFloat 6.2s 1s ease-in-out infinite;
 }
 
 .sceneImage,
@@ -261,8 +278,8 @@
 .flowPulse {
   stroke: var(--visual-coral, #bd3825);
   stroke-dasharray: 7 11;
+  stroke-dashoffset: -18;
   stroke-width: 3;
-  animation: flowDash 1.4s linear infinite;
 }
 
 .flowHead {
@@ -297,7 +314,6 @@
   border-radius: 50%;
   background: #24a967;
   box-shadow: 0 0 0 4px rgba(36, 169, 103, 0.13);
-  animation: statusPulse 2.4s ease-in-out infinite;
 }
 
 .heroPhone {
@@ -337,8 +353,7 @@
 .phoneScreen .posterImage {
   position: absolute;
   inset: 0;
-  transform: scale(1.03);
-  animation: posterPan 9s ease-in-out infinite alternate;
+  transform: scale(1.12) translate3d(2%, 1%, 0);
 }
 
 .posterShade {
@@ -434,11 +449,10 @@
 
 .playerRail span {
   display: block;
-  width: 62%;
+  width: 82%;
   height: 100%;
   border-radius: inherit;
   background: white;
-  animation: playerProgress 4.8s ease-in-out infinite;
 }
 
 .resultChip {
@@ -473,6 +487,8 @@
   --visual-ink: #101828;
   --visual-coral: #bd3825;
   --visual-mint: #b9f5d0;
+  --home-motion-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --home-motion-micro: cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
   width: 100%;
   height: 154px;
@@ -743,7 +759,8 @@
   border: 1.5px solid rgba(255, 255, 255, 0.88);
   border-radius: 50%;
   box-shadow: 0 0 0 4px rgba(16, 24, 40, 0.1);
-  animation: focusDrift 4.2s ease-in-out infinite alternate;
+  translate: 6px -5px;
+  scale: 1.12;
 }
 
 .photoMotion {
@@ -774,6 +791,8 @@
   --visual-ink: #101828;
   --visual-coral: #bd3825;
   --visual-mint: #b9f5d0;
+  --home-motion-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --home-motion-micro: cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
   height: 176px;
   margin: -3px -3px 18px;
@@ -1150,17 +1169,15 @@
 
 .previewProgress i {
   display: block;
-  width: 72%;
+  width: 82%;
   height: 100%;
   border-radius: inherit;
   background: white;
-  animation: playerProgress 4.8s ease-in-out infinite;
 }
 
 .readyChip {
   top: 2px;
   right: 2px;
-  animation: statusPulse 2.4s ease-in-out infinite;
 }
 
 @container (max-width: 150px) {
@@ -1378,73 +1395,6 @@
   background: var(--visual-ink);
 }
 
-@keyframes sourceFloat {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-
-  50% {
-    translate: 0 -5px;
-  }
-}
-
-@keyframes flowDash {
-  to {
-    stroke-dashoffset: -18;
-  }
-}
-
-@keyframes orbitDot {
-  0%,
-  100% {
-    translate: 0 0;
-  }
-
-  50% {
-    translate: 6px -7px;
-  }
-}
-
-@keyframes statusPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 4px rgba(36, 169, 103, 0.13);
-  }
-
-  50% {
-    box-shadow: 0 0 0 7px rgba(36, 169, 103, 0.05);
-  }
-}
-
-@keyframes posterPan {
-  from {
-    transform: scale(1.05) translate3d(-1%, -1%, 0);
-  }
-
-  to {
-    transform: scale(1.12) translate3d(2%, 1%, 0);
-  }
-}
-
-@keyframes playerProgress {
-  0% {
-    width: 12%;
-  }
-
-  70%,
-  100% {
-    width: 82%;
-  }
-}
-
-@keyframes focusDrift {
-  to {
-    translate: 6px -5px;
-    scale: 1.12;
-  }
-}
-
 @media (max-width: 700px) {
   .heroCanvas {
     min-height: 420px;
@@ -1616,6 +1566,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .heroCanvas[data-home-depth] {
+    --home-depth-x: 0px !important;
+    --home-depth-y: 0px !important;
+    --home-depth-rotate-x: 0deg !important;
+    --home-depth-rotate-y: 0deg !important;
+    transform: none !important;
+    will-change: auto !important;
+  }
+
   .heroOutcome *,
   .heroOutcome *::before,
   .heroOutcome *::after,

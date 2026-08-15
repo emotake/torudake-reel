@@ -40,6 +40,7 @@ function FlowArrow({ className }: { className?: string }) {
   return (
     <svg
       className={className}
+      data-home-motion-part="flow-path"
       viewBox="0 0 112 42"
       aria-hidden="true"
       focusable="false"
@@ -59,18 +60,34 @@ function FlowArrow({ className }: { className?: string }) {
 export function HeroOutcomeVisual() {
   return (
     <figure className={styles.heroOutcome}>
-      <div className={styles.heroCanvas} aria-hidden="true">
-        <span className={`${styles.brandDot} ${styles.brandDotMint}`} />
-        <span className={`${styles.brandDot} ${styles.brandDotCoral}`} />
-        <span className={styles.brandDash} />
+      <div
+        className={styles.heroCanvas}
+        data-home-reveal="hero-outcome"
+        data-home-depth="hero-outcome"
+        data-home-motion-visual="source-to-reel"
+        aria-hidden="true"
+      >
+        <span
+          className={`${styles.brandDot} ${styles.brandDotMint}`}
+          data-home-motion-part="brand-accent"
+        />
+        <span
+          className={`${styles.brandDot} ${styles.brandDotCoral}`}
+          data-home-motion-part="brand-accent"
+        />
+        <span className={styles.brandDash} data-home-motion-part="brand-accent" />
 
-        <div className={styles.sourceGroup}>
+        <div className={styles.sourceGroup} data-home-motion-part="sources">
           <div className={styles.sourceHeading}>
             <span>素材</span>
             <strong>3つの場面</strong>
           </div>
 
-          <div className={`${styles.sourceCard} ${styles.sourceCardRain}`}>
+          <div
+            className={`${styles.sourceCard} ${styles.sourceCardRain}`}
+            data-home-motion-part="source-card"
+            data-home-motion-order="1"
+          >
             <div className={`${styles.sceneImage} ${styles.sceneRain}`} />
             <div className={styles.sourceMeta}>
               <span>雨の日</span>
@@ -78,7 +95,11 @@ export function HeroOutcomeVisual() {
             </div>
           </div>
 
-          <div className={`${styles.sourceCard} ${styles.sourceCardSea}`}>
+          <div
+            className={`${styles.sourceCard} ${styles.sourceCardSea}`}
+            data-home-motion-part="source-card"
+            data-home-motion-order="2"
+          >
             <div className={`${styles.sceneImage} ${styles.sceneSea}`} />
             <div className={styles.sourceMeta}>
               <span>海辺</span>
@@ -86,7 +107,11 @@ export function HeroOutcomeVisual() {
             </div>
           </div>
 
-          <div className={`${styles.sourceCard} ${styles.sourceCardRiver}`}>
+          <div
+            className={`${styles.sourceCard} ${styles.sourceCardRiver}`}
+            data-home-motion-part="source-card"
+            data-home-motion-order="3"
+          >
             <div className={`${styles.sceneImage} ${styles.sceneRiver}`} />
             <div className={styles.sourceMeta}>
               <span>川沿い</span>
@@ -95,19 +120,19 @@ export function HeroOutcomeVisual() {
           </div>
         </div>
 
-        <div className={styles.heroFlow}>
+        <div className={styles.heroFlow} data-home-motion-part="flow">
           <span>自動で整える</span>
           <FlowArrow />
         </div>
 
-        <div className={styles.resultGroup}>
+        <div className={styles.resultGroup} data-home-motion-part="result">
           <div className={styles.resultHeading}>
-            <span className={styles.resultStatus}>
+            <span className={styles.resultStatus} data-home-motion-part="status">
               <i /> 完成プレビュー
             </span>
             <strong>9:16</strong>
           </div>
-          <div className={styles.heroPhone}>
+          <div className={styles.heroPhone} data-home-motion-part="result-phone">
             <div className={styles.phoneSpeaker} />
             <div className={styles.phoneScreen}>
               <div className={styles.posterImage} />
@@ -125,7 +150,10 @@ export function HeroOutcomeVisual() {
               </div>
             </div>
           </div>
-          <div className={styles.resultChip}>
+          <div
+            className={styles.resultChip}
+            data-home-motion-part="result-features"
+          >
             <span>テロップ</span>
             <span>音声</span>
             <span>1080p</span>
@@ -143,6 +171,7 @@ export function ModeMiniVisual({ mode }: { mode: HomeCreationMode }) {
   return (
     <div
       className={`${styles.modeVisual} ${styles[`mode_${mode}`]}`}
+      data-home-motion-visual={`mode-${mode}`}
       role="img"
       aria-label={MODE_LABELS[mode]}
     >
@@ -227,10 +256,15 @@ export function WorkflowMiniVisual({ step }: { step: HomeWorkflowStep }) {
   return (
     <div
       className={`${styles.workflowVisual} ${styles[`workflow_${step}`]}`}
+      data-home-motion-visual={`workflow-${step}`}
       role="img"
       aria-label={WORKFLOW_LABELS[step]}
     >
-      <div className={styles.mockWindow} aria-hidden="true">
+      <div
+        className={styles.mockWindow}
+        data-home-motion-part="workflow-window"
+        aria-hidden="true"
+      >
         <div className={styles.mockBar}>
           <span />
           <span />

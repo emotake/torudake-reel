@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [landingSource, visualSource, visualCss, globalCss] = await Promise.all([
+const [landingSource, visualSource, motionSource, visualCss, globalCss] = await Promise.all([
   readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-rich-visuals.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/home-premium-motion.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-rich-visuals.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
 ]);
+
+const homeStorySource = `${landingSource}\n${motionSource}`;
 
 function jpegDimensions(bytes) {
   assert.equal(bytes[0], 0xff);
@@ -83,10 +86,10 @@ test("gives every creation mode a distinct labelled preview", () => {
 
 test("shows the before-and-after story and three real workflow previews", () => {
   for (const scene of ["rain", "sea", "river"]) {
-    assert.match(landingSource, new RegExp(`demoSceneThumb is${scene[0].toUpperCase()}${scene.slice(1)}`));
+    assert.match(homeStorySource, new RegExp(`torudake-demo-scene-${scene}\\.jpg`));
   }
-  assert.match(landingSource, /編集前に選んだ3つの場面/);
-  assert.match(landingSource, /10秒の完成動画へ/);
+  assert.match(homeStorySource, /編集前に選んだ3つの場面/);
+  assert.match(homeStorySource, /10秒の完成動画へ/);
   for (const step of ["select", "settings", "preview"]) {
     assert.match(landingSource, new RegExp(`<WorkflowMiniVisual step="${step}"`));
   }
@@ -129,12 +132,12 @@ test("uses compact settings and preview artwork without squeezing explanatory co
 });
 
 test("keeps settings and preview artwork contained at narrow card widths", () => {
-  const workflowVisualCss = cssBlock(visualCss, ".workflowVisual");
-  const mockWindowCss = cssBlock(visualCss, ".mockWindow");
-  const settingPhoneCss = cssBlock(visualCss, ".settingMiniPhone");
-  const settingToolsCss = cssBlock(visualCss, ".settingTools");
+  const workflowVisualCss = cssBlock(visualCss, ".workflowVisual {");
+  const mockWindowCss = cssBlock(visualCss, ".mockWindow {");
+  const settingPhoneCss = cssBlock(visualCss, ".settingMiniPhone {");
+  const settingToolsCss = cssBlock(visualCss, ".settingTools {");
   const settingControlCss = cssBlock(visualCss, ".soundTool,");
-  const previewPhoneCss = cssBlock(visualCss, ".previewPhone");
+  const previewPhoneCss = cssBlock(visualCss, ".previewPhone {");
   const narrowCss = cssBlock(visualCss, "@container (max-width: 150px)");
   const narrowSettingsCss = cssBlock(narrowCss, ".settingsArtwork {");
   const narrowSettingPhoneCss = cssBlock(narrowCss, ".settingMiniPhone");
