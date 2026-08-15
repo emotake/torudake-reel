@@ -15096,36 +15096,6 @@ a {
   margin-inline: 0;
 }
 
-.landingPromiseRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 23px;
-}
-
-.landingPromiseRow span {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 11px;
-  border: 1px solid rgba(16, 24, 40, 0.09);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #485568;
-  font-size: 11px;
-  font-weight: 850;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
-}
-
-.landingPromiseRow span::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--coral-dark);
-  content: "";
-}
-
 .creationChooser > header {
   margin-bottom: 24px;
 }
@@ -15485,9 +15455,6 @@ a {
     margin-inline: auto;
   }
 
-  .landingPromiseRow {
-    justify-content: center;
-  }
 }
 
 @media (max-width: 760px) {
@@ -15507,10 +15474,6 @@ a {
 
   .landingHeroStage .landingIntroCopy > p:last-of-type {
     margin-inline: 0;
-  }
-
-  .landingPromiseRow {
-    justify-content: flex-start;
   }
 
   .creationModeCard {
@@ -15671,16 +15634,6 @@ a {
     display: none;
   }
 
-  .landingPromiseRow {
-    gap: 6px;
-  }
-
-  .landingPromiseRow span {
-    min-height: 30px;
-    padding-inline: 9px;
-    font-size: 12px;
-  }
-
   .demoSceneRail {
     gap: 6px;
   }
@@ -15774,33 +15727,62 @@ a {
   line-height: 1.85;
 }
 
-.landingPromiseRow {
-  gap: 0;
-  margin-top: 30px;
-  border-top: 1px solid rgba(16, 24, 40, 0.14);
-  border-bottom: 1px solid rgba(16, 24, 40, 0.14);
+.landingPromiseList {
+  display: grid;
+  width: min(100%, 540px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(12px, 1.5vw, 18px);
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.landingPromiseRow span {
-  min-height: 42px;
-  padding: 0 16px;
-  border: 0;
-  border-left: 1px solid rgba(16, 24, 40, 0.12);
-  border-radius: 0;
-  background: transparent;
-  color: #4f5b6c;
+.landingPromiseItem {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.landingPromiseMark {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgba(25, 115, 70, 0.14);
+  border-radius: 50%;
+  background: rgba(185, 245, 208, 0.42);
+  color: var(--mint-dark);
   font-size: 12px;
-  font-weight: 700;
-  box-shadow: none;
+  font-weight: 900;
+  line-height: 1;
 }
 
-.landingPromiseRow span:first-child {
-  padding-left: 0;
-  border-left: 0;
+.landingPromiseCopy {
+  display: block;
+  min-width: 0;
 }
 
-.landingPromiseRow span::before {
-  display: none;
+.landingPromiseCopy strong,
+.landingPromiseCopy small {
+  display: block;
+}
+
+.landingPromiseCopy strong {
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.landingPromiseCopy small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
 }
 
 .landingHeroResult {
@@ -16198,8 +16180,8 @@ a {
     margin-inline: auto;
   }
 
-  .landingPromiseRow {
-    justify-content: center;
+  .landingPromiseList {
+    margin-inline: auto;
   }
 
   .landingHeroResult {
@@ -16226,15 +16208,8 @@ a {
     margin-inline: 0;
   }
 
-  .landingPromiseRow {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .landingPromiseRow span {
-    flex: 1 1 auto;
-    justify-content: center;
-    padding-inline: 10px;
+  .landingPromiseList {
+    margin-inline: 0;
   }
 
   .landingHeroResult {
@@ -16316,6 +16291,38 @@ a {
   }
 }
 
+@media (max-width: 520px) {
+  .landingPromiseList {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .landingPromiseItem {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .landingPromiseMark {
+    width: 22px;
+    height: 22px;
+    font-size: 9px;
+  }
+
+  .landingPromiseCopy strong {
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .landingPromiseCopy small {
+    display: none;
+  }
+}
+
 @media (max-width: 420px) {
   .landingHeroResultHeading h2 {
     font-size: 21px;
@@ -16346,14 +16353,18 @@ a {
     font-size: clamp(40px, 12vw, 52px);
   }
 
-  .landingPromiseRow span {
-    min-height: 40px;
-    padding-inline: 7px;
-    font-size: 12px;
-  }
 }
 
 @media (max-width: 340px) {
+  .landingPromiseList {
+    gap: 6px;
+  }
+
+  .landingPromiseMark {
+    width: 20px;
+    height: 20px;
+  }
+
   .homeEditorialLanding .creationModeCard > [role="img"] {
     height: 104px;
   }

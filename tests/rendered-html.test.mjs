@@ -32,6 +32,47 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /動画や写真を、/);
   assert.match(html, /リールに。/);
   assert.match(html, /必要な機能だけを選んで仕上げられます。/);
+  const heroCopyStart = html.indexOf('class="landingIntroCopy"');
+  const heroResultStart = html.indexOf(
+    'class="landingHeroResult"',
+    heroCopyStart,
+  );
+  assert.ok(heroCopyStart >= 0);
+  assert.ok(heroResultStart > heroCopyStart);
+
+  const heroCopyHtml = html.slice(heroCopyStart, heroResultStart);
+  const heroLeadIndex = heroCopyHtml.indexOf(
+    "画面の案内に沿って、必要な機能だけを選んで仕上げられます。",
+  );
+  const heroPromiseIndex = heroCopyHtml.indexOf('class="landingPromiseList"');
+  assert.ok(heroLeadIndex >= 0 && heroLeadIndex < heroPromiseIndex);
+  assert.match(
+    heroCopyHtml,
+    /<ul\b[^>]*class="landingPromiseList"[^>]*aria-label="共通の仕上がり条件"/,
+  );
+  assert.equal(
+    (heroCopyHtml.match(/<li class="landingPromiseItem">/g) ?? []).length,
+    3,
+  );
+  assert.equal(
+    (
+      heroCopyHtml.match(
+        /class="landingPromiseMark" aria-hidden="true"/g,
+      ) ?? []
+    ).length,
+    3,
+  );
+
+  let previousPromiseCopyIndex = -1;
+  for (const copy of ["プレビュー無料", "最大1080p", "透かしなし"]) {
+    const copyIndex = heroCopyHtml.indexOf(copy);
+    assert.ok(
+      copyIndex > previousPromiseCopyIndex,
+      `${copy} must remain in the hero promise order`,
+    );
+    previousPromiseCopyIndex = copyIndex;
+  }
+  assert.doesNotMatch(html, /landingPromiseRow/);
   assert.doesNotMatch(html, /素材を選んで、|作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);
   assert.match(html, /素材を選ぶだけで、投稿できる動画へ/);

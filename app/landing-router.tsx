@@ -256,11 +256,29 @@ export function HomeLanding(props: LandingSharedProps) {
             <p>
               画面の案内に沿って、必要な機能だけを選んで仕上げられます。
             </p>
-            <div className="landingPromiseRow" aria-label="共通の仕上がり条件">
-              <span>プレビュー無料</span>
-              <span>最大1080p</span>
-              <span>透かしなし</span>
-            </div>
+            <ul className="landingPromiseList" aria-label="共通の仕上がり条件">
+              <li className="landingPromiseItem">
+                <span className="landingPromiseMark" aria-hidden="true">¥0</span>
+                <span className="landingPromiseCopy">
+                  <strong>プレビュー無料</strong>
+                  <small>保存前に仕上がりを確認</small>
+                </span>
+              </li>
+              <li className="landingPromiseItem">
+                <span className="landingPromiseMark" aria-hidden="true">HD</span>
+                <span className="landingPromiseCopy">
+                  <strong>最大1080p</strong>
+                  <small>高画質で保存</small>
+                </span>
+              </li>
+              <li className="landingPromiseItem">
+                <span className="landingPromiseMark" aria-hidden="true">✓</span>
+                <span className="landingPromiseCopy">
+                  <strong>透かしなし</strong>
+                  <small>サービス名は入りません</small>
+                </span>
+              </li>
+            </ul>
           </div>
           <div
             className="landingHeroResult"

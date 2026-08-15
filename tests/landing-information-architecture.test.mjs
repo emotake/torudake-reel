@@ -50,6 +50,56 @@ test("shows the playable finish before three equal creation choices", () => {
   assert.match(landingSource, /href="\/photo-reel"/);
 });
 
+test("keeps the hero promises semantic, ordered, and ahead of the finished result", () => {
+  const homeStart = landingSource.indexOf("export function HomeLanding");
+  const singleStart = landingSource.indexOf("export function VideoEditLanding");
+  const home = landingSource.slice(homeStart, singleStart);
+  const introCopyIndex = home.indexOf('className="landingIntroCopy"');
+  const leadIndex = home.indexOf(
+    "画面の案内に沿って、必要な機能だけを選んで仕上げられます。",
+    introCopyIndex,
+  );
+  const promiseListIndex = home.indexOf(
+    'className="landingPromiseList"',
+    introCopyIndex,
+  );
+  const promiseListEnd = home.indexOf("</ul>", promiseListIndex);
+  const finishedResultIndex = home.indexOf(
+    'className="landingHeroResult"',
+    introCopyIndex,
+  );
+
+  assert.ok(introCopyIndex >= 0);
+  assert.ok(introCopyIndex < leadIndex);
+  assert.ok(leadIndex < promiseListIndex);
+  assert.ok(promiseListIndex < promiseListEnd);
+  assert.ok(promiseListEnd < finishedResultIndex);
+
+  const promiseList = home.slice(promiseListIndex, promiseListEnd);
+  assert.match(promiseList, /aria-label="共通の仕上がり条件"/);
+  assert.equal(
+    (promiseList.match(/<li className="landingPromiseItem">/g) ?? []).length,
+    3,
+  );
+  assert.equal(
+    (
+      promiseList.match(
+        /className="landingPromiseMark" aria-hidden="true"/g,
+      ) ?? []
+    ).length,
+    3,
+  );
+
+  let previousCopyIndex = -1;
+  for (const copy of ["プレビュー無料", "最大1080p", "透かしなし"]) {
+    const copyIndex = promiseList.indexOf(copy);
+    assert.ok(copyIndex > previousCopyIndex, `${copy} must remain in promise order`);
+    previousCopyIndex = copyIndex;
+  }
+
+  assert.doesNotMatch(home, /landingPromiseRow/);
+});
+
 test("keeps one video editor engine while giving it a focused public entry", () => {
   assert.match(pageSource, /landingVariant\?: "home" \| "video-edit"/);
   assert.match(pageSource, /export function VideoEditExperience\(\)/);
