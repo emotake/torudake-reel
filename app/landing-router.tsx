@@ -16,6 +16,11 @@ import {
 import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
 import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
+import {
+  HeroOutcomeVisual,
+  ModeMiniVisual,
+  WorkflowMiniVisual,
+} from "./home-rich-visuals";
 
 type LandingSharedProps = {
   openPicker: () => void;
@@ -72,13 +77,16 @@ function CreationChooser({
         <p>編集とプレビューは無料です。</p>
       </header>
       <div className="creationModeGrid">
-        <article className="creationModeCard isRecommended">
+        <article className="creationModeCard isRecommended creationModeSingle">
           <div className="creationModeLabel">
             <span aria-hidden="true">1</span>
             <em>はじめてにおすすめ</em>
           </div>
-          <h3>動画1本から作る</h3>
-          <p>自動カット、必要なテロップ、音声、表紙を順番に選んで仕上げます。</p>
+          <ModeMiniVisual mode="single" />
+          <div className="creationModeCopy">
+            <h3>動画1本から作る</h3>
+            <p>自動カット、必要なテロップ、音声、表紙を順番に選んで仕上げます。</p>
+          </div>
           <button className="creationModeAction" type="button" onClick={openPicker}>
             動画を1本選ぶ <span aria-hidden="true">→</span>
           </button>
@@ -92,23 +100,29 @@ function CreationChooser({
           </button>
         </article>
 
-        <article className="creationModeCard">
+        <article className="creationModeCard creationModeMultiple">
           <div className="creationModeLabel">
             <span aria-hidden="true">2–5</span>
           </div>
-          <h3>複数の動画から作る</h3>
-          <p>2〜5本から使う場面を選び、素材の順番を保ったまま1本にします。</p>
+          <ModeMiniVisual mode="multiple" />
+          <div className="creationModeCopy">
+            <h3>複数の動画から作る</h3>
+            <p>2〜5本から使う場面を選び、素材の順番を保ったまま1本にします。</p>
+          </div>
           <Link className="creationModeAction" href="/video-mix">
             複数動画で作る <span aria-hidden="true">→</span>
           </Link>
         </article>
 
-        <article className="creationModeCard">
+        <article className="creationModeCard creationModePhotos">
           <div className="creationModeLabel">
             <span aria-hidden="true">写真</span>
           </div>
-          <h3>写真から作る</h3>
-          <p>最大10枚の写真を選び、動きのある縦型リールへまとめます。</p>
+          <ModeMiniVisual mode="photos" />
+          <div className="creationModeCopy">
+            <h3>写真から作る</h3>
+            <p>最大10枚の写真を選び、動きのある縦型リールへまとめます。</p>
+          </div>
           <Link className="creationModeAction" href="/photo-reel">
             写真で作る <span aria-hidden="true">→</span>
           </Link>
@@ -217,19 +231,27 @@ export function HomeLanding(props: LandingSharedProps) {
   return (
     <div className="landingRouter">
       <section className="landingIntro">
-        <div className="landingIntroCopy">
-          <p className="eyebrow">
-            <span>かんたん動画編集</span>
-            素材を選ぶだけで、投稿できる動画へ
-          </p>
-          <h1>
-            動画や写真を、
-            <br />
-            <em>リールに。</em>
-          </h1>
-          <p>
-            画面の案内に沿って、必要な機能だけを選んで仕上げられます。
-          </p>
+        <div className="landingHeroStage">
+          <div className="landingIntroCopy">
+            <p className="eyebrow">
+              <span>かんたん動画編集</span>
+              素材を選ぶだけで、投稿できる動画へ
+            </p>
+            <h1>
+              動画や写真を、
+              <br />
+              <em>リールに。</em>
+            </h1>
+            <p>
+              画面の案内に沿って、必要な機能だけを選んで仕上げられます。
+            </p>
+            <div className="landingPromiseRow" aria-label="共通の仕上がり条件">
+              <span>プレビュー無料</span>
+              <span>最大1080p</span>
+              <span>透かしなし</span>
+            </div>
+          </div>
+          <HeroOutcomeVisual />
         </div>
         <DraftRecovery
           name={props.recoverableDraftName}
@@ -244,15 +266,40 @@ export function HomeLanding(props: LandingSharedProps) {
       </section>
 
       <section className="landingDemoSection" aria-labelledby="landingDemoTitle">
-        <div className="landingSectionCopy">
-          <p className="eyebrow">実際の仕上がり</p>
-          <h2 id="landingDemoTitle">サンプル動画で、仕上がりを確認できます。</h2>
-          <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
+        <div className="landingDemoStory">
+          <div className="landingSectionCopy">
+            <p className="eyebrow">実際の仕上がり</p>
+            <h2 id="landingDemoTitle">サンプル動画で、仕上がりを確認できます。</h2>
+            <strong className="landingDemoTransformation">3つの場面が、投稿できる1本に。</strong>
+            <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
+          </div>
+          <ol className="demoSceneRail" aria-label="編集前に選んだ3つの場面">
+            <li>
+              <span className="demoSceneThumb isRain" aria-hidden="true" />
+              <span><small>素材 01</small>雨の街</span>
+            </li>
+            <li>
+              <span className="demoSceneThumb isSea" aria-hidden="true" />
+              <span><small>素材 02</small>海辺</span>
+            </li>
+            <li>
+              <span className="demoSceneThumb isRiver" aria-hidden="true" />
+              <span><small>素材 03</small>川沿い</span>
+            </li>
+          </ol>
+          <p className="demoSceneOutcome">
+            <span aria-hidden="true">↳</span>
+            カット・音声・テロップを整えた、10秒の完成動画へ
+          </p>
         </div>
         {props.demo}
       </section>
 
       <section className="homeBenefitBand" aria-label="共通する安心ポイント">
+        <div className="homeBenefitLead">
+          <span aria-hidden="true">●</span>
+          <p><strong>無料で仕上がりを確認。</strong>保存するときだけ、料金を選びます。</p>
+        </div>
         <div className="homeBenefitGrid">
           <article>
             <span aria-hidden="true">データ</span>
@@ -280,21 +327,30 @@ export function HomeLanding(props: LandingSharedProps) {
           <h2 id="homeStepsTitle">難しいタイムライン操作はありません。</h2>
           <p>素材を選ぶ、仕上げ方を選ぶ、プレビューを確認する。必要なところだけ直せます。</p>
         </header>
-        <div className="homeStepGrid">
+        <div className="homeStepGrid homeStepRichGrid">
           <article>
-            <span>01</span>
-            <h3>素材を選ぶ</h3>
-            <p>動画1本、複数動画、写真から、作りたいものに合う入口を選択。</p>
+            <WorkflowMiniVisual step="select" />
+            <div className="homeStepCopy">
+              <span>01</span>
+              <h3>素材を選ぶ</h3>
+              <p>動画1本、複数動画、写真から、作りたいものに合う入口を選択。</p>
+            </div>
           </article>
           <article>
-            <span>02</span>
-            <h3>案内に沿って決める</h3>
-            <p>音声、カット、テロップ、つなぎ方など、必要な項目だけ表示。</p>
+            <WorkflowMiniVisual step="settings" />
+            <div className="homeStepCopy">
+              <span>02</span>
+              <h3>案内に沿って決める</h3>
+              <p>音声、カット、テロップ、つなぎ方など、必要な項目だけ表示。</p>
+            </div>
           </article>
           <article>
-            <span>03</span>
-            <h3>確認して保存する</h3>
-            <p>無料プレビューで仕上がりを確認し、保存するときだけプランを選択。</p>
+            <WorkflowMiniVisual step="preview" />
+            <div className="homeStepCopy">
+              <span>03</span>
+              <h3>確認して保存する</h3>
+              <p>無料プレビューで仕上がりを確認し、保存するときだけプランを選択。</p>
+            </div>
           </article>
         </div>
       </section>
