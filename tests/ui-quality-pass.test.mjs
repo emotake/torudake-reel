@@ -150,7 +150,10 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
 });
 
 test("labels the permanent hero value instead of presenting it as news", () => {
-  assert.match(landingSource, /<span>かんたん動画編集<\/span>/);
+  assert.match(
+    landingSource,
+    /<span>かんたん動画編集<\/span>\s*素材を選ぶだけで、投稿できる動画へ/,
+  );
   assert.match(landingSource, /動画や写真を、/);
   assert.match(landingSource, /<em>リールに。<\/em>/);
   assert.match(landingSource, /必要な機能だけを選んで仕上げられます。/);

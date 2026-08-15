@@ -3558,7 +3558,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           </span>
           <span className="brandText">
             撮るだけリール
-            <small>素材を選ぶだけで、投稿できる動画へ</small>
+            <small>日常で撮った動画から、投稿できる1本へ</small>
           </span>
         </button>
 

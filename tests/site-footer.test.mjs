@@ -98,8 +98,8 @@ test("groups the shared footer into four labelled sections with twelve routes", 
 
   assert.deepEqual(groups, expectedGroups);
   assert.deepEqual(links, expectedLinks);
-  assert.match(footerSource, /素材を選ぶだけで、投稿できる動画へ/);
-  assert.doesNotMatch(footerSource, /動画や写真から、投稿できる1本へ/);
+  assert.match(footerSource, /動画や写真から、投稿できる1本へ/);
+  assert.doesNotMatch(footerSource, /素材を選ぶだけで、投稿できる動画へ/);
   assert.match(
     footerSource,
     /<footer className="siteFooter" aria-labelledby="siteFooterTitle">/,

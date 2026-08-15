@@ -220,6 +220,7 @@ export function HomeLanding(props: LandingSharedProps) {
         <div className="landingIntroCopy">
           <p className="eyebrow">
             <span>かんたん動画編集</span>
+            素材を選ぶだけで、投稿できる動画へ
           </p>
           <h1>
             動画や写真を、

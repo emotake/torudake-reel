@@ -35,7 +35,6 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /素材を選んで、|作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);
   assert.match(html, /素材を選ぶだけで、投稿できる動画へ/);
-  assert.doesNotMatch(html, /日常で撮った動画から、投稿できる1本へ/);
   assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /id="create"/);
