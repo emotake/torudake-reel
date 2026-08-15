@@ -69,7 +69,7 @@ export default function SiteFooter({
               <Image src="/favicon-v2.svg" width={48} height={48} alt="" />
               <span>
                 <strong>撮るだけリール</strong>
-                <small>動画や写真から、投稿できる1本へ</small>
+                <small>素材を選ぶだけで、投稿できる動画へ</small>
               </span>
             </Link>
           </h2>
