@@ -12642,12 +12642,21 @@ footer > small {
   font-weight: 800;
 }
 
-.videoMixSourceSummary video {
+.videoMixSourceSummary > img,
+.videoMixSourceSummary > .videoMixSourceThumbnailPlaceholder {
   width: 64px;
   height: 76px;
   border-radius: 11px;
   object-fit: cover;
   background: #111827;
+}
+
+.videoMixSourceSummary > .videoMixSourceThumbnailPlaceholder {
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .videoMixSourceSummary > div {
@@ -12919,8 +12928,20 @@ footer > small {
 
 .videoMixClipActions {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
-  gap: 5px;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.videoMixClipActions .videoMixClipPreviewButton,
+.videoMixClipActions p {
+  grid-column: 1 / -1;
+}
+
+.videoMixClipActions p {
+  margin: 0;
+  color: var(--mix-subtle);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .videoMixClipList input {
@@ -13916,7 +13937,8 @@ footer > small {
     grid-template-columns: 28px 56px minmax(0, 1fr);
   }
 
-  .videoMixSourceSummary video {
+  .videoMixSourceSummary > img,
+  .videoMixSourceSummary > .videoMixSourceThumbnailPlaceholder {
     width: 56px;
     height: 68px;
   }

@@ -845,7 +845,37 @@ export default function VideoMixClient() {
   const previewSecondaryGainRef = useRef<GainNode | null>(null);
   const previewNarrationGainRef = useRef<GainNode | null>(null);
   const previewPendingPlayRef = useRef(new Set<HTMLVideoElement>());
+  const previewPlayPromiseRef = useRef(new Map<HTMLVideoElement, {
+    generation: number;
+    sourceId: string;
+    promise: Promise<boolean>;
+  }>());
   const previewDeferredGainRef = useRef(new Map<HTMLVideoElement, number>());
+  const previewMutedFallbackRef = useRef(new Set<HTMLVideoElement>());
+  const previewFallbackNoticeRef = useRef(false);
+  const previewPlaybackGenerationRef = useRef(0);
+  const previewMetadataWaitRef = useRef(new Map<HTMLVideoElement, {
+    key: string;
+    listener: () => void;
+    errorListener: () => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+    run: () => void;
+    fail: () => void;
+  }>());
+  const previewActiveSwitchRef = useRef<{
+    generation: number;
+    sourceId: string;
+    globalClipIndex: number;
+    editedTime: number;
+  } | null>(null);
+  const previewSelectionClipRef = useRef<{
+    sourceId: string;
+    clipIndex: number;
+    start: number;
+    end: number;
+    editedStart: number;
+    editedEnd: number;
+  } | null>(null);
   const transitionButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const finishModeButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const animationRef = useRef<number | null>(null);
@@ -855,6 +885,7 @@ export default function VideoMixClient() {
   const lastPreviewBackgroundUpdateRef = useRef<[string, string]>(["", ""]);
   const previewStartedAtRef = useRef(0);
   const previewStartTimeRef = useRef(0);
+  const previewTimeRef = useRef(0);
   const activeLayerRef = useRef<0 | 1>(0);
   const activeClipRef = useRef(-1);
   const exportAbortRef = useRef<AbortController | null>(null);
@@ -1050,6 +1081,14 @@ export default function VideoMixClient() {
   );
 
   const stopPreview = useCallback(() => {
+    previewPlaybackGenerationRef.current += 1;
+    for (const [video, pending] of previewMetadataWaitRef.current) {
+      video.removeEventListener("loadedmetadata", pending.listener);
+      video.removeEventListener("error", pending.errorListener);
+      clearTimeout(pending.timeoutId);
+    }
+    previewMetadataWaitRef.current.clear();
+    previewActiveSwitchRef.current = null;
     if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
     animationRef.current = null;
     previewLoopRef.current = null;
@@ -1060,11 +1099,34 @@ export default function VideoMixClient() {
     if (previewPrimaryGainRef.current) previewPrimaryGainRef.current.gain.value = 0;
     if (previewSecondaryGainRef.current) previewSecondaryGainRef.current.gain.value = 0;
     previewPendingPlayRef.current.clear();
+    previewPlayPromiseRef.current.clear();
     previewDeferredGainRef.current.clear();
+    previewMutedFallbackRef.current.clear();
     narrationAudioRef.current?.pause();
     if (previewNarrationGainRef.current) previewNarrationGainRef.current.gain.value = 0;
     isPlayingRef.current = false;
     setIsPlaying(false);
+  }, []);
+
+  const releasePreviewMediaElements = useCallback(() => {
+    for (const video of [previewPrimaryRef.current, previewSecondaryRef.current]) {
+      if (!video) continue;
+      video.pause();
+      previewPendingPlayRef.current.delete(video);
+      previewPlayPromiseRef.current.delete(video);
+      previewDeferredGainRef.current.delete(video);
+      previewMutedFallbackRef.current.delete(video);
+      video.removeAttribute("src");
+      delete video.dataset.sourceId;
+      video.load();
+    }
+    activeClipRef.current = -1;
+  }, []);
+
+  const releaseSourcePlayer = useCallback((player: HTMLVideoElement) => {
+    player.pause();
+    player.removeAttribute("src");
+    player.load();
   }, []);
 
   const pauseSourcePlayers = useCallback((exceptSourceId?: string) => {
@@ -1074,22 +1136,126 @@ export default function VideoMixClient() {
   }, []);
 
   const toggleSourcePlayer = useCallback((sourceId: string) => {
+    const openPlayer = sourcePlayerRefs.current.get(sourceId);
+    if (openPlayer) {
+      releaseSourcePlayer(openPlayer);
+      sourcePlayerRefs.current.delete(sourceId);
+      setExpandedSourcePlayerId(null);
+      return;
+    }
     stopPreview();
-    pauseSourcePlayers();
-    setExpandedSourcePlayerId((current) =>
-      current === sourceId ? null : sourceId,
-    );
-  }, [pauseSourcePlayers, stopPreview]);
+    releasePreviewMediaElements();
+    for (const player of sourcePlayerRefs.current.values()) {
+      releaseSourcePlayer(player);
+    }
+    sourcePlayerRefs.current.clear();
+    setExpandedSourcePlayerId(sourceId);
+  }, [releasePreviewMediaElements, releaseSourcePlayer, stopPreview]);
 
   const handleSourcePlayerPlay = useCallback((sourceId: string) => {
     stopPreview();
+    releasePreviewMediaElements();
     pauseSourcePlayers(sourceId);
-  }, [pauseSourcePlayers, stopPreview]);
+  }, [pauseSourcePlayers, releasePreviewMediaElements, stopPreview]);
 
   const closeSourcePlayers = useCallback(() => {
-    pauseSourcePlayers();
+    for (const player of sourcePlayerRefs.current.values()) {
+      releaseSourcePlayer(player);
+    }
+    sourcePlayerRefs.current.clear();
     setExpandedSourcePlayerId(null);
-  }, [pauseSourcePlayers]);
+  }, [releaseSourcePlayer]);
+
+  const runWhenPreviewMetadataReady = useCallback((
+    video: HTMLVideoElement,
+    sourceId: string,
+    generation: number,
+    actionKey: string,
+    run: () => void,
+    fail: () => void = () => undefined,
+  ) => {
+    if (
+      video.readyState >= HTMLMediaElement.HAVE_METADATA &&
+      video.dataset.sourceId === sourceId
+    ) {
+      const previous = previewMetadataWaitRef.current.get(video);
+      if (previous) {
+        video.removeEventListener("loadedmetadata", previous.listener);
+        video.removeEventListener("error", previous.errorListener);
+        clearTimeout(previous.timeoutId);
+        previewMetadataWaitRef.current.delete(video);
+      }
+      run();
+      return true;
+    }
+    const key = `${generation}:${sourceId}:${actionKey}`;
+    const previous = previewMetadataWaitRef.current.get(video);
+    if (previous?.key === key) {
+      // The editing clock is frozen while an active layer loads. Keep only its
+      // latest desired seek instead of adding one listener on every rAF frame.
+      previous.run = run;
+      previous.fail = fail;
+      return false;
+    }
+    if (previous) {
+      video.removeEventListener("loadedmetadata", previous.listener);
+      video.removeEventListener("error", previous.errorListener);
+      clearTimeout(previous.timeoutId);
+    }
+    const clearPending = (pending: {
+      listener: () => void;
+      errorListener: () => void;
+      timeoutId: ReturnType<typeof setTimeout>;
+    }) => {
+      video.removeEventListener("loadedmetadata", pending.listener);
+      video.removeEventListener("error", pending.errorListener);
+      clearTimeout(pending.timeoutId);
+      if (previewMetadataWaitRef.current.get(video) === pending) {
+        previewMetadataWaitRef.current.delete(video);
+      }
+    };
+    const pending: {
+      key: string;
+      listener: () => void;
+      errorListener: () => void;
+      timeoutId: ReturnType<typeof setTimeout>;
+      run: () => void;
+      fail: () => void;
+    } = {
+      key,
+      run,
+      fail,
+      listener: () => {
+        const latest = previewMetadataWaitRef.current.get(video);
+        if (latest?.listener !== pending.listener) return;
+        clearPending(pending);
+        if (
+          !mountedRef.current ||
+          previewPlaybackGenerationRef.current !== generation ||
+          video.dataset.sourceId !== sourceId
+        ) return;
+        latest.run();
+      },
+      errorListener: () => {
+        const latest = previewMetadataWaitRef.current.get(video);
+        if (latest?.errorListener !== pending.errorListener) return;
+        clearPending(pending);
+        if (
+          !mountedRef.current ||
+          previewPlaybackGenerationRef.current !== generation ||
+          video.dataset.sourceId !== sourceId
+        ) return;
+        latest.fail();
+      },
+      timeoutId: setTimeout(() => undefined, 0),
+    };
+    clearTimeout(pending.timeoutId);
+    pending.timeoutId = setTimeout(pending.errorListener, 8_000);
+    previewMetadataWaitRef.current.set(video, pending);
+    video.addEventListener("loadedmetadata", pending.listener, { once: true });
+    video.addEventListener("error", pending.errorListener, { once: true });
+    return false;
+  }, []);
 
   const ensurePreviewAudioGraph = useCallback(() => {
     if (previewAudioContextRef.current) {
@@ -1146,7 +1312,15 @@ export default function VideoMixClient() {
     const node = video === previewPrimaryRef.current
       ? previewPrimaryGainRef.current
       : previewSecondaryGainRef.current;
-    // Keep both elements unmuted for their entire authorized playback session.
+    if (previewMutedFallbackRef.current.has(video)) {
+      video.muted = true;
+      video.volume = 0;
+      if (node) node.gain.value = 0;
+      return;
+    }
+    // Keep successfully authorized elements unmuted for their entire playback
+    // session. If a browser rejects a later source swap, that one layer is
+    // moved to the muted visual fallback above instead of stopping everything.
     // WebKit pauses a video that is unmuted outside a trusted user gesture, so
     // silence/transition mixing must be expressed through GainNode (or volume
     // in the no-WebAudio fallback), never by toggling HTMLMediaElement.muted.
@@ -1175,7 +1349,9 @@ export default function VideoMixClient() {
     gain: number,
   ) => {
     const safeGain = Math.max(0, Math.min(1.35, gain));
-    player.muted = safeGain <= 0;
+    // Keep the audio element authorized from the original click. Silence its
+    // pre-roll through GainNode/volume; async unmute pauses playback on WebKit.
+    player.muted = false;
     if (previewNarrationGainRef.current) {
       player.volume = 1;
       previewNarrationGainRef.current.gain.value = safeGain;
@@ -1186,85 +1362,180 @@ export default function VideoMixClient() {
 
   const playPreviewMedia = useCallback((
     media: HTMLMediaElement,
-    reportFailure = true,
+    generation: number,
   ) => {
-    void media.play().catch(() => {
-      if (!reportFailure) return;
-      if (!mountedRef.current) return;
-      stopPreview();
-      setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
+    return media.play().then(() => {
+      return mountedRef.current &&
+        isPlayingRef.current &&
+        previewPlaybackGenerationRef.current === generation;
+    }).catch((error: unknown) => {
+      if (
+        !mountedRef.current ||
+        !isPlayingRef.current ||
+        previewPlaybackGenerationRef.current !== generation
+      ) return false;
+      console.warn("[video-mix-preview] media play failed", {
+        name: error instanceof DOMException ? error.name : "UnknownError",
+        kind: media instanceof HTMLAudioElement ? "narration" : "video",
+        readyState: media.readyState,
+        networkState: media.networkState,
+      });
+      return false;
     });
-  }, [stopPreview]);
+  }, []);
+
+  const setPreviewMutedFallback = useCallback((video: HTMLVideoElement) => {
+    previewMutedFallbackRef.current.add(video);
+    previewDeferredGainRef.current.delete(video);
+    const node = video === previewPrimaryRef.current
+      ? previewPrimaryGainRef.current
+      : previewSecondaryGainRef.current;
+    video.muted = true;
+    video.volume = 0;
+    if (node) node.gain.value = 0;
+  }, []);
+
+  const rememberPreviewPlayAttempt = useCallback((
+    video: HTMLVideoElement,
+    generation: number,
+    sourceId: string,
+    promise: Promise<boolean>,
+  ) => {
+    const tracked = { generation, sourceId, promise };
+    previewPlayPromiseRef.current.set(video, tracked);
+    void promise.finally(() => {
+      if (previewPlayPromiseRef.current.get(video) === tracked) {
+        previewPlayPromiseRef.current.delete(video);
+      }
+    });
+    return promise;
+  }, []);
+
+  const settlePreviewPlayAttempt = useCallback(async (
+    video: HTMLVideoElement,
+    initialAttempt: Promise<void>,
+    desiredGain: number,
+    role: "active" | "standby" | "boundary",
+    generation: number,
+    sourceId: string,
+    allowMutedFallback: boolean,
+  ) => {
+    const isCurrentAttempt = () =>
+      mountedRef.current &&
+      isPlayingRef.current &&
+      previewPlaybackGenerationRef.current === generation &&
+      video.dataset.sourceId === sourceId;
+    try {
+      await initialAttempt;
+      if (!isCurrentAttempt()) return false;
+      previewPendingPlayRef.current.delete(video);
+      const latestGain = isPlayingRef.current
+        ? previewDeferredGainRef.current.get(video) ?? desiredGain
+        : 0;
+      previewDeferredGainRef.current.delete(video);
+      setPreviewMediaGain(video, latestGain);
+      return true;
+    } catch (initialError) {
+      if (!isCurrentAttempt()) return false;
+      previewPendingPlayRef.current.delete(video);
+      previewDeferredGainRef.current.delete(video);
+      console.warn("[video-mix-preview] unmuted video play failed", {
+        name: initialError instanceof DOMException ? initialError.name : "UnknownError",
+        role,
+        readyState: video.readyState,
+        networkState: video.networkState,
+      });
+      if (!allowMutedFallback) return false;
+      setPreviewMutedFallback(video);
+      try {
+        await video.play();
+        if (!isCurrentAttempt()) return false;
+        if (!previewFallbackNoticeRef.current && mountedRef.current) {
+          previewFallbackNoticeRef.current = true;
+          setMessage("端末の再生制限により、一部素材はプレビューで映像のみ再生します。完成動画の音声には影響しません。");
+        }
+        return true;
+      } catch (fallbackError) {
+        console.warn("[video-mix-preview] muted video play failed", {
+          name: fallbackError instanceof DOMException ? fallbackError.name : "UnknownError",
+          role,
+          readyState: video.readyState,
+          networkState: video.networkState,
+          mediaErrorCode: video.error?.code ?? null,
+        });
+        return false;
+      }
+    }
+  }, [setPreviewMediaGain, setPreviewMutedFallback]);
 
   const startPreviewMediaPair = useCallback((
     primary: HTMLVideoElement,
     secondary: HTMLVideoElement,
+    generation: number,
+    allowActiveMutedFallback: boolean,
   ) => {
     // Invoke both play() calls synchronously before awaiting either promise so
-    // they share the same trusted click activation. Report one combined error
-    // only after both promises settle; a late boundary never calls play().
+    // they share the same trusted click activation. The active result controls
+    // the clock; standby failure degrades to muted visuals instead of stopping
+    // a primary layer that is already playable.
     const media = [primary, secondary] as const;
     media.forEach((video) => {
       previewPendingPlayRef.current.add(video);
       previewDeferredGainRef.current.set(video, 0);
     });
     const attempts = [primary.play(), secondary.play()];
-    attempts.forEach((attempt, index) => {
-      void attempt.then(
-        () => {
-          const video = media[index];
-          previewPendingPlayRef.current.delete(video);
-          const desiredGain = isPlayingRef.current
-            ? previewDeferredGainRef.current.get(video) ?? 0
-            : 0;
-          previewDeferredGainRef.current.delete(video);
-          setPreviewMediaGain(video, desiredGain);
-        },
-        () => {
-          const video = media[index];
-          previewPendingPlayRef.current.delete(video);
-          previewDeferredGainRef.current.delete(video);
-          setPreviewMediaGain(video, 0);
-        },
-      );
-    });
-    void Promise.allSettled(attempts).then((results) => {
-      if (results.every((result) => result.status === "fulfilled")) return;
-      if (!mountedRef.current || !isPlayingRef.current) return;
-      stopPreview();
-      setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
-    });
-  }, [setPreviewMediaGain, stopPreview]);
+    const primarySourceId = primary.dataset.sourceId ?? "";
+    const secondarySourceId = secondary.dataset.sourceId ?? "";
+    return {
+      activeReady: rememberPreviewPlayAttempt(primary, generation, primarySourceId, settlePreviewPlayAttempt(
+        primary,
+        attempts[0],
+        0,
+        "active",
+        generation,
+        primarySourceId,
+        allowActiveMutedFallback,
+      )),
+      standbyReady: rememberPreviewPlayAttempt(secondary, generation, secondarySourceId, settlePreviewPlayAttempt(
+        secondary,
+        attempts[1],
+        0,
+        "standby",
+        generation,
+        secondarySourceId,
+        true,
+      )),
+    };
+  }, [rememberPreviewPlayAttempt, settlePreviewPlayAttempt]);
 
-  const resumePreviewMediaMuted = useCallback((
+  const resumePreviewMediaWithFallback = useCallback((
     video: HTMLVideoElement,
     desiredGain: number,
   ) => {
-    if (previewPendingPlayRef.current.has(video)) {
+    const generation = previewPlaybackGenerationRef.current;
+    const sourceId = video.dataset.sourceId ?? "";
+    const existing = previewPlayPromiseRef.current.get(video);
+    if (
+      existing?.generation === generation &&
+      existing.sourceId === sourceId
+    ) {
       setPreviewMediaGain(video, desiredGain);
-      return;
+      return existing.promise;
     }
+    previewPlayPromiseRef.current.delete(video);
+    previewPendingPlayRef.current.delete(video);
     previewPendingPlayRef.current.add(video);
     setPreviewMediaGain(video, desiredGain);
-    void video.play().then(
-      () => {
-        previewPendingPlayRef.current.delete(video);
-        const latestGain = isPlayingRef.current
-          ? previewDeferredGainRef.current.get(video) ?? 0
-          : 0;
-        previewDeferredGainRef.current.delete(video);
-        setPreviewMediaGain(video, latestGain);
-      },
-      () => {
-        previewPendingPlayRef.current.delete(video);
-        previewDeferredGainRef.current.delete(video);
-        setPreviewMediaGain(video, 0);
-        if (!mountedRef.current || !isPlayingRef.current) return;
-        stopPreview();
-        setError("プレビューを再生できませんでした。画面を一度タップして、もう一度お試しください。");
-      },
-    );
-  }, [setPreviewMediaGain, stopPreview]);
+    return rememberPreviewPlayAttempt(video, generation, sourceId, settlePreviewPlayAttempt(
+      video,
+      video.play(),
+      desiredGain,
+      "boundary",
+      generation,
+      sourceId,
+      true,
+    ));
+  }, [rememberPreviewPlayAttempt, setPreviewMediaGain, settlePreviewPlayAttempt]);
 
   const previewSourceGainAt = useCallback((time: number) =>
     previewDuckingMetadata
@@ -1556,6 +1827,10 @@ export default function VideoMixClient() {
     const secondaryVideo = previewSecondaryRef.current;
     const narrationAudio = narrationAudioRef.current;
     const sourcePlayers = sourcePlayerRefs.current;
+    const previewMetadataWaits = previewMetadataWaitRef.current;
+    const previewPendingPlays = previewPendingPlayRef.current;
+    const previewPlayPromises = previewPlayPromiseRef.current;
+    const previewDeferredGains = previewDeferredGainRef.current;
     const releaseOnPageHide = (event: PageTransitionEvent) => {
       if (!event.persisted) {
         pageHidingRef.current = true;
@@ -1566,12 +1841,28 @@ export default function VideoMixClient() {
     window.addEventListener("pagehide", releaseOnPageHide);
     return () => {
       mountedRef.current = false;
+      previewPlaybackGenerationRef.current += 1;
+      isPlayingRef.current = false;
+      previewActiveSwitchRef.current = null;
+      for (const [video, pending] of previewMetadataWaits) {
+        video.removeEventListener("loadedmetadata", pending.listener);
+        video.removeEventListener("error", pending.errorListener);
+        clearTimeout(pending.timeoutId);
+      }
+      previewMetadataWaits.clear();
+      previewPendingPlays.clear();
+      previewPlayPromises.clear();
+      previewDeferredGains.clear();
       window.removeEventListener("pagehide", releaseOnPageHide);
       if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
       primaryVideo?.pause();
       secondaryVideo?.pause();
       narrationAudio?.pause();
-      sourcePlayers.forEach((player) => player.pause());
+      sourcePlayers.forEach((player) => {
+        player.pause();
+        player.removeAttribute("src");
+        player.load();
+      });
       sourcePlayers.clear();
       void previewAudioContextRef.current?.close().catch(() => undefined);
       previewAudioContextRef.current = null;
@@ -2142,13 +2433,14 @@ export default function VideoMixClient() {
   }, [previewBackgroundForVideo]);
 
   const configurePreviewAt = useCallback((time: number, play: boolean) => {
-    if (!plan || sources.length === 0) return;
+    if (!plan || sources.length === 0) return false;
     const safeTime = Math.max(0, Math.min(plan.duration, time));
     const clip = clipAtTime(plan, safeTime);
     const source = sources[clip.sourceIndex];
     const primary = previewPrimaryRef.current;
     const secondary = previewSecondaryRef.current;
-    if (!primary || !secondary || !source) return;
+    if (!primary || !secondary || !source) return false;
+    const generation = previewPlaybackGenerationRef.current;
     const current = activeLayerRef.current === 0 ? primary : secondary;
     const inactive = activeLayerRef.current === 0 ? secondary : primary;
     const sourcePreviewGain =
@@ -2174,58 +2466,229 @@ export default function VideoMixClient() {
         clip.end,
         clip.start + Math.max(0, safeTime - clip.editedStart),
       );
-      setPreviewMediaGain(outgoing, 0);
+      const pendingSwitch = previewActiveSwitchRef.current;
+      if (
+        pendingSwitch?.generation === generation &&
+        pendingSwitch.sourceId === source.id &&
+        pendingSwitch.globalClipIndex === clip.globalClipIndex
+      ) return false;
+      previewActiveSwitchRef.current = {
+        generation,
+        sourceId: source.id,
+        globalClipIndex: clip.globalClipIndex,
+        editedTime: safeTime,
+      };
       stylePreviewLayer(outgoing, 0, 1);
       const sourceChanged = incoming.dataset.sourceId !== source.id;
       if (sourceChanged) {
+        previewPendingPlayRef.current.delete(incoming);
+        previewPlayPromiseRef.current.delete(incoming);
+        previewDeferredGainRef.current.delete(incoming);
+        previewMutedFallbackRef.current.delete(incoming);
         incoming.src = source.url;
         incoming.dataset.sourceId = source.id;
+        if (narrationEnabled && narration && narrationSourceAudioMode === "mute") {
+          previewMutedFallbackRef.current.add(incoming);
+        }
       }
       setPreviewMediaGain(incoming, 0);
       stylePreviewLayer(incoming, 2, 0);
       applySourceFraming(incoming);
-      activeLayerRef.current = incomingIndex;
-      activeClipRef.current = clip.globalClipIndex;
+      let activatedSynchronously = false;
+      const isCurrentSwitch = () => {
+        const pending = previewActiveSwitchRef.current;
+        return mountedRef.current &&
+          isPlayingRef.current === play &&
+          previewPlaybackGenerationRef.current === generation &&
+          incoming.dataset.sourceId === source.id &&
+          pending?.generation === generation &&
+          pending.sourceId === source.id &&
+          pending.globalClipIndex === clip.globalClipIndex;
+      };
+      const failActiveSwitch = () => {
+        if (!isCurrentSwitch()) return;
+        previewActiveSwitchRef.current = null;
+        stopPreview();
+        setError(
+          incoming.error?.code === 4
+            ? "この端末では、この素材の形式をプレビュー再生できません。別の動画を選ぶか、H.264互換で書き出してからお試しください。"
+            : "次の素材の再生を開始できませんでした。もう一度「プレビューを再生」を押すと、続きから確認できます。",
+        );
+      };
+      const activateIncoming = () => {
+        if (!isCurrentSwitch()) return;
+        activeLayerRef.current = incomingIndex;
+        activeClipRef.current = clip.globalClipIndex;
+        previewActiveSwitchRef.current = null;
+        previewStartTimeRef.current = safeTime;
+        previewStartedAtRef.current = performance.now();
+        previewTimeRef.current = safeTime;
+        setPreviewTime(safeTime);
+        setPreviewMediaGain(incoming, sourcePreviewGain);
+        stylePreviewLayer(incoming, 2, 1);
+        activatedSynchronously = true;
+      };
       const seekAndMaybePlay = () => {
-        if (incoming.dataset.sourceId !== source.id) return;
-        incoming.currentTime = targetTime;
-        updatePreviewLayerBackground(incoming, source, targetTime);
-        if (play && incoming.paused) {
+        if (!isCurrentSwitch()) return;
+        const trackedPlay = previewPlayPromiseRef.current.get(incoming);
+        const waitsForTrackedPlay = trackedPlay?.generation === generation &&
+          trackedPlay.sourceId === source.id;
+        const seekIncoming = () => {
+          if (!isCurrentSwitch()) return;
+          incoming.currentTime = targetTime;
+          updatePreviewLayerBackground(incoming, source, targetTime);
+        };
+        if (play && waitsForTrackedPlay) {
+          outgoing.pause();
+          void resumePreviewMediaWithFallback(incoming, sourcePreviewGain).then((ready) => {
+            if (ready) {
+              seekIncoming();
+              activateIncoming();
+            } else {
+              failActiveSwitch();
+            }
+          });
+        } else if (play && incoming.paused) {
           // Loading a new URL may implicitly pause a pre-started layer. Resume
-          // muted first (allowed without activation), and defer every gain
-          // update until play() resolves so a transition tick cannot leak the
-          // pre-seek audio while the promise is pending.
-          resumePreviewMediaMuted(incoming, sourcePreviewGain);
+          // it without exposing audio while play() is pending; if unmuted
+          // playback is rejected, the helper retries as a muted visual layer.
+          seekIncoming();
+          outgoing.pause();
+          void resumePreviewMediaWithFallback(incoming, sourcePreviewGain).then((ready) => {
+            if (ready) activateIncoming();
+            else failActiveSwitch();
+          });
         } else {
-          setPreviewMediaGain(incoming, sourcePreviewGain);
+          seekIncoming();
+          activateIncoming();
         }
       };
-      if (incoming.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        seekAndMaybePlay();
-      } else {
-        incoming.addEventListener("loadedmetadata", seekAndMaybePlay, { once: true });
-        // A source pre-started by the user's click is already loading. Calling
-        // load() again would abort that trusted play promise on Safari.
-        if (sourceChanged) incoming.load();
+      const metadataReady = runWhenPreviewMetadataReady(
+        incoming,
+        source.id,
+        generation,
+        `active-${clip.globalClipIndex}`,
+        seekAndMaybePlay,
+        failActiveSwitch,
+      );
+      if (!metadataReady) {
+        outgoing.pause();
+        setPreviewMediaGain(outgoing, 0);
       }
+      return activatedSynchronously;
     } else {
       const targetTime = Math.min(clip.end, clip.start + Math.max(0, safeTime - clip.editedStart));
-      setPreviewMediaGain(current, sourcePreviewGain);
-      stylePreviewLayer(current, 2, 1);
-      applySourceFraming(current);
-      if (Math.abs(current.currentTime - targetTime) > 0.3) current.currentTime = targetTime;
-      if (play && current.paused) {
-        resumePreviewMediaMuted(current, sourcePreviewGain);
-      }
-      updatePreviewLayerBackground(current, source, targetTime);
+      const seekCurrentAndMaybePlay = () => {
+        if (
+          !mountedRef.current ||
+          previewPlaybackGenerationRef.current !== generation ||
+          current.dataset.sourceId !== source.id
+        ) return;
+        setPreviewMediaGain(current, sourcePreviewGain);
+        stylePreviewLayer(current, 2, 1);
+        applySourceFraming(current);
+        const trackedPlay = previewPlayPromiseRef.current.get(current);
+        const waitsForTrackedPlay = trackedPlay?.generation === generation &&
+          trackedPlay.sourceId === source.id;
+        const seekCurrent = () => {
+          if (
+            previewPlaybackGenerationRef.current !== generation ||
+            current.dataset.sourceId !== source.id
+          ) return;
+          if (Math.abs(current.currentTime - targetTime) > 0.3) {
+            current.currentTime = targetTime;
+          }
+          updatePreviewLayerBackground(current, source, targetTime);
+        };
+        if (play && waitsForTrackedPlay) {
+          previewActiveSwitchRef.current = {
+            generation,
+            sourceId: source.id,
+            globalClipIndex: clip.globalClipIndex,
+            editedTime: safeTime,
+          };
+          void resumePreviewMediaWithFallback(current, sourcePreviewGain).then((ready) => {
+            const pending = previewActiveSwitchRef.current;
+            if (
+              previewPlaybackGenerationRef.current !== generation ||
+              pending?.sourceId !== source.id ||
+              pending.globalClipIndex !== clip.globalClipIndex
+            ) return;
+            previewActiveSwitchRef.current = null;
+            if (!ready) {
+              stopPreview();
+              setError("プレビューを開始できませんでした。もう一度「プレビューを再生」を押してください。");
+              return;
+            }
+            seekCurrent();
+            previewStartTimeRef.current = safeTime;
+            previewStartedAtRef.current = performance.now();
+          });
+        } else {
+          seekCurrent();
+        }
+        if (play && current.paused && !waitsForTrackedPlay) {
+          previewActiveSwitchRef.current = {
+            generation,
+            sourceId: source.id,
+            globalClipIndex: clip.globalClipIndex,
+            editedTime: safeTime,
+          };
+          void resumePreviewMediaWithFallback(current, sourcePreviewGain).then((ready) => {
+            const pending = previewActiveSwitchRef.current;
+            if (
+              previewPlaybackGenerationRef.current !== generation ||
+              pending?.sourceId !== source.id ||
+              pending.globalClipIndex !== clip.globalClipIndex
+            ) return;
+            previewActiveSwitchRef.current = null;
+            if (!ready) {
+              stopPreview();
+              setError(
+                current.error?.code === 4
+                  ? "この端末では、この素材の形式をプレビュー再生できません。別の動画を選ぶか、H.264互換で書き出してからお試しください。"
+                  : "プレビューを再開できませんでした。もう一度「プレビューを再生」を押してください。",
+              );
+              return;
+            }
+            previewStartTimeRef.current = safeTime;
+            previewStartedAtRef.current = performance.now();
+          });
+        }
+      };
+      const metadataReady = runWhenPreviewMetadataReady(
+        current,
+        source.id,
+        generation,
+        `current-${clip.globalClipIndex}`,
+        seekCurrentAndMaybePlay,
+        () => {
+          if (
+            previewPlaybackGenerationRef.current !== generation ||
+            current.dataset.sourceId !== source.id
+          ) return;
+          if (play) stopPreview();
+          setError(
+            current.error?.code === 4
+              ? "この端末では、この素材の形式をプレビュー再生できません。別の動画を選ぶか、H.264互換で書き出してからお試しください。"
+              : "プレビュー用の動画を読み込めませんでした。素材を選び直してお試しください。",
+          );
+        },
+      );
+      return metadataReady && previewActiveSwitchRef.current === null;
     }
   }, [
     plan,
+    narration,
+    narrationEnabled,
+    narrationSourceAudioMode,
     previewSourceGainAt,
     previewSourceNormalizationGain,
-    resumePreviewMediaMuted,
+    resumePreviewMediaWithFallback,
+    runWhenPreviewMetadataReady,
     setPreviewMediaGain,
     sources,
+    stopPreview,
     stylePreviewLayer,
     updatePreviewLayerBackground,
   ]);
@@ -2244,8 +2707,13 @@ export default function VideoMixClient() {
       );
       const outgoingSource = sources[transitionFrame.from.sourceIndex];
       if (usesOutgoingLayer && outgoingSource) {
+        const generation = previewPlaybackGenerationRef.current;
         const seekOutgoingFrame = () => {
-          if (other.dataset.sourceId !== outgoingSource.id) return;
+          if (
+            !mountedRef.current ||
+            previewPlaybackGenerationRef.current !== generation ||
+            other.dataset.sourceId !== outgoingSource.id
+          ) return;
           if (Math.abs(other.currentTime - transitionFrame.from.sourceTime) > 0.3) {
             other.currentTime = transitionFrame.from.sourceTime;
           }
@@ -2257,15 +2725,23 @@ export default function VideoMixClient() {
         };
         setPreviewMediaGain(other, 0);
         if (other.dataset.sourceId !== outgoingSource.id) {
+          previewPendingPlayRef.current.delete(other);
+          previewPlayPromiseRef.current.delete(other);
+          previewDeferredGainRef.current.delete(other);
+          previewMutedFallbackRef.current.delete(other);
           other.src = outgoingSource.url;
           other.dataset.sourceId = outgoingSource.id;
-          other.addEventListener("loadedmetadata", seekOutgoingFrame, { once: true });
-          other.load();
-        } else if (other.readyState >= HTMLMediaElement.HAVE_METADATA) {
-          seekOutgoingFrame();
-        } else {
-          other.addEventListener("loadedmetadata", seekOutgoingFrame, { once: true });
+          if (narrationEnabled && narration && narrationSourceAudioMode === "mute") {
+            previewMutedFallbackRef.current.add(other);
+          }
         }
+        runWhenPreviewMetadataReady(
+          other,
+          outgoingSource.id,
+          generation,
+          `transition-${transitionFrame.boundaryIndex}-${transitionFrame.from.clipIndex}`,
+          seekOutgoingFrame,
+        );
       }
       const visual = transitionFrame.visual;
       stylePreviewLayer(
@@ -2319,8 +2795,12 @@ export default function VideoMixClient() {
     }
   }, [
     plan,
+    narration,
+    narrationEnabled,
+    narrationSourceAudioMode,
     previewSourceGainAt,
     previewSourceNormalizationGain,
+    runWhenPreviewMetadataReady,
     schedule,
     setPreviewMediaGain,
     sources,
@@ -2328,13 +2808,27 @@ export default function VideoMixClient() {
     updatePreviewLayerBackground,
   ]);
 
-  const startPreview = (loopRange?: { start: number; end: number }) => {
+  const startPreview = (
+    loopRange?: { start: number; end: number },
+    selectionTarget?: {
+      sourceId: string;
+      clipIndex: number;
+      start: number;
+      end: number;
+      editedStart: number;
+      editedEnd: number;
+    },
+  ) => {
     if (!plan || sceneSelectionBusy || exporting || narrationGenerating) return;
     if (isPlayingRef.current) {
       stopPreview();
       return;
     }
     closeSourcePlayers();
+    previewSelectionClipRef.current = null;
+    previewFallbackNoticeRef.current = false;
+    previewMutedFallbackRef.current.clear();
+    setError("");
     const startAt = loopRange?.start ?? (previewTime >= plan.duration - 0.04 ? 0 : previewTime);
     previewLoopRef.current = loopRange ?? null;
     ensurePreviewAudioGraph();
@@ -2351,55 +2845,104 @@ export default function VideoMixClient() {
       videoCompositionTransitionUsesOverlap(startFrame.transition.type)
         ? sources[startFrame.transition.from.sourceIndex]
         : sources[nextClip.sourceIndex] ?? startSource;
-    if (primary && secondary && startSource && standbySource) {
-      // Both unmuted media elements must enter the playing state during this
-      // explicit click. Later `loadedmetadata` and rAF callbacks are not
-      // trusted user activations on iOS, and WebKit pauses a muted autoplaying
-      // video when it is unmuted later. Keep both unmuted with zero output gain
-      // while assigning/seeking, then configurePreviewAt raises only the
-      // currently audible layer. The standby remains authorized and playing
-      // silently, ready for a transition without another play() request.
-      setPreviewMediaGain(primary, 0);
-      setPreviewMediaGain(secondary, 0);
+    if (!primary || !secondary || !startSource || !standbySource) {
+      setError("プレビューを準備できませんでした。動画を選び直してお試しください。");
+      return;
+    }
+    const generation = previewPlaybackGenerationRef.current + 1;
+    previewPlaybackGenerationRef.current = generation;
+    // Set playback intent before issuing play() so a synchronously resolved
+    // promise can restore the deferred gain for the active layer.
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+    let playbackReadiness: ReturnType<typeof startPreviewMediaPair>;
+    {
+      // Start both visual elements in this explicit click. Later
+      // `loadedmetadata` and rAF callbacks are not trusted activations on iOS.
+      // Source-audio previews stay unmuted behind zero GainNodes; narration-only
+      // previews intentionally keep the videos muted so narration is the sole
+      // audible stream. The standby remains ready for a transition.
       if (primary.dataset.sourceId !== startSource.id) {
+        previewPendingPlayRef.current.delete(primary);
+        previewPlayPromiseRef.current.delete(primary);
+        previewDeferredGainRef.current.delete(primary);
+        previewMutedFallbackRef.current.delete(primary);
         primary.src = startSource.url;
         primary.dataset.sourceId = startSource.id;
-        primary.load();
       }
       if (secondary.dataset.sourceId !== standbySource.id) {
+        previewPendingPlayRef.current.delete(secondary);
+        previewPlayPromiseRef.current.delete(secondary);
+        previewDeferredGainRef.current.delete(secondary);
+        previewMutedFallbackRef.current.delete(secondary);
         secondary.src = standbySource.url;
         secondary.dataset.sourceId = standbySource.id;
-        secondary.load();
       }
+      // When AI narration replaces the source audio, keep both visual layers
+      // muted from the original click. This leaves the single audible media
+      // stream to narration on iOS instead of asking WebKit to authorize three.
+      if (
+        narrationEnabled &&
+        narration &&
+        narrationSourceAudioMode === "mute"
+      ) {
+        previewMutedFallbackRef.current.add(primary);
+        previewMutedFallbackRef.current.add(secondary);
+      }
+      setPreviewMediaGain(primary, 0);
+      setPreviewMediaGain(secondary, 0);
       activeLayerRef.current = 0;
       activeClipRef.current = startClip.globalClipIndex;
-      startPreviewMediaPair(primary, secondary);
+      playbackReadiness = startPreviewMediaPair(
+        primary,
+        secondary,
+        generation,
+        narrationEnabled && Boolean(narration) && narrationSourceAudioMode === "mute",
+      );
     }
+    previewTimeRef.current = startAt;
     setPreviewTime(startAt);
     previewStartTimeRef.current = startAt;
     previewStartedAtRef.current = 0;
-    // Set playback intent before configuring both media layers so the outgoing
-    // side of a transition can start in the same user gesture as the incoming.
-    isPlayingRef.current = true;
-    setIsPlaying(true);
-    configurePreviewAt(startAt, true);
-    updatePreviewTransition(startAt);
-    updateNarrationOverlay(startAt);
     const narrationPlayer = narrationAudioRef.current;
+    let narrationReady = Promise.resolve(true);
     if (narrationEnabled && narration && narrationPlayer) {
       narrationPlayer.currentTime = Math.min(startAt, narration.audioDuration);
-      setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
-      playPreviewMedia(narrationPlayer);
+      setPreviewNarrationGain(narrationPlayer, 0);
+      narrationReady = playPreviewMedia(narrationPlayer, generation);
     }
     const tick = (now: number) => {
+      const pendingSwitch = previewActiveSwitchRef.current;
+      if (pendingSwitch?.generation === generation) {
+        previewStartTimeRef.current = pendingSwitch.editedTime;
+        previewStartedAtRef.current = now;
+        previewTimeRef.current = pendingSwitch.editedTime;
+        if (narrationPlayer && narration) {
+          setPreviewNarrationGain(narrationPlayer, 0);
+          narrationPlayer.currentTime = Math.min(
+            pendingSwitch.editedTime,
+            narration.audioDuration,
+          );
+        }
+        animationRef.current = requestAnimationFrame(tick);
+        return;
+      }
       if (previewStartedAtRef.current === 0) previewStartedAtRef.current = now;
       const next = previewStartTimeRef.current + (now - previewStartedAtRef.current) / 1000;
       const loop = previewLoopRef.current;
       if (loop && next >= loop.end) {
         previewStartTimeRef.current = loop.start;
         previewStartedAtRef.current = now;
+        previewTimeRef.current = loop.start;
         setPreviewTime(loop.start);
-        configurePreviewAt(loop.start, true);
+        const loopReady = configurePreviewAt(loop.start, true);
+        if (!loopReady && previewActiveSwitchRef.current) {
+          if (narrationPlayer && narration) {
+            setPreviewNarrationGain(narrationPlayer, 0);
+          }
+          animationRef.current = requestAnimationFrame(tick);
+          return;
+        }
         updatePreviewTransition(loop.start);
         updateNarrationOverlay(loop.start);
         if (narrationPlayer && narration) {
@@ -2410,6 +2953,7 @@ export default function VideoMixClient() {
         return;
       }
       if (!mountedRef.current || next >= plan.duration) {
+        previewTimeRef.current = plan.duration;
         setPreviewTime(plan.duration);
         configurePreviewAt(plan.duration - 0.001, false);
         updatePreviewTransition(plan.duration - 0.001);
@@ -2419,9 +2963,22 @@ export default function VideoMixClient() {
       }
       if (now - lastPreviewUiUpdateRef.current >= 80) {
         lastPreviewUiUpdateRef.current = now;
+        previewTimeRef.current = next;
         setPreviewTime(next);
       }
-      configurePreviewAt(next, true);
+      const frameReady = configurePreviewAt(next, true);
+      if (!frameReady && previewActiveSwitchRef.current) {
+        previewStartTimeRef.current = next;
+        previewStartedAtRef.current = now;
+        previewTimeRef.current = next;
+        setPreviewTime(next);
+        if (narrationPlayer && narration) {
+          setPreviewNarrationGain(narrationPlayer, 0);
+          narrationPlayer.currentTime = Math.min(next, narration.audioDuration);
+        }
+        animationRef.current = requestAnimationFrame(tick);
+        return;
+      }
       updatePreviewTransition(next);
       updateNarrationOverlay(next);
       if (
@@ -2433,20 +2990,72 @@ export default function VideoMixClient() {
       ) {
         narrationPlayer.currentTime = next;
       }
+      if (narrationEnabled && narration && narrationPlayer) {
+        setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
+      }
       animationRef.current = requestAnimationFrame(tick);
     };
-    animationRef.current = requestAnimationFrame(tick);
+    // The editing clock must follow actual media playback. Starting rAF while
+    // a Blob video is still waiting for metadata makes the UI race ahead and
+    // can also abort Safari's pending play() promise.
+    void Promise.all([playbackReadiness.activeReady, narrationReady]).then(([
+      activeReady,
+      narrationIsReady,
+    ]) => {
+      if (previewPlaybackGenerationRef.current !== generation) return;
+      if (!activeReady || !narrationIsReady) {
+        stopPreview();
+        setError(
+          !narrationIsReady
+            ? "AIナレーションの再生を開始できませんでした。もう一度「プレビューを再生」を押してください。"
+            : primary.error?.code === 4
+            ? "この端末では、この素材の形式をプレビュー再生できません。別の動画を選ぶか、H.264互換で書き出してからお試しください。"
+            : "プレビューを開始できませんでした。もう一度「プレビューを再生」を押してください。",
+        );
+        return;
+      }
+      // Seek only after the trusted play promise has fulfilled. Seeking a fresh
+      // Blob URL from loadedmetadata while play() is still pending aborts that
+      // promise on Safari/WebKit.
+      configurePreviewAt(startAt, true);
+      updatePreviewTransition(startAt);
+      updateNarrationOverlay(startAt);
+      previewStartedAtRef.current = 0;
+      if (loopRange && selectionTarget) {
+        previewSelectionClipRef.current = {
+          ...selectionTarget,
+        };
+      }
+      if (narrationPlayer && narration) {
+        narrationPlayer.currentTime = Math.min(startAt, narration.audioDuration);
+        setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
+      }
+      animationRef.current = requestAnimationFrame(tick);
+    });
+    // Standby failure is non-fatal. Its helper first retries muted, and a later
+    // boundary reports an error only if that visual fallback also cannot play.
+    void playbackReadiness.standbyReady;
   };
 
   const previewSingleClip = (sourceId: string, clipIndex: number) => {
-    if (!plan) return;
+    if (!plan || sceneSelectionBusy) return;
     const clip = plan.clips.find((item) => item.sourceId === sourceId && item.clipIndex === clipIndex);
     if (!clip) return;
     stopPreview();
     // Keep play() in the button's trusted click handler. Deferring startPreview
     // to requestAnimationFrame loses user activation on iOS (including for the
     // optional narration audio).
-    startPreview({ start: clip.editedStart, end: clip.editedEnd });
+    startPreview(
+      { start: clip.editedStart, end: clip.editedEnd },
+      {
+        sourceId: clip.sourceId,
+        clipIndex: clip.clipIndex,
+        start: clip.start,
+        end: clip.end,
+        editedStart: clip.editedStart,
+        editedEnd: clip.editedEnd,
+      },
+    );
   };
 
   const setClipEdgeFromPreview = (
@@ -2454,18 +3063,77 @@ export default function VideoMixClient() {
     clipIndex: number,
     field: "start" | "end",
   ) => {
-    if (!plan) return;
-    const active = clipAtTime(plan, previewTime);
-    if (active.sourceId !== sourceId || active.clipIndex !== clipIndex) {
-      setSourceFeedback({ kind: "error", text: "先にこのカットをプレビューし、使いたい位置で停止してください。" });
+    if (!plan || sceneSelectionBusy) return;
+    const target = plan.clips.find(
+      (clip) => clip.sourceId === sourceId && clip.clipIndex === clipIndex,
+    );
+    const selected = previewSelectionClipRef.current;
+    const currentPreviewTime = previewTimeRef.current;
+    const geometryStillMatches = target && selected &&
+      Math.abs(selected.start - target.start) < 0.0005 &&
+      Math.abs(selected.end - target.end) < 0.0005 &&
+      Math.abs(selected.editedStart - target.editedStart) < 0.0005 &&
+      Math.abs(selected.editedEnd - target.editedEnd) < 0.0005;
+    const positionTolerance = 1 / plan.frameRate + 0.005;
+    const positionBelongsToTarget = target &&
+      currentPreviewTime >= target.editedStart - positionTolerance &&
+      currentPreviewTime <= target.editedEnd + positionTolerance;
+    if (
+      !target ||
+      selected?.sourceId !== sourceId ||
+      selected.clipIndex !== clipIndex ||
+      !geometryStillMatches ||
+      !positionBelongsToTarget
+    ) {
+      announceSourceFeedback(
+        "error",
+        "先に「選択範囲をプレビュー」を押し、仕上がりプレビューを使いたい位置へ移動してください。",
+      );
       return;
     }
-    updateClip(
+    const source = sourcesRef.current.find((item) => item.id === sourceId);
+    const sourceClip = source?.clips[clipIndex];
+    if (!source || !sourceClip) return;
+    const raw = Math.max(
+      target.start,
+      Math.min(
+        target.end,
+        target.start + Math.max(0, currentPreviewTime - target.editedStart),
+      ),
+    );
+    if (
+      (field === "start" && raw > sourceClip.end - MINIMUM_CLIP_SECONDS + 0.0005) ||
+      (field === "end" && raw < sourceClip.start + MINIMUM_CLIP_SECONDS - 0.0005)
+    ) {
+      announceSourceFeedback(
+        "error",
+        `開始と終了の間は${MINIMUM_CLIP_SECONDS}秒以上必要です。もう少し${field === "start" ? "前" : "後ろ"}の位置を選んでください。`,
+      );
+      return;
+    }
+    const previousClip = source.clips[clipIndex - 1];
+    const nextClip = source.clips[clipIndex + 1];
+    if (field === "start" && previousClip && raw < previousClip.end - 0.0005) {
+      announceSourceFeedback("error", "前のカットと重ならない位置を選んでください。");
+      return;
+    }
+    if (field === "end" && nextClip && raw > nextClip.start + 0.0005) {
+      announceSourceFeedback("error", "次のカットと重ならない位置を選んでください。");
+      return;
+    }
+    const applied = updateClip(
       sourceId,
       clipIndex,
       field,
-      Math.min(active.end, active.start + Math.max(0, previewTime - active.editedStart)),
+      raw,
     );
+    if (applied !== null) {
+      const sourceIndex = sourcesRef.current.findIndex((item) => item.id === sourceId);
+      announceSourceFeedback(
+        "message",
+        `動画${sourceIndex + 1}・カット${clipIndex + 1}の${field === "start" ? "開始" : "終了"}を、元動画の${formatSeconds(applied)}に設定しました。`,
+      );
+    }
   };
 
   const addVideos = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -2724,6 +3392,7 @@ export default function VideoMixClient() {
       pruneVideoMixBoundaryTransitionPreferences(next, currentPreferences),
     );
     activeClipRef.current = -1;
+    previewTimeRef.current = 0;
     setPreviewTime(0);
   };
 
@@ -2814,8 +3483,9 @@ export default function VideoMixClient() {
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
-    ) return;
+    ) return null;
     const current = sourcesRef.current;
+    let appliedValue: number | null = null;
     const next = current.map((source) => {
       if (source.id !== sourceId) return source;
       if (source.sceneSelectionStatus === "analyzing") return source;
@@ -2825,9 +3495,11 @@ export default function VideoMixClient() {
       if (field === "start") {
         const minimum = clipIndex === 0 ? 0 : clips[clipIndex - 1].end;
         clip.start = Math.max(minimum, Math.min(clip.end - MINIMUM_CLIP_SECONDS, raw));
+        appliedValue = clip.start;
       } else {
         const maximum = clipIndex === clips.length - 1 ? source.duration : clips[clipIndex + 1].start;
         clip.end = Math.min(maximum, Math.max(clip.start + MINIMUM_CLIP_SECONDS, raw));
+        appliedValue = clip.end;
       }
       if (
         clip.start === source.clips[clipIndex].start &&
@@ -2844,13 +3516,14 @@ export default function VideoMixClient() {
         sceneSelectionRevision: source.sceneSelectionRevision + 1,
       };
     });
-    if (next.every((source, index) => source === current[index])) return;
+    if (next.every((source, index) => source === current[index])) return appliedValue;
     sourceGenerationRef.current += 1;
     stopPreview();
     clearResult();
     invalidateGeneratedNarration();
     sourcesRef.current = next;
     setSources(next);
+    return appliedValue;
   };
 
   const generateMixNarration = async () => {
@@ -3437,7 +4110,7 @@ export default function VideoMixClient() {
       </section>
 
       <section className="videoMixWorkspace" aria-label="複数動画の編集">
-        <div className="videoMixPreviewPanel">
+        <div className="videoMixPreviewPanel" id="video-mix-finished-preview">
           <div className="videoMixPreviewHeading">
             <span>仕上がりプレビュー</span>
             <small>{plan ? `${sources.length}動画・${plan.clips.length}カット・${plan.duration.toFixed(1)}秒` : "9:16"}</small>
@@ -3483,9 +4156,10 @@ export default function VideoMixClient() {
               aria-label="プレビューの再生位置"
               aria-valuetext={`${formatSeconds(previewTime)} / ${formatSeconds(plan?.duration ?? 0)}`}
               onChange={(event) => {
-                stopPreview();
-                const next = Number(event.target.value);
-                setPreviewTime(next);
+                 stopPreview();
+                 const next = Number(event.target.value);
+                 previewTimeRef.current = next;
+                 setPreviewTime(next);
                 configurePreviewAt(next, false);
                 updatePreviewTransition(next);
                 updateNarrationOverlay(next);
@@ -3562,7 +4236,13 @@ export default function VideoMixClient() {
                   <li key={source.id}>
                     <div className="videoMixSourceSummary">
                       <span>{String(sourceIndex + 1).padStart(2, "0")}</span>
-                      <video src={source.url} muted playsInline preload="metadata" aria-label={`${sourceIndex + 1}番目の素材 ${source.file.name}`} />
+                      {source.thumbnails[0] ? (
+                        // Generated locally and intentionally kept as a data URL.
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={source.thumbnails[0]} alt="" />
+                      ) : (
+                        <span className="videoMixSourceThumbnailPlaceholder" aria-hidden="true">動画</span>
+                      )}
                       <div>
                         <strong>{source.file.name}</strong>
                         <small>{source.width}×{source.height}・{formatSeconds(source.duration)}・{formatBytes(source.file.size)}</small>
@@ -3693,9 +4373,38 @@ export default function VideoMixClient() {
                             );
                           })}
                           <div className="videoMixClipActions">
-                            <button type="button" onClick={() => previewSingleClip(source.id, clipIndex)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>このカットを繰り返し再生</button>
-                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>停止位置を開始に</button>
-                            <button type="button" onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>停止位置を終了に</button>
+                            <button
+                              type="button"
+                              className="videoMixClipPreviewButton"
+                              onClick={() => previewSingleClip(source.id, clipIndex)}
+                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
+                              aria-controls="video-mix-finished-preview"
+                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
+                              aria-label={`${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの選択範囲を仕上がりプレビューで再生`}
+                            >
+                              選択範囲をプレビュー
+                            </button>
+                            <p id={`video-mix-clip-help-${source.id}-${clipIndex}`}>「この位置」は、画面の「仕上がりプレビュー」の現在位置です。素材全体の再生位置は使いません。</p>
+                            <button
+                              type="button"
+                              onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")}
+                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
+                              aria-controls="video-mix-finished-preview"
+                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
+                              aria-label={`仕上がりプレビューの現在位置を、${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの開始位置に設定`}
+                            >
+                              この位置から使う
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")}
+                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
+                              aria-controls="video-mix-finished-preview"
+                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
+                              aria-label={`仕上がりプレビューの現在位置を、${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの終了位置に設定`}
+                            >
+                              この位置まで使う
+                            </button>
                           </div>
                         </fieldset>
                       ))}

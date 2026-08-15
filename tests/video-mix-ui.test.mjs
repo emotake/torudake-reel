@@ -279,16 +279,20 @@ test("keeps preview layers and paid reservations safe across transitions and nav
     previewConfigurationStart,
     clientSource.indexOf("const startPreview =", previewConfigurationStart),
   );
-  assert.doesNotMatch(previewConfiguration, /outgoing\.pause\(\)|other\.pause\(\)/);
+  assert.match(
+    previewConfiguration,
+    /if \(!metadataReady\) \{[\s\S]*?outgoing\.pause\(\);[\s\S]*?setPreviewMediaGain\(outgoing, 0\)/,
+  );
   assert.doesNotMatch(previewConfiguration, /playPreviewMedia\(incoming\)|playPreviewMedia\(other\)/);
   assert.match(clientSource, /const attempts = \[primary\.play\(\), secondary\.play\(\)\]/);
-  assert.match(clientSource, /setPreviewMediaGain\(primary, 0\)[\s\S]*?setPreviewMediaGain\(secondary, 0\)[\s\S]*?startPreviewMediaPair\(primary, secondary\)/);
+  assert.match(clientSource, /setPreviewMediaGain\(primary, 0\)[\s\S]*?setPreviewMediaGain\(secondary, 0\)[\s\S]*?startPreviewMediaPair\([\s\S]*?primary,[\s\S]*?secondary,[\s\S]*?generation,/);
   assert.match(clientSource, /activeClipRef\.current = startClip\.globalClipIndex/);
   assert.match(clientSource, /startFrame\?\.transition[\s\S]*?sources\[startFrame\.transition\.from\.sourceIndex\]/);
   assert.match(clientSource, /Loading a new URL may implicitly pause a pre-started layer/);
   assert.match(previewConfiguration, /setPreviewMediaGain\(incoming, 0\)[\s\S]*?incoming\.currentTime = targetTime/);
-  assert.match(previewConfiguration, /resumePreviewMediaMuted\(incoming, sourcePreviewGain\)/);
-  assert.match(previewConfiguration, /resumePreviewMediaMuted\(current, sourcePreviewGain\)/);
+  assert.match(previewConfiguration, /resumePreviewMediaWithFallback\(incoming, sourcePreviewGain\)/);
+  assert.match(previewConfiguration, /resumePreviewMediaWithFallback\(current, sourcePreviewGain\)/);
+  assert.match(previewConfiguration, /runWhenPreviewMetadataReady\([\s\S]*?`current-\$\{clip\.globalClipIndex\}`/);
   assert.doesNotMatch(previewConfiguration, /incoming\.play\(\)|current\.play\(\)|other\.play\(\)/);
   const mediaGainGuard = clientSource.slice(
     clientSource.indexOf("const setPreviewMediaGain"),
@@ -299,25 +303,41 @@ test("keeps preview layers and paid reservations safe across transitions and nav
     /previewPendingPlayRef\.current\.has\(video\)[\s\S]*?previewDeferredGainRef\.current\.set\(video, safeGain\)[\s\S]*?node\.gain\.value = 0/,
   );
   assert.match(mediaGainGuard, /video\.muted = false/);
-  assert.doesNotMatch(
+  assert.match(
     mediaGainGuard,
-    /video\.muted = true|video\.muted = safeGain <= 0/,
+    /previewMutedFallbackRef\.current\.has\(video\)[\s\S]*?video\.muted = true[\s\S]*?return/,
   );
+  assert.doesNotMatch(mediaGainGuard, /video\.muted = safeGain <= 0/);
   const mutedResume = clientSource.slice(
-    clientSource.indexOf("const resumePreviewMediaMuted"),
+    clientSource.indexOf("const resumePreviewMediaWithFallback"),
     clientSource.indexOf("const previewSourceGainAt"),
   );
   assert.match(
     mutedResume,
-    /previewPendingPlayRef\.current\.add\(video\)[\s\S]*?setPreviewMediaGain\(video, desiredGain\)[\s\S]*?video\.play\(\)/,
+    /previewPlayPromiseRef\.current\.get\(video\)[\s\S]*?existing\.promise[\s\S]*?previewPendingPlayRef\.current\.add\(video\)[\s\S]*?video\.play\(\)/,
   );
+  assert.match(clientSource, /rememberPreviewPlayAttempt\([\s\S]*?generation[\s\S]*?sourceId[\s\S]*?promise/);
+  assert.match(previewConfiguration, /previewPlayPromiseRef\.current\.delete\(incoming\)[\s\S]*?incoming\.src = source\.url/);
+  assert.match(previewConfiguration, /waitsForTrackedPlay[\s\S]*?resumePreviewMediaWithFallback\(incoming, sourcePreviewGain\)\.then[\s\S]*?seekIncoming\(\)[\s\S]*?activateIncoming\(\)/);
+  assert.match(clientSource, /setPreviewMutedFallback\(video\)[\s\S]*?await video\.play\(\)/);
+  assert.match(clientSource, /activeReady:[\s\S]*?standbyReady:/);
+  assert.match(clientSource, /Promise\.all\(\[playbackReadiness\.activeReady, narrationReady\]\)[\s\S]*?requestAnimationFrame\(tick\)/);
+  assert.match(clientSource, /setPreviewNarrationGain\(narrationPlayer, 0\)[\s\S]*?playPreviewMedia\(narrationPlayer, generation\)[\s\S]*?Promise\.all\(\[playbackReadiness\.activeReady, narrationReady\]\)[\s\S]*?setPreviewNarrationGain\(narrationPlayer, narration\.normalizationGain\)/);
+  assert.match(clientSource, /const setPreviewNarrationGain[\s\S]*?player\.muted = false/);
+  assert.match(clientSource, /narrationSourceAudioMode === "mute"[\s\S]*?previewMutedFallbackRef\.current\.add\(primary\)[\s\S]*?previewMutedFallbackRef\.current\.add\(secondary\)/);
+  assert.doesNotMatch(clientSource, /Promise\.allSettled\(attempts\)[\s\S]*?stopPreview\(\)/);
+  assert.match(clientSource, /player\.pause\(\);[\s\S]*?player\.removeAttribute\("src"\);[\s\S]*?player\.load\(\)/);
+  assert.match(clientSource, /previewMetadataWaitRef\.current\.get\(video\)[\s\S]*?previous\.run = run/);
+  assert.match(clientSource, /pending\.timeoutId = setTimeout\(pending\.errorListener, 8_000\)/);
+  assert.match(clientSource, /video\.addEventListener\("error", pending\.errorListener/);
+  assert.match(clientSource, /pendingSwitch\?\.generation === generation[\s\S]*?requestAnimationFrame\(tick\)/);
   const singleClipPreview = clientSource.slice(
     clientSource.indexOf("const previewSingleClip"),
     clientSource.indexOf("const setClipEdgeFromPreview"),
   );
   assert.match(
     singleClipPreview,
-    /stopPreview\(\);[\s\S]*?startPreview\(\{ start: clip\.editedStart, end: clip\.editedEnd \}\)/,
+    /stopPreview\(\);[\s\S]*?startPreview\([\s\S]*?\{ start: clip\.editedStart, end: clip\.editedEnd \},[\s\S]*?sourceId: clip\.sourceId/,
   );
   assert.doesNotMatch(singleClipPreview, /requestAnimationFrame\s*\(/);
   assert.match(clientSource, /window\.addEventListener\("pagehide"/);
@@ -413,8 +433,20 @@ test("exposes fine cut controls and accessible playback progress", () => {
   assert.match(clientSource, /素材全体を再生する/);
   assert.match(clientSource, /controls[\s\S]*?onPlay=\{\(\) => handleSourcePlayerPlay\(source\.id\)\}/);
   assert.match(clientSource, /pauseSourcePlayers\(sourceId\)/);
-  assert.match(clientSource, /このカットを繰り返し再生/);
-  assert.match(clientSource, /停止位置を開始に/);
+  assert.match(clientSource, /選択範囲をプレビュー/);
+  assert.match(clientSource, /この位置から使う/);
+  assert.match(clientSource, /この位置まで使う/);
+  assert.match(clientSource, /「この位置」は、画面の「仕上がりプレビュー」の現在位置です/);
+  assert.doesNotMatch(clientSource, /停止位置を開始に|停止位置を終了に/);
+  assert.match(clientSource, /previewSelectionClipRef/);
+  assert.match(clientSource, /previewSelectionClipRef\.current = \{[\s\S]*?\.\.\.selectionTarget/);
+  assert.match(clientSource, /Math\.abs\(selected\.start - target\.start\)[\s\S]*?Math\.abs\(selected\.editedEnd - target\.editedEnd\)/);
+  assert.doesNotMatch(clientSource, /selected\.plan !== plan/);
+  assert.match(clientSource, /currentPreviewTime >= target\.editedStart - positionTolerance[\s\S]*?currentPreviewTime <= target\.editedEnd \+ positionTolerance/);
+  assert.match(clientSource, /開始と終了の間は\$\{MINIMUM_CLIP_SECONDS\}秒以上必要です/);
+  assert.match(clientSource, /動画\$\{sourceIndex \+ 1\}・カット\$\{clipIndex \+ 1\}[\s\S]*?元動画の\$\{formatSeconds\(applied\)\}/);
+  assert.match(clientSource, /announceSourceFeedback\([\s\S]*?開始[\s\S]*?終了/);
+  assert.doesNotMatch(clientSource, /<video src=\{source\.url\} muted playsInline preload="metadata"/);
   assert.match(clientSource, /type="number"/);
   assert.match(clientSource, /aria-valuetext/);
   assert.match(clientSource, /role="progressbar"/);
