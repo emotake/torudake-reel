@@ -116,9 +116,7 @@ export function HeroOutcomeVisual() {
                 <small>休日の記録</small>
                 <strong>雨上がりの街を歩く</strong>
               </div>
-              <span className={styles.heroPlay}>
-                <PlayMark />
-              </span>
+              <span className={styles.heroPlay}>完成</span>
               <div className={styles.captionSample}>
                 雨のあとの景色を、一本のリールに。
               </div>

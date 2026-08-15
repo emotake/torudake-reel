@@ -70,10 +70,12 @@ test("shows the before-and-after story and three real workflow previews", () => 
 });
 
 test("keeps decorative motion optional and content order semantic", () => {
+  const richMarkerIndex = globalCss.indexOf("Rich home preview");
+  assert.ok(richMarkerIndex >= 0);
+  const richCss = globalCss.slice(richMarkerIndex);
   assert.match(visualCss, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(visualCss, /animation-duration:\s*0\.01ms !important/);
-  assert.match(globalCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?transition:\s*none !important/);
-  const richCss = globalCss.slice(globalCss.indexOf("Rich home preview"));
+  assert.match(richCss, /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?transition:\s*none !important;[\s\S]*?\n\}/);
   assert.doesNotMatch(richCss, /\border:\s*-[1-9]/);
 });
 

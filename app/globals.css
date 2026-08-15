@@ -15506,15 +15506,39 @@ a {
   }
 
   .creationModeCard {
-    display: flex;
+    display: grid;
     min-height: 0;
-    gap: 8px;
+    grid-template-columns: 104px minmax(0, 1fr);
+    grid-template-areas:
+      "label label"
+      "visual copy"
+      "action action"
+      "secondary secondary";
+    gap: 9px 12px;
     padding: 15px;
   }
 
+  .creationModeCard .creationModeLabel {
+    grid-area: label;
+  }
+
   .creationModeCard > [role="img"] {
+    grid-area: visual;
     height: 112px;
     margin-bottom: 0;
+  }
+
+  .creationModeCard .creationModeCopy {
+    grid-area: copy;
+    align-self: center;
+  }
+
+  .creationModeCard .creationModeAction {
+    grid-area: action;
+  }
+
+  .creationModeCard .creationModeSecondary {
+    grid-area: secondary;
   }
 
   .creationModeCard h3,
@@ -15558,6 +15582,10 @@ a {
 
   .homeBenefitGrid article,
   .homeBenefitGrid article:first-child {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 12px;
+    align-items: center;
     padding: 15px 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.11);
     border-left: 0;
@@ -15565,6 +15593,15 @@ a {
 
   .homeBenefitGrid article:first-child {
     border-top: 0;
+  }
+
+  .homeBenefitGrid article h3,
+  .homeBenefitGrid article p {
+    margin: 0;
+  }
+
+  .homeBenefitGrid article p {
+    grid-column: 2;
   }
 
   .homeStepRichGrid {
@@ -15610,7 +15647,7 @@ a {
   }
 
   .homeStepCopy p {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.55;
   }
 }
@@ -15633,7 +15670,7 @@ a {
   .landingPromiseRow span {
     min-height: 30px;
     padding-inline: 9px;
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .demoSceneRail {
@@ -15641,7 +15678,15 @@ a {
   }
 
   .demoSceneRail li > span:last-child {
-    font-size: 9px;
+    font-size: 12px;
+  }
+
+  .demoSceneRail small {
+    font-size: 10px;
+  }
+
+  .demoSceneOutcome {
+    font-size: 13px;
   }
 
   .homeBenefitLead {
@@ -15665,6 +15710,16 @@ a {
 
   .homeStepRichGrid article {
     grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .creationModeCard {
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap-inline: 10px;
+    padding: 13px;
+  }
+
+  .creationModeCard > [role="img"] {
+    height: 96px;
   }
 }
 
