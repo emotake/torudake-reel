@@ -169,6 +169,53 @@ test("stacks each promise term over its value at narrow widths", () => {
   );
 });
 
+test("uses full-width stacked promises with readable desktop typography", () => {
+  const desktopStart = cssSource.indexOf("@media (min-width: 761px)");
+  const desktopEnd = cssSource.indexOf("@media", desktopStart + 1);
+  const desktopPromises = cssSource.slice(
+    desktopStart,
+    desktopEnd >= 0 ? desktopEnd : undefined,
+  );
+
+  function rule(selector) {
+    const start = desktopPromises.indexOf(`${selector} {`);
+    const end = desktopPromises.indexOf("}", start);
+    assert.ok(start >= 0 && end > start, `Missing desktop ${selector} rule`);
+    return desktopPromises.slice(start, end);
+  }
+
+  function pixelValue(source, property) {
+    const match = source.match(new RegExp(`${property}:\\s*([\\d.]+)px`));
+    assert.ok(match, `Missing pixel ${property}`);
+    return Number(match[1]);
+  }
+
+  assert.ok(desktopStart >= 0);
+  const leadRule = rule(".landingHeroStage .landingIntroCopy > p:last-of-type");
+  const itemRule = rule(".landingPromiseItem");
+  const markRule = rule(".landingPromiseMark");
+  const typographyRule = rule(".landingPromiseTypography");
+  const termRule = rule(".landingPromiseTerm");
+  const valueRule = rule(".landingPromiseValue");
+  const supportingRule = rule(".landingPromiseCopy small");
+
+  assert.match(itemRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(
+    typographyRule,
+    /display:\s*grid;[\s\S]*?justify-items:\s*start;[\s\S]*?white-space:\s*normal;/,
+  );
+  assert.ok(pixelValue(leadRule, "font-size") >= 17);
+  assert.ok(pixelValue(termRule, "font-size") >= 12);
+  assert.ok(pixelValue(valueRule, "font-size") >= 19);
+  assert.ok(pixelValue(supportingRule, "font-size") >= 12);
+  assert.match(leadRule, /color:\s*#3f4b5e;/i);
+  assert.match(termRule, /color:\s*#46536a;/i);
+  assert.match(supportingRule, /color:\s*#4f5b70;/i);
+  assert.match(markRule, /width:\s*20px;/);
+  assert.match(markRule, /height:\s*1px;/);
+  assert.match(markRule, /background:\s*rgba\(25,\s*115,\s*70,\s*0\.68\);/);
+});
+
 test("keeps one video editor engine while giving it a focused public entry", () => {
   assert.match(pageSource, /landingVariant\?: "home" \| "video-edit"/);
   assert.match(pageSource, /export function VideoEditExperience\(\)/);

@@ -15808,6 +15808,74 @@ a {
   line-height: 1.5;
 }
 
+@media (min-width: 761px) {
+  .landingHeroStage .landingIntroCopy > p:last-of-type {
+    color: #3f4b5e;
+    font-size: 17px;
+    font-weight: 500;
+    line-height: 1.78;
+    letter-spacing: 0.005em;
+  }
+
+  .landingPromiseList {
+    gap: clamp(18px, 1.8vw, 24px);
+    margin-top: 30px;
+  }
+
+  .landingPromiseItem {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    align-content: start;
+  }
+
+  .landingPromiseMark {
+    width: 20px;
+    height: 1px;
+    margin-top: 0;
+    border-radius: 999px;
+    background: rgba(25, 115, 70, 0.68);
+  }
+
+  .landingPromiseCopy {
+    text-align: left;
+  }
+
+  .landingPromiseTypography {
+    display: grid;
+    gap: 1px;
+    align-items: start;
+    justify-items: start;
+    white-space: normal;
+  }
+
+  .landingPromiseTerm {
+    color: #46536a;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.25;
+    letter-spacing: 0.035em;
+  }
+
+  .landingPromiseValue {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+  }
+
+  .landingPromiseValueNumeric {
+    letter-spacing: 0;
+  }
+
+  .landingPromiseCopy small {
+    margin-top: 7px;
+    color: #4f5b70;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+}
+
 .landingHeroResult {
   display: grid;
   min-width: 0;
