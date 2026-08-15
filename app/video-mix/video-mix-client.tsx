@@ -181,6 +181,16 @@ type MixNarration = Readonly<{
 
 type NarrationSourceAudioMode = "mute" | "ambient";
 
+type ActiveTrimTarget = Readonly<{
+  sourceId: string;
+  clipIndex: number;
+}>;
+
+type ActiveTrimDraft = Readonly<ActiveTrimTarget & {
+  start: number;
+  end: number;
+}>;
+
 const VIDEO_MIX_AMBIENT_AUDIO_GAIN = 0.12;
 
 class VideoMixRequestError extends Error {
@@ -830,6 +840,8 @@ function clipAtTime(plan: VideoCompositionPlan, time: number) {
 export default function VideoMixClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const sourceFeedbackRef = useRef<HTMLParagraphElement>(null);
+  const trimPanelRef = useRef<HTMLElement>(null);
+  const activeTrimDraftRef = useRef<ActiveTrimDraft | null>(null);
   const previewPrimaryRef = useRef<HTMLVideoElement>(null);
   const previewSecondaryRef = useRef<HTMLVideoElement>(null);
   const previewPrimaryLayerRef = useRef<HTMLSpanElement>(null);
@@ -964,6 +976,9 @@ export default function VideoMixClient() {
   const [mobileStep, setMobileStep] = useState<1 | 2 | 3>(1);
   const [showAllTransitions, setShowAllTransitions] = useState(false);
   const [expandedSourcePlayerId, setExpandedSourcePlayerId] = useState<string | null>(null);
+  const [activeTrimTarget, setActiveTrimTarget] = useState<ActiveTrimTarget | null>(null);
+  const [activeTrimDraft, setActiveTrimDraft] = useState<ActiveTrimDraft | null>(null);
+  const [trimFeedback, setTrimFeedback] = useState("");
   const [loadedDraft] = useState<VideoMixClientDraft | null>(() =>
     typeof window === "undefined" ? null : readVideoMixClientDraft(window.localStorage),
   );
@@ -1029,6 +1044,20 @@ export default function VideoMixClient() {
   const sceneSelectionBusy = sources.some(
     (source) => source.sceneSelectionStatus === "analyzing",
   );
+  const activeTrimSourceIndex = activeTrimTarget
+    ? sources.findIndex((source) => source.id === activeTrimTarget.sourceId)
+    : -1;
+  const activeTrimSource = activeTrimSourceIndex >= 0
+    ? sources[activeTrimSourceIndex]
+    : null;
+  const activeTrimClip = activeTrimSource && activeTrimTarget
+    ? activeTrimSource.clips[activeTrimTarget.clipIndex] ?? null
+    : null;
+  const displayedTrimDraft = activeTrimDraft && activeTrimTarget &&
+    activeTrimDraft.sourceId === activeTrimTarget.sourceId &&
+    activeTrimDraft.clipIndex === activeTrimTarget.clipIndex
+    ? activeTrimDraft
+    : null;
   const editingLocked =
     preparing || exporting || narrationGenerating || discardingPending || Boolean(pendingFinalize);
   const narrationSourceAudioGain =
@@ -3058,84 +3087,6 @@ export default function VideoMixClient() {
     );
   };
 
-  const setClipEdgeFromPreview = (
-    sourceId: string,
-    clipIndex: number,
-    field: "start" | "end",
-  ) => {
-    if (!plan || sceneSelectionBusy) return;
-    const target = plan.clips.find(
-      (clip) => clip.sourceId === sourceId && clip.clipIndex === clipIndex,
-    );
-    const selected = previewSelectionClipRef.current;
-    const currentPreviewTime = previewTimeRef.current;
-    const geometryStillMatches = target && selected &&
-      Math.abs(selected.start - target.start) < 0.0005 &&
-      Math.abs(selected.end - target.end) < 0.0005 &&
-      Math.abs(selected.editedStart - target.editedStart) < 0.0005 &&
-      Math.abs(selected.editedEnd - target.editedEnd) < 0.0005;
-    const positionTolerance = 1 / plan.frameRate + 0.005;
-    const positionBelongsToTarget = target &&
-      currentPreviewTime >= target.editedStart - positionTolerance &&
-      currentPreviewTime <= target.editedEnd + positionTolerance;
-    if (
-      !target ||
-      selected?.sourceId !== sourceId ||
-      selected.clipIndex !== clipIndex ||
-      !geometryStillMatches ||
-      !positionBelongsToTarget
-    ) {
-      announceSourceFeedback(
-        "error",
-        "先に「選択範囲をプレビュー」を押し、仕上がりプレビューを使いたい位置へ移動してください。",
-      );
-      return;
-    }
-    const source = sourcesRef.current.find((item) => item.id === sourceId);
-    const sourceClip = source?.clips[clipIndex];
-    if (!source || !sourceClip) return;
-    const raw = Math.max(
-      target.start,
-      Math.min(
-        target.end,
-        target.start + Math.max(0, currentPreviewTime - target.editedStart),
-      ),
-    );
-    if (
-      (field === "start" && raw > sourceClip.end - MINIMUM_CLIP_SECONDS + 0.0005) ||
-      (field === "end" && raw < sourceClip.start + MINIMUM_CLIP_SECONDS - 0.0005)
-    ) {
-      announceSourceFeedback(
-        "error",
-        `開始と終了の間は${MINIMUM_CLIP_SECONDS}秒以上必要です。もう少し${field === "start" ? "前" : "後ろ"}の位置を選んでください。`,
-      );
-      return;
-    }
-    const previousClip = source.clips[clipIndex - 1];
-    const nextClip = source.clips[clipIndex + 1];
-    if (field === "start" && previousClip && raw < previousClip.end - 0.0005) {
-      announceSourceFeedback("error", "前のカットと重ならない位置を選んでください。");
-      return;
-    }
-    if (field === "end" && nextClip && raw > nextClip.start + 0.0005) {
-      announceSourceFeedback("error", "次のカットと重ならない位置を選んでください。");
-      return;
-    }
-    const applied = updateClip(
-      sourceId,
-      clipIndex,
-      field,
-      raw,
-    );
-    if (applied !== null) {
-      const sourceIndex = sourcesRef.current.findIndex((item) => item.id === sourceId);
-      announceSourceFeedback(
-        "message",
-        `動画${sourceIndex + 1}・カット${clipIndex + 1}の${field === "start" ? "開始" : "終了"}を、元動画の${formatSeconds(applied)}に設定しました。`,
-      );
-    }
-  };
-
   const addVideos = async (event: ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -3383,6 +3334,12 @@ export default function VideoMixClient() {
     setRemovedSource(undoEntry);
     sourceGenerationRef.current += 1;
     stopPreview();
+    if (activeTrimTarget?.sourceId === sourceId) {
+      activeTrimDraftRef.current = null;
+      setActiveTrimTarget(null);
+      setActiveTrimDraft(null);
+      setTrimFeedback("");
+    }
     clearResult();
     invalidateGeneratedNarration();
     const next = current.filter((source) => source.id !== sourceId);
@@ -3448,6 +3405,12 @@ export default function VideoMixClient() {
     if (next.every((source, index) => source === current[index])) return;
     sourceGenerationRef.current += 1;
     stopPreview();
+    if (activeTrimTarget?.sourceId === sourceId) {
+      activeTrimDraftRef.current = null;
+      setActiveTrimTarget(null);
+      setActiveTrimDraft(null);
+      setTrimFeedback("");
+    }
     clearResult();
     invalidateGeneratedNarration();
     sourcesRef.current = next;
@@ -3476,7 +3439,12 @@ export default function VideoMixClient() {
     activeClipRef.current = -1;
   };
 
-  const updateClip = (sourceId: string, clipIndex: number, field: "start" | "end", raw: number) => {
+  const updateClipRange = (
+    sourceId: string,
+    clipIndex: number,
+    rawStart: number,
+    rawEnd: number,
+  ): { start: number; end: number } | null => {
     if (
       preparingRef.current ||
       narrationGeneratingRef.current ||
@@ -3485,22 +3453,28 @@ export default function VideoMixClient() {
       pendingFinalizeRef.current
     ) return null;
     const current = sourcesRef.current;
-    let appliedValue: number | null = null;
+    let appliedRange: { start: number; end: number } | null = null;
     const next = current.map((source) => {
       if (source.id !== sourceId) return source;
       if (source.sceneSelectionStatus === "analyzing") return source;
       const clips = source.clips.map((clip) => ({ ...clip }));
       const clip = clips[clipIndex];
       if (!clip) return source;
-      if (field === "start") {
-        const minimum = clipIndex === 0 ? 0 : clips[clipIndex - 1].end;
-        clip.start = Math.max(minimum, Math.min(clip.end - MINIMUM_CLIP_SECONDS, raw));
-        appliedValue = clip.start;
-      } else {
-        const maximum = clipIndex === clips.length - 1 ? source.duration : clips[clipIndex + 1].start;
-        clip.end = Math.min(maximum, Math.max(clip.start + MINIMUM_CLIP_SECONDS, raw));
-        appliedValue = clip.end;
-      }
+      const minimum = clipIndex === 0 ? 0 : clips[clipIndex - 1].end;
+      const maximum = clipIndex === clips.length - 1
+        ? source.duration
+        : clips[clipIndex + 1].start;
+      const requestedStart = Number.isFinite(rawStart) ? rawStart : clip.start;
+      const requestedEnd = Number.isFinite(rawEnd) ? rawEnd : clip.end;
+      clip.start = Math.max(
+        minimum,
+        Math.min(maximum - MINIMUM_CLIP_SECONDS, requestedStart),
+      );
+      clip.end = Math.min(
+        maximum,
+        Math.max(clip.start + MINIMUM_CLIP_SECONDS, requestedEnd),
+      );
+      appliedRange = { start: clip.start, end: clip.end };
       if (
         clip.start === source.clips[clipIndex].start &&
         clip.end === source.clips[clipIndex].end
@@ -3516,14 +3490,134 @@ export default function VideoMixClient() {
         sceneSelectionRevision: source.sceneSelectionRevision + 1,
       };
     });
-    if (next.every((source, index) => source === current[index])) return appliedValue;
+    if (next.every((source, index) => source === current[index])) return appliedRange;
     sourceGenerationRef.current += 1;
     stopPreview();
     clearResult();
     invalidateGeneratedNarration();
     sourcesRef.current = next;
     setSources(next);
-    return appliedValue;
+    return appliedRange;
+  };
+
+  const constrainActiveTrimDraft = (
+    draft: ActiveTrimDraft,
+    field: "start" | "end",
+    raw: number,
+  ): ActiveTrimDraft => {
+    const source = sourcesRef.current.find((item) => item.id === draft.sourceId);
+    const clip = source?.clips[draft.clipIndex];
+    if (!source || !clip || !Number.isFinite(raw)) return draft;
+    const minimum = draft.clipIndex === 0
+      ? 0
+      : source.clips[draft.clipIndex - 1].end;
+    const maximum = draft.clipIndex === source.clips.length - 1
+      ? source.duration
+      : source.clips[draft.clipIndex + 1].start;
+    if (field === "start") {
+      return {
+        ...draft,
+        start: Math.max(
+          minimum,
+          Math.min(draft.end - MINIMUM_CLIP_SECONDS, raw),
+        ),
+      };
+    }
+    return {
+      ...draft,
+      end: Math.min(
+        maximum,
+        Math.max(draft.start + MINIMUM_CLIP_SECONDS, raw),
+      ),
+    };
+  };
+
+  const setActiveTrimDraftEdge = (
+    field: "start" | "end",
+    raw: number,
+  ) => {
+    const current = activeTrimDraftRef.current;
+    if (!current) return null;
+    const next = constrainActiveTrimDraft(current, field, raw);
+    activeTrimDraftRef.current = next;
+    setActiveTrimDraft(next);
+    setTrimFeedback("");
+    return next;
+  };
+
+  const commitActiveTrimDraft = (draftOverride?: ActiveTrimDraft | null) => {
+    const draft = draftOverride ?? activeTrimDraftRef.current;
+    if (!draft) return;
+    const applied = updateClipRange(
+      draft.sourceId,
+      draft.clipIndex,
+      draft.start,
+      draft.end,
+    );
+    if (!applied) return;
+    const next = { ...draft, ...applied };
+    activeTrimDraftRef.current = next;
+    setActiveTrimDraft(next);
+    setTrimFeedback(
+      `使う範囲を${formatSeconds(applied.start)}から${formatSeconds(applied.end)}まで（${formatSeconds(applied.end - applied.start)}）に更新しました。`,
+    );
+  };
+
+  const adjustActiveTrimDraft = (
+    field: "start" | "end",
+    amount: number,
+  ) => {
+    const current = activeTrimDraftRef.current;
+    if (!current) return;
+    const next = constrainActiveTrimDraft(
+      current,
+      field,
+      current[field] + amount,
+    );
+    activeTrimDraftRef.current = next;
+    setActiveTrimDraft(next);
+    commitActiveTrimDraft(next);
+  };
+
+  const openClipTrimEditor = (
+    sourceId: string,
+    clipIndex: number,
+  ) => {
+    const source = sourcesRef.current.find((item) => item.id === sourceId);
+    const clip = source?.clips[clipIndex];
+    if (!source || !clip || source.sceneSelectionStatus === "analyzing") return;
+    const nextDraft = {
+      sourceId,
+      clipIndex,
+      start: clip.start,
+      end: clip.end,
+    };
+    activeTrimDraftRef.current = nextDraft;
+    setActiveTrimTarget({ sourceId, clipIndex });
+    setActiveTrimDraft(nextDraft);
+    setTrimFeedback("");
+    previewSingleClip(sourceId, clipIndex);
+    requestAnimationFrame(() => {
+      trimPanelRef.current?.scrollIntoView({ block: "nearest" });
+      trimPanelRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const closeClipTrimEditor = () => {
+    const target = activeTrimTarget;
+    stopPreview();
+    activeTrimDraftRef.current = null;
+    setActiveTrimTarget(null);
+    setActiveTrimDraft(null);
+    setTrimFeedback("");
+    if (!target) return;
+    requestAnimationFrame(() => {
+      const button = document.getElementById(
+        `video-mix-trim-button-${target.sourceId}-${target.clipIndex}`,
+      );
+      button?.scrollIntoView({ block: "nearest" });
+      button?.focus({ preventScroll: true });
+    });
   };
 
   const generateMixNarration = async () => {
@@ -4110,9 +4204,9 @@ export default function VideoMixClient() {
       </section>
 
       <section className="videoMixWorkspace" aria-label="複数動画の編集">
-        <div className="videoMixPreviewPanel" id="video-mix-finished-preview">
+        <div className={`videoMixPreviewPanel${displayedTrimDraft ? " isTrimming" : ""}`} id="video-mix-finished-preview">
           <div className="videoMixPreviewHeading">
-            <span>仕上がりプレビュー</span>
+            <h2>仕上がりプレビュー</h2>
             <small>{plan ? `${sources.length}動画・${plan.clips.length}カット・${plan.duration.toFixed(1)}秒` : "9:16"}</small>
           </div>
           <div className="videoMixPhone">
@@ -4173,6 +4267,104 @@ export default function VideoMixClient() {
             />
             <span>{formatSeconds(previewTime)} / {formatSeconds(plan?.duration ?? 0)}</span>
           </div>
+          {activeTrimSource && activeTrimClip && activeTrimTarget && displayedTrimDraft ? (
+            <section
+              ref={trimPanelRef}
+              id="video-mix-trim-panel"
+              className="videoMixTrimPanel"
+              aria-labelledby="video-mix-trim-heading"
+              tabIndex={-1}
+            >
+              <div className="videoMixTrimHeading">
+                <div>
+                  <span>動画{activeTrimSourceIndex + 1}を調整中</span>
+                  <h3 id="video-mix-trim-heading">使う場面 {activeTrimTarget.clipIndex + 1}</h3>
+                </div>
+                <button type="button" onClick={closeClipTrimEditor}>調整を終える</button>
+              </div>
+              <p className="videoMixTrimSummary">
+                <span><small>元動画</small><strong>{formatSeconds(displayedTrimDraft.start)}〜{formatSeconds(displayedTrimDraft.end)}</strong></span>
+                <span><small>使う長さ</small><strong>{formatSeconds(displayedTrimDraft.end - displayedTrimDraft.start)}</strong></span>
+              </p>
+              <div className="videoMixFilmstrip videoMixTrimFilmstrip" aria-hidden="true">
+                {activeTrimSource.thumbnails.map((thumbnail, frameIndex) => (
+                  // Generated locally and intentionally left as a data URL.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={`${activeTrimSource.id}-trim-frame-${frameIndex}`} src={thumbnail} alt="" />
+                ))}
+                <span
+                  style={{
+                    left: `${(displayedTrimDraft.start / activeTrimSource.duration) * 100}%`,
+                    width: `${((displayedTrimDraft.end - displayedTrimDraft.start) / activeTrimSource.duration) * 100}%`,
+                  }}
+                />
+              </div>
+              {(["start", "end"] as const).map((field) => {
+                const isStart = field === "start";
+                const label = isStart ? "使い始め" : "使い終わり";
+                const value = displayedTrimDraft[field];
+                const minimum = isStart
+                  ? activeTrimTarget.clipIndex === 0
+                    ? 0
+                    : activeTrimSource.clips[activeTrimTarget.clipIndex - 1].end
+                  : displayedTrimDraft.start + MINIMUM_CLIP_SECONDS;
+                const maximum = isStart
+                  ? displayedTrimDraft.end - MINIMUM_CLIP_SECONDS
+                  : activeTrimTarget.clipIndex === activeTrimSource.clips.length - 1
+                    ? activeTrimSource.duration
+                    : activeTrimSource.clips[activeTrimTarget.clipIndex + 1].start;
+                return (
+                  <label className="videoMixTrimEdge" key={field}>
+                    <span><strong>{label}</strong><output>{formatSeconds(value)}</output></span>
+                    <input
+                      type="range"
+                      min={minimum}
+                      max={maximum}
+                      step="any"
+                      value={value}
+                      aria-valuetext={`${label} ${formatSeconds(value)}`}
+                      disabled={editingLocked || activeTrimSource.sceneSelectionStatus === "analyzing"}
+                      onChange={(event) => setActiveTrimDraftEdge(field, Number(event.target.value))}
+                      onPointerUp={() => commitActiveTrimDraft()}
+                      onKeyUp={() => commitActiveTrimDraft()}
+                      onBlur={() => commitActiveTrimDraft()}
+                    />
+                  </label>
+                );
+              })}
+              <button
+                type="button"
+                className="videoMixTrimPreviewButton"
+                onClick={() => previewSingleClip(activeTrimTarget.sourceId, activeTrimTarget.clipIndex)}
+                disabled={!plan || editingLocked || sceneSelectionBusy}
+              >
+                <span aria-hidden="true">▶</span> 選んだ範囲を再生
+              </button>
+              <details className="videoMixTrimFineTune">
+                <summary>0.1秒単位で細かく調整</summary>
+                {(["start", "end"] as const).map((field) => {
+                  const label = field === "start" ? "使い始め" : "使い終わり";
+                  return (
+                    <div key={field}>
+                      <strong>{label}</strong>
+                      {([-1, -0.1, 0.1, 1] as const).map((amount) => (
+                        <button
+                          type="button"
+                          key={amount}
+                          onClick={() => adjustActiveTrimDraft(field, amount)}
+                          disabled={editingLocked || activeTrimSource.sceneSelectionStatus === "analyzing"}
+                          aria-label={`${label}を${Math.abs(amount)}秒${amount < 0 ? "早める" : "遅らせる"}`}
+                        >
+                          {amount > 0 ? "+" : "−"}{Math.abs(amount)}秒
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </details>
+              {trimFeedback ? <p className="videoMixTrimFeedback" role="status" aria-live="polite">{trimFeedback}</p> : null}
+            </section>
+          ) : null}
           <div className="videoMixFacts">
             <span><strong>1080 × 1920</strong>完成動画</span>
             <span><strong>素材順を固定</strong>前後・逆再生なし</span>
@@ -4250,12 +4442,12 @@ export default function VideoMixClient() {
                           {source.sceneSelectionStatus === "analyzing"
                             ? "おすすめ場面を端末内で選別中…"
                             : source.sceneSelectionStatus === "recommended"
-                              ? `おすすめ ${source.clips.length}カットを選択済み`
+                              ? `おすすめの${source.clips.length}場面を選びました`
                               : source.sceneSelectionStatus === "restored"
-                                ? `前回の${source.clips.length}カットを復元`
+                                ? `前回の${source.clips.length}場面を復元しました`
                                 : source.sceneSelectionStatus === "fallback"
-                                  ? `${source.clips.length}カット・中央付近を仮選択`
-                                  : `${source.clips.length}カット・手動で調整済み`}
+                                  ? `${source.clips.length}場面・中央付近を仮選択`
+                                  : `${source.clips.length}場面・手動で調整済み`}
                         </em>
                         <button
                           type="button"
@@ -4265,7 +4457,7 @@ export default function VideoMixClient() {
                           onClick={() => toggleSourcePlayer(source.id)}
                           disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}
                         >
-                          {expandedSourcePlayerId === source.id ? "素材の再生を閉じる" : "素材全体を再生する"}
+                          {expandedSourcePlayerId === source.id ? "元動画を閉じる" : "元動画を確認"}
                         </button>
                       </div>
                       <button type="button" onClick={() => removeSource(source.id)} disabled={editingLocked || sceneSelectionBusy} aria-label={`${sourceIndex + 1}番目の動画 ${source.file.name}を削除`}>削除</button>
@@ -4284,67 +4476,22 @@ export default function VideoMixClient() {
                           onPlay={() => handleSourcePlayerPlay(source.id)}
                           aria-label={`${sourceIndex + 1}番目の素材 ${source.file.name} の全体再生`}
                         />
-                        <p>元動画全体を、音声付きで確認できます。ここでの再生位置は使用範囲を変更しません。</p>
+                        <p>確認専用です。音声付きで再生できます。使う範囲は「使う場面」から調整します。</p>
                       </div>
                     ) : null}
                     <fieldset className="videoMixClipCount">
                       <legend>この動画から使う場面</legend>
-                      <button type="button" className={source.clips.length === 1 ? "isActive" : ""} aria-pressed={source.clips.length === 1} onClick={() => setClipCount(source.id, 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>1カット</button>
-                      <button type="button" className={source.clips.length === 2 ? "isActive" : ""} aria-pressed={source.clips.length === 2} onClick={() => setClipCount(source.id, 2)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing" || source.duration < MINIMUM_CLIP_SECONDS * 2}>2カット</button>
-                    </fieldset>
-                    <fieldset className="videoMixFraming">
-                      <legend>縦画面への収め方</legend>
-                      {([
-                        ["blur", "ぼかし背景"],
-                        ["cover", "画面いっぱい"],
-                        ["contain", "全体を表示"],
-                      ] as const).map(([mode, label]) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={source.framing.mode === mode ? "isActive" : ""}
-                          aria-pressed={source.framing.mode === mode}
-                          disabled={editingLocked}
-                          onClick={() => updateSourceFraming(source.id, { mode })}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                      {source.framing.mode !== "contain" ? (
-                        <>
-                          <label>
-                            <span>主役の横位置</span>
-                            <input
-                              type="range"
-                              min={0}
-                              max={1}
-                              step={0.05}
-                              value={source.framing.focusX}
-                              aria-valuetext={`左から${Math.round(source.framing.focusX * 100)}%`}
-                              disabled={editingLocked}
-                              onChange={(event) => updateSourceFraming(source.id, { focusX: Number(event.target.value) })}
-                            />
-                          </label>
-                          <label>
-                            <span>主役の縦位置</span>
-                            <input
-                              type="range"
-                              min={0}
-                              max={1}
-                              step={0.05}
-                              value={source.framing.focusY}
-                              aria-valuetext={`上から${Math.round(source.framing.focusY * 100)}%`}
-                              disabled={editingLocked}
-                              onChange={(event) => updateSourceFraming(source.id, { focusY: Number(event.target.value) })}
-                            />
-                          </label>
-                        </>
-                      ) : null}
+                      <button type="button" className={source.clips.length === 1 ? "isActive" : ""} aria-pressed={source.clips.length === 1} onClick={() => setClipCount(source.id, 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>1か所</button>
+                      <button type="button" className={source.clips.length === 2 ? "isActive" : ""} aria-pressed={source.clips.length === 2} onClick={() => setClipCount(source.id, 2)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing" || source.duration < MINIMUM_CLIP_SECONDS * 2}>2か所</button>
                     </fieldset>
                     <div className="videoMixClipList">
-                      {source.clips.map((clip, clipIndex) => (
-                        <fieldset key={`${source.id}-${clipIndex}`}>
-                          <legend>{clipIndex + 1}つ目のカット <strong>{formatSeconds(clip.start)}〜{formatSeconds(clip.end)}</strong></legend>
+                      {source.clips.map((clip, clipIndex) => {
+                        const isActive = activeTrimTarget?.sourceId === source.id &&
+                          activeTrimTarget.clipIndex === clipIndex;
+                        return (
+                        <fieldset className={isActive ? "isActive" : ""} key={`${source.id}-${clipIndex}`}>
+                          <legend><span>使う場面 {clipIndex + 1}</span><strong>{formatSeconds(clip.end - clip.start)}</strong></legend>
+                          <p className="videoMixClipRangeText">元動画の {formatSeconds(clip.start)}〜{formatSeconds(clip.end)} を使います</p>
                           <div className="videoMixFilmstrip" aria-hidden="true">
                             {source.thumbnails.map((thumbnail, frameIndex) => (
                               // Generated locally and intentionally left as a data URL.
@@ -4353,62 +4500,75 @@ export default function VideoMixClient() {
                             ))}
                             <span style={{ left: `${(clip.start / source.duration) * 100}%`, width: `${((clip.end - clip.start) / source.duration) * 100}%` }} />
                           </div>
-                          {(["start", "end"] as const).map((field) => {
-                            const value = field === "start" ? clip.start : clip.end;
-                            const label = field === "start" ? "開始" : "終了";
-                            return (
-                              <div className="videoMixClipEdge" key={field}>
-                                <label>
-                                  <span>{label}</span>
-                                  <input type="range" min={0} max={source.duration} step={0.1} value={value} aria-valuetext={formatSeconds(value)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} />
-                                </label>
-                                <div>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>−1秒</button>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value - 0.1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>−0.1</button>
-                                  <label><span className="visuallyHidden">{label}時刻（秒）</span><input type="number" min={0} max={source.duration} step={0.1} value={value.toFixed(1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"} onChange={(event) => updateClip(source.id, clipIndex, field, Number(event.target.value))} /></label>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 0.1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>＋0.1</button>
-                                  <button type="button" onClick={() => updateClip(source.id, clipIndex, field, value + 1)} disabled={editingLocked || source.sceneSelectionStatus === "analyzing"}>＋1秒</button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                          <div className="videoMixClipActions">
-                            <button
-                              type="button"
-                              className="videoMixClipPreviewButton"
-                              onClick={() => previewSingleClip(source.id, clipIndex)}
-                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
-                              aria-controls="video-mix-finished-preview"
-                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
-                              aria-label={`${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの選択範囲を仕上がりプレビューで再生`}
-                            >
-                              選択範囲をプレビュー
-                            </button>
-                            <p id={`video-mix-clip-help-${source.id}-${clipIndex}`}>「この位置」は、画面の「仕上がりプレビュー」の現在位置です。素材全体の再生位置は使いません。</p>
-                            <button
-                              type="button"
-                              onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "start")}
-                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
-                              aria-controls="video-mix-finished-preview"
-                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
-                              aria-label={`仕上がりプレビューの現在位置を、${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの開始位置に設定`}
-                            >
-                              この位置から使う
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setClipEdgeFromPreview(source.id, clipIndex, "end")}
-                              disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
-                              aria-controls="video-mix-finished-preview"
-                              aria-describedby={`video-mix-clip-help-${source.id}-${clipIndex}`}
-                              aria-label={`仕上がりプレビューの現在位置を、${sourceIndex + 1}番目の動画・${clipIndex + 1}つ目のカットの終了位置に設定`}
-                            >
-                              この位置まで使う
-                            </button>
-                          </div>
+                          <button
+                            id={`video-mix-trim-button-${source.id}-${clipIndex}`}
+                            type="button"
+                            className="videoMixClipEditButton"
+                            onClick={() => openClipTrimEditor(source.id, clipIndex)}
+                            disabled={!plan || editingLocked || sceneSelectionBusy || source.sceneSelectionStatus === "analyzing"}
+                            aria-controls="video-mix-trim-panel"
+                            aria-pressed={isActive}
+                            aria-label={`${sourceIndex + 1}番目の動画・使う場面${clipIndex + 1}を仕上がりプレビューで確認して調整`}
+                          >
+                            <span aria-hidden="true">{isActive ? "✓" : "▶"}</span>
+                            {isActive ? "この場面を調整中" : "この場面を確認・調整"}
+                          </button>
                         </fieldset>
-                      ))}
+                        );
+                      })}
                     </div>
+                    <details className="videoMixFramingDisclosure">
+                      <summary>縦画面での見え方を調整</summary>
+                      <fieldset className="videoMixFraming">
+                        <legend>縦画面への収め方</legend>
+                        {([
+                          ["blur", "ぼかし背景"],
+                          ["cover", "画面いっぱい"],
+                          ["contain", "全体を表示"],
+                        ] as const).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={source.framing.mode === mode ? "isActive" : ""}
+                            aria-pressed={source.framing.mode === mode}
+                            disabled={editingLocked}
+                            onClick={() => updateSourceFraming(source.id, { mode })}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                        {source.framing.mode !== "contain" ? (
+                          <>
+                            <label>
+                              <span>主役の横位置</span>
+                              <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={source.framing.focusX}
+                                aria-valuetext={`左から${Math.round(source.framing.focusX * 100)}%`}
+                                disabled={editingLocked}
+                                onChange={(event) => updateSourceFraming(source.id, { focusX: Number(event.target.value) })}
+                              />
+                            </label>
+                            <label>
+                              <span>主役の縦位置</span>
+                              <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={source.framing.focusY}
+                                aria-valuetext={`上から${Math.round(source.framing.focusY * 100)}%`}
+                                disabled={editingLocked}
+                                onChange={(event) => updateSourceFraming(source.id, { focusY: Number(event.target.value) })}
+                              />
+                            </label>
+                          </>
+                        ) : null}
+                      </fieldset>
+                    </details>
                   </li>
                 ))}
               </ol>

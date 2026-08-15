@@ -12332,7 +12332,8 @@ footer > small {
   justify-content: space-between;
 }
 
-.videoMixPreviewHeading span {
+.videoMixPreviewHeading h2 {
+  margin: 0;
   font-size: 13px;
   font-weight: 800;
 }
@@ -12462,6 +12463,181 @@ footer > small {
 .videoMixPlayback span {
   min-width: 86px;
   text-align: right;
+}
+
+.videoMixPreviewPanel.isTrimming {
+  position: static;
+  top: auto;
+  gap: 10px;
+}
+
+.videoMixPreviewPanel.isTrimming .videoMixPhone {
+  width: min(100%, 280px);
+}
+
+.videoMixTrimPanel {
+  display: grid;
+  width: min(100%, 410px);
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid rgba(189, 56, 37, 0.28);
+  border-radius: 18px;
+  outline: none;
+  background: #fffdf9;
+  box-shadow: 0 16px 42px rgba(21, 32, 53, 0.11);
+}
+
+.videoMixTrimPanel:focus-visible {
+  outline: 3px solid var(--mix-coral-dark);
+  outline-offset: 3px;
+}
+
+.videoMixTrimHeading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.videoMixTrimHeading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.videoMixTrimHeading span {
+  color: var(--mix-coral-dark);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.videoMixTrimHeading h3 {
+  margin: 0;
+  color: var(--mix-ink);
+  font-size: 18px;
+}
+
+.videoMixTrimHeading button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(21, 32, 53, 0.13);
+  border-radius: 11px;
+  color: var(--mix-ink);
+  font-size: 12px;
+  font-weight: 800;
+  background: white;
+}
+
+.videoMixTrimSummary {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.videoMixTrimSummary > span {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: #f4f1eb;
+}
+
+.videoMixTrimSummary small {
+  color: var(--mix-subtle);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.videoMixTrimSummary strong {
+  color: var(--mix-ink);
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+
+.videoMixTrimEdge {
+  display: grid;
+  gap: 6px;
+}
+
+.videoMixTrimEdge > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--mix-ink);
+  font-size: 13px;
+}
+
+.videoMixTrimEdge output {
+  min-width: 68px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--mix-coral-dark);
+  font-family: var(--font-display);
+  font-weight: 800;
+  text-align: center;
+  background: #f7e6df;
+}
+
+.videoMixTrimEdge input {
+  width: 100%;
+  min-height: 32px;
+  accent-color: var(--mix-coral);
+}
+
+.videoMixTrimPreviewButton {
+  min-height: 48px;
+  border: 0;
+  border-radius: 13px;
+  color: white;
+  font-size: 14px;
+  font-weight: 900;
+  background: var(--mix-coral);
+  box-shadow: 0 9px 22px rgba(189, 56, 37, 0.2);
+}
+
+.videoMixTrimFineTune {
+  border-top: 1px solid rgba(21, 32, 53, 0.09);
+}
+
+.videoMixTrimFineTune summary,
+.videoMixFramingDisclosure summary {
+  min-height: 44px;
+  padding: 12px 4px 0;
+  color: var(--mix-ink);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.videoMixTrimFineTune > div {
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr) repeat(4, minmax(52px, auto));
+  gap: 5px;
+  align-items: center;
+  margin-top: 7px;
+}
+
+.videoMixTrimFineTune > div > strong {
+  font-size: 12px;
+}
+
+.videoMixTrimFineTune button {
+  min-height: 42px;
+  padding: 0 7px;
+  border: 1px solid rgba(21, 32, 53, 0.12);
+  border-radius: 9px;
+  color: var(--mix-ink);
+  font-size: 11px;
+  font-weight: 800;
+  background: white;
+}
+
+.videoMixTrimFeedback {
+  margin: 0;
+  color: #217251;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
 }
 
 .videoMixFacts {
@@ -12686,7 +12862,7 @@ footer > small {
 
 .videoMixSourceSummary .videoMixSourcePreviewToggle {
   width: fit-content;
-  min-height: 36px;
+  min-height: 44px;
   margin-top: 5px;
   padding-inline: 11px;
   color: var(--mix-ink);
@@ -12834,42 +13010,48 @@ footer > small {
 
 .videoMixClipList fieldset {
   display: grid;
-  gap: 9px;
+  gap: 10px;
   margin: 0;
-  padding: 12px;
-  border: 0;
-  border-radius: 13px;
-  background: #f7f4ef;
+  padding: 14px;
+  border: 1px solid rgba(21, 32, 53, 0.1);
+  border-radius: 15px;
+  background: #fffdf9;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.videoMixClipList fieldset.isActive {
+  border-color: var(--mix-coral);
+  box-shadow: 0 0 0 3px rgba(189, 56, 37, 0.1);
 }
 
 .videoMixClipList legend {
+  display: flex;
   width: 100%;
+  align-items: center;
+  justify-content: space-between;
   padding: 0;
-  font-size: 12px;
-  font-weight: 800;
+  color: var(--mix-ink);
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .videoMixClipList legend strong {
-  float: right;
   color: #217251;
   font-family: var(--font-display);
 }
 
-.videoMixClipList label {
-  display: grid;
-  grid-template-columns: 38px 1fr;
-  gap: 10px;
-  align-items: center;
+.videoMixClipRangeText {
+  margin: 0;
   color: var(--mix-subtle);
   font-size: 12px;
-  font-weight: 700;
+  line-height: 1.5;
 }
 
 .videoMixFilmstrip {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   position: relative;
-  height: 38px;
+  height: 54px;
   overflow: hidden;
   border-radius: 9px;
   background:
@@ -12889,64 +13071,64 @@ footer > small {
   top: 0;
   bottom: 0;
   min-width: 2px;
-  border: 2px solid var(--mix-coral);
-  background: rgba(200, 68, 47, 0.16);
+  border: 3px solid var(--mix-coral);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 100vmax rgba(20, 28, 43, 0.55);
 }
 
-.videoMixClipEdge {
-  display: grid;
-  gap: 6px;
-}
-
-.videoMixClipEdge > div {
-  display: grid;
-  grid-template-columns: repeat(2, auto) minmax(72px, 1fr) repeat(2, auto);
-  gap: 4px;
-}
-
-.videoMixClipEdge button,
-.videoMixClipActions button {
-  min-height: 44px;
-  padding: 0 8px;
-  border: 1px solid rgba(21, 32, 53, 0.12);
-  border-radius: 9px;
-  color: var(--mix-ink);
-  font-size: 11px;
-  font-weight: 800;
+.videoMixFilmstrip span::before,
+.videoMixFilmstrip span::after {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 26px;
+  border-radius: 4px;
   background: white;
+  box-shadow: 0 1px 5px rgba(21, 32, 53, 0.35);
+  content: "";
+  transform: translateY(-50%);
 }
 
-.videoMixClipEdge input[type="number"] {
+.videoMixFilmstrip span::before {
+  left: -4px;
+}
+
+.videoMixFilmstrip span::after {
+  right: -4px;
+}
+
+.videoMixTrimFilmstrip {
+  height: 48px;
+}
+
+.videoMixClipEditButton {
   width: 100%;
-  min-height: 44px;
-  padding: 0 7px;
-  border: 1px solid rgba(21, 32, 53, 0.13);
-  border-radius: 9px;
-  font: inherit;
-  font-size: 16px;
+  min-height: 48px;
+  border: 1px solid var(--mix-coral);
+  border-radius: 12px;
+  color: var(--mix-coral-dark);
+  font-size: 13px;
+  font-weight: 900;
+  background: #fff7f2;
 }
 
-.videoMixClipActions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
+.videoMixClipEditButton.isActive,
+.videoMixClipEditButton[aria-pressed="true"] {
+  color: white;
+  background: var(--mix-coral);
 }
 
-.videoMixClipActions .videoMixClipPreviewButton,
-.videoMixClipActions p {
-  grid-column: 1 / -1;
+.videoMixFramingDisclosure {
+  margin-top: 12px;
+  border-top: 1px solid rgba(21, 32, 53, 0.09);
 }
 
-.videoMixClipActions p {
-  margin: 0;
-  color: var(--mix-subtle);
-  font-size: 11px;
-  line-height: 1.55;
+.videoMixFramingDisclosure summary {
+  padding-inline: 2px;
 }
 
-.videoMixClipList input {
-  width: 100%;
-  accent-color: var(--mix-coral);
+.videoMixFramingDisclosure .videoMixFraming {
+  padding: 2px 0 0;
 }
 
 .videoMixTransitionGrid {
@@ -13958,17 +14140,30 @@ footer > small {
     width: 100%;
   }
 
-  .videoMixClipEdge > div {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+  .videoMixPreviewPanel.isTrimming .videoMixPhone {
+    width: min(68vw, 260px);
   }
 
-  .videoMixClipEdge button,
-  .videoMixClipActions button {
-    padding: 0 4px;
+  .videoMixTrimPanel {
+    width: 100%;
+    padding: 14px;
   }
 
-  .videoMixClipActions {
-    grid-template-columns: 1fr;
+  .videoMixTrimFineTune > div {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .videoMixTrimFineTune > div > strong {
+    grid-column: 1 / -1;
+  }
+
+  .videoMixTrimFineTune button {
+    min-height: 44px;
+    padding-inline: 3px;
+  }
+
+  .videoMixClipList fieldset {
+    padding: 13px;
   }
 
   .videoMixFinishMode,

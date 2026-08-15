@@ -333,7 +333,7 @@ test("keeps preview layers and paid reservations safe across transitions and nav
   assert.match(clientSource, /pendingSwitch\?\.generation === generation[\s\S]*?requestAnimationFrame\(tick\)/);
   const singleClipPreview = clientSource.slice(
     clientSource.indexOf("const previewSingleClip"),
-    clientSource.indexOf("const setClipEdgeFromPreview"),
+    clientSource.indexOf("const addVideos", clientSource.indexOf("const previewSingleClip")),
   );
   assert.match(
     singleClipPreview,
@@ -430,27 +430,55 @@ test("exposes fine cut controls and accessible playback progress", () => {
   assert.match(clientSource, /sceneSelectionStatus === "analyzing"/);
   assert.match(clientSource, /おすすめ場面を端末内で選別中/);
   assert.match(clientSource, /source\.thumbnails\.map/);
-  assert.match(clientSource, /素材全体を再生する/);
+  assert.match(clientSource, /元動画を確認/);
+  assert.match(clientSource, /確認専用です。音声付きで再生できます。使う範囲は「使う場面」から調整します/);
   assert.match(clientSource, /controls[\s\S]*?onPlay=\{\(\) => handleSourcePlayerPlay\(source\.id\)\}/);
   assert.match(clientSource, /pauseSourcePlayers\(sourceId\)/);
-  assert.match(clientSource, /選択範囲をプレビュー/);
-  assert.match(clientSource, /この位置から使う/);
-  assert.match(clientSource, /この位置まで使う/);
-  assert.match(clientSource, /「この位置」は、画面の「仕上がりプレビュー」の現在位置です/);
-  assert.doesNotMatch(clientSource, /停止位置を開始に|停止位置を終了に/);
-  assert.match(clientSource, /previewSelectionClipRef/);
-  assert.match(clientSource, /previewSelectionClipRef\.current = \{[\s\S]*?\.\.\.selectionTarget/);
-  assert.match(clientSource, /Math\.abs\(selected\.start - target\.start\)[\s\S]*?Math\.abs\(selected\.editedEnd - target\.editedEnd\)/);
-  assert.doesNotMatch(clientSource, /selected\.plan !== plan/);
-  assert.match(clientSource, /currentPreviewTime >= target\.editedStart - positionTolerance[\s\S]*?currentPreviewTime <= target\.editedEnd \+ positionTolerance/);
-  assert.match(clientSource, /開始と終了の間は\$\{MINIMUM_CLIP_SECONDS\}秒以上必要です/);
-  assert.match(clientSource, /動画\$\{sourceIndex \+ 1\}・カット\$\{clipIndex \+ 1\}[\s\S]*?元動画の\$\{formatSeconds\(applied\)\}/);
-  assert.match(clientSource, /announceSourceFeedback\([\s\S]*?開始[\s\S]*?終了/);
+  assert.match(clientSource, /この場面を確認・調整/);
+  assert.match(clientSource, /使い始め/);
+  assert.match(clientSource, /使い終わり/);
+  assert.match(clientSource, /選んだ範囲を再生/);
+  assert.match(clientSource, /0\.1秒単位で細かく調整/);
+  assert.match(clientSource, /縦画面での見え方を調整/);
+  assert.doesNotMatch(clientSource, /停止位置を開始に|停止位置を終了に|この位置から使う|この位置まで使う/);
+  assert.match(clientSource, /const \[activeTrimTarget, setActiveTrimTarget\] = useState/);
+  assert.match(clientSource, /const \[activeTrimDraft, setActiveTrimDraft\] = useState/);
+  assert.match(clientSource, /const updateClipRange = \(/);
+  assert.match(clientSource, /onPointerUp=\{\(\) => commitActiveTrimDraft\(\)\}/);
+  assert.match(clientSource, /onKeyUp=\{\(\) => commitActiveTrimDraft\(\)\}/);
+  assert.match(clientSource, /onBlur=\{\(\) => commitActiveTrimDraft\(\)\}/);
+  assert.match(clientSource, /step="any"/);
+  assert.match(clientSource, /aria-controls="video-mix-trim-panel"/);
+  assert.match(clientSource, /aria-pressed=\{isActive\}/);
+  assert.match(clientSource, /draft\.end - MINIMUM_CLIP_SECONDS/);
+  assert.match(clientSource, /draft\.start \+ MINIMUM_CLIP_SECONDS/);
+  assert.match(clientSource, /元動画の \{formatSeconds\(clip\.start\)\}〜\{formatSeconds\(clip\.end\)\} を使います/);
+  assert.match(clientSource, /setTrimFeedback\([\s\S]*?使う範囲を\$\{formatSeconds\(applied\.start\)\}から\$\{formatSeconds\(applied\.end\)\}まで/);
   assert.doesNotMatch(clientSource, /<video src=\{source\.url\} muted playsInline preload="metadata"/);
-  assert.match(clientSource, /type="number"/);
   assert.match(clientSource, /aria-valuetext/);
   assert.match(clientSource, /role="progressbar"/);
   assert.match(clientSource, /tabIndex=\{-1\}[\s\S]*?aria-hidden="true"/);
+});
+
+test("keeps trimming as one explicit, trusted-click interaction", () => {
+  const editorStart = clientSource.indexOf("const openClipTrimEditor");
+  const editor = clientSource.slice(
+    editorStart,
+    clientSource.indexOf("const closeClipTrimEditor", editorStart),
+  );
+  assert.match(editor, /setActiveTrimTarget\(\{ sourceId, clipIndex \}\)/);
+  assert.match(editor, /previewSingleClip\(sourceId, clipIndex\)/);
+  assert.match(editor, /requestAnimationFrame\(\(\) =>/);
+  assert.ok(
+    editor.indexOf("previewSingleClip(sourceId, clipIndex)") < editor.indexOf("requestAnimationFrame(() =>"),
+    "preview playback must start inside the original click before scrolling or focusing",
+  );
+  assert.match(editor, /trimPanelRef\.current\?\.scrollIntoView/);
+  assert.match(editor, /trimPanelRef\.current\?\.focus/);
+  assert.match(clientSource, /const constrainActiveTrimDraft/);
+  assert.match(clientSource, /const commitActiveTrimDraft/);
+  assert.match(clientSource, /const adjustActiveTrimDraft/);
+  assert.match(clientSource, /activeTrimDraftRef\.current = null;[\s\S]*?setActiveTrimTarget\(null\)/);
 });
 
 test("shares selectable caption styles and scene-grounded narration with preview and export", () => {
