@@ -15740,25 +15740,23 @@ a {
 .landingPromiseItem {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 11px;
   align-items: start;
-  align-content: start;
 }
 
 .landingPromiseMark {
   display: block;
-  width: 18px;
-  height: 1px;
-  margin-top: 0;
-  border-radius: 999px;
-  background: rgba(25, 115, 70, 0.68);
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--mint-dark);
 }
 
 .landingPromiseCopy {
   display: block;
   min-width: 0;
-  text-align: left;
 }
 
 .landingPromiseCopy strong,
@@ -15772,32 +15770,29 @@ a {
 }
 
 .landingPromiseTypography {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 1px;
-  align-items: start;
-  justify-items: start;
-  white-space: normal;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 .landingPromiseTerm {
-  color: #4f5b70;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 650;
   line-height: 1.25;
-  letter-spacing: 0.035em;
-  white-space: nowrap;
+  letter-spacing: 0.04em;
 }
 
 .landingPromiseValue {
   color: var(--coral-dark);
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: 15px;
   font-style: normal;
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -0.015em;
-  white-space: nowrap;
 }
 
 .landingPromiseValueNumeric {
@@ -15806,9 +15801,9 @@ a {
 }
 
 .landingPromiseCopy small {
-  margin-top: 6px;
-  color: #566174;
-  font-size: 12px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.5;
 }
@@ -16403,8 +16398,8 @@ a {
   }
 
   .landingPromiseMark {
-    width: 18px;
-    height: 1px;
+    width: 6px;
+    height: 6px;
     margin-top: 0;
   }
 
@@ -16415,9 +16410,6 @@ a {
     white-space: normal;
   }
 
-}
-
-@media (max-width: 480px) {
   .landingPromiseCopy small {
     display: none;
   }

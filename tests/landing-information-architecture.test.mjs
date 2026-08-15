@@ -150,7 +150,7 @@ test("keeps the hero promises semantic, ordered, and ahead of the finished resul
   assert.doesNotMatch(home, /landingPromiseRow/);
 });
 
-test("uses readable stacked promise typography in the base styles", () => {
+test("keeps the original dot and inline promise typography in the base styles", () => {
   const baseStart = cssSource.indexOf(".landingPromiseItem");
   const desktopStart = cssSource.indexOf(
     "@media (min-width: 761px)",
@@ -179,22 +179,29 @@ test("uses readable stacked promise typography in the base styles", () => {
   const valueRule = rule(".landingPromiseValue");
   const supportingRule = rule(".landingPromiseCopy small");
 
-  assert.match(itemRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(
+    itemRule,
+    /grid-template-columns:\s*6px\s+minmax\(0,\s*1fr\)/,
+  );
+  assert.match(itemRule, /gap:\s*11px;/);
   assert.match(
     typographyRule,
-    /display:\s*grid;[\s\S]*?justify-items:\s*start;[\s\S]*?white-space:\s*normal;/,
+    /display:\s*flex;[\s\S]*?align-items:\s*baseline;[\s\S]*?gap:\s*5px;[\s\S]*?white-space:\s*nowrap;/,
   );
-  assert.ok(pixelValue(termRule, "font-size") >= 12);
-  assert.ok(pixelValue(valueRule, "font-size") >= 19);
-  assert.ok(pixelValue(supportingRule, "font-size") >= 12);
-  assert.match(termRule, /color:\s*#4f5b70;/i);
-  assert.match(supportingRule, /color:\s*#566174;/i);
-  assert.equal(pixelValue(markRule, "width"), 18);
-  assert.equal(pixelValue(markRule, "height"), 1);
-  assert.match(markRule, /background:\s*rgba\(25,\s*115,\s*70,\s*0\.68\);/);
+  assert.equal(pixelValue(termRule, "font-size"), 11);
+  assert.equal(pixelValue(valueRule, "font-size"), 15);
+  assert.equal(pixelValue(supportingRule, "font-size"), 11);
+  assert.match(termRule, /color:\s*var\(--muted\);/);
+  assert.match(supportingRule, /color:\s*var\(--muted\);/);
+  assert.equal(pixelValue(markRule, "width"), 6);
+  assert.equal(pixelValue(markRule, "height"), 6);
+  assert.match(markRule, /margin-top:\s*6px;/);
+  assert.match(markRule, /border-radius:\s*50%;/);
+  assert.match(markRule, /background:\s*var\(--mint-dark\);/);
+  assert.doesNotMatch(markRule, /height:\s*1px|background:\s*rgba\(/);
 });
 
-test("keeps three stacked promise columns and simplifies only below 480px", () => {
+test("keeps three stacked promise columns and hides support below 520px", () => {
   const desktopPromiseStart = cssSource.indexOf(".landingPromiseTypography");
   const mobileStart = cssSource.indexOf(
     "@media (max-width: 520px)",
@@ -204,15 +211,6 @@ test("keeps three stacked promise columns and simplifies only below 480px", () =
   const mobilePromises = cssSource.slice(
     mobileStart,
     mobileEnd >= 0 ? mobileEnd : undefined,
-  );
-  const compactStart = cssSource.indexOf(
-    "@media (max-width: 480px)",
-    mobileStart,
-  );
-  const compactEnd = cssSource.indexOf("@media", compactStart + 1);
-  const compactPromises = cssSource.slice(
-    compactStart,
-    compactEnd >= 0 ? compactEnd : undefined,
   );
 
   assert.ok(mobileStart >= 0);
@@ -224,10 +222,12 @@ test("keeps three stacked promise columns and simplifies only below 480px", () =
     mobilePromises,
     /\.landingPromiseTypography\s*\{[\s\S]*?display:\s*grid;[\s\S]*?justify-items:\s*center;[\s\S]*?white-space:\s*normal;/,
   );
-  assert.doesNotMatch(mobilePromises, /\.landingPromiseCopy small\s*\{/);
-  assert.ok(compactStart >= 0);
   assert.match(
-    compactPromises,
+    mobilePromises,
+    /\.landingPromiseMark\s*\{[\s\S]*?width:\s*6px;[\s\S]*?height:\s*6px;/,
+  );
+  assert.match(
+    mobilePromises,
     /\.landingPromiseCopy small\s*\{[\s\S]*?display:\s*none;/,
   );
 });
