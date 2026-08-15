@@ -63,15 +63,60 @@ test("renders the Torudake Reel product experience", async () => {
     3,
   );
 
-  let previousPromiseCopyIndex = -1;
-  for (const copy of ["プレビュー無料", "最大1080p", "透かしなし"]) {
-    const copyIndex = heroCopyHtml.indexOf(copy);
-    assert.ok(
-      copyIndex > previousPromiseCopyIndex,
-      `${copy} must remain in the hero promise order`,
+  const renderedPromiseItems = Array.from(
+    heroCopyHtml.matchAll(/<li class="landingPromiseItem">([\s\S]*?)<\/li>/g),
+    (match) => match[1],
+  );
+  const renderedPromisePairs = [
+    ["プレビュー無料", "プレビュー", "無料"],
+    ["最大1080p", "最大", "1080p"],
+    ["透かしなし", "透かし", "なし"],
+  ];
+
+  assert.equal(renderedPromiseItems.length, renderedPromisePairs.length);
+  for (const [index, [accessibleCopy, term, value]] of renderedPromisePairs.entries()) {
+    const item = renderedPromiseItems[index];
+    const accessibleCopyIndex = item.indexOf(
+      `<span class="visuallyHidden">${accessibleCopy}</span>`,
     );
-    previousPromiseCopyIndex = copyIndex;
+    const visualTypographyIndex = item.indexOf(
+      'class="landingPromiseTypography" aria-hidden="true"',
+    );
+    const termIndex = item.indexOf(
+      `<span class="landingPromiseTerm">${term}</span>`,
+    );
+    const valueIndex = item.indexOf(`>${value}</span>`, termIndex);
+
+    assert.ok(
+      accessibleCopyIndex >= 0 && accessibleCopyIndex < visualTypographyIndex,
+      `${accessibleCopy} must remain contiguous in SSR for assistive technology`,
+    );
+    assert.ok(
+      visualTypographyIndex < termIndex && termIndex < valueIndex,
+      `${term}/${value} must remain in rendered visual reading order`,
+    );
   }
+  assert.equal(
+    (
+      heroCopyHtml.match(
+        /class="landingPromiseTypography" aria-hidden="true"/g,
+      ) ?? []
+    ).length,
+    3,
+  );
+  assert.equal(
+    (heroCopyHtml.match(/class="landingPromiseTerm"/g) ?? []).length,
+    3,
+  );
+  assert.equal(
+    (heroCopyHtml.match(/class="landingPromiseValue(?:\s[^"']*)?"/g) ?? [])
+      .length,
+    3,
+  );
+  assert.doesNotMatch(
+    heroCopyHtml,
+    /<strong>\s*(?:プレビュー無料|最大1080p|透かしなし)\s*<\/strong>/,
+  );
   assert.doesNotMatch(html, /landingPromiseRow/);
   assert.doesNotMatch(html, /素材を選んで、|作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);

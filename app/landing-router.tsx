@@ -258,23 +258,41 @@ export function HomeLanding(props: LandingSharedProps) {
             </p>
             <ul className="landingPromiseList" aria-label="共通の仕上がり条件">
               <li className="landingPromiseItem">
-                <span className="landingPromiseMark" aria-hidden="true">¥0</span>
+                <span className="landingPromiseMark" aria-hidden="true" />
                 <span className="landingPromiseCopy">
-                  <strong>プレビュー無料</strong>
+                  <strong>
+                    <span className="visuallyHidden">プレビュー無料</span>
+                    <span className="landingPromiseTypography" aria-hidden="true">
+                      <span className="landingPromiseTerm">プレビュー</span>
+                      <span className="landingPromiseValue">無料</span>
+                    </span>
+                  </strong>
                   <small>保存前に仕上がりを確認</small>
                 </span>
               </li>
               <li className="landingPromiseItem">
-                <span className="landingPromiseMark" aria-hidden="true">HD</span>
+                <span className="landingPromiseMark" aria-hidden="true" />
                 <span className="landingPromiseCopy">
-                  <strong>最大1080p</strong>
+                  <strong>
+                    <span className="visuallyHidden">最大1080p</span>
+                    <span className="landingPromiseTypography" aria-hidden="true">
+                      <span className="landingPromiseTerm">最大</span>
+                      <span className="landingPromiseValue landingPromiseValueNumeric">1080p</span>
+                    </span>
+                  </strong>
                   <small>高画質で保存</small>
                 </span>
               </li>
               <li className="landingPromiseItem">
-                <span className="landingPromiseMark" aria-hidden="true">✓</span>
+                <span className="landingPromiseMark" aria-hidden="true" />
                 <span className="landingPromiseCopy">
-                  <strong>透かしなし</strong>
+                  <strong>
+                    <span className="visuallyHidden">透かしなし</span>
+                    <span className="landingPromiseTypography" aria-hidden="true">
+                      <span className="landingPromiseTerm">透かし</span>
+                      <span className="landingPromiseValue">なし</span>
+                    </span>
+                  </strong>
                   <small>サービス名は入りません</small>
                 </span>
               </li>

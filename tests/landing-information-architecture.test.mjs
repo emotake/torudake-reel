@@ -90,14 +90,83 @@ test("keeps the hero promises semantic, ordered, and ahead of the finished resul
     3,
   );
 
-  let previousCopyIndex = -1;
-  for (const copy of ["プレビュー無料", "最大1080p", "透かしなし"]) {
-    const copyIndex = promiseList.indexOf(copy);
-    assert.ok(copyIndex > previousCopyIndex, `${copy} must remain in promise order`);
-    previousCopyIndex = copyIndex;
+  const promiseItems = Array.from(
+    promiseList.matchAll(
+      /<li className="landingPromiseItem">([\s\S]*?)<\/li>/g,
+    ),
+    (match) => match[1],
+  );
+  const promisePairs = [
+    ["プレビュー無料", "プレビュー", "無料"],
+    ["最大1080p", "最大", "1080p"],
+    ["透かしなし", "透かし", "なし"],
+  ];
+
+  assert.equal(promiseItems.length, promisePairs.length);
+  for (const [index, [accessibleCopy, term, value]] of promisePairs.entries()) {
+    const item = promiseItems[index];
+    const accessibleCopyIndex = item.indexOf(
+      `<span className="visuallyHidden">${accessibleCopy}</span>`,
+    );
+    const visualTypographyIndex = item.indexOf(
+      'className="landingPromiseTypography" aria-hidden="true"',
+    );
+    const termIndex = item.indexOf(
+      `className="landingPromiseTerm">${term}</span>`,
+    );
+    const valueIndex = item.indexOf(`>${value}</span>`, termIndex);
+
+    assert.ok(
+      accessibleCopyIndex >= 0 && accessibleCopyIndex < visualTypographyIndex,
+      `${accessibleCopy} must remain contiguous for assistive technology`,
+    );
+    assert.ok(
+      visualTypographyIndex < termIndex && termIndex < valueIndex,
+      `${term}/${value} must remain in visual reading order`,
+    );
   }
+  assert.equal(
+    (
+      promiseList.match(
+        /className="landingPromiseTypography" aria-hidden="true"/g,
+      ) ?? []
+    ).length,
+    3,
+  );
+  assert.equal(
+    (promiseList.match(/className="landingPromiseTerm"/g) ?? []).length,
+    3,
+  );
+  assert.equal(
+    (promiseList.match(/className="landingPromiseValue(?:\s[^"']*)?"/g) ?? [])
+      .length,
+    3,
+  );
+  assert.doesNotMatch(
+    promiseList,
+    /<strong>\s*(?:プレビュー無料|最大1080p|透かしなし)\s*<\/strong>/,
+  );
 
   assert.doesNotMatch(home, /landingPromiseRow/);
+});
+
+test("stacks each promise term over its value at narrow widths", () => {
+  const desktopPromiseStart = cssSource.indexOf(".landingPromiseTypography");
+  const mobileStart = cssSource.indexOf(
+    "@media (max-width: 520px)",
+    desktopPromiseStart,
+  );
+  const mobileEnd = cssSource.indexOf("@media", mobileStart + 1);
+  const mobilePromises = cssSource.slice(
+    mobileStart,
+    mobileEnd >= 0 ? mobileEnd : undefined,
+  );
+
+  assert.ok(mobileStart >= 0);
+  assert.match(
+    mobilePromises,
+    /\.landingPromiseTypography\s*\{[\s\S]*?display:\s*grid;[\s\S]*?justify-items:\s*center;[\s\S]*?white-space:\s*normal;/,
+  );
 });
 
 test("keeps one video editor engine while giving it a focused public entry", () => {

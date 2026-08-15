@@ -15740,23 +15740,18 @@ a {
 .landingPromiseItem {
   display: grid;
   min-width: 0;
-  grid-template-columns: 26px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 11px;
   align-items: start;
 }
 
 .landingPromiseMark {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border: 1px solid rgba(25, 115, 70, 0.14);
+  display: block;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
   border-radius: 50%;
-  background: rgba(185, 245, 208, 0.42);
-  color: var(--mint-dark);
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
+  background: var(--mint-dark);
 }
 
 .landingPromiseCopy {
@@ -15771,18 +15766,46 @@ a {
 
 .landingPromiseCopy strong {
   color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.landingPromiseTypography {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.landingPromiseTerm {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+}
+
+.landingPromiseValue {
+  color: var(--coral-dark);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+
+.landingPromiseValueNumeric {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
 }
 
 .landingPromiseCopy small {
-  margin-top: 3px;
+  margin-top: 5px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.45;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .landingHeroResult {
@@ -16301,21 +16324,22 @@ a {
 
   .landingPromiseItem {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: 7px;
     justify-items: center;
     text-align: center;
   }
 
   .landingPromiseMark {
-    width: 22px;
-    height: 22px;
-    font-size: 9px;
+    width: 6px;
+    height: 6px;
+    margin-top: 0;
   }
 
-  .landingPromiseCopy strong {
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: nowrap;
+  .landingPromiseTypography {
+    display: grid;
+    gap: 1px;
+    justify-items: center;
+    white-space: normal;
   }
 
   .landingPromiseCopy small {
@@ -16358,11 +16382,6 @@ a {
 @media (max-width: 340px) {
   .landingPromiseList {
     gap: 6px;
-  }
-
-  .landingPromiseMark {
-    width: 20px;
-    height: 20px;
   }
 
   .homeEditorialLanding .creationModeCard > [role="img"] {
