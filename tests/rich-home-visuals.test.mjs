@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [landingSource, visualSource, visualCss] = await Promise.all([
+const [landingSource, visualSource, visualCss, pageSource] = await Promise.all([
   readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-rich-visuals.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-rich-visuals.module.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
 ]);
 
 const homeVisualSource = `${landingSource}\n${visualSource}`;
@@ -36,14 +37,28 @@ function jpegDimensions(bytes) {
   throw new Error("JPEG size marker not found");
 }
 
-test("places an editorial real-media hero before the creation choices", () => {
-  const heroIndex = landingSource.indexOf("<HomeEditorialHero");
-  const chooserIndex = landingSource.indexOf("<CreationChooser");
+test("places one playable finished video before the creation choices", () => {
+  const homeSource = landingSource.slice(
+    landingSource.indexOf("export function HomeLanding"),
+    landingSource.indexOf("export function VideoEditLanding"),
+  );
+  const heroIndex = homeSource.indexOf('className="landingHeroResult"');
+  const demoIndex = homeSource.indexOf("{props.demo}", heroIndex);
+  const chooserIndex = homeSource.indexOf("<CreationChooser");
+  const demoSource = pageSource.slice(
+    pageSource.indexOf("function RealVideoDemo"),
+    pageSource.indexOf("function Landing", pageSource.indexOf("function RealVideoDemo")),
+  );
 
-  assert.ok(heroIndex >= 0 && heroIndex < chooserIndex);
-  assert.match(visualSource, /export\s+function\s+HomeEditorialHero\b/);
-  assert.match(visualSource, /<figure\b[^>]*aria-(?:label|labelledby)=/s);
-  assert.match(visualSource, /<figcaption\b/);
+  assert.ok(heroIndex >= 0 && heroIndex < demoIndex && demoIndex < chooserIndex);
+  assert.equal((homeSource.match(/\{props\.demo\}/g) ?? []).length, 1);
+  assert.match(
+    demoSource,
+    /<video[\s\S]*?\bcontrols\b[\s\S]*?\bplaysInline\b[\s\S]*?preload="none"[\s\S]*?poster="\/demo\/torudake-demo-poster\.jpg"/,
+  );
+  assert.match(demoSource, /<source src="\/demo\/torudake-demo\.mp4" type="video\/mp4" \/>/);
+  assert.match(demoSource, /<track[\s\S]*?\bdefault\b[\s\S]*?kind="captions"/);
+  assert.doesNotMatch(demoSource, /\bautoPlay\b|\bmuted\b|\bloop\b/);
 });
 
 test("uses real media to distinguish all three creation modes", () => {
@@ -59,11 +74,11 @@ test("uses real media to distinguish all three creation modes", () => {
   assert.match(landingSource, /href="\/photo-reel"/);
 });
 
-test("renders the real source scenes and finished poster with intrinsic image metadata", () => {
+test("renders the real source scenes with intrinsic image metadata", () => {
   const stillStart = visualSource.indexOf("function Still");
-  const heroStart = visualSource.indexOf("export function HomeEditorialHero");
-  assert.ok(stillStart >= 0 && heroStart > stillStart);
-  const stillRenderer = visualSource.slice(stillStart, heroStart);
+  const modeStart = visualSource.indexOf("export function ModeMediaVisual");
+  assert.ok(stillStart >= 0 && modeStart > stillStart);
+  const stillRenderer = visualSource.slice(stillStart, modeStart);
 
   assert.match(stillRenderer, /<img\b/);
   assert.match(stillRenderer, /\bwidth=(?:\{\d+\}|["']\d+["'])/);
@@ -74,7 +89,6 @@ test("renders the real source scenes and finished poster with intrinsic image me
     "torudake-demo-scene-rain.jpg",
     "torudake-demo-scene-sea.jpg",
     "torudake-demo-scene-river.jpg",
-    "torudake-demo-poster.jpg",
   ]) {
     assert.match(
       visualSource,
@@ -82,7 +96,7 @@ test("renders the real source scenes and finished poster with intrinsic image me
     );
   }
 
-  assert.doesNotMatch(visualSource, /\bautoPlay\b|\bautoplay\b/i);
+  assert.doesNotMatch(homeVisualSource, /\bautoPlay\b|\bautoplay\b/i);
 });
 
 test("removes fake editing interfaces, comparison controls, and motion scaffolding", () => {
@@ -90,6 +104,7 @@ test("removes fake editing interfaces, comparison controls, and motion scaffoldi
     "HeroOutcomeVisual",
     "ModeMiniVisual",
     "WorkflowMiniVisual",
+    "HomeEditorialHero",
     "HomeTransformationCompare",
     "HomeMotionExperience",
   ]) {
@@ -106,7 +121,7 @@ test("removes fake editing interfaces, comparison controls, and motion scaffoldi
   assert.doesNotMatch(homeVisualSource, /type=["']range["']/);
 });
 
-test("keeps the real-media presentation still and readable", () => {
+test("keeps the mode previews still and readable", () => {
   assert.doesNotMatch(visualCss, /@keyframes\b/i);
   assert.doesNotMatch(visualCss, /\banimation(?:-[a-z-]+)?\s*:/i);
   assert.doesNotMatch(visualCss, /\binfinite\b/i);

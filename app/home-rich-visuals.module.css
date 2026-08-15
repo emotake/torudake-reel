@@ -1,118 +1,6 @@
-.editorialHero,
-.editorialHero * {
+.modeMedia,
+.modeMedia * {
   box-sizing: border-box;
-}
-
-.editorialHero {
-  --editorial-ink: #101828;
-  --editorial-paper: #f4f0e8;
-  --editorial-white: #ffffff;
-  --editorial-coral: #b74330;
-  width: min(100%, 720px);
-  margin: 0 auto;
-}
-
-.editorialComposition {
-  display: grid;
-  min-height: 430px;
-  grid-template-columns: minmax(190px, 0.88fr) 64px minmax(220px, 1.12fr);
-  gap: clamp(14px, 2.5vw, 28px);
-  align-items: center;
-  padding: clamp(22px, 4vw, 38px);
-  border: 1px solid rgba(16, 24, 40, 0.12);
-  border-radius: 20px;
-  background: var(--editorial-paper);
-}
-
-.sourceEditorial,
-.resultEditorial {
-  min-width: 0;
-}
-
-.mediaHeading {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  margin: 0 0 14px;
-  color: var(--editorial-ink);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.mediaHeading::before {
-  width: 24px;
-  height: 3px;
-  flex: 0 0 auto;
-  background: var(--editorial-coral);
-  content: "";
-}
-
-.sourceTriptych {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--editorial-ink);
-}
-
-.sourceTriptych img,
-.resultStill img,
-.modeMedia img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.sourceTriptych img {
-  aspect-ratio: 9 / 16;
-}
-
-.editorialTransition {
-  display: grid;
-  gap: 5px;
-  justify-items: center;
-  color: var(--editorial-ink);
-  text-align: center;
-}
-
-.editorialTransition span {
-  color: var(--editorial-coral);
-  font-size: 30px;
-  font-weight: 400;
-  line-height: 1;
-}
-
-.editorialTransition strong {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.resultEditorial {
-  justify-self: center;
-  width: min(100%, 230px);
-}
-
-.resultStill {
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--editorial-ink);
-}
-
-.resultStill img {
-  aspect-ratio: 9 / 16;
-}
-
-.editorialHero figcaption {
-  margin: 14px 0 0;
-  color: #596273;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.7;
-  text-align: center;
 }
 
 .modeMedia {
@@ -122,7 +10,14 @@
   overflow: hidden;
   border: 1px solid rgba(16, 24, 40, 0.1);
   border-radius: 10px;
-  background: var(--editorial-paper, #f4f0e8);
+  background: #f4f0e8;
+}
+
+.modeMedia img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .mode_single img {
@@ -133,7 +28,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
-  background: var(--editorial-ink, #101828);
+  background: #101828;
 }
 
 .mode_multiple img {
@@ -145,7 +40,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 2px;
-  background: var(--editorial-white, #ffffff);
+  background: #ffffff;
 }
 
 .mode_photos img:first-child {
@@ -161,66 +56,7 @@
   object-position: center 62%;
 }
 
-@media (max-width: 700px) {
-  .editorialComposition {
-    min-height: 390px;
-    grid-template-columns: minmax(130px, 0.9fr) 44px minmax(150px, 1.1fr);
-    gap: 10px;
-    padding: 20px 16px;
-  }
-
-  .sourceTriptych {
-    gap: 3px;
-  }
-
-  .editorialTransition span {
-    font-size: 25px;
-  }
-
-  .editorialTransition strong {
-    font-size: 12px;
-  }
-}
-
 @media (max-width: 420px) {
-  .editorialComposition {
-    min-height: 0;
-    grid-template-columns: 1fr;
-    gap: 17px;
-    padding: 18px;
-    border-radius: 14px;
-  }
-
-  .sourceEditorial {
-    width: min(100%, 250px);
-    justify-self: center;
-  }
-
-  .mediaHeading {
-    margin-bottom: 10px;
-    font-size: 13px;
-  }
-
-  .editorialTransition {
-    display: flex;
-    gap: 9px;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .editorialTransition span {
-    transform: rotate(90deg);
-  }
-
-  .resultEditorial {
-    width: min(72vw, 210px);
-  }
-
-  .editorialHero figcaption {
-    font-size: 13px;
-    text-align: left;
-  }
-
   .modeMedia {
     height: 145px;
     border-radius: 8px;
@@ -228,18 +64,6 @@
 }
 
 @media (max-width: 340px) {
-  .editorialComposition {
-    padding-inline: 13px;
-  }
-
-  .sourceEditorial {
-    width: min(100%, 218px);
-  }
-
-  .resultEditorial {
-    width: min(70vw, 188px);
-  }
-
   .modeMedia {
     height: 132px;
   }

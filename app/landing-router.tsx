@@ -16,10 +16,7 @@ import {
 import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
 import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
-import {
-  HomeEditorialHero,
-  ModeMediaVisual,
-} from "./home-rich-visuals";
+import { ModeMediaVisual } from "./home-rich-visuals";
 
 type LandingSharedProps = {
   openPicker: () => void;
@@ -265,7 +262,19 @@ export function HomeLanding(props: LandingSharedProps) {
               <span>透かしなし</span>
             </div>
           </div>
-          <HomeEditorialHero />
+          <div
+            className="landingHeroResult"
+            aria-labelledby="landingHeroResultTitle"
+          >
+            <div className="landingHeroResultHeading">
+              <p className="eyebrow">実際の仕上がり</p>
+              <h2 id="landingHeroResultTitle">
+                サンプル動画で、仕上がりを確認できます。
+              </h2>
+              <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
+            </div>
+            {props.demo}
+          </div>
         </div>
         <DraftRecovery
           name={props.recoverableDraftName}
@@ -277,21 +286,6 @@ export function HomeLanding(props: LandingSharedProps) {
           openSample={props.openSample}
           isSampleLoading={props.isSampleLoading}
         />
-      </section>
-
-      <section
-        className="landingDemoSection"
-        aria-labelledby="landingDemoTitle"
-      >
-        <div className="landingDemoStory">
-          <div className="landingSectionCopy">
-            <p className="eyebrow">実際の仕上がり</p>
-            <h2 id="landingDemoTitle">サンプル動画で、仕上がりを確認できます。</h2>
-            <strong className="landingDemoTransformation">3つの場面が、投稿できる1本に。</strong>
-            <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
-          </div>
-        </div>
-        {props.demo}
       </section>
 
       <section

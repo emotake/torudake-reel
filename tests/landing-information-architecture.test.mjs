@@ -11,24 +11,27 @@ const [pageSource, landingSource, cssSource, videoEditSource, sitemapSource] =
     readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8"),
   ]);
 
-test("routes the home page through three equal creation choices before the demo", () => {
+test("shows the playable finish before three equal creation choices", () => {
   const homeStart = landingSource.indexOf("export function HomeLanding");
   const singleStart = landingSource.indexOf("export function VideoEditLanding");
   const home = landingSource.slice(homeStart, singleStart);
 
+  const finishIndex = home.indexOf('className="landingHeroResult"');
+  const playableDemoIndex = home.indexOf("{props.demo}", finishIndex);
   const chooserIndex = home.indexOf("<CreationChooser");
-  const demoIndex = home.indexOf('className="landingDemoSection"');
   const benefitsIndex = home.indexOf('className="homeBenefitBand"');
   const stepsIndex = home.indexOf('className="homeSteps"');
   const pricingIndex = home.indexOf("<PricingTeaser");
   const faqIndex = home.indexOf('className="homeFaq"');
 
-  assert.ok(chooserIndex >= 0 && chooserIndex < demoIndex);
-  assert.ok(demoIndex < benefitsIndex);
+  assert.ok(finishIndex >= 0 && finishIndex < playableDemoIndex);
+  assert.ok(playableDemoIndex < chooserIndex);
+  assert.ok(chooserIndex < benefitsIndex);
   assert.ok(benefitsIndex < stepsIndex);
   assert.ok(stepsIndex < pricingIndex);
   assert.ok(pricingIndex < faqIndex);
   assert.doesNotMatch(home, /<VoiceSamples/);
+  assert.doesNotMatch(home, /landingDemoSection/);
 
   for (const copy of [
     "何から作りますか？",

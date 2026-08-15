@@ -47,18 +47,23 @@ test("keeps the recommended setup short and moves free caption styling to result
   assert.match(setupSource, /spokenCutMode === "manual"/);
 });
 
-test("loads the sample as a real File and keeps the caption-synchronised demo fallback", () => {
-  assert.match(pageSource, /fullDemoRequested[\s\S]*?\/demo\/torudake-demo\.mp4[\s\S]*?\/demo\/torudake-demo-lite\.mp4/);
-  assert.match(pageSource, /muted=\{!fullDemoRequested\}/);
-  assert.match(pageSource, /poster="\/demo\/torudake-demo-poster\.jpg"/);
+test("loads the sample as a real File and presents one direct, captioned demo", () => {
+  const demoStart = pageSource.indexOf("function RealVideoDemo");
+  const demoEnd = pageSource.indexOf("function Landing", demoStart);
+  const demoSource = pageSource.slice(demoStart, demoEnd);
+
+  assert.match(demoSource, /<source src="\/demo\/torudake-demo\.mp4" type="video\/mp4" \/>/);
+  assert.match(demoSource, /\bcontrols\b[\s\S]*?\bplaysInline\b[\s\S]*?preload="none"/);
+  assert.match(demoSource, /poster="\/demo\/torudake-demo-poster\.jpg"/);
+  assert.match(demoSource, /<track[\s\S]*?\bdefault\b[\s\S]*?kind="captions"/);
+  assert.doesNotMatch(demoSource, /fullDemoRequested|torudake-demo-lite\.mp4|\bmuted\b|\bloop\b/);
   assert.match(pageSource, /fetch\("\/demo\/torudake-demo\.mp4"/);
   assert.match(pageSource, /new File\(\[blob\], "torudake-demo\.mp4"/);
   assert.match(pageSource, /chooseFile\(sampleFile, \{ demo: true \}\)/);
   assert.match(pageSource, /isDemoSample[\s\S]*?DEMO_CAPTIONS\.map/);
   assert.match(pageSource, /サンプルを読込中/);
   assert.match(pageSource, /通信を確認して、もう一度お試しください/);
-  assert.match(pageSource, /onTimeUpdate=/);
-  assert.match(pageSource, /DEMO_CAPTIONS\.find/);
+  assert.doesNotMatch(demoSource, /onTimeUpdate=|DEMO_CAPTIONS\.find/);
   assert.match(pageSource, /videoUnavailable/);
   assert.match(pageSource, /デモ動画を準備しています/);
 });

@@ -3791,26 +3791,13 @@ const DEMO_CAPTIONS = [
 ] as const;
 
 function RealVideoDemo() {
-  const [caption, setCaption] = useState<string | null>(null);
   const [videoUnavailable, setVideoUnavailable] = useState(false);
-  const [fullDemoRequested, setFullDemoRequested] = useState(false);
-  const fullDemoRequestedRef = useRef(false);
+  const demoStartedRef = useRef(false);
 
-  function startFullDemo(video: HTMLVideoElement) {
-    if (fullDemoRequestedRef.current) {
-      trackClientEvent("demo_started", { source: "hero_video" });
-      return;
-    }
-    fullDemoRequestedRef.current = true;
-    setFullDemoRequested(true);
-    video.pause();
-    video.src = "/demo/torudake-demo.mp4";
-    video.muted = false;
-    video.load();
-    void video.play().catch(() => {
-      // iOS may require a second tap after replacing the lightweight source.
-      // The native controls remain visible and ready on the full demo.
-    });
+  function trackDemoStart() {
+    if (demoStartedRef.current) return;
+    demoStartedRef.current = true;
+    trackClientEvent("demo_started", { source: "hero_video" });
   }
 
   return (
@@ -3824,29 +3811,17 @@ function RealVideoDemo() {
       ) : (
         <div className="realDemoPlayer">
           <video
-            src={
-              fullDemoRequested
-                ? "/demo/torudake-demo.mp4"
-                : "/demo/torudake-demo-lite.mp4"
-            }
             controls
-            muted={!fullDemoRequested}
-            loop
             playsInline
             preload="none"
             poster="/demo/torudake-demo-poster.jpg"
-            aria-label="再生すると音声付き1080p本編へ切り替わる、撮るだけリールのデモ動画"
-            onPlay={(event) => startFullDemo(event.currentTarget)}
+            aria-label="音声と日本語字幕付き、約10秒の完成動画"
+            onPlay={trackDemoStart}
             onError={() => setVideoUnavailable(true)}
-            onTimeUpdate={(event) => {
-              const currentTime = event.currentTarget.currentTime;
-              const next = DEMO_CAPTIONS.find(
-                (item) => currentTime >= item.start && currentTime < item.end,
-              );
-              setCaption(next?.text ?? null);
-            }}
           >
+            <source src="/demo/torudake-demo.mp4" type="video/mp4" />
             <track
+              default
               kind="captions"
               src="/demo/torudake-demo-ja.vtt"
               srcLang="ja"
@@ -3854,25 +3829,16 @@ function RealVideoDemo() {
             />
           </video>
           <div className="realDemoStatus">
-            <span>編集後デモ</span>
-            <strong>
-              {fullDemoRequested
-                ? "音声付き1080p本編を再生中"
-                : "再生すると音声付き1080p本編を読み込みます"}
-            </strong>
+            <span>完成動画</span>
+            <strong>約10秒・音声付き</strong>
           </div>
-          {caption ? (
-            <div className="realDemoCaption" aria-live="off">
-              {caption}
-            </div>
-          ) : null}
         </div>
       )}
       <figcaption className="visualResult" id="realDemoCaption">
         <span aria-hidden="true">✓</span>
         <p>
           <strong>実際の動画・音声・テロップで確認</strong>
-          再生しながら、仕上がりの雰囲気を確かめられます
+          1回の再生操作で、仕上がりの雰囲気を確かめられます
         </p>
       </figcaption>
     </figure>

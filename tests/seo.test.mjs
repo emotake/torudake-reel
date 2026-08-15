@@ -150,7 +150,7 @@ test("publishes a real product demo as VideoObject", () => {
   const value = buildSiteStructuredData();
   const video = value["@graph"].find((entry) => entry["@type"] === "VideoObject");
   assert.ok(video);
-  assert.equal(video.contentUrl, `${SITE_ORIGIN}/demo/torudake-demo-lite.mp4`);
+  assert.equal(video.contentUrl, `${SITE_ORIGIN}/demo/torudake-demo.mp4`);
   assert.equal(video.thumbnailUrl, `${SITE_ORIGIN}/demo/torudake-demo-poster.jpg`);
   assert.equal(video.uploadDate, "2026-08-12");
 });

@@ -883,9 +883,12 @@ test("keeps the complete narration buffer in both portable and fallback exports"
   assert.doesNotMatch(pageSource, /return alignedToSpeech\.map/);
 });
 
-test("lazy-loads the real audio-equipped 1080p demo after the light source", () => {
-  assert.match(pageSource, /torudake-demo-lite\.mp4/);
-  assert.match(pageSource, /video\.src = "\/demo\/torudake-demo\.mp4"/);
-  assert.match(pageSource, /video\.muted = false/);
-  assert.match(pageSource, /再生すると音声付き1080p本編を読み込みます/);
+test("loads the audio-equipped 1080p demo directly from a user-controlled player", () => {
+  const demoStart = pageSource.indexOf("function RealVideoDemo");
+  const demoEnd = pageSource.indexOf("function Landing", demoStart);
+  const demoSource = pageSource.slice(demoStart, demoEnd);
+
+  assert.match(demoSource, /<source src="\/demo\/torudake-demo\.mp4" type="video\/mp4" \/>/);
+  assert.match(demoSource, /\bcontrols\b[\s\S]*?\bplaysInline\b[\s\S]*?preload="none"/);
+  assert.doesNotMatch(demoSource, /torudake-demo-lite\.mp4|video\.src\s*=|\bautoPlay\b|\bmuted\b/);
 });

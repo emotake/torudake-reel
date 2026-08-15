@@ -10838,6 +10838,14 @@ a {
   background: #111927;
 }
 
+.realDemoPlayer video::cue {
+  background: rgba(16, 24, 40, 0.86);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
 .realDemoStatus {
   position: absolute;
   top: 15px;
@@ -15795,6 +15803,104 @@ a {
   display: none;
 }
 
+.landingHeroResult {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  align-self: start;
+}
+
+.landingHeroResultHeading {
+  display: grid;
+  gap: 7px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(16, 24, 40, 0.16);
+}
+
+.landingHeroResultHeading .eyebrow,
+.landingHeroResultHeading h2,
+.landingHeroResultHeading p {
+  margin: 0;
+}
+
+.landingHeroResultHeading h2 {
+  max-width: 540px;
+  font-size: clamp(21px, 2.1vw, 29px);
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+
+.landingHeroResultHeading > p:last-child {
+  color: #5b6675;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.landingHeroResult .heroVisual {
+  width: 100%;
+  min-height: 0;
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.landingHeroResult .heroVisual::before,
+.landingHeroResult .heroVisual::after {
+  display: none;
+}
+
+.landingHeroResult .realDemo {
+  gap: 18px;
+  padding: 26px;
+  border: 1px solid rgba(16, 24, 40, 0.14);
+  border-radius: 14px;
+  background: #f4f0e8;
+  box-shadow: none;
+}
+
+.landingHeroResult .realDemoPlayer {
+  width: min(100%, 256px);
+  height: 455px;
+  border: 1px solid rgba(16, 24, 40, 0.16);
+  border-radius: 9px;
+  box-shadow: 0 18px 42px rgba(16, 24, 40, 0.16);
+}
+
+.landingHeroResult .realDemoStatus span,
+.landingHeroResult .realDemoStatus strong {
+  border: 0;
+  border-radius: 4px;
+  background: rgba(16, 24, 40, 0.78);
+  backdrop-filter: none;
+}
+
+.landingHeroResult .realDemo .visualResult {
+  position: static;
+  width: min(100%, 430px);
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid rgba(16, 24, 40, 0.14);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  backdrop-filter: none;
+}
+
+.landingHeroResult .realDemo .visualResult > span {
+  background: transparent;
+}
+
+.landingHeroResult .realDemo .visualResult p {
+  color: #5b6675;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.landingHeroResult .realDemo .visualResult strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
 .creationChooser > header {
   max-width: 680px;
   margin: 0 0 30px;
@@ -16095,6 +16201,11 @@ a {
   .landingPromiseRow {
     justify-content: center;
   }
+
+  .landingHeroResult {
+    width: min(100%, 720px);
+    margin-inline: auto;
+  }
 }
 
 @media (max-width: 760px) {
@@ -16124,6 +16235,19 @@ a {
     flex: 1 1 auto;
     justify-content: center;
     padding-inline: 10px;
+  }
+
+  .landingHeroResult {
+    width: 100%;
+  }
+
+  .landingHeroResult .realDemo {
+    padding: 22px;
+  }
+
+  .landingHeroResult .realDemoPlayer {
+    width: min(100%, 236px);
+    height: 420px;
   }
 
   .creationModeGrid {
@@ -16189,6 +16313,31 @@ a {
 
   .homeStepEditorialGrid h3 {
     margin-top: 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  .landingHeroResultHeading h2 {
+    font-size: 21px;
+  }
+
+  .landingHeroResult .realDemo {
+    gap: 15px;
+    padding: 18px;
+    border-radius: 10px;
+  }
+
+  .landingHeroResult .realDemoPlayer {
+    width: min(100%, 218px);
+    height: 388px;
+  }
+
+  .landingHeroResult .realDemoStatus strong {
+    display: none;
+  }
+
+  .landingHeroResult .realDemo .visualResult {
+    padding-top: 13px;
   }
 }
 

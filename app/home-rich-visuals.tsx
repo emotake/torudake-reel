@@ -12,55 +12,18 @@ const MODE_LABELS: Record<HomeCreationMode, string> = {
 
 type StillProps = {
   src: string;
-  eager?: boolean;
 };
 
-function Still({ src, eager = false }: StillProps) {
+function Still({ src }: StillProps) {
   return (
     <img
       src={src}
       alt=""
       width={360}
       height={640}
-      loading={eager ? "eager" : "lazy"}
+      loading="lazy"
       decoding="async"
     />
-  );
-}
-
-export function HomeEditorialHero() {
-  return (
-    <figure className={styles.editorialHero} aria-labelledby="homeEditorialHeroCaption">
-      <div
-        className={styles.editorialComposition}
-        role="img"
-        aria-label="撮影した3つの場面が、投稿できる1本の縦型動画に仕上がるイメージ"
-      >
-        <div className={styles.sourceEditorial} aria-hidden="true">
-          <p className={styles.mediaHeading}>撮影した素材</p>
-          <div className={styles.sourceTriptych}>
-            <Still src="/demo/torudake-demo-scene-rain.jpg" eager />
-            <Still src="/demo/torudake-demo-scene-sea.jpg" eager />
-            <Still src="/demo/torudake-demo-scene-river.jpg" eager />
-          </div>
-        </div>
-
-        <div className={styles.editorialTransition} aria-hidden="true">
-          <span>→</span>
-          <strong>1本へ</strong>
-        </div>
-
-        <div className={styles.resultEditorial} aria-hidden="true">
-          <p className={styles.mediaHeading}>仕上がり</p>
-          <div className={styles.resultStill}>
-            <Still src="/demo/torudake-demo-poster.jpg" eager />
-          </div>
-        </div>
-      </div>
-      <figcaption id="homeEditorialHeroCaption">
-        3つの場面から、投稿できる縦型動画へ。
-      </figcaption>
-    </figure>
   );
 }
 

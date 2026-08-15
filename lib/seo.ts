@@ -117,7 +117,7 @@ export function buildSiteStructuredData() {
         thumbnailUrl: siteUrl("/demo/torudake-demo-poster.jpg"),
         uploadDate: "2026-08-12",
         duration: "PT10.4S",
-        contentUrl: siteUrl("/demo/torudake-demo-lite.mp4"),
+        contentUrl: siteUrl("/demo/torudake-demo.mp4"),
         inLanguage: "ja-JP",
       },
     ],

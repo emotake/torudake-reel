@@ -48,9 +48,15 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /href="\/photo-reel"/);
   assert.match(html, /href="\/pricing"/);
   assert.match(html, /class="heroVisual realDemo"/);
-  assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);
+  assert.equal((html.match(/<video\b/g) ?? []).length, 1);
+  assert.match(html, /<source src="\/demo\/torudake-demo\.mp4" type="video\/mp4"/);
   assert.match(html, /poster="\/demo\/torudake-demo-poster\.jpg"/);
-  assert.match(html, /再生すると音声付き1080p本編を読み込みます/);
+  assert.match(html, /controls=""/);
+  assert.match(html, /playsInline=""/);
+  assert.match(html, /preload="none"/);
+  assert.match(html, /<track default="" kind="captions"/);
+  assert.doesNotMatch(html, /autoplay=""|muted=""|loop=""/);
+  assert.match(html, /約10秒・音声付き/);
   assert.match(html, /実際の仕上がり/);
   assert.match(html, /サンプル動画で、仕上がりを確認できます/);
   assert.match(html, /映像・音声・テロップをまとめて確認できます。登録は必要ありません/);
