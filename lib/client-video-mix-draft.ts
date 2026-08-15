@@ -36,10 +36,24 @@ const TRANSITIONS = new Set<VideoCompositionTransitionType>([
 const NARRATION_STYLES = new Set<NarrationStyle>(["bright", "calm", "comedy", "party"]);
 const NARRATION_GOALS = new Set<CaptionGoal>(["follow", "sales", "reach"]);
 const VIDEO_MIX_CAPTION_STYLES = new Set<VideoMixCaptionStyle>([
-  "panel",
-  "outline",
-  "minimal",
+  "auto",
+  "bold",
+  "soft",
+  "pop",
+  "vlog",
+  "refined",
 ]);
+
+function normalizeVideoMixCaptionStyle(
+  value: unknown,
+): VideoMixCaptionStyle | null {
+  if (value === undefined || value === "panel") return "auto";
+  if (value === "outline") return "soft";
+  if (value === "minimal") return "vlog";
+  return VIDEO_MIX_CAPTION_STYLES.has(value as VideoMixCaptionStyle)
+    ? (value as VideoMixCaptionStyle)
+    : null;
+}
 
 export type VideoMixDraftSource = Readonly<{
   id: string;
@@ -150,10 +164,7 @@ export function readVideoMixClientDraft(
         value.narrationSourceAudioMode !== "mute" &&
         value.narrationSourceAudioMode !== "ambient") ||
       typeof value.narrationCaptionsEnabled !== "boolean" ||
-      (value.narrationCaptionStyle !== undefined &&
-        !VIDEO_MIX_CAPTION_STYLES.has(
-          value.narrationCaptionStyle as VideoMixCaptionStyle,
-        )) ||
+      normalizeVideoMixCaptionStyle(value.narrationCaptionStyle) === null ||
       !NARRATION_STYLES.has(value.narrationStyle as NarrationStyle) ||
       !NARRATION_GOALS.has(value.narrationGoal as CaptionGoal) ||
       typeof value.narrationBrief !== "string" ||
@@ -168,13 +179,11 @@ export function readVideoMixClientDraft(
       ...value,
       narrationSourceAudioMode:
         value.narrationSourceAudioMode === "ambient" ? "ambient" : "mute",
-      // Draft v1 predates selectable caption styles. Preserve its original
-      // dark-panel appearance instead of discarding an otherwise valid draft.
-      narrationCaptionStyle:
-        value.narrationCaptionStyle === "outline" ||
-        value.narrationCaptionStyle === "minimal"
-          ? value.narrationCaptionStyle
-          : "panel",
+      // Keep v1 drafts valid while moving the former three styles to the
+      // nearest matching pattern from the single-video editor.
+      narrationCaptionStyle: normalizeVideoMixCaptionStyle(
+        value.narrationCaptionStyle,
+      )!,
       sources: sources as VideoMixDraftSource[],
     } as VideoMixClientDraft;
   } catch {

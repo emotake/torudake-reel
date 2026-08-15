@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent,
 } from "react";
 import {
@@ -64,7 +65,11 @@ import {
   prepareVideoMixNarration,
   type VideoMixCaptionStyle,
 } from "../../lib/video-mix-narration";
-import type { CaptionGoal } from "../../lib/caption-design";
+import {
+  DEFAULT_CAPTION_PROFILE,
+  resolveCaptionDesign,
+  type CaptionGoal,
+} from "../../lib/caption-design";
 import { getCaptionDisplayRange, type CaptionSegment } from "../../lib/captions";
 import {
   getVideoMixBoundaryPreferenceKeys,
@@ -2367,10 +2372,17 @@ export default function VideoMixClient() {
           time,
           narration.captions,
           style,
+          narrationGoal,
         );
       }
     },
-    [narration, narrationCaptionStyle, narrationCaptionsEnabled, narrationEnabled],
+    [
+      narration,
+      narrationCaptionStyle,
+      narrationCaptionsEnabled,
+      narrationEnabled,
+      narrationGoal,
+    ],
   );
 
   const previewBackgroundForVideo = useCallback((video: HTMLVideoElement) =>
@@ -3901,6 +3913,7 @@ export default function VideoMixClient() {
                   editedTime,
                   narration.captions,
                   narrationCaptionStyle,
+                  narrationGoal,
                 );
               }
             : undefined,
@@ -4851,26 +4864,50 @@ export default function VideoMixClient() {
                     <legend>テロップの見た目</legend>
                     <p>音声を作り直さず、プレビューと完成動画へ同じデザインを反映します。</p>
                     <div>
-                      {VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          aria-pressed={narrationCaptionStyle === option.id}
-                          className={narrationCaptionStyle === option.id ? "isActive" : ""}
-                          disabled={editingLocked}
-                          onClick={() => {
-                            if (narrationCaptionStyle === option.id) return;
-                            stopPreview();
-                            clearResult();
-                            setNarrationCaptionStyle(option.id);
-                            window.requestAnimationFrame(() => updateNarrationOverlay(previewTime, option.id));
-                          }}
-                        >
-                          <span className={`videoMixCaptionStylePreview ${option.id}`} aria-hidden="true">あの日の景色</span>
-                          <strong>{option.label}</strong>
-                          <small>{option.note}</small>
-                        </button>
-                      ))}
+                      {VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => {
+                        const design = resolveCaptionDesign(
+                          { ...DEFAULT_CAPTION_PROFILE, mood: option.id },
+                          narrationGoal,
+                        );
+                        const previewStyle = {
+                          "--caption-accent": design.palette.highlight,
+                          "--caption-border": design.palette.border,
+                          "--caption-text": design.palette.text,
+                          "--caption-panel": design.palette.background,
+                          "--caption-highlight-stroke":
+                            design.palette.highlight === "#181818"
+                              ? "#fffdf7"
+                              : design.palette.stroke || "#172033",
+                        } as CSSProperties;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            aria-pressed={narrationCaptionStyle === option.id}
+                            className={narrationCaptionStyle === option.id ? "isActive" : ""}
+                            disabled={editingLocked}
+                            onClick={() => {
+                              if (narrationCaptionStyle === option.id) return;
+                              stopPreview();
+                              clearResult();
+                              setNarrationCaptionStyle(option.id);
+                              window.requestAnimationFrame(() =>
+                                updateNarrationOverlay(previewTime, option.id),
+                              );
+                            }}
+                          >
+                            <span
+                              className={`videoMixCaptionStylePreview captionStyleSample ${option.tone}`}
+                              style={previewStyle}
+                              aria-hidden="true"
+                            >
+                              今日の<em>おすすめ</em>
+                            </span>
+                            <strong>{option.label}</strong>
+                            <small>{option.note}</small>
+                          </button>
+                        );
+                      })}
                     </div>
                   </fieldset>
                 ) : null}

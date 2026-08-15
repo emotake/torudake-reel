@@ -361,17 +361,78 @@ test("caption visibility follows locally aligned display timing", () => {
   assert.equal(getActiveVideoMixCaption(captions, 2.4), null);
 });
 
-test("offers three accessible caption styles with the legacy panel as default", () => {
-  assert.equal(DEFAULT_VIDEO_MIX_CAPTION_STYLE, "panel");
+test("offers the same six caption patterns as the single-video editor", () => {
+  assert.equal(DEFAULT_VIDEO_MIX_CAPTION_STYLE, "auto");
   assert.deepEqual(
     VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => option.id),
-    ["panel", "outline", "minimal"],
+    ["auto", "bold", "soft", "pop", "vlog", "refined"],
   );
   assert.ok(
     VIDEO_MIX_CAPTION_STYLE_OPTIONS.every(
       (option) => option.label.length > 0 && option.note.length > 0,
     ),
   );
+});
+
+test("renders all six shared caption patterns with distinct Canvas treatments", () => {
+  const captions = [
+    {
+      id: 1,
+      start: 0,
+      end: 4,
+      text: "今日のおすすめを紹介します",
+      highlight: "おすすめ",
+      accent: true,
+      removed: false,
+    },
+  ];
+  const signatures = new Set();
+
+  for (const option of VIDEO_MIX_CAPTION_STYLE_OPTIONS) {
+    const operations = [];
+    const context = {
+      save() { operations.push("save"); },
+      restore() { operations.push("restore"); },
+      translate(x, y) { operations.push(`translate:${x}:${y}`); },
+      measureText(value) { return { width: Array.from(value).length * 48 }; },
+      beginPath() { operations.push("path"); },
+      roundRect(...values) { operations.push(`round:${values.join(":")}`); },
+      fill() { operations.push("fill"); },
+      fillRect(...values) { operations.push(`fillRect:${values.join(":")}`); },
+      stroke() { operations.push("stroke"); },
+      moveTo(...values) { operations.push(`move:${values.join(":")}`); },
+      lineTo(...values) { operations.push(`line:${values.join(":")}`); },
+      strokeText(value) { operations.push(`strokeText:${value}`); },
+      fillText(value) { operations.push(`fillText:${value}`); },
+      set font(value) { operations.push(`font:${value}`); },
+      set globalAlpha(value) { operations.push(`alpha:${value}`); },
+      set textAlign(value) { operations.push(`align:${value}`); },
+      set textBaseline(value) { operations.push(`baseline:${value}`); },
+      set fillStyle(value) { operations.push(`fillStyle:${value}`); },
+      set lineWidth(value) { operations.push(`lineWidth:${value}`); },
+      set strokeStyle(value) { operations.push(`strokeStyle:${value}`); },
+      set shadowColor(value) { operations.push(`shadowColor:${value}`); },
+      set shadowBlur(value) { operations.push(`shadowBlur:${value}`); },
+      set shadowOffsetX(value) { operations.push(`shadowX:${value}`); },
+      set shadowOffsetY(value) { operations.push(`shadowY:${value}`); },
+      set lineJoin(value) { operations.push(`lineJoin:${value}`); },
+    };
+    assert.equal(
+      drawVideoMixNarrationCaption(
+        context,
+        1080,
+        1920,
+        1,
+        captions,
+        option.id,
+        "follow",
+      ),
+      true,
+    );
+    signatures.add(operations.join("|"));
+  }
+
+  assert.equal(signatures.size, VIDEO_MIX_CAPTION_STYLE_OPTIONS.length);
 });
 
 test("shared Canvas renderer draws only during the aligned caption window", () => {
@@ -384,6 +445,10 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     },
     beginPath() {},
     roundRect() {},
+    translate() {},
+    fillRect() {},
+    moveTo() {},
+    lineTo() {},
     fill() {},
     stroke() {},
     strokeText() {},
@@ -399,6 +464,7 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     set strokeStyle(value) {},
     set shadowColor(value) {},
     set shadowBlur(value) {},
+    set shadowOffsetX(value) {},
     set shadowOffsetY(value) {},
     set lineJoin(value) {},
   };
@@ -425,7 +491,7 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
   assert.equal(drawn.length, 2);
 });
 
-test("renders outline and minimal captions without the legacy panel", () => {
+test("renders the shared text-only caption patterns without a panel", () => {
   const operations = [];
   const context = {
     save() {},
@@ -437,6 +503,10 @@ test("renders outline and minimal captions without the legacy panel", () => {
       operations.push("panel-path");
     },
     roundRect() {},
+    translate() {},
+    fillRect() {},
+    moveTo() {},
+    lineTo() {},
     fill() {},
     stroke() {},
     strokeText(value) {
@@ -455,6 +525,7 @@ test("renders outline and minimal captions without the legacy panel", () => {
     set strokeStyle(value) {},
     set shadowColor(value) {},
     set shadowBlur(value) {},
+    set shadowOffsetX(value) {},
     set shadowOffsetY(value) {},
   };
   const captions = [
@@ -468,7 +539,7 @@ test("renders outline and minimal captions without the legacy panel", () => {
   ];
 
   assert.equal(
-    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "outline"),
+    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "soft"),
     true,
   );
   assert.ok(operations.some((operation) => operation.startsWith("outline:")));
@@ -476,7 +547,7 @@ test("renders outline and minimal captions without the legacy panel", () => {
 
   operations.length = 0;
   assert.equal(
-    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "minimal"),
+    drawVideoMixNarrationCaption(context, 1080, 1920, 1, captions, "vlog"),
     true,
   );
   assert.ok(operations.some((operation) => operation.startsWith("text:")));

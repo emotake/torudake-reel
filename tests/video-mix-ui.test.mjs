@@ -486,8 +486,10 @@ test("shares selectable caption styles and scene-grounded narration with preview
   assert.match(clientSource, /useState<VideoMixCaptionStyle>\(DEFAULT_VIDEO_MIX_CAPTION_STYLE\)/);
   assert.match(clientSource, /narrationCaptionStyle,/);
   assert.ok(
-    (clientSource.match(/drawVideoMixNarrationCaption\([\s\S]*?narrationCaptionStyle/g) ?? []).length >= 2,
+    (clientSource.match(/drawVideoMixNarrationCaption\([\s\S]*?narrationCaptionStyle,[\s\S]*?narrationGoal/g) ?? []).length >= 2,
   );
+  assert.match(clientSource, /resolveCaptionDesign\([\s\S]*?DEFAULT_CAPTION_PROFILE[\s\S]*?option\.id/);
+  assert.match(clientSource, /captionStyleSample \$\{option\.tone\}/);
   assert.match(clientSource, /音声を作り直さず、プレビューと完成動画へ同じデザイン/);
   assert.match(clientSource, /createVideoMixNarrationSceneTimeline\(plan\)/);
   assert.match(clientSource, /sceneTimeline,/);

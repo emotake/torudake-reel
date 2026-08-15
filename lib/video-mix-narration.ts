@@ -1,4 +1,15 @@
 import { getCaptionDisplayRange, type CaptionSegment } from "./captions";
+import {
+  CAPTION_MOODS,
+  DEFAULT_CAPTION_PROFILE,
+  getCaptionEntranceProgress,
+  getCaptionPresentation,
+  resolveCaptionDesign,
+  wrapCaptionLines,
+  type CaptionGoal,
+  type CaptionMood,
+} from "./caption-design";
+import { getCaptionSafeArea } from "./caption-readability";
 import { buildNarrationTimeline, type NarrationPlan } from "./narration";
 import { attachNarrationCaptionDisplayTiming } from "./narration-alignment";
 import {
@@ -21,29 +32,13 @@ import {
 const FRAME_LONG_EDGE = 512;
 const FRAME_JPEG_QUALITY = 0.66;
 
-export const VIDEO_MIX_CAPTION_STYLE_OPTIONS = [
-  {
-    id: "panel",
-    label: "読みやすい帯",
-    note: "半透明の帯で、どんな映像でも読みやすく",
-  },
-  {
-    id: "outline",
-    label: "くっきり文字",
-    note: "太いふち取りで、映像を広く見せる",
-  },
-  {
-    id: "minimal",
-    label: "シンプル",
-    note: "細めの白文字で、映像を主役に",
-  },
-] as const;
+/** Uses the same six caption patterns as the single-video editor. */
+export const VIDEO_MIX_CAPTION_STYLE_OPTIONS = CAPTION_MOODS;
 
-export type VideoMixCaptionStyle =
-  (typeof VIDEO_MIX_CAPTION_STYLE_OPTIONS)[number]["id"];
+export type VideoMixCaptionStyle = CaptionMood;
 
-/** Retains the original video-mix caption appearance for existing drafts. */
-export const DEFAULT_VIDEO_MIX_CAPTION_STYLE: VideoMixCaptionStyle = "panel";
+export const DEFAULT_VIDEO_MIX_CAPTION_STYLE: VideoMixCaptionStyle =
+  DEFAULT_CAPTION_PROFILE.mood;
 
 export type VideoMixNarrationFrameSource = Readonly<{
   file: File;
@@ -499,17 +494,10 @@ export function getActiveVideoMixCaption(
   }) ?? null;
 }
 
-function splitCaptionLines(text: string, maximumCharacters = 14) {
-  const characters = Array.from(text.replace(/\s+/gu, "").trim());
-  if (characters.length <= maximumCharacters) return [characters.join("")];
-  const midpoint = Math.ceil(characters.length / 2);
-  return [
-    characters.slice(0, midpoint).join(""),
-    characters.slice(midpoint).join(""),
-  ];
-}
-
-/** Shared 9:16 Canvas caption renderer for preview and export. */
+/**
+ * Shared 9:16 Canvas caption renderer for preview and export. It deliberately
+ * uses the same design primitives and layout rules as the single-video editor.
+ */
 export function drawVideoMixNarrationCaption(
   context: CanvasRenderingContext2D,
   width: number,
@@ -517,63 +505,252 @@ export function drawVideoMixNarrationCaption(
   editedTime: number,
   captions: readonly CaptionSegment[],
   style: VideoMixCaptionStyle = DEFAULT_VIDEO_MIX_CAPTION_STYLE,
+  goal: CaptionGoal = "follow",
 ) {
   const caption = getActiveVideoMixCaption(captions, editedTime);
   if (!caption) return false;
-  const display = getCaptionDisplayRange(caption);
-  const entrance = Math.min(1, Math.max(0, (editedTime - display.start) / 0.18));
-  const lines = splitCaptionLines(caption.text);
-  const fontSize = Math.round(Math.max(32, Math.min(62, width * 0.052)));
-  const lineHeight = Math.round(fontSize * 1.32);
-  const paddingX = Math.round(fontSize * 0.72);
-  const paddingY = Math.round(fontSize * 0.45);
-  context.save();
-  const fontWeight = style === "minimal" ? 600 : 700;
-  context.font = `${fontWeight} ${fontSize}px "Noto Sans JP", "Hiragino Sans", sans-serif`;
-  const boxWidth = Math.min(
-    width * 0.86,
-    Math.max(...lines.map((line) => context.measureText(line).width)) + paddingX * 2,
+  const displayRange = getCaptionDisplayRange(caption);
+  const keptCaptions = captions.filter(
+    (item) => !item.removed && Boolean(item.text.trim()),
   );
-  const boxHeight = lines.length * lineHeight + paddingY * 2;
-  const x = (width - boxWidth) / 2;
-  const baseY = height * 0.8 - boxHeight;
-  const y = baseY + (1 - entrance) * fontSize * 0.22;
+  const keptIndex = Math.max(
+    0,
+    keptCaptions.findIndex((item) => item.id === caption.id),
+  );
+  const presentation = getCaptionPresentation(caption, keptIndex);
+  const profile = { ...DEFAULT_CAPTION_PROFILE, mood: style };
+  const design = resolveCaptionDesign(profile, goal);
+  const { palette, frame, tone } = design;
+  const presentationScale =
+    presentation === "hook" ? 1.12 : presentation === "metric" ? 1.08 : 1;
+  const fontSize =
+    (tone === "vlog"
+      ? Math.max(22, Math.min(52, width * 0.041))
+      : Math.max(26, Math.min(64, width * 0.052))) * presentationScale;
+  const captionFontWeight =
+    tone === "vlog" && presentation === "hook"
+      ? 700
+      : palette.fontWeight;
+  const horizontalPadding =
+    fontSize * (frame.borderPlacement === "none" ? 0.32 : 0.72);
+  const verticalPadding =
+    fontSize * (frame.borderPlacement === "none" ? 0.18 : 0.44);
+  const safeArea = getCaptionSafeArea(width, height);
+  const maxTextWidth = Math.max(
+    fontSize * 8,
+    safeArea.width - horizontalPadding * 2,
+  );
+  const charactersPerLine = Math.max(8, Math.floor(maxTextWidth / fontSize));
+  const lines = wrapCaptionLines(caption.text, charactersPerLine, 2);
+  const showBrand = presentation === "hook" && Boolean(profile.brandName);
+  const brandHeight = showBrand ? fontSize * 0.52 : 0;
 
-  context.globalAlpha = 0.35 + entrance * 0.65;
+  context.font = `${captionFontWeight} ${fontSize}px ${frame.fontFamily}`;
   context.textAlign = "center";
   context.textBaseline = "middle";
-  if (style === "panel") {
-    const radius = Math.min(28, fontSize * 0.42);
-    context.fillStyle = "rgba(8, 14, 24, 0.78)";
+  const widestLine = Math.max(
+    ...lines.map((line) => context.measureText(line).width),
+  );
+  const lineHeight = fontSize * 1.25;
+  const boxWidth = Math.min(
+    safeArea.width,
+    widestLine + horizontalPadding * 2,
+  );
+  const boxHeight =
+    lines.length * lineHeight + verticalPadding * 2 + brandHeight;
+  const boxX = (width - boxWidth) / 2;
+  const preferredBoxY =
+    tone === "vlog"
+      ? height * 0.43
+      : safeArea.y + safeArea.height - boxHeight;
+  const boxY = Math.min(
+    safeArea.y + safeArea.height - boxHeight,
+    Math.max(safeArea.y, preferredBoxY),
+  );
+  const boxRadius = Math.max(0, fontSize * frame.cornerRadius);
+  const entrance = getCaptionEntranceProgress(editedTime, displayRange.start);
+
+  context.save();
+  context.globalAlpha = 0.35 + entrance * 0.65;
+  context.translate(
+    0,
+    (1 - entrance) * fontSize * (tone === "vlog" ? 0.04 : 0.18),
+  );
+  if (palette.background) {
+    context.save();
+    context.shadowColor =
+      frame.shadow === "offset"
+        ? "#181818"
+        : frame.shadow === "warm"
+          ? "rgba(75,44,29,.34)"
+          : frame.shadow === "deep"
+            ? "rgba(0,0,0,.44)"
+            : "rgba(8,15,25,.26)";
+    context.shadowBlur = frame.shadow === "offset" ? 0 : fontSize * 0.4;
+    context.shadowOffsetX = frame.shadow === "offset" ? fontSize * 0.16 : 0;
+    context.shadowOffsetY = fontSize * 0.16;
+    context.fillStyle = palette.background;
     context.beginPath();
-    context.roundRect(x, y, boxWidth, boxHeight, radius);
+    context.roundRect(boxX, boxY, boxWidth, boxHeight, boxRadius);
     context.fill();
-    context.lineWidth = Math.max(2, width * 0.0025);
-    context.strokeStyle = "rgba(255,255,255,0.24)";
+    context.restore();
+  }
+  if (palette.border && frame.borderPlacement === "outline") {
+    context.lineWidth = Math.max(
+      2,
+      fontSize * (tone === "mono" ? 0.065 : 0.035),
+    );
+    context.strokeStyle = palette.border;
+    context.beginPath();
+    context.roundRect(boxX, boxY, boxWidth, boxHeight, boxRadius);
+    context.stroke();
+  } else if (palette.border && frame.borderPlacement === "left") {
+    context.fillStyle = palette.border;
+    context.beginPath();
+    context.roundRect(
+      boxX,
+      boxY,
+      Math.max(4, fontSize * 0.075),
+      boxHeight,
+      Math.max(2, boxRadius * 0.45),
+    );
+    context.fill();
+  } else if (palette.border && frame.borderPlacement === "bottom") {
+    context.fillStyle = palette.border;
+    context.beginPath();
+    context.roundRect(
+      boxX,
+      boxY + boxHeight - Math.max(4, fontSize * 0.075),
+      boxWidth,
+      Math.max(4, fontSize * 0.075),
+      Math.max(2, boxRadius * 0.45),
+    );
+    context.fill();
+  }
+  if (tone === "signature" && frame.borderPlacement !== "none") {
+    context.strokeStyle = palette.border;
+    context.lineWidth = Math.max(1, fontSize * 0.018);
+    context.beginPath();
+    context.moveTo(boxX + fontSize * 0.18, boxY + fontSize * 0.16);
+    context.lineTo(boxX + fontSize * 0.55, boxY + fontSize * 0.16);
+    context.moveTo(
+      boxX + boxWidth - fontSize * 0.55,
+      boxY + boxHeight - fontSize * 0.16,
+    );
+    context.lineTo(
+      boxX + boxWidth - fontSize * 0.18,
+      boxY + boxHeight - fontSize * 0.16,
+    );
     context.stroke();
   }
-  context.fillStyle = "#fff";
-  context.shadowColor = style === "minimal" ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.55)";
-  context.shadowBlur = style === "minimal"
-    ? Math.max(2, width * 0.004)
-    : Math.max(4, width * 0.008);
-  context.shadowOffsetY = style === "minimal" ? Math.max(1, width * 0.002) : 0;
-  if (style === "outline") {
-    context.lineWidth = Math.max(5, fontSize * 0.12);
-    context.lineJoin = "round";
-    context.strokeStyle = "rgba(8,14,24,0.94)";
+  if (showBrand) {
+    context.fillStyle = palette.highlight;
+    context.font = `750 ${fontSize * 0.34}px ${frame.fontFamily}`;
+    context.textAlign = "left";
+    context.fillText(
+      profile.brandName,
+      boxX + horizontalPadding,
+      boxY + verticalPadding * 0.72,
+      boxWidth - horizontalPadding * 2,
+    );
+  }
+  const highlight = caption.highlight?.trim() ?? "";
+  context.font = `${captionFontWeight} ${fontSize}px ${frame.fontFamily}`;
+  context.textAlign = "left";
+  if (!palette.background && frame.borderPlacement === "none") {
+    context.shadowColor =
+      tone === "pop"
+        ? palette.highlight
+        : tone === "vlog"
+          ? "rgba(0,0,0,.82)"
+          : tone === "signature"
+            ? "rgba(20,14,10,.78)"
+            : "rgba(0,0,0,.68)";
+    context.shadowBlur =
+      tone === "pop"
+        ? 0
+        : tone === "vlog"
+          ? fontSize * 0.07
+          : fontSize * 0.18;
+    context.shadowOffsetX = tone === "pop" ? fontSize * 0.055 : 0;
+    context.shadowOffsetY =
+      tone === "pop"
+        ? fontSize * 0.07
+        : tone === "vlog"
+          ? fontSize * 0.045
+          : fontSize * 0.08;
   }
   lines.forEach((line, index) => {
-    const lineY = y + paddingY + lineHeight * (index + 0.5);
-    if (style === "outline") {
-      context.strokeText(line, width / 2, lineY, boxWidth - paddingX * 1.4);
-    }
-    context.fillText(
-      line,
-      width / 2,
-      lineY,
-      boxWidth - paddingX * 1.4,
-    );
+    const lineY =
+      boxY +
+      verticalPadding +
+      brandHeight +
+      lineHeight * (index + 0.5);
+    const highlightIndex = highlight ? line.indexOf(highlight) : -1;
+    const parts =
+      highlightIndex >= 0
+        ? [
+            {
+              text: line.slice(0, highlightIndex),
+              color: palette.text,
+              highlighted: false,
+            },
+            {
+              text: highlight,
+              color:
+                frame.highlight === "block"
+                  ? palette.label
+                  : palette.highlight,
+              highlighted: true,
+            },
+            {
+              text: line.slice(highlightIndex + highlight.length),
+              color: palette.text,
+              highlighted: false,
+            },
+          ]
+        : [{ text: line, color: palette.text, highlighted: false }];
+    let textX = width / 2 - context.measureText(line).width / 2;
+
+    parts.forEach((part) => {
+      const partWidth = context.measureText(part.text).width;
+      if (part.highlighted && frame.highlight === "marker") {
+        context.fillStyle = `${palette.highlight}66`;
+        context.fillRect(
+          textX,
+          lineY + fontSize * 0.18,
+          partWidth,
+          Math.max(3, fontSize * 0.22),
+        );
+      } else if (part.highlighted && frame.highlight === "block") {
+        context.fillStyle = palette.highlight;
+        context.beginPath();
+        context.roundRect(
+          textX - fontSize * 0.08,
+          lineY - fontSize * 0.48,
+          partWidth + fontSize * 0.16,
+          fontSize * 0.96,
+          fontSize * 0.08,
+        );
+        context.fill();
+      }
+      if (palette.stroke) {
+        const strokeRatio =
+          tone === "signature" ? 0.055 : tone === "cinema" ? 0.095 : 0.115;
+        context.lineWidth = Math.max(3, fontSize * strokeRatio);
+        context.lineJoin = "round";
+        context.strokeStyle =
+          part.highlighted &&
+          frame.borderPlacement === "none" &&
+          palette.highlight === "#181818"
+            ? "#fffdf7"
+            : palette.stroke;
+        context.strokeText(part.text, textX, lineY);
+      }
+      context.fillStyle = part.color;
+      context.fillText(part.text, textX, lineY);
+      textX += partWidth;
+    });
   });
   context.restore();
   return true;
