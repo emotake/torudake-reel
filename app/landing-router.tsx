@@ -106,7 +106,7 @@ function CreationChooser({
           className="creationModeCard creationModeMultiple"
         >
           <div className="creationModeLabel">
-            <span aria-hidden="true">2–5</span>
+            <span aria-hidden="true">動画 2〜5本</span>
           </div>
           <ModeMediaVisual mode="multiple" />
           <div className="creationModeCopy">
@@ -122,7 +122,7 @@ function CreationChooser({
           className="creationModeCard creationModePhotos"
         >
           <div className="creationModeLabel">
-            <span aria-hidden="true">写真</span>
+            <span aria-hidden="true">写真 最大10枚</span>
           </div>
           <ModeMediaVisual mode="photos" />
           <div className="creationModeCopy">

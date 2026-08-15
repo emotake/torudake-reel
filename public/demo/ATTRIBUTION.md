@@ -39,3 +39,7 @@ The four `public/demo/voices/*-v5.wav` previews replace v4 after users reported 
 - Lightweight landing preview: `public/demo/torudake-demo-lite.mp4`, derived from the final media at 720 × 1280 with no audio. It is used only to reduce initial mobile transfer size; the full demo remains the source for the interactive sample.
 - Poster: `public/demo/torudake-demo-poster.jpg`, a frame extracted from the final media for reduced-motion and tap-to-play states.
 - Landing scene stills: `public/demo/torudake-demo-scene-{rain,sea,river}.jpg`, three lightweight 360 × 640 frames extracted from the same licensed and edited demo video for the home-page before/after explanation.
+
+## Home photo-mode stills
+
+`public/demo/torudake-photo-{flowers,brunch,dog}-v1.jpg` were generated on 2026-08-15 with OpenAI's built-in image generation tool specifically for the home-page photo-reel entry. They depict fictional everyday-life subjects, contain no identifiable person, logo, or copied text, and do not derive from third-party stock media. The selected source was cropped into three distinct 600 × 400 JPEGs and compressed locally for the compact mode-card presentation.
