@@ -162,6 +162,13 @@ test("labels the permanent hero value instead of presenting it as news", () => {
   assert.doesNotMatch(landingSource, /素材を選んで、|作り方をひとつ選ぶだけ。/);
 });
 
+test("describes the finish sample without an ambiguous start-work claim", () => {
+  assert.match(landingSource, /仕上がりサンプル/);
+  assert.match(landingSource, /サンプル動画で、仕上がりを確認できます。/);
+  assert.match(landingSource, /映像・音声・テロップをまとめて確認できます。登録は必要ありません。/);
+  assert.doesNotMatch(landingSource, /先に見てから、作り始められます。/);
+});
+
 test("explains media processing without hiding full-video AI uploads", () => {
   assert.match(landingSource, /カットや書き出しは、お使いのスマホ・タブレット・パソコンで行います/);
   assert.match(landingSource, /写真と選んだ音源を外部のAIサービスへ送信しません/);
