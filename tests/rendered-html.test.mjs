@@ -38,7 +38,12 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /id="create"/);
-  assert.match(html, /何から作りますか？/);
+  assert.match(html, /動画1本でも、複数でも、写真だけでも。/);
+  assert.match(
+    html,
+    /手元の素材に合う作り方を選べます。編集とプレビューは無料です。/,
+  );
+  assert.doesNotMatch(html, /何から作りますか？/);
   assert.match(html, /動画1本から作る/);
   assert.match(html, /複数の動画から作る/);
   assert.match(html, /2〜5本から使う場面を選び/);

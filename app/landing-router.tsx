@@ -73,8 +73,8 @@ function CreationChooser({
       aria-labelledby="creationChooserTitle"
     >
       <header>
-        <h2 id="creationChooserTitle">何から作りますか？</h2>
-        <p>編集とプレビューは無料です。</p>
+        <h2 id="creationChooserTitle">動画1本でも、複数でも、写真だけでも。</h2>
+        <p>手元の素材に合う作り方を選べます。編集とプレビューは無料です。</p>
       </header>
       <div className="creationModeGrid">
         <article

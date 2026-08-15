@@ -34,14 +34,18 @@ test("shows the playable finish before three equal creation choices", () => {
   assert.doesNotMatch(home, /landingDemoSection/);
 
   for (const copy of [
-    "何から作りますか？",
+    "動画1本でも、複数でも、写真だけでも。",
+    "手元の素材に合う作り方を選べます。編集とプレビューは無料です。",
     "動画1本から作る",
     "複数の動画から作る",
     "写真から作る",
   ]) {
     assert.match(landingSource, new RegExp(copy));
   }
-  assert.doesNotMatch(landingSource, /素材はどれですか？|まず作り方を選びます/);
+  assert.doesNotMatch(
+    landingSource,
+    /何から作りますか？|素材はどれですか？|まず作り方を選びます/,
+  );
   assert.match(landingSource, /href="\/video-mix"/);
   assert.match(landingSource, /href="\/photo-reel"/);
 });
