@@ -22,14 +22,25 @@ function setRevealed(element: HTMLElement) {
   element.setAttribute("data-home-revealed", "true");
 }
 
-function cancelMotionAnimations(root: HTMLElement) {
-  root.getAnimations({ subtree: true }).forEach((animation) => animation.cancel());
+function trackMotionAnimation(animation: Animation, activeAnimations: Set<Animation>) {
+  activeAnimations.add(animation);
+  const release = () => activeAnimations.delete(animation);
+  animation.addEventListener("finish", release, { once: true });
+  animation.addEventListener("cancel", release, { once: true });
 }
 
-function animateScene(element: HTMLElement) {
+function cancelMotionAnimations(root: HTMLElement, activeAnimations: Set<Animation>) {
+  Array.from(activeAnimations).forEach((animation) => animation.cancel());
+  activeAnimations.clear();
+  if (typeof root.getAnimations === "function") {
+    root.getAnimations({ subtree: true }).forEach((animation) => animation.cancel());
+  }
+}
+
+function animateScene(element: HTMLElement, activeAnimations: Set<Animation>) {
   setRevealed(element);
   const order = Math.max(0, Math.min(5, Number(element.dataset.homeRevealOrder ?? 0)));
-  element.animate(
+  const animation = element.animate(
     [
       { opacity: 0.86, transform: "translate3d(0, 18px, 0) scale(.994)" },
       { opacity: 1, transform: "translate3d(0, 0, 0) scale(1)" },
@@ -41,9 +52,10 @@ function animateScene(element: HTMLElement) {
       fill: "backwards",
     },
   );
+  trackMotionAnimation(animation, activeAnimations);
 }
 
-function animateHeroStory(root: HTMLElement) {
+function animateHeroStory(root: HTMLElement, activeAnimations: Set<Animation>) {
   const hero = root.querySelector<HTMLElement>(
     '[data-home-motion-visual="source-to-reel"]',
   );
@@ -67,7 +79,7 @@ function animateHeroStory(root: HTMLElement) {
     const name = part.dataset.homeMotionPart ?? "";
     const itemOrder = Number(part.dataset.homeMotionOrder ?? 0);
     const delay = (order[name] ?? 120) + itemOrder * 70 + index * 7;
-    part.animate(
+    const animation = part.animate(
       [
         { opacity: 1, transform: "translate3d(0, 4px, 0) scale(.99)" },
         { opacity: 1, transform: "translate3d(0, 0, 0) scale(1)" },
@@ -79,6 +91,7 @@ function animateHeroStory(root: HTMLElement) {
         fill: "backwards",
       },
     );
+    trackMotionAnimation(animation, activeAnimations);
   });
 }
 
@@ -103,6 +116,9 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
     let pointerX = 0;
     let pointerY = 0;
     let heroPlayed = false;
+    let disposed = false;
+    let observerGeneration = 0;
+    const activeAnimations = new Set<Animation>();
 
     const resetDepth = () => {
       pointerX = 0;
@@ -150,7 +166,7 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
         const bounds = element.getBoundingClientRect();
         if (bounds.bottom <= 0 || bounds.top >= viewportHeight) return;
         if (!element.hasAttribute("data-home-revealed")) {
-          if (animate) animateScene(element);
+          if (animate) animateScene(element, activeAnimations);
           else setRevealed(element);
         }
       });
@@ -159,7 +175,7 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
     const playHero = () => {
       if (heroPlayed || reducedQuery.matches || paused) return;
       heroPlayed = true;
-      animateHeroStory(root);
+      animateHeroStory(root, activeAnimations);
     };
 
     const playHeroIfVisible = () => {
@@ -169,13 +185,15 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
     };
 
     const setupMotion = () => {
+      if (disposed) return;
+      const generation = ++observerGeneration;
       observer?.disconnect();
       observer = null;
       resetDepth();
 
       if (reducedQuery.matches) {
         root.dataset.homeMotion = "reduced";
-        cancelMotionAnimations(root);
+        cancelMotionAnimations(root, activeAnimations);
         revealElements.forEach(setRevealed);
         return;
       }
@@ -190,33 +208,43 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
         return;
       }
 
-      observer = new IntersectionObserver(
+      const currentObserver = new IntersectionObserver(
         (entries) => {
+          if (
+            disposed ||
+            generation !== observerGeneration ||
+            observer !== currentObserver
+          ) {
+            return;
+          }
           entries.forEach((entry) => {
             if (!entry.isIntersecting) return;
             const element = entry.target as HTMLElement;
             if (reducedQuery.matches || paused) {
               setRevealed(element);
-              if (element !== heroVisual || heroPlayed) observer?.unobserve(element);
+              if (element !== heroVisual || heroPlayed) currentObserver.unobserve(element);
               return;
             }
             if (element === heroVisual) {
               playHero();
               if (!heroPlayed) return;
               setRevealed(element);
-              observer?.unobserve(element);
+              currentObserver.unobserve(element);
               return;
             }
-            if (!element.hasAttribute("data-home-revealed")) animateScene(element);
-            observer?.unobserve(element);
+            if (!element.hasAttribute("data-home-revealed")) {
+              animateScene(element, activeAnimations);
+            }
+            currentObserver.unobserve(element);
           });
         },
         { threshold: 0.15, rootMargin: "80px 0px -10%" },
       );
+      observer = currentObserver;
       revealElements.forEach((element) => {
-        if (!element.hasAttribute("data-home-revealed")) observer?.observe(element);
+        if (!element.hasAttribute("data-home-revealed")) currentObserver.observe(element);
       });
-      if (heroVisual && !heroPlayed) observer.observe(heroVisual);
+      if (heroVisual && !heroPlayed) currentObserver.observe(heroVisual);
     };
 
     const handleMotionPreference = () => setupMotion();
@@ -229,7 +257,7 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
       if (paused) {
         if (frameId) window.cancelAnimationFrame(frameId);
         frameId = 0;
-        cancelMotionAnimations(root);
+        cancelMotionAnimations(root, activeAnimations);
         resetDepth();
       } else {
         revealVisibleElements(false);
@@ -239,7 +267,7 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
     const handlePageHide = () => {
       paused = true;
       root.setAttribute("data-home-paused", "");
-      cancelMotionAnimations(root);
+      cancelMotionAnimations(root, activeAnimations);
       if (frameId) window.cancelAnimationFrame(frameId);
       frameId = 0;
       resetDepth();
@@ -267,9 +295,11 @@ export function HomeMotionExperience({ children }: { children: ReactNode }) {
     else finePointerQuery.addListener?.(handlePointerPreference);
 
     return () => {
+      disposed = true;
+      observerGeneration += 1;
       observer?.disconnect();
       if (frameId) window.cancelAnimationFrame(frameId);
-      cancelMotionAnimations(root);
+      cancelMotionAnimations(root, activeAnimations);
       root.removeEventListener("pointermove", handlePointerMove);
       root.removeEventListener("pointerleave", handlePointerLeave);
       root.removeEventListener("pointercancel", handlePointerLeave);

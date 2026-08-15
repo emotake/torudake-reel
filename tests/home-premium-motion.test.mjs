@@ -112,11 +112,29 @@ test("reveals content once and only enhances fine-pointer devices", () => {
   assert.match(motionSource, /requestAnimationFrame\s*\(/);
   assert.match(motionSource, /cancelAnimationFrame\s*\(/);
   assert.match(motionSource, /document\.visibilityState/);
+  assert.match(motionSource, /new\s+Set<Animation>\(\)/);
+  assert.match(motionSource, /trackMotionAnimation\s*\(/);
+  assert.match(motionSource, /animation\.addEventListener\(["']finish["']/);
+  assert.match(motionSource, /animation\.addEventListener\(["']cancel["']/);
+  assert.match(
+    motionSource,
+    /typeof\s+root\.getAnimations\s*===\s*["']function["']/,
+  );
   assert.match(motionSource, /getAnimations\(\{\s*subtree:\s*true\s*\}\)/);
+  assert.ok(
+    (motionSource.match(/cancelMotionAnimations\(root, activeAnimations\)/g) ?? [])
+      .length >= 4,
+    "Reduced motion, visibility, pagehide, and cleanup must cancel tracked animations",
+  );
+  assert.match(motionSource, /let\s+disposed\s*=\s*false/);
+  assert.match(motionSource, /if\s*\(disposed\)\s*return/);
+  assert.match(motionSource, /generation\s*!==\s*observerGeneration/);
+  assert.match(motionSource, /observer\s*!==\s*currentObserver/);
+  assert.match(motionSource, /disposed\s*=\s*true/);
   assert.match(motionSource, /reducedQuery\.matches \|\| paused/);
   assert.match(
     motionSource,
-    /if \(heroVisual && !heroPlayed\) observer\.observe\(heroVisual\)/,
+    /if \(heroVisual && !heroPlayed\) currentObserver\.observe\(heroVisual\)/,
   );
 
   for (const eventName of [
