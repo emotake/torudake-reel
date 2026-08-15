@@ -51,7 +51,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /src="\/demo\/torudake-demo-lite\.mp4"/);
   assert.match(html, /poster="\/demo\/torudake-demo-poster\.jpg"/);
   assert.match(html, /再生すると音声付き1080p本編を読み込みます/);
-  assert.match(html, /仕上がりサンプル/);
+  assert.match(html, /実際の仕上がり/);
   assert.match(html, /サンプル動画で、仕上がりを確認できます/);
   assert.match(html, /映像・音声・テロップをまとめて確認できます。登録は必要ありません/);
   assert.doesNotMatch(html, /先に見てから、作り始められます/);

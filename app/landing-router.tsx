@@ -245,7 +245,7 @@ export function HomeLanding(props: LandingSharedProps) {
 
       <section className="landingDemoSection" aria-labelledby="landingDemoTitle">
         <div className="landingSectionCopy">
-          <p className="eyebrow">仕上がりサンプル</p>
+          <p className="eyebrow">実際の仕上がり</p>
           <h2 id="landingDemoTitle">サンプル動画で、仕上がりを確認できます。</h2>
           <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
         </div>
