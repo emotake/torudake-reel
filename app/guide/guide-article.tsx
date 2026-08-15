@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SITE_NAME, SITE_ORIGIN } from "../../lib/site";
+import SiteFooter from "../site-footer";
 
 export function GuideArticle({
   title,
@@ -24,7 +25,8 @@ export function GuideArticle({
     publisher: { "@type": "Organization", name: SITE_NAME },
   };
   return (
-    <main className="legalPage">
+    <>
+      <main className="legalPage">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -51,6 +53,8 @@ export function GuideArticle({
           <Link href="/photo-reel">写真からリールを作る</Link>
         </p>
       </article>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

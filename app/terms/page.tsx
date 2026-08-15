@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import SiteFooter from "../site-footer";
 import { NARRATION_DISCLOSURE_TEXT } from "../../lib/narration";
 import {
   FREE_AI_OPERATION_SUCCESS_LIMIT,
@@ -32,7 +33,8 @@ const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
 export default function TermsPage() {
   return (
-    <main className="legalPage">
+    <>
+      <main className="legalPage">
       <Link className="legalBack" href="/">
         ← 撮るだけリールへ戻る
       </Link>
@@ -200,6 +202,8 @@ export default function TermsPage() {
           から請求できます。
         </p>
       </article>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

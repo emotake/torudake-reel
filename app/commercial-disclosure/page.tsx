@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import SiteFooter from "../site-footer";
 import {
   FREE_AI_OPERATION_SUCCESS_LIMIT,
   FREE_SECONDS_LIMIT,
@@ -30,7 +31,8 @@ const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
 export default function CommercialDisclosurePage() {
   return (
-    <main className="legalPage">
+    <>
+      <main className="legalPage">
       <Link className="legalBack" href="/">
         ← 撮るだけリールへ戻る
       </Link>
@@ -177,6 +179,8 @@ export default function CommercialDisclosurePage() {
           <Link href="/privacy">プライバシーポリシー</Link>が適用されます。
         </p>
       </article>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

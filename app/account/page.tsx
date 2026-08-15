@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import SiteFooter from "../site-footer";
 import AccountClient from "./account-client";
 
 export const dynamic = "force-dynamic";
@@ -15,5 +16,10 @@ export const metadata: Metadata = {
 };
 
 export default function AccountPage() {
-  return <AccountClient />;
+  return (
+    <>
+      <AccountClient />
+      <SiteFooter />
+    </>
+  );
 }

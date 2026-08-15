@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SiteFooter from "./site-footer";
 import {
   useEffect,
   useMemo,
@@ -3537,7 +3538,8 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
   }, [file, stage]);
 
   return (
-    <main className="siteShell" data-build="20260809-refined-luxury">
+    <>
+      <main className="siteShell" data-build="20260809-refined-luxury">
       <header className="topbar">
         <button
           className="brand"
@@ -3762,35 +3764,15 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
         />
       )}
 
-      <footer>
-        <div>
-          <strong>撮るだけリール</strong>
-          <span>動画を選ぶだけ。カット・AI音声・テロップ・表紙候補まで提案。</span>
-        </div>
-        <div className="footerLinks">
-          <Link href="/#create">作り方</Link>
-          <Link href="/video-edit">1本の動画</Link>
-          <Link href="/video-mix">複数の動画</Link>
-          <Link href="/photo-reel">写真</Link>
-          <Link href="/pricing">料金</Link>
-          <Link href="/guide/iphone-mov-reel">iPhone動画ガイド</Link>
-          <Link href="/guide/silent-video-narration">無音動画ガイド</Link>
-          <Link href="/guide/japanese-reading">読み方修正ガイド</Link>
-          <a href="/privacy">プライバシー</a>
-          <a href="/terms">利用規約</a>
-          <a href="/commercial-disclosure">特商法表記</a>
-          <Link href="/support">よくある質問・お問い合わせ</Link>
-        </div>
-        <small>© 2026 撮るだけリール</small>
-      </footer>
-
       {toast && (
         <div className="toast" role="status">
           <span>✓</span>
           {toast}
         </div>
       )}
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }
 

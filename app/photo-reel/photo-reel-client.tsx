@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import SiteFooter from "../site-footer";
 import {
   useCallback,
   useEffect,
@@ -1107,7 +1108,8 @@ export default function PhotoReelClient() {
   };
 
   return (
-    <main className="photoReelShell">
+    <>
+      <main className="photoReelShell">
       <header className="photoReelTopbar">
         <Link className="photoReelBrand" href="/" aria-label="撮るだけリールのトップへ">
           <span className="photoReelBrandIcon" aria-hidden="true">
@@ -1688,17 +1690,8 @@ export default function PhotoReelClient() {
         </div>
       </section>
 
-      <footer className="photoReelFooter">
-        <strong>撮るだけリール</strong>
-        <p>写真も動画も、編集で止まらず投稿へ。</p>
-        <nav aria-label="フッターナビゲーション">
-          <Link href="/">動画から作る</Link>
-          <Link href="/privacy">プライバシー</Link>
-          <Link href="/terms">利用規約</Link>
-          <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
-          <Link href="/support">よくある質問・お問い合わせ</Link>
-        </nav>
-      </footer>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

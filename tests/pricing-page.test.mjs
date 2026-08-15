@@ -14,6 +14,10 @@ const cssSource = await readFile(
   new URL("../app/pricing/pricing.module.css", import.meta.url),
   "utf8",
 );
+const siteFooterSource = await readFile(
+  new URL("../app/site-footer.tsx", import.meta.url),
+  "utf8",
+);
 
 test("pricing page stays server-rendered and exposes canonical metadata", () => {
   assert.doesNotMatch(pageSource, /^\s*["']use client["']/m);
@@ -64,12 +68,22 @@ test("pricing page includes the paid-service trust and legal essentials", () => 
     "Face ID・Touch ID",
     "Stripe",
     "いつでも解約",
+  ]) {
+    assert.ok(pageSource.includes(copy), `missing required pricing copy: ${copy}`);
+  }
+
+  assert.match(pageSource, /<\/main>\s*<SiteFooter \/>/);
+  for (const route of [
     "/support",
     "/terms",
     "/privacy",
     "/commercial-disclosure",
   ]) {
-    assert.ok(pageSource.includes(copy), `missing required pricing copy: ${copy}`);
+    assert.match(
+      siteFooterSource,
+      new RegExp(`href: ["']${route}["']`),
+      `shared pricing footer must retain legal/support route: ${route}`,
+    );
   }
 });
 

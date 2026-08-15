@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import SiteFooter from "../site-footer";
 
 export const metadata = buildPublicPageMetadata({
   title: "よくある質問・お問い合わせ｜撮るだけリール",
@@ -24,7 +25,8 @@ const CONTACT_URL = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
 
 export default function SupportPage() {
   return (
-    <main className="legalPage">
+    <>
+      <main className="legalPage">
       <Link className="legalBack" href="/">
         ← 撮るだけリールへ戻る
       </Link>
@@ -82,6 +84,8 @@ export default function SupportPage() {
           <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
         </p>
       </article>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

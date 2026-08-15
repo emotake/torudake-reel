@@ -15,6 +15,7 @@ import {
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
 } from "../../lib/billing-policy";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import SiteFooter from "../site-footer";
 import CheckoutLink from "./checkout-link";
 import styles from "./pricing.module.css";
 
@@ -89,7 +90,8 @@ const plans = [
 
 export default function PricingPage() {
   return (
-    <main className={styles.page}>
+    <>
+      <main className={styles.page}>
       <header className={styles.siteHeader}>
         <div className={styles.headerInner}>
           <Link className={styles.brand} href="/" aria-label="撮るだけリール トップページ">
@@ -341,13 +343,8 @@ export default function PricingPage() {
         </section>
       </div>
 
-      <footer className={styles.footer}>
-        <Link href="/">トップ</Link>
-        <Link href="/support">サポート</Link>
-        <Link href="/terms">利用規約</Link>
-        <Link href="/privacy">プライバシーポリシー</Link>
-        <Link href="/commercial-disclosure">特定商取引法に基づく表示</Link>
-      </footer>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This media editor deliberately keeps stable callbacks around long-running browser media and reservation lifecycles. */
 
 import Link from "next/link";
+import SiteFooter from "../site-footer";
 import {
   useCallback,
   useEffect,
@@ -4182,7 +4183,8 @@ export default function VideoMixClient() {
   };
 
   return (
-    <main className="videoMixShell" data-mobile-step={mobileStep}>
+    <>
+      <main className="videoMixShell" data-mobile-step={mobileStep}>
       <header className="videoMixHeader">
         <Link href="/" className="videoMixBrand" target="_blank" rel="noreferrer">撮るだけリール</Link>
         <div>
@@ -5078,7 +5080,8 @@ export default function VideoMixClient() {
         <button type="button" className={mobileStep === 3 ? "isActive" : ""} aria-current={mobileStep === 3 ? "step" : undefined} disabled={!plan} onClick={() => setMobileStep(3)}>3 音声・保存</button>
       </nav>
 
-      <footer className="videoMixFooter"><Link href="/" target="_blank" rel="noreferrer">トップへ戻る</Link><Link href="/support" target="_blank" rel="noreferrer">よくある質問・お問い合わせ</Link><Link href="/privacy" target="_blank" rel="noreferrer">プライバシー</Link><Link href="/terms" target="_blank" rel="noreferrer">利用規約</Link></footer>
-    </main>
+      </main>
+      <SiteFooter preserveWorkspace />
+    </>
   );
 }

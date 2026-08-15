@@ -213,11 +213,15 @@ test("uses declared font stacks and Japanese-first decorative labels", () => {
 test("keeps mobile account access and accessible touch targets visible", () => {
   assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*?\.accountButton\s*\{[\s\S]*?display:\s*inline-flex/);
   assert.match(cssSource, /\.siteShell :is\(button, select, textarea, summary, \[role="button"\]\),[\s\S]*?min-height:\s*44px/);
-  assert.match(cssSource, /\.siteShell \.brandText small,[\s\S]*?\.siteShell footer :is\(span, a, small\),[\s\S]*?font-size:\s*12px/);
+  assert.match(cssSource, /\.siteFooterBrandLink small\s*\{[^}]*font-size:\s*12px/);
   assert.match(cssSource, /\.accentChoices > button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px/);
   assert.match(cssSource, /\.brand\s*\{[\s\S]*?min-height:\s*44px/);
   assert.match(cssSource, /\.trialButton,[\s\S]*?\.transferButton\s*\{[\s\S]*?min-height:\s*44px/);
-  assert.match(cssSource, /\.topbar nav a,[\s\S]*?\.footerLinks a\s*\{[\s\S]*?min-width:\s*44px/);
+  assert.match(cssSource, /\.topbar nav a\s*\{[^}]*min-width:\s*44px/);
+  assert.match(
+    cssSource,
+    /\.siteFooterGroup a\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px[^}]*font-size:\s*14px/,
+  );
   assert.match(cssSource, /\.visuallyHidden\[type="file"\]\s*\{[\s\S]*?display:\s*none/);
   assert.match(
     cssSource,

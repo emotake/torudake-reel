@@ -386,7 +386,12 @@ test("ships accessible mobile controls and route metadata", () => {
   );
   assert.match(
     cssSource,
-    /\.videoMixFooter a\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px[^}]*font-size:\s*13px/,
+    /\.siteFooterGroup a\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px[^}]*font-size:\s*14px/,
+  );
+  assert.match(clientSource, /<SiteFooter preserveWorkspace \/>/);
+  assert.match(
+    cssSource,
+    /@media \(max-width: 880px\)[\s\S]*?\.videoMixShell \+ \.siteFooter\s*\{[^}]*padding-bottom:\s*104px/,
   );
   assert.match(cssSource, /@media \(max-width: 620px\)[\s\S]*?\.videoMixTransitionGrid/);
   assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.videoMixShell/);

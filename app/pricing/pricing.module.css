@@ -599,25 +599,6 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
-.footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px 22px;
-  padding: 26px 24px 34px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-}
-
-.footer a {
-  min-height: 44px;
-  padding: 12px 0;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  text-underline-offset: 3px;
-}
-
 .page a:focus-visible,
 .page summary:focus-visible {
   border-radius: 8px;

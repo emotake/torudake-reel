@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
+import SiteFooter from "../site-footer";
 
 export const metadata = buildPublicPageMetadata({
   title: "プライバシーポリシー｜撮るだけリール",
@@ -12,7 +13,8 @@ const CONTACT_EMAIL = "torudake.reel@gmail.com";
 
 export default function PrivacyPage() {
   return (
-    <main className="legalPage">
+    <>
+      <main className="legalPage">
       <Link className="legalBack" href="/">
         ← 撮るだけリールへ戻る
       </Link>
@@ -143,6 +145,8 @@ export default function PrivacyPage() {
           機能、利用する外部サービス、法令などの変更に応じて本ポリシーを改定することがあります。重要な変更は、本サービス上で分かりやすくお知らせします。
         </p>
       </article>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }
