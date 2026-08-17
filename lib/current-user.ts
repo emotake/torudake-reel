@@ -67,7 +67,7 @@ export function authenticationRequired() {
       error: "続けるにはアカウントへのログインが必要です。",
       code: "authentication_required",
     },
-    { status: 401 },
+    { status: 401, headers: { "Cache-Control": "private, no-store" } },
   );
 }
 

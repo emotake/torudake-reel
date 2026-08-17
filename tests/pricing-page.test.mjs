@@ -96,7 +96,7 @@ test("pricing page includes the paid-service trust and legal essentials", () => 
     "自動更新",
     "繰り越されません",
     "書き出しに成功した時点",
-    "アカウント作成またはログイン",
+    "新しいアカウントはGoogleで作成",
     "Face ID・Touch ID",
     "Stripe",
     "いつでも解約",

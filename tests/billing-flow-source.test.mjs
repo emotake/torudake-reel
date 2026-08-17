@@ -24,6 +24,7 @@ test("polls the authenticated account after Stripe redirects back", () => {
   assert.match(accountSource, /type CheckoutPlan = "starter" \| "standard" \| "one_time"/);
   assert.match(accountSource, /beginCheckoutFromAccount\("starter"\)/);
   assert.match(accountSource, /beginCheckoutFromAccount\("standard"\)/);
+  assert.match(accountSource, /beginCheckoutFromAccount\("one_time"\)/);
   assert.doesNotMatch(accountSource, /startCheckout\("light"\)/);
   assert.match(accountSource, /accountPlanRecommend">おすすめ/);
   assert.match(accountSource, /STARTER_MONTHLY_PRICE_JPY/);
@@ -35,7 +36,6 @@ test("polls the authenticated account after Stripe redirects back", () => {
   assert.doesNotMatch(accountSource, /125円|42円お得/);
   assert.match(accountSource, /月3本・500円なら、1本ずつ3回購入するより100円お得/);
   assert.match(accountSource, /月額にしない場合は、今回だけ1本の購入も選べます/);
-  assert.match(accountSource, /<OneTimeRescue source="account"/);
   assert.match(accountSource, /今月.*本保存済み・あと.*本保存できます/);
   assert.match(accountSource, /買い切りで保存できる残り本数/);
   assert.match(accountSource, /表示価格はすべて税込/);
@@ -49,13 +49,14 @@ test("polls the authenticated account after Stripe redirects back", () => {
       accountSource.indexOf('<OneTimeRescue source="account"'),
   );
 });
-
 test("reauthenticates an existing account before adding a backup passkey", () => {
-  assert.match(accountSource, /status\?\.authenticated === true/);
   assert.match(
     accountSource,
-    /if \(addingBackupPasskey\) \{\s*await reauthenticate\(\);\s*\} else \{\s*await postJson<\{ ready: boolean \}>\("\/api\/session\/trial"\)/,
+    /if \(status\?\.authenticated !== true\) \{\s*throw new Error\([\s\S]*?先にGoogleでログインしてください。/,
   );
+  assert.match(accountSource, /await reauthenticate\(\);[\s\S]*?\/api\/account\/passkey\/register\/options/);
+  assert.doesNotMatch(accountSource, /\/api\/session\/trial/);
+  assert.match(accountSource, /Googleで登録した方も追加できます/);
   assert.match(accountSource, /予備パスキーを追加/);
   assert.match(accountSource, /予備のパスキーを追加しました/);
 });

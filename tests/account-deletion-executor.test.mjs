@@ -109,6 +109,9 @@ test("execute anonymizes identity and deletes credentials while preserving billi
   assert.equal(result.completed, 1);
   assert.equal(row("SELECT COUNT(*) AS value FROM account_passkeys WHERE user_id = ?", fixture.userId).value, 0);
   assert.equal(row("SELECT COUNT(*) AS value FROM account_sessions WHERE user_id = ?", fixture.userId).value, 0);
+  assert.equal(row("SELECT COUNT(*) AS value FROM account_external_identities WHERE user_id = ?", fixture.userId).value, 0);
+  assert.equal(row("SELECT COUNT(*) AS value FROM account_oauth_challenges WHERE initiating_user_id = ?", fixture.userId).value, 0);
+  assert.equal(row("SELECT COUNT(*) AS value FROM account_email_challenges WHERE initiating_user_id = ?", fixture.userId).value, 0);
   assert.equal(row("SELECT COUNT(*) AS value FROM billing_purchases WHERE user_id = ?", fixture.userId).value, 1);
   const user = row("SELECT email, billing_email, full_name, account_deleted_at FROM users WHERE id = ?", fixture.userId);
   assert.match(user.email, /^deleted\+[0-9a-f]+@anonymous\.torudake\.invalid$/);
@@ -304,6 +307,36 @@ function createFixture(
       ) VALUES (?, ?, 1, 1, 9999999999, 1)
     `)
     .run(`session-${suffix}`, userId);
+  database.sqlite
+    .prepare(`
+      INSERT INTO account_external_identities (
+        id, user_id, provider, subject_hash, verified_email,
+        created_at, last_used_at, revoked_at
+      ) VALUES (?, ?, 'google', ?, ?, 1, 1, NULL)
+    `)
+    .run(`identity-${suffix}`, userId, `subject-${suffix}-hash`, email);
+  database.sqlite
+    .prepare(`
+      INSERT INTO account_oauth_challenges (
+        state_hash, provider, nonce, pkce_verifier, intent,
+        initiating_user_id, expected_origin, return_to, network_hash,
+        created_at, expires_at, consumed_at
+      ) VALUES (?, 'google', 'nonce', 'verifier', 'link', ?,
+        'https://torudake-reel.pages.dev', '/account', 'network', 1,
+        9999999999, NULL)
+    `)
+    .run(`oauth-${suffix}`, userId);
+  database.sqlite
+    .prepare(`
+      INSERT INTO account_email_challenges (
+        challenge_hash, email_hash, normalized_email, code_hash, intent,
+        initiating_user_id, expected_origin, return_to, network_hash,
+        attempts, created_at, expires_at, consumed_at
+      ) VALUES (?, 'email-hash', ?, 'code-hash', 'link', ?,
+        'https://torudake-reel.pages.dev', '/account', 'network', 0, 1,
+        9999999999, NULL)
+    `)
+    .run(`email-${suffix}`, email, userId);
   database.sqlite
     .prepare(`
       INSERT INTO account_deletion_requests (

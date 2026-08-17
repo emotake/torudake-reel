@@ -26,8 +26,8 @@ export const metadata = buildPublicPageMetadata({
   path: "/terms",
 });
 
-const TERMS_VERSION = "2026-08-13";
-const LAST_UPDATED = "2026年8月13日";
+const TERMS_VERSION = "2026-08-18";
+const LAST_UPDATED = "2026年8月18日";
 const CONTACT_EMAIL = "torudake.reel@gmail.com";
 const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
@@ -101,7 +101,7 @@ export default function TermsPage() {
         <ul>
           <li>
             無料体験は合計{FREE_MINUTES}分以内・動画{FREE_VIDEO_LIMIT}
-            本までの範囲で、いずれかの上限に先に達するまで利用できます。編集とプレビューは無料ですが、完成動画の保存には有料の利用枠が必要です。
+            本までの範囲で、いずれかの上限に先に達するまで利用できます。編集とプレビューは無料ですが、外部AI機能の利用と完成動画の保存にはログインが必要で、保存には有料の利用枠が必要です。新しいアカウントはGoogleで作成します。既存のパスキー利用者は登録済みパスキーでログインできます。Googleアカウントでは、明示的な再認証後にパスキーを予備のログイン方法として追加できます。
           </li>
           <li>
             「動画をつないで作る」機能では、最大5本、全素材の合計500MB・5分まで選択できます。複数素材をつないだ完成動画も、書き出して保存する1本を動画1本分として扱います。

@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This media editor deliberately keeps stable callbacks around long-running browser media and reservation lifecycles. */
 
 import Link from "next/link";
+import AuthenticationGate from "../authentication-gate";
 import {
   MONTHLY_FIRST_OFFER_VERSION,
   MonthlyFirstPurchaseOptions,
@@ -208,10 +209,19 @@ class VideoMixRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "VideoMixRequestError";
   }
+}
+
+function isAuthenticationRequiredError(error: unknown) {
+  return (
+    error instanceof VideoMixRequestError &&
+    error.status === 401 &&
+    error.code === "authentication_required"
+  );
 }
 
 const TRANSITION_OPTIONS: ReadonlyArray<{
@@ -391,8 +401,17 @@ function buildFilename() {
 }
 
 async function readApiError(response: Response, fallback: string) {
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-  return payload?.error?.trim() || fallback;
+  return (await readApiErrorDetail(response, fallback)).message;
+}
+
+async function readApiErrorDetail(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: string; code?: string }
+    | null;
+  return {
+    message: payload?.error?.trim() || fallback,
+    code: typeof payload?.code === "string" ? payload.code : null,
+  };
 }
 
 async function reserveMixUsage(
@@ -605,12 +624,17 @@ async function requestMixNarrationPlan(options: Readonly<{
     signal: options.signal,
   });
   const payload = (await response.json().catch(() => null)) as
-    | (NarrationPlan & { narrationBundleToken?: string; error?: string })
+    | (NarrationPlan & {
+        narrationBundleToken?: string;
+        error?: string;
+        code?: string;
+      })
     | null;
   if (!response.ok || !payload?.script || !payload.narrationBundleToken) {
     throw new VideoMixRequestError(
       payload?.error || "AIナレーションの台本を作成できませんでした。",
       response.status,
+      typeof payload?.code === "string" ? payload.code : null,
     );
   }
   return { plan: payload, quota: readAiQuota(response) };
@@ -640,9 +664,14 @@ async function requestMixNarrationSpeech(options: Readonly<{
     signal: options.signal,
   });
   if (!response.ok) {
+    const detail = await readApiErrorDetail(
+      response,
+      "AI音声を生成できませんでした。",
+    );
     throw new VideoMixRequestError(
-      await readApiError(response, "AI音声を生成できませんでした。"),
+      detail.message,
       response.status,
+      detail.code,
     );
   }
   const audio = await response.blob();
@@ -975,6 +1004,7 @@ export default function VideoMixClient() {
   const [deletingDurableCopy, setDeletingDurableCopy] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [result, setResult] = useState<MixResult | null>(null);
+  const [authenticationGateOpen, setAuthenticationGateOpen] = useState(false);
   const [pendingFinalize, setPendingFinalize] = useState<PendingFinalize | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -3789,6 +3819,16 @@ export default function VideoMixClient() {
     } catch (caught) {
       reservationInvalidatedRef.current = true;
       void releaseActiveReservationForeground().catch(() => undefined);
+      if (isAuthenticationRequiredError(caught)) {
+        setShowPurchase(false);
+        setError(
+          "AIナレーションを使うにはログインが必要です。素材と編集設定はこの画面に残っています。ログイン後、AIナレーションの作成をもう一度押してください。",
+        );
+        setMessage("");
+        setAuthenticationGateOpen(true);
+        trackClientEvent("video_mix_narration_failed", analyticsSnapshot());
+        return;
+      }
       setShowPurchase(
         caught instanceof VideoMixRequestError && caught.status === 402,
       );
@@ -5096,6 +5136,18 @@ export default function VideoMixClient() {
       </nav>
 
       </main>
+      <AuthenticationGate
+        open={authenticationGateOpen}
+        reason="ai"
+        onClose={() => setAuthenticationGateOpen(false)}
+        onAuthenticated={() => {
+          setAuthenticationGateOpen(false);
+          setError("");
+          setMessage(
+            "ログインが完了しました。素材と編集内容は保持されています。AIナレーションの作成をもう一度押してください。",
+          );
+        }}
+      />
       <SiteFooter preserveWorkspace />
     </>
   );

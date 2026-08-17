@@ -5,9 +5,8 @@ import {
 } from "../../../../lib/billing-store";
 import {
   getCurrentUser,
-  isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
-import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
+import { isAccountAuthenticationAvailable } from "../../../../lib/account-auth-methods";
 import {
   isBillingConfigured,
   getStripeReadiness,
@@ -17,8 +16,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const authenticationAvailable =
-    isSitesAuthenticationTrusted() || isPasskeyAuthenticationConfigured();
+  const authenticationAvailable = isAccountAuthenticationAvailable();
   const stripeConfigured = isBillingConfigured();
   const configured = authenticationAvailable && stripeConfigured;
   const billingMode = stripeBillingMode();

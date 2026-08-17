@@ -34,13 +34,22 @@ test("issues opaque secure passkey cookies without exposing account data", async
   assert.match(await hashAccountToken(token), /^[0-9a-f]{64}$/);
 });
 
-test("binds passkey registration to the anti-abuse trial identity", async () => {
+test("allows passkey registration only as a recently verified account backup", async () => {
   const source = await readFile(
     new URL("../lib/account-auth.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /getRegisteredTrialSessionId\(request\)/);
-  assert.match(source, /trialSessionPrincipalEmail\(sessionId\)/);
+  const registration = source.slice(
+    source.indexOf("export async function registrationOptions"),
+    source.indexOf("export async function authenticationOptions"),
+  );
+  assert.match(registration, /external_identity_authentication_required/);
+  assert.match(
+    registration,
+    /requireRecentAccountReauthentication\(\s*request,\s*user\.id,?\s*\)/,
+  );
+  assert.match(registration, /requiresReauthentication: true/);
+  assert.doesNotMatch(registration, /getRegisteredTrialSessionId|trialSessionPrincipalEmail/);
   assert.match(source, /residentKey: "required"/);
   assert.match(source, /userVerification: "required"/);
   assert.match(source, /attestationType: "none"/);

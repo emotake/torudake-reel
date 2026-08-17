@@ -39,9 +39,25 @@ pnpm run test
 `TRUST_SITES_AUTH_HEADERS` は未設定または `false` のままにしてください。
 この値を `true` にできるのは、OpenAI Sitesの認証ディスパッチャー配下だけです。
 
-一般公開環境のアカウント認証にはパスキーを使用します。認証用の秘密鍵は
-利用者の端末から送信されず、サーバーには公開鍵とハッシュ化したセッションだけを
-保存します。D1へ `drizzle/0010_passkey_accounts.sql` を適用してから公開してください。
+一般公開環境では、新しいアカウントをGoogleで作成します。Passkeyは登録済み
+アカウントのログイン・本人確認・予備鍵としてのみ使用し、Passkey単独では新しい
+アカウントを作成しません。Passkeyの秘密鍵は利用者の端末から送信されず、サーバー
+には公開鍵とハッシュ化したセッションだけを保存します。GoogleのCallback URLは
+`/api/account/oauth/google/callback` です。`OIDC_CANONICAL_ORIGIN` には公開originを
+パスなしで設定し、Google Cloud側のredirect URIと完全一致させてください。
+
+公開前に `drizzle/0025_worried_lake.sql` と `drizzle/0026_odd_blob.sql` を順番に
+適用します。0025に含まれる初回無料用テーブルは将来互換のための未使用schemaで、
+このリリースでは対応するAPI・画面・集計処理を公開しません。Googleの資格情報と
+callbackを準備してから `OIDC_AUTH_ENABLED=true` と
+`GOOGLE_OIDC_ENABLED=true` を同時に有効化してください。認証方式をすべて無効の
+まま本番公開すると、新規利用者がログインできません。
+`OIDC_AUTH_SECRET` と `GOOGLE_OIDC_CLIENT_ID` はGoogle利用者識別子のハッシュ入力
+です。既存の `account_external_identities` を移行せずに変更してはいけません。
+
+編集とプレビュー用の利用枠予約は匿名trialでも利用できます。一方、外部AI原価が
+発生する文字起こし・AI台本・AI音声の各APIは匿名trialを受け付けません。運営権限
+またはGoogle／登録済みPasskeyでログインしたアカウントが必要です。
 
 無料体験の新規発行には、32文字以上のランダムな
 `TRIAL_ISSUANCE_SECRET` が必要です。値はCloudflareのシークレットとして設定し、

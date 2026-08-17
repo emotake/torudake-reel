@@ -30,6 +30,7 @@ import {
   recordMeteredAiTranscriptionDuration,
 } from "../../../lib/operator-usage";
 import { getUsagePrincipal } from "../../../lib/operator-access";
+import { authenticationRequired } from "../../../lib/current-user";
 import { isUsageEnforcementEnabled } from "../../../lib/usage-enforcement";
 import {
   createUpstreamAbortSignal,
@@ -507,10 +508,10 @@ export async function POST(request: Request) {
       request.headers.get("content-type")?.toLowerCase() ?? "";
     const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
     const usagePrincipal = usageEnforcementEnabled
-      ? await getUsagePrincipal(request, { allowTrial: true })
+      ? await getUsagePrincipal(request)
       : null;
     if (usageEnforcementEnabled && !usagePrincipal?.currentUser) {
-      return jsonError("続けるにはアカウントへのログインが必要です。", 401);
+      return authenticationRequired();
     }
 
     let file: File | null = null;
@@ -558,10 +559,8 @@ export async function POST(request: Request) {
         return jsonError("動画のアップロードが未完了または期限切れです。", 410);
       }
 
-      const { currentUser: transferPrincipal } = await getUsagePrincipal(
-        request,
-        { allowTrial: true },
-      );
+      const { currentUser: transferPrincipal } =
+        usagePrincipal ?? (await getUsagePrincipal(request));
       const authenticatedEmail = transferPrincipal?.email ?? "";
       if (
         transfer.ownerEmail &&

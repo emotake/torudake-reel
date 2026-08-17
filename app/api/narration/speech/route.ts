@@ -7,6 +7,7 @@ import {
   type AuthorizedMeteredAiOperation,
 } from "../../../../lib/billing-store";
 import { getUsagePrincipal } from "../../../../lib/operator-access";
+import { authenticationRequired } from "../../../../lib/current-user";
 import { verifyInitialNarrationToken } from "../../../../lib/narration-initial";
 import {
   normalizeNarrationDeliveryPreset,
@@ -728,13 +729,10 @@ export async function POST(request: Request) {
 
   const usageEnforcementEnabled = isUsageEnforcementEnabled(request);
   const usagePrincipal = usageEnforcementEnabled
-    ? await getUsagePrincipal(request, { allowTrial: true })
+    ? await getUsagePrincipal(request)
     : null;
   if (usageEnforcementEnabled && !usagePrincipal?.currentUser) {
-    return Response.json(
-      { error: "続けるにはアカウントへのログインが必要です。" },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
-    );
+    return authenticationRequired();
   }
 
   let payload: {

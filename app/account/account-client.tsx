@@ -10,6 +10,7 @@ import type {
 } from "@simplewebauthn/browser";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import AuthenticationGate from "../authentication-gate";
 import {
   MONTHLY_FIRST_OFFER_VERSION,
   MonthlyFirstPurchaseOptions,
@@ -171,6 +172,9 @@ export default function AccountClient() {
   const [recoveryReference, setRecoveryReference] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [accountAuthOpen, setAccountAuthOpen] = useState(false);
+  const [accountReauthenticationOpen, setAccountReauthenticationOpen] =
+    useState(false);
   const [busy, setBusy] = useState<
     | "register"
     | "login"
@@ -186,6 +190,11 @@ export default function AccountClient() {
     | null
   >(null);
   const checkoutStarted = useRef(false);
+  const reauthenticationRequest = useRef<{
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  } | null>(null);
 
   async function loadStatus() {
     const response = await fetch("/api/billing/status", {
@@ -283,13 +292,14 @@ export default function AccountClient() {
     }
     setBusy("register");
     setError("");
-    const addingBackupPasskey = status?.authenticated === true;
+    const addingBackupPasskey = passkeys.length > 0;
     try {
-      if (addingBackupPasskey) {
-        await reauthenticate();
-      } else {
-        await postJson<{ ready: boolean }>("/api/session/trial");
+      if (status?.authenticated !== true) {
+        throw new Error(
+          "パスキーを追加するには、先にGoogleでログインしてください。",
+        );
       }
+      await reauthenticate();
       const prepared = await postJson<
         AuthOptions<PublicKeyCredentialCreationOptionsJSON>
       >("/api/account/passkey/register/options");
@@ -304,7 +314,7 @@ export default function AccountClient() {
       setNotice(
         addingBackupPasskey
           ? "予備のパスキーを追加しました。端末を変更したときのログインにも利用できます。"
-          : "アカウントを作成しました。この端末の本人確認でログインできます。",
+          : "パスキーを追加しました。今後の本人確認とログインにも利用できます。",
       );
       await loadStatus();
       await loadPasskeys();
@@ -314,7 +324,7 @@ export default function AccountClient() {
           authError,
           addingBackupPasskey
             ? "予備のパスキーを追加できませんでした。"
-            : "アカウントを作成できませんでした。",
+            : "パスキーを追加できませんでした。",
         ),
       );
     } finally {
@@ -350,18 +360,38 @@ export default function AccountClient() {
     }
   }
 
-  async function reauthenticate() {
-    const prepared = await postJson<
-      AuthOptions<PublicKeyCredentialRequestOptionsJSON>
-    >("/api/account/passkey/reauth/options");
-    if (!prepared.options) throw new Error("本人確認情報を準備できませんでした。");
-    const credential = await startAuthentication({
-      optionsJSON: prepared.options,
+  function reauthenticate() {
+    if (reauthenticationRequest.current) {
+      return reauthenticationRequest.current.promise;
+    }
+    let resolveRequest!: () => void;
+    let rejectRequest!: (error: Error) => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveRequest = resolve;
+      rejectRequest = reject;
     });
-    await postJson<{ authenticated: boolean }>(
-      "/api/account/passkey/login/verify",
-      credential,
-    );
+    reauthenticationRequest.current = {
+      promise,
+      resolve: resolveRequest,
+      reject: rejectRequest,
+    };
+    setAccountReauthenticationOpen(true);
+    return promise;
+  }
+
+  function completeReauthentication() {
+    const pending = reauthenticationRequest.current;
+    reauthenticationRequest.current = null;
+    setAccountReauthenticationOpen(false);
+    pending?.resolve();
+    void loadStatus().catch(() => undefined);
+  }
+
+  function cancelReauthentication() {
+    const pending = reauthenticationRequest.current;
+    reauthenticationRequest.current = null;
+    setAccountReauthenticationOpen(false);
+    pending?.reject(new Error("本人確認をキャンセルしました。"));
   }
 
   async function renamePasskey(passkey: AccountPasskey) {
@@ -733,7 +763,7 @@ export default function AccountClient() {
           <p className="eyebrow">ACCOUNT</p>
           <h1>本人確認して、利用枠とお支払いを管理</h1>
           <p>
-            この端末で初めて使う方は「アカウントを作る」、ほかの端末ですでに登録した方は「ログイン」を選んでください。Face ID・Touch ID・端末の画面ロックを使うため、パスワードを覚える必要はありません。
+            Googleでアカウントを作成またはログインできます。登録済みのパスキーでもログインできます。プロフィール入力やパスワード登録は不要です。
           </p>
           {selectedPlan && (
             <article className="accountNotice accountSelectedPlan" aria-label="選択中の料金プラン">
@@ -742,7 +772,7 @@ export default function AccountClient() {
               <strong>{selectedPlan.price}</strong>
               <span>{selectedPlan.renewal}</span>
               <small>
-                ここではまだ決済されません。パスキーで本人確認したあと、Stripeの決済画面を開きます。
+                ここではまだ決済されません。ログインしたあと、Stripeの決済画面を開きます。
               </small>
             </article>
           )}
@@ -750,37 +780,38 @@ export default function AccountClient() {
             <p className="accountError" role="alert">アカウント認証を現在利用できません。</p>
           ) : (
             <div className="accountAuthActions">
-              <label className="accountField">
-                この端末の名前
-                <input
-                  className="accountTextField"
-                  value={newPasskeyName}
-                  maxLength={40}
-                  autoComplete="off"
-                  onChange={(event) => setNewPasskeyName(event.target.value)}
-                  placeholder="例：自分のiPhone"
-                />
-              </label>
               <button
                 className="accountPrimaryAction"
-                disabled={busy !== null || !newPasskeyName.trim()}
-                onClick={registerPasskey}
-              >
-                {busy === "register" ? "本人確認中…" : "はじめての方：アカウントを作る"}
-              </button>
-              <button
-                className="accountSecondaryAction"
                 disabled={busy !== null}
-                onClick={loginPasskey}
+                onClick={() => setAccountAuthOpen(true)}
               >
-                {busy === "login" ? "本人確認中…" : "登録済みの方：ログイン"}
+                ログイン方法を選ぶ
               </button>
+              <details className="accountRecoveryHelp">
+                <summary>登録済みパスキーを使う</summary>
+                <button
+                  className="accountSecondaryAction"
+                  disabled={busy !== null}
+                  onClick={loginPasskey}
+                >
+                  {busy === "login" ? "本人確認中…" : "登録済みパスキーでログイン"}
+                </button>
+              </details>
             </div>
           )}
           {error && <p className="accountError" role="alert">{error}</p>}
           <small>
-            パスキーの秘密情報は端末から送信されません。カード情報はStripeが管理します。
+            Googleへの投稿操作は行いません。カード情報はStripeが管理します。
           </small>
+          <AuthenticationGate
+            open={accountAuthOpen}
+            reason={pendingCheckoutPlan ? "billing" : "account"}
+            onClose={() => setAccountAuthOpen(false)}
+            onAuthenticated={async () => {
+              setAccountAuthOpen(false);
+              await loadStatus();
+            }}
+          />
           <p className="accountRecoveryHelp">
             有料プランをご利用中で、端末変更・紛失によりログインできない場合は、
             <Link href="/support">
@@ -839,6 +870,13 @@ export default function AccountClient() {
 
   return (
     <main className="accountPage">
+      <AuthenticationGate
+        open={accountReauthenticationOpen}
+        mode="reauthenticate"
+        reason="account"
+        onClose={cancelReauthentication}
+        onAuthenticated={completeReauthentication}
+      />
       <header className="accountHeader">
         <Link className="accountBrand" href="/"><span>▶</span>撮るだけリール</Link>
         <div className="accountHeaderActions">
@@ -928,9 +966,15 @@ export default function AccountClient() {
               >
                 {busy === "register"
                   ? "本人確認中…"
-                  : "本人確認して予備パスキーを追加"}
+                  : passkeys.length > 0
+                    ? "本人確認して予備パスキーを追加"
+                    : "この端末にパスキーを追加"}
               </button>
-              <small>最大10件。追加時にFace ID・Touch ID・端末の画面ロックで本人確認します。</small>
+              <small>
+                {passkeys.length > 0
+                  ? "最大10件。追加時にFace ID・Touch ID・端末の画面ロックで本人確認します。"
+                  : "Googleで登録した方も追加できます。以後の本人確認とログインに利用します。"}
+              </small>
             </article>
             {passkeys.map((passkey) => (
               <article className="accountPlanCard accountCompactCard" key={passkey.id}>

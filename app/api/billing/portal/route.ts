@@ -3,9 +3,8 @@ import {
   authenticationRequired,
   authenticationUnavailable,
   getCurrentUser,
-  isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
-import { isPasskeyAuthenticationConfigured } from "../../../../lib/account-auth";
+import { isAccountAuthenticationAvailable } from "../../../../lib/account-auth-methods";
 import {
   isBillingConfigured,
   isCanonicalBillingRequest,
@@ -59,10 +58,7 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-  if (
-    !isSitesAuthenticationTrusted() &&
-    !isPasskeyAuthenticationConfigured()
-  ) {
+  if (!isAccountAuthenticationAvailable()) {
     return authenticationUnavailable();
   }
   const currentUser = await getCurrentUser(request);
@@ -123,10 +119,7 @@ export async function GET(request: Request) {
       { status: 403 },
     );
   }
-  if (
-    !isSitesAuthenticationTrusted() &&
-    !isPasskeyAuthenticationConfigured()
-  ) {
+  if (!isAccountAuthenticationAvailable()) {
     return authenticationUnavailable();
   }
   const currentUser = await getCurrentUser(request);

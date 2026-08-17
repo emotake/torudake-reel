@@ -1,0 +1,1 @@
+ALTER TABLE `account_auth_challenges` ADD `initiating_session_hash` text;

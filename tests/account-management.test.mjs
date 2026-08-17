@@ -39,6 +39,7 @@ class D1Statement {
 class D1Database {
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
+    this.beforeBatch = null;
   }
 
   prepare(query) {
@@ -46,6 +47,9 @@ class D1Database {
   }
 
   async batch(statements) {
+    const beforeBatch = this.beforeBatch;
+    this.beforeBatch = null;
+    if (beforeBatch) await beforeBatch(statements);
     this.sqlite.exec("BEGIN IMMEDIATE");
     try {
       const results = [];
@@ -74,7 +78,9 @@ globalThis.__cloudflareEnv = {
 
 const {
   AccountAuthError,
+  authenticationOptions,
   deleteAccountPasskey,
+  getAccountAuthenticationState,
   getAccountPasskeys,
   reauthenticationOptions,
   registrationOptions,
@@ -102,7 +108,7 @@ test("lists named passkeys and localizes the ASCII migration default", async () 
   );
 });
 
-test("initial passkey registration remains available without a reauthentication marker", async () => {
+test("first passkey registration requires a logged-in recently reauthenticated account", async () => {
   const now = Math.floor(Date.now() / 1_000);
   const trialId = "10000000-0000-4000-8000-000000000023";
   const trialHash = await sha256Hex(trialId);
@@ -114,7 +120,47 @@ test("initial passkey registration remains available without a reauthentication 
     `)
     .run(trialHash, now, now, now + 3_600);
 
-  const prepared = await registrationOptions(trialRequest(trialId));
+  await assert.rejects(
+    registrationOptions(trialRequest(trialId)),
+    hasAuthCode("external_identity_authentication_required"),
+  );
+
+  const fixture = await createAccountFixture("first-passkey");
+  database.sqlite
+    .prepare(`
+      INSERT INTO account_external_identities (
+        id, user_id, provider, subject_hash, verified_email,
+        created_at, last_used_at, revoked_at
+      ) VALUES (?, ?, 'email', ?, 'first-passkey@example.invalid', ?, ?, NULL)
+    `)
+    .run(
+      "identity-first-passkey",
+      fixture.userId,
+      "f".repeat(43),
+      now,
+      now,
+    );
+  const ordinaryLoginState = await getAccountAuthenticationState(
+    accountRequest(fixture.token),
+  );
+  assert.equal(
+    ordinaryLoginState.recentlyAuthenticated,
+    false,
+    "a fresh ordinary session must not bypass explicit passkey-add step-up",
+  );
+  await assert.rejects(
+    registrationOptions(accountRequest(fixture.token)),
+    hasAuthCode("backup_passkey_reauthentication_required"),
+  );
+  database.sqlite
+    .prepare(`
+      UPDATE account_sessions
+      SET reauthenticated_at = ?
+      WHERE token_hash = ?
+    `)
+    .run(now, fixture.tokenHash);
+
+  const prepared = await registrationOptions(accountRequest(fixture.token));
   assert.equal(prepared.options.excludeCredentials?.length ?? 0, 0);
   const challengeToken = cookieValue(prepared.cookie);
   const challenge = database.sqlite
@@ -124,7 +170,7 @@ test("initial passkey registration remains available without a reauthentication 
       WHERE token_hash = ?
     `)
     .get(await hashAccountToken(challengeToken));
-  assert.equal(challenge.requires_reauthentication, 0);
+  assert.equal(challenge.requires_reauthentication, 1);
 });
 
 test("backup passkey registration requires same-account recent explicit reauthentication", async () => {
@@ -275,6 +321,307 @@ test("a reauthentication challenge cannot cross account sessions", async () => {
   );
 });
 
+test("passkey registration fails if its initiating session is deleted after verification", async () => {
+  const now = Math.floor(Date.now() / 1_000);
+  const fixture = await createAccountFixture("registration-session-race");
+  const existingAuthenticator = await createAuthenticatorCredential();
+  insertPasskey(
+    fixture.userId,
+    existingAuthenticator.id,
+    "Existing passkey",
+    existingAuthenticator.publicKey,
+  );
+  database.sqlite
+    .prepare(`
+      UPDATE account_sessions
+      SET reauthenticated_at = ?
+      WHERE token_hash = ?
+    `)
+    .run(now, fixture.tokenHash);
+
+  const prepared = await registrationOptions(accountRequest(fixture.token));
+  const newAuthenticator = await createAuthenticatorCredential();
+  const response = await createRegistrationResponse(
+    prepared.options,
+    newAuthenticator,
+  );
+  database.beforeBatch = async () => {
+    database.sqlite
+      .prepare("DELETE FROM account_sessions WHERE token_hash = ?")
+      .run(fixture.tokenHash);
+  };
+
+  await assert.rejects(
+    verifyRegistration(
+      accountRequest(fixture.token, cookiePair(prepared.cookie)),
+      response,
+      "Racing passkey",
+    ),
+    hasAuthCode("backup_passkey_reauthentication_required"),
+  );
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT COUNT(*) AS count FROM account_passkeys WHERE user_id = ?")
+      .get(fixture.userId).count,
+    1,
+    "the verified credential must not be registered after its session is revoked",
+  );
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT COUNT(*) AS count FROM account_sessions WHERE user_id = ?")
+      .get(fixture.userId).count,
+    0,
+    "registration must not mint a replacement session",
+  );
+});
+
+test("passkey reauthentication fails if its initiating session is deleted after verification", async () => {
+  const fixture = await createAccountFixture("reauthentication-session-race");
+  const authenticator = await createAuthenticatorCredential();
+  insertPasskey(
+    fixture.userId,
+    authenticator.id,
+    "Reauthentication passkey",
+    authenticator.publicKey,
+  );
+  const prepared = await reauthenticationOptions(accountRequest(fixture.token));
+  const response = await createAuthenticationResponse(
+    prepared.options,
+    authenticator,
+    1,
+  );
+  database.beforeBatch = async () => {
+    database.sqlite
+      .prepare("DELETE FROM account_sessions WHERE token_hash = ?")
+      .run(fixture.tokenHash);
+  };
+
+  await assert.rejects(
+    verifyAuthentication(
+      accountRequest(fixture.token, cookiePair(prepared.cookie)),
+      response,
+    ),
+    hasAuthCode("reauthentication_identity_changed"),
+  );
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT counter FROM account_passkeys WHERE credential_id = ?")
+      .get(authenticator.id).counter,
+    0,
+    "a revoked reauthentication must not advance the passkey counter",
+  );
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT COUNT(*) AS count FROM account_sessions WHERE user_id = ?")
+      .get(fixture.userId).count,
+    0,
+    "reauthentication must not mint a replacement session",
+  );
+});
+
+test("normal passkey login fails if the credential is deleted after verification", async () => {
+  const fixture = await createAccountFixture("login-credential-race");
+  const authenticator = await createAuthenticatorCredential();
+  insertPasskey(
+    fixture.userId,
+    authenticator.id,
+    "Deleted passkey",
+    authenticator.publicKey,
+  );
+  database.sqlite
+    .prepare("DELETE FROM account_sessions WHERE user_id = ?")
+    .run(fixture.userId);
+
+  const prepared = await authenticationOptions(loginRequest());
+  const response = await createAuthenticationResponse(
+    prepared.options,
+    authenticator,
+    1,
+  );
+  database.beforeBatch = async () => {
+    database.sqlite
+      .prepare("DELETE FROM account_passkeys WHERE credential_id = ?")
+      .run(authenticator.id);
+  };
+
+  await assert.rejects(
+    verifyAuthentication(loginRequest(cookiePair(prepared.cookie)), response),
+    hasAuthCode("passkey_no_longer_available"),
+  );
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT COUNT(*) AS count FROM account_sessions WHERE user_id = ?")
+      .get(fixture.userId).count,
+    0,
+    "a deleted credential must not mint an account session",
+  );
+});
+
+test("existing passkey login atomically transfers the current anonymous reservation", async () => {
+  const now = Math.floor(Date.now() / 1_000);
+  const targetUserId = "passkey-transfer-target";
+  const sourceUserId = "passkey-transfer-source";
+  const trialId = "30000000-0000-4000-8000-000000000031";
+  const trialHash = await sha256Hex(trialId);
+  const sourceEmail = `trial-${trialHash.slice(0, 48)}@anonymous.torudake.invalid`;
+  const authenticator = await createAuthenticatorCredential();
+  database.sqlite
+    .prepare(`
+      INSERT INTO users (
+        id, email, billing_email, full_name, stripe_customer_id,
+        account_deleted_at, created_at, updated_at
+      ) VALUES (?, ?, NULL, NULL, NULL, NULL, ?, ?)
+    `)
+    .run(targetUserId, "passkey-transfer@example.com", now, now);
+  insertPasskey(
+    targetUserId,
+    authenticator.id,
+    "既存パスキー",
+    authenticator.publicKey,
+  );
+  database.sqlite
+    .prepare(`
+      INSERT INTO users (
+        id, email, billing_email, full_name, stripe_customer_id,
+        account_deleted_at, created_at, updated_at
+      ) VALUES (?, ?, NULL, NULL, NULL, NULL, ?, ?)
+    `)
+    .run(sourceUserId, sourceEmail, now, now);
+  database.sqlite
+    .prepare(`
+      INSERT INTO trial_sessions (
+        session_hash, account_user_id, created_at, last_seen_at, expires_at
+      ) VALUES (?, NULL, ?, ?, ?)
+    `)
+    .run(trialHash, now, now, now + 3_600);
+  database.sqlite
+    .prepare(`
+      INSERT INTO usage_reservations (
+        id, user_id, idempotency_key, source_duration_seconds, bucket,
+        creation_type, save_funding_source, status, created_at, expires_at,
+        completed_at, release_requested_at, billing_purchase_id
+      ) VALUES (?, ?, ?, 30, 'free', 'single', 'bucket', 'reserved', ?, ?,
+        NULL, NULL, NULL)
+    `)
+    .run(
+      "passkey-transfer-reservation",
+      sourceUserId,
+      "passkey-transfer-attempt",
+      now,
+      now + 3_600,
+    );
+
+  const prepared = await authenticationOptions(trialRequest(trialId));
+  const response = await createAuthenticationResponse(
+    prepared.options,
+    authenticator,
+    1,
+  );
+  const authenticated = await verifyAuthentication(
+    trialRequest(trialId, cookiePair(prepared.cookie)),
+    response,
+  );
+
+  assert.match(authenticated.sessionCookie, /^__Host-torudake_account=/);
+  assert.equal(
+    database.sqlite
+      .prepare("SELECT account_user_id FROM trial_sessions WHERE session_hash = ?")
+      .get(trialHash).account_user_id,
+    targetUserId,
+  );
+  assert.deepEqual(
+    {
+      ...database.sqlite
+        .prepare(`
+          SELECT user_id, status
+          FROM usage_reservations
+          WHERE id = 'passkey-transfer-reservation'
+        `)
+        .get(),
+    },
+    { user_id: targetUserId, status: "reserved" },
+  );
+});
+
+test("trial transfer releases the source reservation when the destination free cap is spent", async () => {
+  const now = Math.floor(Date.now() / 1_000);
+  const targetUserId = "passkey-cap-target";
+  const sourceUserId = "passkey-cap-source";
+  const trialId = "30000000-0000-4000-8000-000000000032";
+  const trialHash = await sha256Hex(trialId);
+  const sourceEmail = `trial-${trialHash.slice(0, 48)}@anonymous.torudake.invalid`;
+  const authenticator = await createAuthenticatorCredential();
+  database.sqlite
+    .prepare(`
+      INSERT INTO users (
+        id, email, billing_email, full_name, stripe_customer_id,
+        account_deleted_at, created_at, updated_at
+      ) VALUES (?, ?, NULL, NULL, NULL, NULL, ?, ?),
+        (?, ?, NULL, NULL, NULL, NULL, ?, ?)
+    `)
+    .run(
+      targetUserId,
+      "passkey-cap@example.com",
+      now,
+      now,
+      sourceUserId,
+      sourceEmail,
+      now,
+      now,
+    );
+  insertPasskey(targetUserId, authenticator.id, "既存パスキー", authenticator.publicKey);
+  database.sqlite
+    .prepare(`
+      INSERT INTO trial_sessions (
+        session_hash, account_user_id, created_at, last_seen_at, expires_at
+      ) VALUES (?, NULL, ?, ?, ?)
+    `)
+    .run(trialHash, now, now, now + 3_600);
+  const insertUsage = database.sqlite.prepare(`
+    INSERT INTO usage_reservations (
+      id, user_id, idempotency_key, source_duration_seconds, bucket,
+      creation_type, save_funding_source, status, created_at, expires_at,
+      completed_at, release_requested_at, billing_purchase_id
+    ) VALUES (?, ?, ?, ?, 'free', 'single', 'bucket', ?, ?, ?, ?, NULL, NULL)
+  `);
+  insertUsage.run("cap-target-a", targetUserId, "cap-target-attempt-a", 90, "completed", now - 10, now + 3_600, now - 5);
+  insertUsage.run("cap-target-b", targetUserId, "cap-target-attempt-b", 90, "completed", now - 9, now + 3_600, now - 4);
+  insertUsage.run("cap-source", sourceUserId, "cap-source-attempt", 30, "reserved", now, now + 3_600, null);
+
+  const prepared = await authenticationOptions(trialRequest(trialId));
+  const response = await createAuthenticationResponse(prepared.options, authenticator, 1);
+  await verifyAuthentication(
+    trialRequest(trialId, cookiePair(prepared.cookie)),
+    response,
+  );
+
+  assert.deepEqual(
+    {
+      ...database.sqlite
+        .prepare("SELECT user_id, status, save_funding_source FROM usage_reservations WHERE id = 'cap-source'")
+        .get(),
+    },
+    {
+      user_id: targetUserId,
+      status: "released",
+      save_funding_source: "bucket",
+    },
+  );
+  assert.deepEqual(
+    {
+      ...database.sqlite
+        .prepare(`
+          SELECT COUNT(*) AS videos, COALESCE(SUM(source_duration_seconds), 0) AS seconds
+          FROM usage_reservations
+          WHERE user_id = ? AND bucket = 'free'
+            AND status IN ('reserved', 'completed')
+        `)
+        .get(targetUserId),
+    },
+    { videos: 2, seconds: 180 },
+  );
+});
+
 test("passkey deletion requires recent verification and preserves the final key", async () => {
   const fixture = await createAccountFixture("delete", 11 * 60);
   insertPasskey(fixture.userId, "credential_delete_abcdefghij", "古い端末");
@@ -337,6 +684,59 @@ test("revoking all sessions removes the freshly verified session too", async () 
   );
 });
 
+test("external-only accounts expose their linked step-up method and obey the same recent-session window", async () => {
+  const fixture = await createAccountFixture("external-only");
+  const now = Math.floor(Date.now() / 1_000);
+  database.sqlite
+    .prepare(`
+      INSERT INTO account_external_identities (
+        id, user_id, provider, subject_hash, verified_email,
+        created_at, last_used_at, revoked_at
+      ) VALUES (?, ?, 'email', ?, 'person@example.com', ?, ?, NULL)
+    `)
+    .run(
+      "external-only-email-identity",
+      fixture.userId,
+      "e".repeat(43),
+      now,
+      now,
+    );
+  database.sqlite
+    .prepare(
+      "UPDATE account_sessions SET reauthenticated_at = ? WHERE token_hash = ?",
+    )
+    .run(now, fixture.tokenHash);
+
+  assert.deepEqual(
+    await getAccountAuthenticationState(accountRequest(fixture.token)),
+    {
+      authenticated: true,
+      recentlyAuthenticated: true,
+      accountMethods: {
+        passkey: false,
+        line: false,
+        google: false,
+        email: true,
+      },
+    },
+  );
+
+  database.sqlite
+    .prepare(`
+      UPDATE account_sessions
+      SET created_at = ?, reauthenticated_at = ?
+      WHERE token_hash = ?
+    `)
+    .run(now - 11 * 60, now - 11 * 60, fixture.tokenHash);
+  const stale = await getAccountAuthenticationState(accountRequest(fixture.token));
+  assert.equal(stale.authenticated, true);
+  assert.equal(stale.recentlyAuthenticated, false);
+  await assert.rejects(
+    revokeAllAccountSessions(accountRequest(fixture.token)),
+    hasAuthCode("reauthentication_required"),
+  );
+});
+
 async function createAccountFixture(suffix, ageSeconds = 0) {
   const now = Math.floor(Date.now() / 1_000);
   const userId = `account-management-${suffix}`;
@@ -393,12 +793,24 @@ function accountRequest(token, additionalCookie = "") {
   });
 }
 
-function trialRequest(trialId) {
+function trialRequest(trialId, additionalCookie = "") {
   return new Request("https://torudake-reel.pages.dev/account", {
     headers: {
-      cookie: `torudake_trial_id=${trialId}`,
+      cookie: [`torudake_trial_id=${trialId}`, additionalCookie]
+        .filter(Boolean)
+        .join("; "),
       origin: "https://torudake-reel.pages.dev",
       "cf-connecting-ip": "203.0.113.100",
+    },
+  });
+}
+
+function loginRequest(additionalCookie = "") {
+  return new Request("https://torudake-reel.pages.dev/account", {
+    headers: {
+      cookie: additionalCookie,
+      origin: "https://torudake-reel.pages.dev",
+      "cf-connecting-ip": "203.0.113.101",
     },
   });
 }

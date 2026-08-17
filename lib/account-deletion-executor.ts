@@ -52,6 +52,7 @@ type DeletionCandidate = {
 
 type DeletionSummary = {
   passkeys: number;
+  externalIdentities: number;
   sessions: number;
   recoveryRequests: number;
   reservations: number;
@@ -566,6 +567,8 @@ async function collectDeletionSummary(
     .prepare(`
       SELECT
         (SELECT COUNT(*) FROM account_passkeys WHERE user_id = ?) AS passkeys,
+        (SELECT COUNT(*) FROM account_external_identities WHERE user_id = ?)
+          AS external_identities,
         (SELECT COUNT(*) FROM account_sessions WHERE user_id = ?) AS sessions,
         (SELECT COUNT(*) FROM account_recovery_challenges WHERE user_id = ?)
           AS recovery_requests,
@@ -584,11 +587,13 @@ async function collectDeletionSummary(
       candidate.user_id,
       candidate.user_id,
       candidate.user_id,
+      candidate.user_id,
       ownerEmail,
     )
     .first<Record<string, unknown>>();
   return {
     passkeys: safeCount(row?.passkeys),
+    externalIdentities: safeCount(row?.external_identities),
     sessions: safeCount(row?.sessions),
     recoveryRequests: safeCount(row?.recovery_requests),
     reservations: safeCount(row?.reservations),
@@ -731,6 +736,12 @@ async function completeDeletion(
       .prepare("DELETE FROM caption_profiles WHERE user_id = ?")
       .bind(candidate.user_id),
     database
+      .prepare("DELETE FROM account_oauth_challenges WHERE initiating_user_id = ?")
+      .bind(candidate.user_id),
+    database
+      .prepare("DELETE FROM account_email_challenges WHERE initiating_user_id = ?")
+      .bind(candidate.user_id),
+    database
       .prepare("DELETE FROM account_auth_challenges WHERE user_id = ?")
       .bind(candidate.user_id),
     database
@@ -738,6 +749,9 @@ async function completeDeletion(
       .bind(candidate.user_id),
     database
       .prepare("DELETE FROM account_sessions WHERE user_id = ?")
+      .bind(candidate.user_id),
+    database
+      .prepare("DELETE FROM account_external_identities WHERE user_id = ?")
       .bind(candidate.user_id),
     database
       .prepare("DELETE FROM account_passkeys WHERE user_id = ?")
@@ -940,6 +954,7 @@ async function deletionAccountReference(userId: string) {
 function emptySummary(): DeletionSummary {
   return {
     passkeys: 0,
+    externalIdentities: 0,
     sessions: 0,
     recoveryRequests: 0,
     reservations: 0,

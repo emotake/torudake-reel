@@ -35,7 +35,6 @@ export const videoTransfers = sqliteTable(
     index("video_transfers_status_idx").on(table.status),
   ],
 );
-
 export const videoTransferParts = sqliteTable(
   "video_transfer_parts",
   {
@@ -103,6 +102,7 @@ export const accountAuthChallenges = sqliteTable(
     expectedOrigin: text("expected_origin").notNull(),
     rpId: text("rp_id").notNull(),
     networkHash: text("network_hash").notNull(),
+    initiatingSessionHash: text("initiating_session_hash"),
     requiresReauthentication: integer("requires_reauthentication", {
       mode: "boolean",
     })
@@ -130,10 +130,105 @@ export const accountSessions = sqliteTable(
     lastSeenAt: integer("last_seen_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     reauthenticatedAt: integer("reauthenticated_at"),
+    authMethod: text("auth_method", {
+      enum: ["passkey", "line", "google", "email"],
+    })
+      .notNull()
+      .default("passkey"),
+    externalIdentityId: text("external_identity_id"),
   },
   (table) => [
     index("account_sessions_user_id_idx").on(table.userId),
     index("account_sessions_expires_at_idx").on(table.expiresAt),
+    index("account_sessions_external_identity_id_idx").on(
+      table.externalIdentityId,
+    ),
+  ],
+);
+
+export const accountExternalIdentities = sqliteTable(
+  "account_external_identities",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    provider: text("provider", {
+      enum: ["line", "google", "email"],
+    }).notNull(),
+    subjectHash: text("subject_hash").notNull(),
+    verifiedEmail: text("verified_email"),
+    createdAt: integer("created_at").notNull(),
+    lastUsedAt: integer("last_used_at").notNull(),
+    revokedAt: integer("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("account_external_identities_provider_subject_unique").on(
+      table.provider,
+      table.subjectHash,
+    ),
+    index("account_external_identities_user_id_idx").on(table.userId),
+    index("account_external_identities_user_active_idx").on(
+      table.userId,
+      table.revokedAt,
+    ),
+  ],
+);
+
+export const accountOauthChallenges = sqliteTable(
+  "account_oauth_challenges",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    provider: text("provider", { enum: ["line", "google"] }).notNull(),
+    nonce: text("nonce").notNull(),
+    pkceVerifier: text("pkce_verifier"),
+    intent: text("intent", { enum: ["login", "link", "reauthenticate"] })
+      .notNull()
+      .default("login"),
+    initiatingUserId: text("initiating_user_id"),
+    expectedOrigin: text("expected_origin").notNull(),
+    returnTo: text("return_to").notNull().default("/account"),
+    networkHash: text("network_hash").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    consumedAt: integer("consumed_at"),
+  },
+  (table) => [
+    index("account_oauth_challenges_expires_at_idx").on(table.expiresAt),
+    index("account_oauth_challenges_network_created_idx").on(
+      table.networkHash,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const accountEmailChallenges = sqliteTable(
+  "account_email_challenges",
+  {
+    challengeHash: text("challenge_hash").primaryKey(),
+    emailHash: text("email_hash").notNull(),
+    normalizedEmail: text("normalized_email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    intent: text("intent", { enum: ["login", "link", "reauthenticate"] })
+      .notNull()
+      .default("login"),
+    initiatingUserId: text("initiating_user_id"),
+    expectedOrigin: text("expected_origin").notNull(),
+    returnTo: text("return_to").notNull().default("/account"),
+    networkHash: text("network_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    consumedAt: integer("consumed_at"),
+  },
+  (table) => [
+    index("account_email_challenges_expires_at_idx").on(table.expiresAt),
+    index("account_email_challenges_email_created_idx").on(
+      table.emailHash,
+      table.createdAt,
+    ),
+    index("account_email_challenges_network_created_idx").on(
+      table.networkHash,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -375,6 +470,16 @@ export const usageReservations = sqliteTable(
     bucket: text("bucket", {
       enum: ["free", "subscription", "one_time", "operator"],
     }).notNull(),
+    creationType: text("creation_type", {
+      enum: ["single", "video_mix", "photo_reel", "legacy"],
+    })
+      .notNull()
+      .default("legacy"),
+    saveFundingSource: text("save_funding_source", {
+      enum: ["bucket", "first_free"],
+    })
+      .notNull()
+      .default("bucket"),
     status: text("status", {
       enum: ["reserved", "completed", "released"],
     })
@@ -405,6 +510,81 @@ export const usageReservations = sqliteTable(
       table.status,
       table.bucket,
       table.createdAt,
+    ),
+    index("usage_reservations_save_funding_source_idx").on(
+      table.saveFundingSource,
+    ),
+  ],
+);
+
+export const freeSaveSubjects = sqliteTable("free_save_subjects", {
+  id: text("id").primaryKey(),
+  createdAt: integer("created_at").notNull(),
+  lastSeenAt: integer("last_seen_at").notNull(),
+});
+
+export const freeSaveSubjectAliases = sqliteTable(
+  "free_save_subject_aliases",
+  {
+    aliasHash: text("alias_hash").primaryKey(),
+    subjectId: text("subject_id").notNull(),
+    kind: text("kind", {
+      enum: [
+        "account",
+        "device",
+        "line",
+        "google",
+        "email",
+        "verified_email",
+      ],
+    }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (table) => [
+    index("free_save_subject_aliases_subject_id_idx").on(table.subjectId),
+    index("free_save_subject_aliases_kind_idx").on(table.kind),
+  ],
+);
+
+export const firstFreeSaveEntitlements = sqliteTable(
+  "first_free_save_entitlements",
+  {
+    subjectId: text("subject_id").primaryKey(),
+    state: text("state", {
+      enum: ["available", "reserved", "consumed"],
+    })
+      .notNull()
+      .default("available"),
+    claimId: text("claim_id"),
+    reservationId: text("reservation_id"),
+    outputId: text("output_id"),
+    claimIdempotencyKey: text("claim_idempotency_key"),
+    finalizeIdempotencyKey: text("finalize_idempotency_key"),
+    reservedAt: integer("reserved_at"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    consumedAt: integer("consumed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("first_free_save_entitlements_claim_id_unique").on(
+      table.claimId,
+    ),
+    uniqueIndex("first_free_save_entitlements_reservation_id_unique").on(
+      table.reservationId,
+    ),
+    uniqueIndex("first_free_save_entitlements_output_id_unique").on(
+      table.outputId,
+    ),
+    uniqueIndex(
+      "first_free_save_entitlements_claim_idempotency_key_unique",
+    ).on(table.claimIdempotencyKey),
+    uniqueIndex(
+      "first_free_save_entitlements_finalize_idempotency_key_unique",
+    ).on(table.finalizeIdempotencyKey),
+    index("first_free_save_entitlements_state_lease_idx").on(
+      table.state,
+      table.leaseExpiresAt,
     ),
   ],
 );

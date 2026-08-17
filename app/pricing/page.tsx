@@ -216,12 +216,12 @@ export default function PricingPage() {
               ✓
             </div>
             <div>
-              <h3 id="checkout-title">本人確認後に、Stripeでお支払い</h3>
+              <h3 id="checkout-title">ログイン後に、Stripeでお支払い</h3>
               <p>
-                購入にはアカウント作成またはログインが必要です。Face ID・Touch ID・端末の画面ロックを使うパスキーで本人確認したあと、Stripeの決済画面を開きます。アカウント画面ではまだ決済されません。
+                新しいアカウントはGoogleで作成します。既存のパスキー利用者は登録済みパスキーでもログインできます。ログイン後にStripeの決済画面を開きます。アカウント画面ではまだ決済されません。
               </p>
               <small>
-                パスキーの秘密情報は端末から送信されません。カード情報はStripeが管理します。
+                登録済みパスキーはFace ID・Touch ID・端末の画面ロックで確認でき、秘密情報は端末から送信されません。カード情報はStripeが管理します。
               </small>
             </div>
           </aside>
@@ -314,7 +314,7 @@ export default function PricingPage() {
             <details>
               <summary>購入ボタンを押すと、すぐ請求されますか？</summary>
               <p>
-                いいえ。アカウント作成またはログインのあとにStripeの決済画面が開きます。最終金額を確認し、Stripeで注文を確定するまでは料金は発生しません。
+                いいえ。Googleでアカウントを作成するか、利用可能な登録済み方法でログインしたあとにStripeの決済画面が開きます。最終金額を確認し、Stripeで注文を確定するまでは料金は発生しません。
               </p>
             </details>
             <details>

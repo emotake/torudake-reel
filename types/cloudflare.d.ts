@@ -1,7 +1,6 @@
 interface Fetcher {
   fetch(request: Request): Promise<Response>;
 }
-
 type D1Database = object;
 
 type R2Bucket = object;
@@ -24,6 +23,12 @@ declare module "cloudflare:workers" {
     STRIPE_PRICE_ONE_TIME?: string;
     OPERATOR_ENROLLMENT_CODE?: string;
     TRIAL_ISSUANCE_SECRET?: string;
+    OIDC_AUTH_ENABLED?: string;
+    OIDC_CANONICAL_ORIGIN?: string;
+    OIDC_AUTH_SECRET?: string;
+    GOOGLE_OIDC_ENABLED?: string;
+    GOOGLE_OIDC_CLIENT_ID?: string;
+    GOOGLE_OIDC_CLIENT_SECRET?: string;
     [binding: string]: unknown;
   };
 }

@@ -73,6 +73,193 @@
   display: none;
 }
 
+.authenticationGateBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(24, 29, 38, 0.46);
+  backdrop-filter: blur(10px);
+}
+
+.authenticationGate {
+  position: relative;
+  width: min(100%, 470px);
+  max-height: min(760px, calc(100dvh - 32px));
+  overflow: auto;
+  padding: clamp(28px, 5vw, 42px);
+  border: 1px solid rgba(39, 52, 73, 0.1);
+  border-radius: 24px;
+  background: #fffdf8;
+  box-shadow: 0 28px 80px rgba(28, 33, 45, 0.22);
+  color: #273449;
+  outline: none;
+}
+
+.authenticationGate h2 {
+  margin: 8px 36px 12px 0;
+  color: #1f2b3d;
+  font-family: var(--font-display);
+  font-size: clamp(25px, 5vw, 34px);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.authenticationGate > p:not(.eyebrow) {
+  margin: 0;
+  color: #566174;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.authenticationGateClose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #f2eee8;
+  color: #3f4b5e;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.authenticationGateActions {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.authenticationProvider {
+  min-height: 50px;
+  padding: 12px 18px;
+  border: 1px solid rgba(39, 52, 73, 0.14);
+  border-radius: 14px;
+  background: #fff;
+  color: #273449;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.authenticationProvider.line {
+  border-color: #06c755;
+  background: #06c755;
+  color: #fff;
+}
+
+.authenticationProvider.google {
+  border-color: #d7dce5;
+  background: #fff;
+  color: #273449;
+}
+
+.authenticationProvider.passkey {
+  border-color: #8f251c;
+  background: #8f251c;
+  color: #fff;
+}
+
+.authenticationProvider.secondary {
+  background: transparent;
+}
+
+.authenticationProvider:disabled,
+.authenticationGateClose:disabled,
+.authenticationEmail button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.authenticationEmail {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(39, 52, 73, 0.11);
+}
+
+.authenticationEmail > span {
+  display: block;
+  margin-bottom: 10px;
+  color: #657084;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.authenticationEmail > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.authenticationEmail input {
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid #ccd2dc;
+  border-radius: 12px;
+  background: #fff;
+  color: #273449;
+  font: inherit;
+  font-size: 14px;
+}
+
+.authenticationEmail button {
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: #273449;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.authenticationGateStatus,
+.authenticationGateError {
+  margin-top: 16px !important;
+  font-size: 13px !important;
+}
+
+.authenticationGateError {
+  color: #9b251c !important;
+}
+
+.authenticationGate > small {
+  display: block;
+  margin-top: 20px;
+  color: #657084;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+@media (max-width: 520px) {
+  .authenticationGateBackdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .authenticationGate {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+    padding: 28px 20px max(26px, env(safe-area-inset-bottom));
+    border-radius: 22px 22px 0 0;
+  }
+
+  .authenticationEmail > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

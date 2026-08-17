@@ -477,7 +477,7 @@ async function hmacSha256Hex(secret: string, value: string) {
   ).join("");
 }
 
-async function hashTrialSessionId(sessionId: string) {
+export async function hashTrialSessionId(sessionId: string) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(sessionId),

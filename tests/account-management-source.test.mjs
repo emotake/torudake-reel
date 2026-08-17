@@ -118,7 +118,9 @@ test("account UI discloses pending checkout before authentication", async () => 
   assert.match(source, /選択中のプラン/);
   assert.match(source, /解約するまで1か月ごとに自動更新/);
   assert.match(source, /1回払い・自動更新なし/);
-  assert.match(source, /パスキーで本人確認したあと、Stripeの決済画面を開きます/);
+  assert.match(source, /ログインしたあと、Stripeの決済画面を開きます/);
+  assert.match(source, /Googleでアカウントを作成またはログイン/);
+  assert.match(source, /登録済みのパスキーでもログイン/);
   assert.match(source, /\/api\/account\/passkeys/);
   assert.match(
     source,
@@ -136,15 +138,45 @@ test("account UI discloses pending checkout before authentication", async () => 
 });
 
 test("dangerous account actions require recent same-account reauthentication", async () => {
-  const source = await readFile(
-    new URL("../lib/account-auth.ts", import.meta.url),
-    "utf8",
-  );
+  const [source, client, gate] = await Promise.all([
+    readFile(new URL("../lib/account-auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/account/account-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/authentication-gate.tsx", import.meta.url), "utf8"),
+  ]);
   assert.match(source, /last_passkey_cannot_be_deleted/);
   assert.match(source, /requireRecentAccountSession\(request\)/);
   assert.match(source, /reauthentication_identity_changed/);
   assert.match(source, /challenge\.user_id !== passkey\.user_id/);
   assert.match(source, /DELETE FROM account_sessions\s+WHERE user_id = \?/);
+  assert.doesNotMatch(client, /\/api\/account\/passkey\/reauth\/options/);
+  assert.match(client, /mode="reauthenticate"/);
+  assert.match(client, /reason="account"/);
+  assert.ok(
+    client.indexOf("open={accountReauthenticationOpen}") >
+      client.indexOf("const freeVideosRemaining"),
+    "the step-up gate must render in the authenticated account branch",
+  );
+  assert.match(gate, /\/api\/account\/passkey\/reauth\/options/);
+  assert.match(gate, /reauthenticate=1/);
+  assert.match(gate, /methods\.accountMethods\.google/);
+  assert.match(gate, /methods\.accountMethods\.passkey/);
+  assert.match(
+    gate,
+    /mode === "reauthenticate"[\s\S]{0,300}\/api\/account\/passkey\/reauth\/options/,
+  );
+
+  const registerPasskey = client.slice(
+    client.indexOf("async function registerPasskey()"),
+    client.indexOf("async function loginPasskey()"),
+  );
+  assert.match(registerPasskey, /status\?\.authenticated !== true/);
+  assert.match(registerPasskey, /await reauthenticate\(\)/);
+  assert.doesNotMatch(registerPasskey, /\/api\/session\/trial/);
+  assert.ok(
+    registerPasskey.indexOf("await reauthenticate()") <
+      registerPasskey.indexOf("/api/account/passkey/register/options"),
+    "first and backup passkeys must both follow recent step-up",
+  );
 });
 
 test("recovery records no plaintext email and never grants authentication", async () => {
@@ -163,14 +195,12 @@ test("recovery records no plaintext email and never grants authentication", asyn
 });
 
 test("billing entry points consume D1 account rate limits", async () => {
-  const checkout = await readFile(
-    new URL("../app/api/billing/checkout/route.ts", import.meta.url),
-    "utf8",
-  );
-  const portal = await readFile(
-    new URL("../app/api/billing/portal/route.ts", import.meta.url),
-    "utf8",
-  );
+  const [checkout, portal, status, methods] = await Promise.all([
+    readFile(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/billing/portal/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/billing/status/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/account-auth-methods.ts", import.meta.url), "utf8"),
+  ]);
   assert.match(checkout, /consumeBillingRateLimit\([\s\S]*"one_time_checkout"/);
   assert.match(checkout, /isAccountDeletionScheduled\(user\.id\)/);
   assert.match(checkout, /account_deletion_scheduled/);
@@ -178,6 +208,13 @@ test("billing entry points consume D1 account rate limits", async () => {
   assert.match(portal, /"billing_documents"/);
   assert.match(portal, /safeStripeDocumentUrl/);
   assert.match(portal, /customer=\$\{customer\}/);
+  for (const route of [checkout, portal, status]) {
+    assert.match(route, /isAccountAuthenticationAvailable\(\)/);
+    assert.doesNotMatch(route, /isPasskeyAuthenticationConfigured\(\)/);
+  }
+  assert.match(methods, /isOidcProviderConfigured\("google"\)/);
+  assert.match(methods, /line: false/);
+  assert.match(methods, /email: false/);
 });
 
 test("account deletion is delayed, reauthenticated, and blocked by active billing", async () => {

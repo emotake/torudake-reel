@@ -10,12 +10,11 @@ import {
   authenticationRequired,
   authenticationUnavailable,
   getCurrentUser,
-  isSitesAuthenticationTrusted,
 } from "../../../../lib/current-user";
 import {
   isAccountDeletionScheduled,
-  isPasskeyAuthenticationConfigured,
 } from "../../../../lib/account-auth";
+import { isAccountAuthenticationAvailable } from "../../../../lib/account-auth-methods";
 import {
   isBillingConfigured,
   isCanonicalBillingRequest,
@@ -80,10 +79,7 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-  if (
-    !isSitesAuthenticationTrusted() &&
-    !isPasskeyAuthenticationConfigured()
-  ) {
+  if (!isAccountAuthenticationAvailable()) {
     return authenticationUnavailable();
   }
   const currentUser = await getCurrentUser(request);

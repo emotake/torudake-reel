@@ -23,11 +23,14 @@ import {
   randomAccountToken,
 } from "./account-session";
 import {
-  bindTrialSessionToAccount,
   getRegisteredTrialSessionId,
-  trialSessionPrincipalEmail,
+  hashTrialSessionId,
   unboundTrialSessionPrincipalEmail,
 } from "./trial-session-store";
+import {
+  anonymousTrialAccountTransferStatements,
+  type AnonymousTrialAccountTransferContext,
+} from "./anonymous-trial-account-transfer";
 
 const CHALLENGE_LIFETIME_SECONDS = 5 * 60;
 const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
@@ -62,6 +65,7 @@ type AuthChallenge = {
   user_id: string | null;
   expected_origin: string;
   rp_id: string;
+  initiating_session_hash: string | null;
   requires_reauthentication: number;
 };
 
@@ -78,6 +82,23 @@ export type AccountIdentity = {
   email: string;
   billingEmail: string | null;
   fullName: string | null;
+};
+
+export type AccountAuthenticationMethod =
+  | "passkey"
+  | "line"
+  | "google"
+  | "email";
+
+export type LinkedAccountAuthenticationMethods = Record<
+  AccountAuthenticationMethod,
+  boolean
+>;
+
+export type AccountAuthenticationState = {
+  authenticated: boolean;
+  recentlyAuthenticated: boolean;
+  accountMethods: LinkedAccountAuthenticationMethods;
 };
 
 export type AccountPasskeySummary = {
@@ -106,7 +127,6 @@ export class AccountAuthError extends Error {
     this.publicMessage = publicMessage;
   }
 }
-
 export function isPasskeyAuthenticationConfigured() {
   const configuredSecret =
     typeof env.TRIAL_ISSUANCE_SECRET === "string"
@@ -120,44 +140,18 @@ export async function registrationOptions(request: Request) {
   const database = databaseOrThrow();
   const now = Math.floor(Date.now() / 1_000);
   const authenticatedAccount = await getAccountIdentity(request);
-  let user: { id: string } | null = authenticatedAccount
-    ? { id: authenticatedAccount.id }
-    : null;
-
-  if (!user) {
-    const sessionId = await getRegisteredTrialSessionId(request);
-    if (!sessionId) {
-      throw new AccountAuthError(
-        "trial_session_required",
-        409,
-        "無料体験の確認が必要です。ページを再読み込みしてお試しください。",
-      );
-    }
-
-    const email = await trialSessionPrincipalEmail(sessionId);
-    user = await database
-      .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
-      .bind(email)
-      .first<{ id: string }>();
-    if (!user) {
-      const userId = crypto.randomUUID();
-      await database
-        .prepare(`
-          INSERT INTO users (
-            id, email, billing_email, full_name, stripe_customer_id,
-            created_at, updated_at
-          ) VALUES (?, ?, NULL, NULL, NULL, ?, ?)
-          ON CONFLICT(email) DO NOTHING
-        `)
-        .bind(userId, email, now, now)
-        .run();
-      user = await database
-        .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
-        .bind(email)
-        .first<{ id: string }>();
-    }
+  if (!authenticatedAccount) {
+    throw new AccountAuthError(
+      "external_identity_authentication_required",
+      401,
+      "パスキーは、Googleでログインしたアカウントに追加できます。先にログインしてください。",
+    );
   }
-  if (!user) throw new Error("Passkey account could not be prepared.");
+  const user = { id: authenticatedAccount.id };
+  const registrationSession = await requireRecentAccountReauthentication(
+    request,
+    user.id,
+  );
 
   const existingPasskeys = await database
     .prepare(`
@@ -170,16 +164,6 @@ export async function registrationOptions(request: Request) {
     .bind(user.id)
     .all<{ credential_id: string; transports: string | null }>();
   const existing = existingPasskeys.results ?? [];
-  if (existing.length > 0 && !authenticatedAccount) {
-    throw new AccountAuthError(
-      "account_already_registered",
-      409,
-      "この無料体験にはアカウントが登録済みです。「ログイン」を選んでください。",
-    );
-  }
-  if (existing.length > 0) {
-    await requireRecentAccountReauthentication(request, user.id);
-  }
   if (existing.length >= MAX_PASSKEYS_PER_ACCOUNT) {
     throw new AccountAuthError(
       "passkey_limit_reached",
@@ -211,7 +195,8 @@ export async function registrationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "registration",
     userId: user.id,
-    requiresReauthentication: existing.length > 0,
+    initiatingSessionHash: registrationSession.tokenHash,
+    requiresReauthentication: true,
     context,
     now,
   });
@@ -229,63 +214,26 @@ export async function verifyRegistration(
   const challenge = await consumeChallenge(request, "registration");
   if (!challenge.user_id) throw new Error("Registration user is missing.");
   const database = databaseOrThrow();
-  const existingPasskeys = await database
-    .prepare(`
-      SELECT COUNT(*) AS count
-      FROM account_passkeys
-      WHERE user_id = ?
-    `)
-    .bind(challenge.user_id)
-    .first<{ count: number }>();
-  const backupRegistration = (existingPasskeys?.count ?? 0) > 0;
-  if (backupRegistration && challenge.requires_reauthentication !== 1) {
+  if (
+    challenge.requires_reauthentication !== 1 ||
+    !challenge.initiating_session_hash
+  ) {
     throw backupPasskeyReauthenticationRequired();
   }
-  if (challenge.requires_reauthentication === 1) {
-    await requireRecentAccountReauthentication(request, challenge.user_id);
+  const registrationSession = await requireRecentAccountReauthentication(
+    request,
+    challenge.user_id,
+  );
+  if (registrationSession.tokenHash !== challenge.initiating_session_hash) {
+    throw backupPasskeyReauthenticationRequired();
   }
   const authenticatedAccount = await getAccountIdentity(request);
-  let trialSessionId: string | null = null;
-  if (
-    authenticatedAccount &&
-    authenticatedAccount.id !== challenge.user_id
-  ) {
+  if (!authenticatedAccount || authenticatedAccount.id !== challenge.user_id) {
     throw new AccountAuthError(
       "registration_identity_changed",
       401,
       "本人確認を始めたアカウントと現在のアカウントが異なります。もう一度お試しください。",
     );
-  }
-  if (!authenticatedAccount) {
-    trialSessionId = await getRegisteredTrialSessionId(request);
-    if (!trialSessionId) {
-      throw new AccountAuthError(
-        "registration_identity_changed",
-        401,
-        "登録を始めた本人確認情報を確認できませんでした。もう一度お試しください。",
-      );
-    }
-    const expectedEmail = await unboundTrialSessionPrincipalEmail(
-      trialSessionId,
-    );
-    if (!expectedEmail) {
-      throw new AccountAuthError(
-        "registration_identity_changed",
-        401,
-        "登録後のアカウントにはログインが必要です。ログインしてから、もう一度お試しください。",
-      );
-    }
-    const expectedUser = await databaseOrThrow()
-      .prepare("SELECT id FROM users WHERE email = ? LIMIT 1")
-      .bind(expectedEmail)
-      .first<{ id: string }>();
-    if (expectedUser?.id !== challenge.user_id) {
-      throw new AccountAuthError(
-        "registration_identity_changed",
-        401,
-        "登録を始めた本人確認情報を確認できませんでした。もう一度お試しください。",
-      );
-    }
   }
   const verification = await verifyRegistrationResponse({
     response,
@@ -310,19 +258,32 @@ export async function verifyRegistration(
   const sessionHash = await hashAccountToken(sessionToken);
   const transports = sanitizeTransports(response.response.transports);
   const displayName = normalizePasskeyDisplayName(requestedDisplayName);
+  let registrationResults: D1Result[];
   try {
-    await database.batch([
+    registrationResults = (await database.batch([
       database
         .prepare(`
           INSERT INTO account_passkeys (
             credential_id, user_id, public_key, counter, transports,
             device_type, backed_up, display_name, created_at, updated_at,
             last_used_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          )
+          SELECT ?, users.id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          FROM users
+          WHERE users.id = ? AND users.account_deleted_at IS NULL
+            AND (
+              SELECT COUNT(*) FROM account_passkeys
+              WHERE user_id = users.id
+            ) < ?
+            AND EXISTS (
+              SELECT 1 FROM account_sessions
+              WHERE token_hash = ? AND user_id = users.id
+                AND expires_at > ?
+                AND reauthenticated_at >= ?
+            )
         `)
         .bind(
           registrationInfo.credential.id,
-          challenge.user_id,
           bytesToBase64Url(registrationInfo.credential.publicKey),
           registrationInfo.credential.counter,
           transports.length ? JSON.stringify(transports) : null,
@@ -332,14 +293,45 @@ export async function verifyRegistration(
           now,
           now,
           now,
+          challenge.user_id,
+          MAX_PASSKEYS_PER_ACCOUNT,
+          challenge.initiating_session_hash,
+          now,
+          now - RECENT_AUTHENTICATION_SECONDS,
         ),
-      sessionInsertStatement(
-        database,
-        sessionHash,
-        challenge.user_id,
-        now,
-      ),
-    ]);
+      database
+        .prepare(`
+          INSERT INTO account_sessions (
+            token_hash, user_id, created_at, last_seen_at, expires_at,
+            reauthenticated_at, auth_method, external_identity_id
+          )
+          SELECT ?, users.id, ?, ?, ?, ?, 'passkey', NULL
+          FROM users
+          WHERE users.id = ? AND users.account_deleted_at IS NULL
+            AND EXISTS (
+              SELECT 1 FROM account_sessions
+              WHERE token_hash = ? AND user_id = users.id
+                AND expires_at > ?
+                AND reauthenticated_at >= ?
+            )
+            AND EXISTS (
+              SELECT 1 FROM account_passkeys
+              WHERE credential_id = ? AND user_id = users.id
+            )
+        `)
+        .bind(
+          sessionHash,
+          now,
+          now,
+          now + SESSION_LIFETIME_SECONDS,
+          now,
+          challenge.user_id,
+          challenge.initiating_session_hash,
+          now,
+          now - RECENT_AUTHENTICATION_SECONDS,
+          registrationInfo.credential.id,
+        ),
+    ])) as D1Result[];
   } catch {
     throw new AccountAuthError(
       "passkey_already_registered",
@@ -349,24 +341,11 @@ export async function verifyRegistration(
   }
 
   if (
-    trialSessionId &&
-    !(await bindTrialSessionToAccount(trialSessionId, challenge.user_id))
+    registrationResults[0]?.meta?.changes !== 1 ||
+    registrationResults[1]?.meta?.changes !== 1
   ) {
-    await database.batch([
-      database
-        .prepare("DELETE FROM account_passkeys WHERE credential_id = ? AND user_id = ?")
-        .bind(registrationInfo.credential.id, challenge.user_id),
-      database
-        .prepare("DELETE FROM account_sessions WHERE token_hash = ? AND user_id = ?")
-        .bind(sessionHash, challenge.user_id),
-    ]);
-    throw new AccountAuthError(
-      "registration_identity_changed",
-      409,
-      "アカウントと無料体験を安全に関連付けられませんでした。もう一度お試しください。",
-    );
+    throw backupPasskeyReauthenticationRequired();
   }
-
   return authenticationResult(request, sessionToken);
 }
 
@@ -383,6 +362,7 @@ export async function authenticationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "authentication",
     userId: null,
+    initiatingSessionHash: null,
     requiresReauthentication: false,
     context,
     now,
@@ -397,6 +377,15 @@ export async function reauthenticationOptions(request: Request) {
   const context = relyingPartyContext(request);
   const identity = await requireAccountIdentity(request);
   const database = databaseOrThrow();
+  const initiatingSessionToken = getAccountSessionToken(request);
+  if (!initiatingSessionToken) {
+    throw new AccountAuthError(
+      "authentication_required",
+      401,
+      "本人確認を続けるには、もう一度ログインしてください。",
+    );
+  }
+  const initiatingSessionHash = await hashAccountToken(initiatingSessionToken);
   const passkeys = await database
     .prepare(`
       SELECT credential_id, transports
@@ -429,6 +418,7 @@ export async function reauthenticationOptions(request: Request) {
     challenge: options.challenge,
     ceremony: "authentication",
     userId: identity.id,
+    initiatingSessionHash,
     requiresReauthentication: false,
     context,
     now,
@@ -452,9 +442,22 @@ export async function verifyAuthentication(
     );
   }
   const database = databaseOrThrow();
+  let initiatingSessionHash: string | null = null;
   if (challenge.user_id) {
+    const initiatingSessionToken = getAccountSessionToken(request);
+    if (!initiatingSessionToken || !challenge.initiating_session_hash) {
+      throw new AccountAuthError(
+        "reauthentication_identity_changed",
+        401,
+        "本人確認を始めたログイン状態を確認できません。もう一度お試しください。",
+      );
+    }
+    initiatingSessionHash = await hashAccountToken(initiatingSessionToken);
     const authenticatedAccount = await getAccountIdentity(request);
-    if (authenticatedAccount?.id !== challenge.user_id) {
+    if (
+      authenticatedAccount?.id !== challenge.user_id ||
+      initiatingSessionHash !== challenge.initiating_session_hash
+    ) {
       throw new AccountAuthError(
         "reauthentication_identity_changed",
         401,
@@ -508,29 +511,105 @@ export async function verifyAuthentication(
   }
 
   const now = Math.floor(Date.now() / 1_000);
+  const trialTransfer = challenge.user_id
+    ? null
+    : await preparePasskeyLoginTrialTransferContext(request, database, now);
+  if (trialTransfer) {
+    const transfer = await database.batch(
+      anonymousTrialAccountTransferStatements(database, {
+        trial: trialTransfer,
+        targetUserId: passkey.user_id,
+        targetProof: {
+          kind: "passkey",
+          credentialId: passkey.credential_id,
+        },
+        now,
+      }),
+    );
+    if ((transfer as D1Result[])[0]?.meta?.changes !== 1) {
+      throw unsafeAnonymousTrialTransferError();
+    }
+  }
   const sessionToken = randomAccountToken();
   const sessionHash = await hashAccountToken(sessionToken);
-  await database.batch([
+  const authenticationResults = (await database.batch([
     database
       .prepare(`
         UPDATE account_passkeys
         SET counter = ?, updated_at = ?, last_used_at = ?
-        WHERE credential_id = ?
+        WHERE credential_id = ? AND user_id = ? AND counter = ?
+          AND EXISTS (
+            SELECT 1 FROM users
+            WHERE id = ? AND account_deleted_at IS NULL
+          )
+          AND (
+            ? IS NULL
+            OR EXISTS (
+              SELECT 1 FROM account_sessions
+              WHERE token_hash = ? AND user_id = ? AND expires_at > ?
+            )
+          )
       `)
       .bind(
         verification.authenticationInfo.newCounter,
         now,
         now,
         passkey.credential_id,
+        passkey.user_id,
+        passkey.counter,
+        passkey.user_id,
+        initiatingSessionHash,
+        initiatingSessionHash,
+        passkey.user_id,
+        now,
       ),
-    sessionInsertStatement(
-      database,
-      sessionHash,
-      passkey.user_id,
-      now,
-      challenge.user_id ? now : null,
-    ),
-  ]);
+    database
+      .prepare(`
+        INSERT INTO account_sessions (
+          token_hash, user_id, created_at, last_seen_at, expires_at,
+          reauthenticated_at, auth_method, external_identity_id
+        )
+        SELECT ?, users.id, ?, ?, ?, ?, 'passkey', NULL
+        FROM users
+        WHERE users.id = ? AND users.account_deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM account_passkeys
+            WHERE credential_id = ? AND user_id = users.id AND counter = ?
+          )
+          AND (
+            ? IS NULL
+            OR EXISTS (
+              SELECT 1 FROM account_sessions
+              WHERE token_hash = ? AND user_id = users.id AND expires_at > ?
+            )
+          )
+      `)
+      .bind(
+        sessionHash,
+        now,
+        now,
+        now + SESSION_LIFETIME_SECONDS,
+        challenge.user_id ? now : null,
+        passkey.user_id,
+        passkey.credential_id,
+        verification.authenticationInfo.newCounter,
+        initiatingSessionHash,
+        initiatingSessionHash,
+        now,
+      ),
+  ])) as D1Result[];
+  if (
+    authenticationResults[0]?.meta?.changes !== 1 ||
+    authenticationResults[1]?.meta?.changes !== 1
+  ) {
+    throw new AccountAuthError(
+      challenge.user_id
+        ? "reauthentication_identity_changed"
+        : "passkey_no_longer_available",
+      401,
+      "本人確認中にログイン状態が変わりました。もう一度お試しください。",
+    );
+  }
   return authenticationResult(request, sessionToken);
 }
 
@@ -548,9 +627,17 @@ export async function getAccountIdentity(request: Request) {
       INNER JOIN users ON users.id = account_sessions.user_id
       WHERE account_sessions.token_hash = ?
         AND account_sessions.expires_at > ?
-        AND EXISTS (
-          SELECT 1 FROM account_passkeys
-          WHERE account_passkeys.user_id = users.id
+        AND users.account_deleted_at IS NULL
+        AND (
+          EXISTS (
+            SELECT 1 FROM account_passkeys
+            WHERE account_passkeys.user_id = users.id
+          )
+          OR EXISTS (
+            SELECT 1 FROM account_external_identities
+            WHERE account_external_identities.user_id = users.id
+              AND account_external_identities.revoked_at IS NULL
+          )
         )
       LIMIT 1
     `)
@@ -577,6 +664,80 @@ export async function getAccountIdentity(request: Request) {
     billingEmail: identity.billing_email,
     fullName: identity.full_name,
   } satisfies AccountIdentity;
+}
+
+export async function getAccountAuthenticationState(
+  request: Request,
+): Promise<AccountAuthenticationState> {
+  const unavailable = {
+    authenticated: false,
+    recentlyAuthenticated: false,
+    accountMethods: {
+      passkey: false,
+      line: false,
+      google: false,
+      email: false,
+    },
+  } satisfies AccountAuthenticationState;
+  const identity = await getAccountIdentity(request);
+  const token = getAccountSessionToken(request);
+  if (!identity || !token) return unavailable;
+
+  const now = Math.floor(Date.now() / 1_000);
+  const state = await databaseOrThrow()
+    .prepare(`
+      SELECT account_sessions.created_at,
+        account_sessions.reauthenticated_at,
+        EXISTS (
+          SELECT 1 FROM account_passkeys
+          WHERE account_passkeys.user_id = account_sessions.user_id
+        ) AS passkey,
+        EXISTS (
+          SELECT 1 FROM account_external_identities
+          WHERE account_external_identities.user_id = account_sessions.user_id
+            AND account_external_identities.provider = 'line'
+            AND account_external_identities.revoked_at IS NULL
+        ) AS line,
+        EXISTS (
+          SELECT 1 FROM account_external_identities
+          WHERE account_external_identities.user_id = account_sessions.user_id
+            AND account_external_identities.provider = 'google'
+            AND account_external_identities.revoked_at IS NULL
+        ) AS google,
+        EXISTS (
+          SELECT 1 FROM account_external_identities
+          WHERE account_external_identities.user_id = account_sessions.user_id
+            AND account_external_identities.provider = 'email'
+            AND account_external_identities.revoked_at IS NULL
+        ) AS email
+      FROM account_sessions
+      WHERE account_sessions.token_hash = ?
+        AND account_sessions.user_id = ?
+        AND account_sessions.expires_at > ?
+      LIMIT 1
+    `)
+    .bind(await hashAccountToken(token), identity.id, now)
+    .first<{
+      created_at: number;
+      reauthenticated_at: number | null;
+      passkey: number;
+      line: number;
+      google: number;
+      email: number;
+    }>();
+  if (!state) return unavailable;
+  return {
+    authenticated: true,
+    recentlyAuthenticated:
+      state.reauthenticated_at !== null &&
+      state.reauthenticated_at >= now - RECENT_AUTHENTICATION_SECONDS,
+    accountMethods: {
+      passkey: state.passkey === 1,
+      line: state.line === 1,
+      google: state.google === 1,
+      email: state.email === 1,
+    },
+  };
 }
 
 export async function getAccountPasskeys(
@@ -657,10 +818,15 @@ export async function deleteAccountPasskey(
       WHERE credential_id = ?
         AND user_id = ?
         AND (
-          SELECT COUNT(*) FROM account_passkeys WHERE user_id = ?
-        ) > 1
+          (SELECT COUNT(*) FROM account_passkeys WHERE user_id = ?) > 1
+          OR EXISTS (
+            SELECT 1 FROM account_external_identities
+            WHERE account_external_identities.user_id = ?
+              AND account_external_identities.revoked_at IS NULL
+          )
+        )
     `)
-    .bind(id, session.userId, session.userId)
+    .bind(id, session.userId, session.userId, session.userId)
     .run();
   if (deleted.meta?.changes !== 1) {
     const passkey = await database
@@ -862,7 +1028,7 @@ export async function requireRecentAccountSession(request: Request) {
     throw new AccountAuthError(
       "reauthentication_required",
       401,
-      "安全のため、パスキーで本人確認をやり直してから操作してください。",
+      "安全のため、登録済みのログイン方法で本人確認をやり直してから操作してください。",
     );
   }
   return { userId: session.user_id, tokenHash };
@@ -909,6 +1075,7 @@ async function saveChallenge(
     challenge: string;
     ceremony: "registration" | "authentication";
     userId: string | null;
+    initiatingSessionHash: string | null;
     requiresReauthentication: boolean;
     context: { origin: string; rpId: string; secure: boolean };
     now: number;
@@ -929,10 +1096,10 @@ async function saveChallenge(
     .prepare(`
         INSERT INTO account_auth_challenges (
           token_hash, challenge, ceremony, user_id, expected_origin,
-          rp_id, network_hash, requires_reauthentication, created_at,
-          expires_at, consumed_at
+          rp_id, network_hash, initiating_session_hash,
+          requires_reauthentication, created_at, expires_at, consumed_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL
         WHERE (
           SELECT COUNT(*) FROM account_auth_challenges
           WHERE network_hash = ? AND created_at >= ?
@@ -941,6 +1108,21 @@ async function saveChallenge(
             SELECT COUNT(*) FROM account_auth_challenges
             WHERE created_at >= ?
           ) < ?
+          AND (
+            ? IS NULL
+            OR EXISTS (
+              SELECT 1 FROM account_sessions
+              INNER JOIN users ON users.id = account_sessions.user_id
+              WHERE account_sessions.token_hash = ?
+                AND account_sessions.user_id = ?
+                AND account_sessions.expires_at > ?
+                AND users.account_deleted_at IS NULL
+                AND (
+                  ? = 0
+                  OR account_sessions.reauthenticated_at >= ?
+                )
+            )
+          )
       `)
     .bind(
       tokenHash,
@@ -950,6 +1132,7 @@ async function saveChallenge(
       values.context.origin,
       values.context.rpId,
       networkHash,
+      values.initiatingSessionHash,
       values.requiresReauthentication ? 1 : 0,
       values.now,
       values.now + CHALLENGE_LIFETIME_SECONDS,
@@ -958,6 +1141,12 @@ async function saveChallenge(
       AUTH_NETWORK_LIMIT,
       values.now - AUTH_RATE_WINDOW_SECONDS,
       AUTH_GLOBAL_LIMIT,
+      values.initiatingSessionHash,
+      values.initiatingSessionHash,
+      values.userId,
+      values.now,
+      values.requiresReauthentication ? 1 : 0,
+      values.now - RECENT_AUTHENTICATION_SECONDS,
     )
     .run();
   if (inserted.meta?.changes !== 1) {
@@ -992,7 +1181,7 @@ async function consumeChallenge(
         AND consumed_at IS NULL
         AND expires_at >= ?
       RETURNING challenge, ceremony, user_id, expected_origin, rp_id,
-        requires_reauthentication
+        initiating_session_hash, requires_reauthentication
     `)
     .bind(now, await hashAccountToken(token), ceremony, now)
     .first<AuthChallenge>();
@@ -1006,35 +1195,146 @@ async function consumeChallenge(
   return challenge;
 }
 
-function sessionInsertStatement(
-  database: D1Database,
-  tokenHash: string,
+export async function createAccountSession(
+  request: Request,
   userId: string,
-  now: number,
-  reauthenticatedAt: number | null = null,
+  authMethod: AccountAuthenticationMethod,
+  externalIdentityId: string | null,
+  initiatingSession?: {
+    initiatingSessionTokenHash: string;
+    initiatingUserId: string;
+  },
+  nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  return database
+  const database = databaseOrThrow();
+  const now = nowSeconds;
+  const sessionToken = randomAccountToken();
+  const sessionHash = await hashAccountToken(sessionToken);
+  if (
+    authMethod === "passkey" ||
+    !externalIdentityId ||
+    (initiatingSession && initiatingSession.initiatingUserId !== userId)
+  ) {
+    throw new AccountAuthError(
+      "authentication_identity_changed",
+      401,
+      "本人確認中にアカウントの状態が変わりました。もう一度お試しください。",
+    );
+  }
+  const inserted = await database
     .prepare(`
       INSERT INTO account_sessions (
         token_hash, user_id, created_at, last_seen_at, expires_at,
-        reauthenticated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        reauthenticated_at, auth_method, external_identity_id
+      )
+      SELECT ?, users.id, ?, ?, ?, ?, ?, ?
+      FROM users
+      WHERE users.id = ? AND users.account_deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM account_external_identities
+          WHERE id = ? AND user_id = users.id AND provider = ?
+            AND revoked_at IS NULL
+        )
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1 FROM account_sessions AS initiating_session
+            WHERE initiating_session.token_hash = ?
+              AND initiating_session.user_id = users.id
+              AND initiating_session.expires_at > ?
+          )
+        )
     `)
     .bind(
-      tokenHash,
-      userId,
+      sessionHash,
       now,
       now,
       now + SESSION_LIFETIME_SECONDS,
-      reauthenticatedAt,
+      now,
+      authMethod,
+      externalIdentityId,
+      userId,
+      externalIdentityId,
+      authMethod,
+      initiatingSession?.initiatingSessionTokenHash ?? null,
+      initiatingSession?.initiatingSessionTokenHash ?? null,
+      now,
+    )
+    .run();
+  if (inserted.meta?.changes !== 1) {
+    throw new AccountAuthError(
+      "authentication_identity_changed",
+      401,
+      "本人確認中にアカウントの状態が変わりました。もう一度お試しください。",
     );
+  }
+  return authenticationResult(request, sessionToken);
+}
+
+async function preparePasskeyLoginTrialTransferContext(
+  request: Request,
+  database: D1Database,
+  now: number,
+): Promise<AnonymousTrialAccountTransferContext | null> {
+  const sessionId = await getRegisteredTrialSessionId(request);
+  if (!sessionId) return null;
+  const principalEmail = await unboundTrialSessionPrincipalEmail(sessionId, now);
+  if (!principalEmail) return null;
+
+  let user = await database
+    .prepare(`
+      SELECT id, account_deleted_at
+      FROM users
+      WHERE email = ?
+      LIMIT 1
+    `)
+    .bind(principalEmail)
+    .first<{ id: string; account_deleted_at: number | null }>();
+  if (!user) {
+    const userId = crypto.randomUUID();
+    await database
+      .prepare(`
+        INSERT INTO users (
+          id, email, billing_email, full_name, stripe_customer_id,
+          account_deleted_at, created_at, updated_at
+        ) VALUES (?, ?, NULL, NULL, NULL, NULL, ?, ?)
+        ON CONFLICT(email) DO NOTHING
+      `)
+      .bind(userId, principalEmail, now, now)
+      .run();
+    user = await database
+      .prepare(`
+        SELECT id, account_deleted_at
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+      `)
+      .bind(principalEmail)
+      .first<{ id: string; account_deleted_at: number | null }>();
+  }
+  if (!user || user.account_deleted_at !== null) {
+    throw unsafeAnonymousTrialTransferError();
+  }
+  return {
+    sessionHash: await hashTrialSessionId(sessionId),
+    principalEmail,
+    userId: user.id,
+  };
 }
 
 function backupPasskeyReauthenticationRequired() {
   return new AccountAuthError(
     "backup_passkey_reauthentication_required",
     401,
-    "予備のパスキーを追加する前に、現在のパスキーで本人確認をやり直してください。",
+    "パスキーを追加する前に、登録済みのログイン方法で本人確認をやり直してください。",
+  );
+}
+
+function unsafeAnonymousTrialTransferError() {
+  return new AccountAuthError(
+    "unsafe_trial_account_merge",
+    409,
+    "無料体験の編集データを安全に引き継げませんでした。ページを再読み込みして、もう一度お試しください。",
   );
 }
 

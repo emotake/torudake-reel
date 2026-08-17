@@ -224,7 +224,7 @@ test("renders a dedicated, monthly-first pricing page with one-time rescue", asy
   assert.match(planHtml, /<details[^>]*>/);
   assert.doesNotMatch(planHtml, /<details[^>]*\sopen(?:=""|=|[ >])/);
   assert.match(planHtml, /href="\/account\?checkout=one_time"/);
-  assert.match(html, /本人確認後に、Stripeでお支払い/);
+  assert.match(html, /ログイン後に、Stripeでお支払い/);
   assert.match(html, /1か月ごとに自動更新/);
 });
 
@@ -430,7 +430,7 @@ test("publishes safe support guidance for billing, recovery, and export failures
 
   assert.match(html, /決済・月額プランの解約/);
   assert.match(html, /書き出しや保存に失敗した/);
-  assert.match(html, /パスキーを登録した端末を紛失した/);
+  assert.match(html, /Googleログインまたはパスキーで困った/);
   assert.match(html, /二重請求・返金について/);
   assert.match(html, /エラー番号/);
   assert.match(html, /利用端末とブラウザ/);
@@ -468,7 +468,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
   assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・動画(?:<!-- -->)?2(?:<!-- -->)?本まで/);
   assert.match(html, /すべて消費税込み/);
-  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-13/);
+  assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-18/);
   assert.match(html, /投稿素材と知的財産権/);
   assert.match(html, /利用停止とサービスの変更/);
   assert.match(html, /保証と責任の範囲/);

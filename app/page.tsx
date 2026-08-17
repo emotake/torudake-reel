@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import AuthenticationGate from "./authentication-gate";
 import {
   MONTHLY_FIRST_OFFER_VERSION,
   MonthlyFirstPurchaseOptions,
@@ -232,6 +233,7 @@ type NarrationPronunciationRow = {
 
 type ApiPayload = {
   error?: string;
+  code?: string;
 };
 
 type TranscriptionResult = {
@@ -300,6 +302,7 @@ class ApiRequestError extends Error {
     readonly status: number,
     readonly aiOperationsRemaining: number | null = null,
     readonly aiOperationLimit: number | null = null,
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -578,9 +581,18 @@ async function readApiResponse<T extends ApiPayload>(
       response.status,
       quota.aiOperationsRemaining,
       quota.aiOperationLimit,
+      typeof payload.code === "string" ? payload.code : null,
     );
   }
   return payload;
+}
+
+function isAuthenticationRequiredError(error: unknown) {
+  return (
+    error instanceof ApiRequestError &&
+    error.status === 401 &&
+    error.code === "authentication_required"
+  );
 }
 
 async function transcribeMediaFile(
@@ -1654,6 +1666,7 @@ async function requestNarrationSpeech(
       response.status,
       quota.aiOperationsRemaining,
       quota.aiOperationLimit,
+      typeof payload.code === "string" ? payload.code : null,
     );
   }
   const audio = await response.blob();
@@ -2095,6 +2108,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
   >(null);
   const [billingError, setBillingError] = useState("");
   const [checkoutReturnMessage, setCheckoutReturnMessage] = useState("");
+  const [authenticationGateOpen, setAuthenticationGateOpen] = useState(false);
   const [recoverableDraft, setRecoverableDraft] =
     useState<LocalEditDraft | null>(null);
   const pendingDraftRestoreRef = useRef<LocalEditDraft | null>(null);
@@ -2746,6 +2760,10 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           rememberAiOperationsRemaining(error.aiOperationsRemaining);
         }
       }
+      if (isAuthenticationRequiredError(error)) {
+        explainAuthenticationRequired();
+        return;
+      }
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -2984,6 +3002,10 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           rememberAiOperationsRemaining(error.aiOperationsRemaining);
         }
       }
+      if (isAuthenticationRequiredError(error)) {
+        explainAuthenticationRequired();
+        return;
+      }
       setProgress(0);
       setEditError(
         error instanceof Error
@@ -3116,6 +3138,12 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
         if (error.aiOperationsRemaining !== null) {
           rememberAiOperationsRemaining(error.aiOperationsRemaining);
         }
+      }
+      if (isAuthenticationRequiredError(error)) {
+        setAuthenticationGateOpen(true);
+        throw new Error(
+          "ログイン後、AI音声の生成ボタンをもう一度押してください。編集中の内容は保持されています。",
+        );
       }
       throw error;
     } finally {
@@ -3295,6 +3323,12 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           rememberAiOperationsRemaining(error.aiOperationsRemaining);
         }
       }
+      if (isAuthenticationRequiredError(error)) {
+        setAuthenticationGateOpen(true);
+        throw new Error(
+          "ログイン後、選んだ一文の修正をもう一度お試しください。編集中の内容は保持されています。",
+        );
+      }
       throw error;
     } finally {
       await audioContext.close().catch(() => undefined);
@@ -3394,8 +3428,18 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     setCheckoutReturnMessage("");
     pendingDraftRestoreRef.current = null;
     setRecoverableDraft(null);
+    setAuthenticationGateOpen(false);
     void clearLocalEditDraft();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function explainAuthenticationRequired() {
+    setProgress(0);
+    setStage("setup");
+    setEditError(
+      "AI機能を使うにはログインが必要です。編集中の素材と設定はこの画面に残っています。ログイン後、同じ操作をもう一度お試しください。",
+    );
+    setAuthenticationGateOpen(true);
   }
 
   function beginDraftRecovery() {
@@ -3780,6 +3824,18 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
         </div>
       )}
       </main>
+      <AuthenticationGate
+        open={authenticationGateOpen}
+        reason="ai"
+        onClose={() => setAuthenticationGateOpen(false)}
+        onAuthenticated={() => {
+          setAuthenticationGateOpen(false);
+          setEditError(
+            "ログインが完了しました。素材と編集内容は保持されています。AI操作をもう一度お試しください。",
+          );
+          notify("ログインが完了しました。AI操作を再開できます");
+        }}
+      />
       <SiteFooter />
     </>
   );
