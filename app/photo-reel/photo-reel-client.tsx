@@ -678,7 +678,7 @@ export default function PhotoReelClient() {
     setMessage("");
     const remaining = MAX_PHOTOS - photos.length;
     if (remaining <= 0) {
-      setError("写真は最大10枚までです。不要な写真を削除してから追加してください。");
+      setError("写真は10枚までです。不要な写真を削除してから追加してください。");
       return;
     }
 
@@ -698,7 +698,7 @@ export default function PhotoReelClient() {
       );
     }
     if (chosen.length > remaining) {
-      setMessage(`最大10枚のため、先頭から${remaining}枚を追加します。`);
+      setMessage(`上限は10枚のため、先頭から${remaining}枚を追加します。`);
     }
     if (totalBytes > MAX_TOTAL_BYTES) {
       setError(
@@ -1127,7 +1127,7 @@ export default function PhotoReelClient() {
       </header>
 
       <section className="photoReelIntro">
-        <p className="photoReelEyebrow">写真からリールへ · 端末内編集</p>
+        <p className="photoReelEyebrow">写真からリールへ・端末内編集</p>
         <h1>
           写真を選ぶだけ。
           <br />
@@ -1146,7 +1146,7 @@ export default function PhotoReelClient() {
             disabled={preparing || isEditingLocked}
           >
             <strong>写真を選んで無料でプレビュー</strong>
-            <small>無料体験はサービス共通で合計3分以内・最大2動画まで</small>
+            <small>無料体験はサービス共通で合計3分以内・動画2本まで</small>
           </button>
         ) : null}
         <div className="photoReelIntroOffer" aria-label="写真リールの料金">
@@ -1174,7 +1174,7 @@ export default function PhotoReelClient() {
         <div className="photoReelPreviewPanel">
           <div className="photoReelPreviewHeading">
             <span>仕上がりプレビュー</span>
-            <small>{photos.length > 0 ? `${photos.length}枚 · ${duration}秒` : "9:16"}</small>
+            <small>{photos.length > 0 ? `${photos.length}枚・${duration}秒` : "9:16"}</small>
           </div>
           <div className="photoReelPhone">
             {photos.length > 0 ? (
@@ -1188,7 +1188,7 @@ export default function PhotoReelClient() {
               <div className="photoReelEmptyPreview">
                 <span aria-hidden="true">＋</span>
                 <strong>写真を選ぶと、ここで動きを確認できます</strong>
-                <small>2〜10枚 · JPEG / PNG / WebP / HEIC</small>
+                <small>2〜10枚・JPEG・PNG・WebP・HEIC</small>
               </div>
             )}
           </div>
@@ -1273,7 +1273,7 @@ export default function PhotoReelClient() {
               <span aria-hidden="true">＋</span>
               <span>
                 <strong>{photos.length === 0 ? "写真を選ぶ" : "写真を追加する"}</strong>
-                <small>iPhoneのHEICにも対応 · 最大10枚</small>
+                <small>iPhoneのHEICにも対応・2〜10枚</small>
               </span>
             </button>
             {preparing ? (
@@ -1507,7 +1507,7 @@ export default function PhotoReelClient() {
               <span className="photoReelExportIcon" aria-hidden="true">MP4</span>
               <span>
                 <strong>高画質で書き出す</strong>
-                <small>1080×1920 · 保存枠1本分</small>
+                <small>1080×1920・保存枠1本分</small>
               </span>
             </div>
             <ul>
@@ -1595,7 +1595,7 @@ export default function PhotoReelClient() {
                     rel="noreferrer"
                     onClick={() => markCheckoutStarted("one_time")}
                   >
-                    <span>初めての保存におすすめ · 1回だけ</span>
+                    <span>初めての保存におすすめ・1回だけ</span>
                     <strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存（税込）</strong>
                     <small>自動更新なし・有効期限なし</small>
                   </Link>
@@ -1609,7 +1609,7 @@ export default function PhotoReelClient() {
                     <span>1か月ごと</span>
                     <strong>
                       {STARTER_MONTHLY_PLAN_LABEL}・¥
-                      {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
+                      {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）
                     </strong>
                     <small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存・1か月ごとの自動更新</small>
                   </Link>
@@ -1623,7 +1623,7 @@ export default function PhotoReelClient() {
                     <span>1か月ごと</span>
                     <strong>
                       {STANDARD_MONTHLY_PLAN_LABEL}・¥
-                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）
+                      {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）
                     </strong>
                     <small>
                       1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで・1本あたり約
@@ -1654,7 +1654,7 @@ export default function PhotoReelClient() {
                 <span aria-hidden="true">✓</span>
                 <div>
                   <h2>写真リールが完成しました</h2>
-                  <p>1080×1920 · MP4 · {duration}秒</p>
+                  <p>1080×1920・MP4・{duration}秒</p>
                 </div>
               </div>
               <video src={result.url} controls playsInline preload="metadata" />

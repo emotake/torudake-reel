@@ -4207,7 +4207,7 @@ export default function VideoMixClient() {
               disabled={editingLocked}
             >
               <strong>動画を選んで無料でプレビュー</strong>
-              <small>無料体験はサービス共通で合計3分以内・最大2動画まで</small>
+              <small>無料体験はサービス共通で合計3分以内・動画2本まで</small>
             </button>
           ) : null}
         </div>
@@ -4249,7 +4249,7 @@ export default function VideoMixClient() {
               <div className="videoMixEmpty">
                 <span aria-hidden="true">＋</span>
                 <strong>動画を選ぶと、ここで順番とつなぎ目を確認できます</strong>
-                <small>MP4 / MOV / M4V / WebM</small>
+                <small>MP4・MOV・M4V・WebM</small>
               </div>
             )}
           </div>

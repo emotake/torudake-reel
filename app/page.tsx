@@ -3981,8 +3981,8 @@ function Landing({
               ¥0
             </span>
             <div>
-              <strong>無料体験：合計3分以内・最大2動画まで</strong>
-              <small>AI処理は1動画につき3回。編集結果が完成すると1動画分を使用します</small>
+              <strong>無料体験：合計3分以内・動画2本まで</strong>
+              <small>AI処理は動画1本につき3回。編集結果が完成すると動画1本分を使用します</small>
             </div>
             <div className="heroOfferPrice">
               <strong>保存は動画1本 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
@@ -4011,7 +4011,7 @@ function Landing({
             </span>
             <span>
               <strong>写真からリールを作る</strong>
-              <small>最大10枚・自動編集5パターン</small>
+              <small>2〜10枚・自動編集5パターン</small>
             </span>
             <i aria-hidden="true">→</i>
           </Link>
@@ -4102,7 +4102,7 @@ function Landing({
             <div className="stepIcon uploadIcon">↑</div>
             <h3>撮った動画を送る</h3>
             <p>5分までの縦・横・正方形動画をそのままアップロード。</p>
-            <small>MP4・MOV・スマホ対応 / 最大500MB</small>
+            <small>MP4・MOV・スマホ対応・最大500MB</small>
           </article>
           <article>
             <span className="stepNo">02</span>
@@ -4193,7 +4193,7 @@ function Landing({
           <div>
             <strong>まずは無料で、編集後の動画を確認</strong>
             <small>
-              合計3分以内・最大2動画まで（いずれか先に達するまで）。AI処理は1動画につき3回。編集・プレビューまで無料、完成動画の保存は有料です。
+              合計3分以内・動画2本まで（いずれか先に達するまで）。AI処理は動画1本につき3回。編集・プレビューまで無料、完成動画の保存は有料です。
             </small>
           </div>
           <button onClick={openPicker}>無料で試す</button>
@@ -4206,7 +4206,7 @@ function Landing({
             <h3>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h3>
             <strong>
               ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/1か月・税込</small>
+              <small>／1か月（税込）</small>
             </strong>
             <span>
               {monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}・1本あたり約
@@ -4218,7 +4218,7 @@ function Landing({
             <ul>
               <li>✓ 90秒まで</li>
               <li>
-                ✓ AI処理は1動画につき
+                ✓ AI処理は動画1本につき
                 {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
               </li>
               <li>✓ 最大1080p・透かしなし</li>
@@ -4238,7 +4238,7 @@ function Landing({
             <h3>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h3>
             <strong>
               ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/1か月・税込</small>
+              <small>／1か月（税込）</small>
             </strong>
             <span>
               {`${monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}・1本あたり約${Math.round(
@@ -4248,7 +4248,7 @@ function Landing({
             <ul>
               <li>✓ 90秒まで</li>
               <li>
-                ✓ AI処理は1動画につき
+                ✓ AI処理は動画1本につき
                 {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
               </li>
               <li>✓ 最大1080p・透かしなし</li>
@@ -4268,12 +4268,12 @@ function Landing({
             <h3>動画1本だけ保存</h3>
             <strong>
               ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
-              <small>/1本・税込</small>
+              <small>／1本（税込）</small>
             </strong>
             <span>動画1本だけ保存・月額料金なし</span>
             <ul>
               <li>✓ 90秒まで</li>
-              <li>✓ AI処理は1動画につき5回</li>
+              <li>✓ AI処理は動画1本につき5回</li>
               <li>✓ 最大1080p・透かしなし</li>
               <li>✓ 表紙つき・AIナレーションなら投稿文も作成</li>
             </ul>
@@ -4660,7 +4660,7 @@ function SetupWorkspace({
             <p>
               <strong>{file?.name ?? "sample_reel_video.mp4"}</strong>
               <small>
-                {file ? `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB` : "18.4 MB"}・{sourceOrientation}
+                {file ? `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)}MB` : "18.4MB"}・{sourceOrientation}
               </small>
             </p>
             <button onClick={chooseAnother}>変更</button>
@@ -10999,7 +10999,7 @@ function ResultWorkspace({
                   rel="noreferrer"
                   onClick={markCheckoutStarted}
                 >
-                  {`${STARTER_MONTHLY_PLAN_LABEL}・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
+                  {`${STARTER_MONTHLY_PLAN_LABEL}・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`}
                 </Link>
                 <Link
                   className="quietButton"
@@ -11008,7 +11008,7 @@ function ResultWorkspace({
                   rel="noreferrer"
                   onClick={markCheckoutStarted}
                 >
-                  {`${STANDARD_MONTHLY_PLAN_LABEL}・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}/1か月（税込）`}
+                  {`${STANDARD_MONTHLY_PLAN_LABEL}・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`}
                 </Link>
               </div>
               <small className="freeExportReturnNote">

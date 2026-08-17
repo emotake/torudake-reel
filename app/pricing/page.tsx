@@ -53,13 +53,13 @@ const plans = [
     name: STARTER_MONTHLY_PLAN_LABEL,
     title: `1か月に動画${STARTER_MONTHLY_VIDEO_LIMIT}本まで`,
     price: STARTER_MONTHLY_PRICE_JPY,
-    priceSuffix: "/ 1か月・税込",
+    priceSuffix: "／1か月（税込）",
     unit: `1本あたり約${Math.round(
       STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
     ).toLocaleString("ja-JP")}円`,
     features: [
       "1本90秒まで",
-      `AI処理は1動画につき${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`,
+      `AI処理は動画1本につき${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`,
       "最大1080p・透かしなし",
       "編集スタイルを記憶",
       "1か月ごとに自動更新・未使用分の繰り越しなし",
@@ -73,13 +73,13 @@ const plans = [
     name: STANDARD_MONTHLY_PLAN_LABEL,
     title: `1か月に動画${STANDARD_MONTHLY_VIDEO_LIMIT}本まで`,
     price: STANDARD_MONTHLY_PRICE_JPY,
-    priceSuffix: "/ 1か月・税込",
+    priceSuffix: "／1か月（税込）",
     unit: `1本あたり約${Math.round(
       STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
     ).toLocaleString("ja-JP")}円`,
     features: [
       "1本90秒まで",
-      `AI処理は1動画につき${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`,
+      `AI処理は動画1本につき${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`,
       "最大1080p・透かしなし",
       "編集スタイルを記憶",
       "1か月ごとに自動更新・未使用分の繰り越しなし",
@@ -155,8 +155,8 @@ export default function PricingPage() {
             <p className={styles.eyebrow}>無料体験</p>
             <h2 id="free-title">まずは編集後の動画を確認</h2>
             <p>
-              合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
-              動画まで（いずれか先に達するまで）。AI処理は1動画につき
+              合計{FREE_MINUTES}分以内・動画{FREE_VIDEO_LIMIT}
+              本まで（いずれか先に達するまで）。AI処理は動画1本につき
               {FREE_AI_OPERATION_SUCCESS_LIMIT}
               回です。編集とプレビューは無料、完成動画の保存には有料の利用枠が必要です。
             </p>

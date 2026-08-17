@@ -95,13 +95,13 @@ function checkoutPlanDetails(plan: CheckoutPlan | null) {
     case "starter":
       return {
         name: STARTER_MONTHLY_PLAN_LABEL,
-        price: `¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 1か月・税込`,
+        price: `¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`,
         renewal: "解約するまで1か月ごとに自動更新",
       };
     case "standard":
       return {
         name: STANDARD_MONTHLY_PLAN_LABEL,
-        price: `¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")} / 1か月・税込`,
+        price: `¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`,
         renewal: "解約するまで1か月ごとに自動更新",
       };
     case "one_time":
@@ -866,8 +866,8 @@ export default function AccountClient() {
               <strong>{activeMonthlyPlanLabel(status)}</strong>
               <span>
                 {status.monthly?.active
-                  ? `今月${status.monthly.videosUsed}本保存済み・あと${Math.max(0, status.monthly.videoLimit - status.monthly.videosUsed)}本保存できます・AI処理は1動画あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
-                  : `無料体験：残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒（最大${FREE_VIDEO_LIMIT}動画・合計${Math.floor(FREE_SECONDS_LIMIT / 60)}分のいずれか先に到達するまで）・AI処理は1動画あたり3回`}
+                  ? `今月${status.monthly.videosUsed}本保存済み・あと${Math.max(0, status.monthly.videoLimit - status.monthly.videosUsed)}本保存できます・AI処理は動画1本あたり${SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回`
+                  : `無料体験：残り${freeVideosRemaining}本・${Math.floor(freeSecondsRemaining / 60)}分${freeSecondsRemaining % 60}秒（動画${FREE_VIDEO_LIMIT}本・合計${Math.floor(FREE_SECONDS_LIMIT / 60)}分のいずれか先に到達するまで）・AI処理は動画1本あたり3回`}
               </span>
             </article>
             <article>
@@ -990,7 +990,7 @@ export default function AccountClient() {
               <h2>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h2>
               <strong>
                 ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small> / 1か月・税込</small>
+                <small>／1か月（税込）</small>
               </strong>
               <span className="accountPlanUnit">
                 1本あたり約
@@ -1002,7 +1002,7 @@ export default function AccountClient() {
               <ul>
                 <li>{monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}</li>
                 <li>
-                  AI処理は1動画あたり
+                  AI処理は動画1本あたり
                   {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
                 </li>
                 <li>解約するまで1か月ごとに自動更新</li>
@@ -1036,7 +1036,7 @@ export default function AccountClient() {
               <h2>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h2>
               <strong>
                 ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small> / 1か月・税込</small>
+                <small>／1か月（税込）</small>
               </strong>
               <span className="accountPlanUnit">
                 1本あたり約
@@ -1048,7 +1048,7 @@ export default function AccountClient() {
               <ul>
                 <li>{monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}</li>
                 <li>
-                  AI処理は1動画あたり
+                  AI処理は動画1本あたり
                   {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
                 </li>
                 <li>解約するまで1か月ごとに自動更新</li>
@@ -1184,7 +1184,7 @@ export default function AccountClient() {
         無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
       </p>
       <p className="accountSecurity">
-        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は1動画あたり無料体験3回、動画1本プラン5回、月3本・月7本プラン
+        AI処理には、文字起こし、高精度再解析、AI台本の生成、AI音声の生成が含まれます。初回ナレーションは台本完成時に1回分を使用し、続く初回音声と内部の自動調整では追加回数を使用しません。作成後の再生成などは正常に完了するごとに1回分を使用し、上限は動画1本あたり無料体験3回、動画1本プラン5回、月3本・月7本プラン
         {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回です。正常に完了したAI処理の回数は、動画を保存せず編集を終了した場合も戻りません。
       </p>
       <div className="accountLegalLinks">

@@ -134,7 +134,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /複数の動画から作る/);
   assert.match(html, /2〜5本から使う場面を選び/);
   assert.match(html, /写真から作る/);
-  assert.match(html, /最大10枚の写真を選び/);
+  assert.match(html, /2〜10枚の写真を選び/);
   assert.match(html, /href="\/video-mix"/);
   assert.match(html, /href="\/photo-reel"/);
   assert.match(html, /href="\/pricing"/);
@@ -173,7 +173,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /元の音声があっても、なくても対応/);
   assert.doesNotMatch(html, /AIが全部整える/);
   assert.match(html, /仕上がりを見てから、保存方法を選べます/);
-  assert.match(html, /無料体験は合計3分以内・最大2動画まで/);
+  assert.match(html, /無料体験は合計3分以内・動画2本まで/);
   assert.match(html, /1回払い・税込・自動更新なし/);
   assert.match(html, /月(?:<!-- -->)?3(?:<!-- -->)?本 ¥(?:<!-- -->)?500/);
   assert.match(html, /月(?:<!-- -->)?7(?:<!-- -->)?本 ¥(?:<!-- -->)?1,000/);
@@ -229,7 +229,7 @@ test("renders the five-pattern photo reel editor as a separate public route", as
   assert.match(html, /写真を選ぶだけ。/);
   assert.match(html, /動きのある1本に。/);
   assert.match(html, /写真を選んで無料でプレビュー/);
-  assert.match(html, /無料体験はサービス共通で合計3分以内・最大2動画まで/);
+  assert.match(html, /無料体験はサービス共通で合計3分以内・動画2本まで/);
   assert.match(html, /自動編集を選ぶ/);
   assert.match(html, /シネマ/);
   assert.match(html, /リズム/);
@@ -397,7 +397,7 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /最大500MB/);
   assert.match(html, /編集とプレビューを利用できます/);
   assert.match(html, /有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります/);
-  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
+  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・動画(?:<!-- -->)?2(?:<!-- -->)?本まで/);
   assert.match(html, /表示価格はすべて消費税込み/);
   assert.match(html, /支払済み期間の料金は日割りで返金しません/);
   assert.match(html, /注文確定後のお客様都合によるキャンセル・返品・返金/);
@@ -407,9 +407,9 @@ test("publishes the commercial disclosure and contact route before checkout", as
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成などは正常に完了するごとに1回分/);
   assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
-  assert.match(html, /1動画あたり(?:<!-- -->)?3(?:<!-- -->)?回/);
-  assert.match(html, /1動画あたり(?:<!-- -->)?5(?:<!-- -->)?回/);
-  assert.match(html, /1動画あたり(?:<!-- -->)?6(?:<!-- -->)?回/);
+  assert.match(html, /動画1本あたり(?:<!-- -->)?3(?:<!-- -->)?回/);
+  assert.match(html, /動画1本あたり(?:<!-- -->)?5(?:<!-- -->)?回/);
+  assert.match(html, /動画1本あたり(?:<!-- -->)?6(?:<!-- -->)?回/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/commercial-disclosure"/,
@@ -459,7 +459,7 @@ test("publishes the shared AI processing limits in the terms", async () => {
   assert.match(html, /続く初回音声と内部の自動調整では追加回数を使用しません/);
   assert.match(html, /作成後の再生成、文字起こし、高精度再解析は正常に完了するごとに1回分/);
   assert.match(html, /動画を保存せず編集を終了した場合も戻りません/);
-  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・最大(?:<!-- -->)?2(?:<!-- -->)?動画/);
+  assert.match(html, /合計(?:<!-- -->)?3(?:<!-- -->)?分以内・動画(?:<!-- -->)?2(?:<!-- -->)?本まで/);
   assert.match(html, /すべて消費税込み/);
   assert.match(html, /規約バージョン：(?:<!-- -->)?2026-08-13/);
   assert.match(html, /投稿素材と知的財産権/);

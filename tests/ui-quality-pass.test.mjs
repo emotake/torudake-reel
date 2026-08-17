@@ -183,13 +183,13 @@ test("explains media processing without hiding full-video AI uploads", () => {
 });
 
 test("keeps first-screen trial and purchase claims precise", () => {
-  assert.match(pageSource, /無料体験：合計3分以内・最大2動画まで/);
-  assert.match(pageSource, /AI処理は1動画につき3回/);
+  assert.match(pageSource, /無料体験：合計3分以内・動画2本まで/);
+  assert.match(pageSource, /AI処理は動画1本につき3回/);
   assert.match(pageSource, /プラン購入時に決済・書き出し成功時に1本分を使用/);
   assert.doesNotMatch(pageSource, /完成動画を保存するまでは料金がかかりません/);
 
   assert.match(photoReelSource, /className="photoReelHeroCta"/);
-  assert.match(photoReelSource, /無料体験はサービス共通で合計3分以内・最大2動画まで/);
+  assert.match(photoReelSource, /無料体験はサービス共通で合計3分以内・動画2本まで/);
   assert.match(photoReelSource, /購入手続き完了時に決済されます/);
   assert.ok(
     photoReelSource.indexOf('className="photoReelHeroCta"') <
@@ -241,7 +241,7 @@ test("uses declared font stacks and Japanese-first decorative labels", () => {
   ]) {
     assert.match(pageSource, new RegExp(label));
   }
-  assert.match(photoReelSource, /写真からリールへ · 端末内編集/);
+  assert.match(photoReelSource, /写真からリールへ・端末内編集/);
   assert.match(videoMixSource, /<span>複数動画編集<\/span>/);
 });
 

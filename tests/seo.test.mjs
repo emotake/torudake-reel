@@ -142,7 +142,7 @@ test("describes the real web application without invented ratings", () => {
     application.offers.some((offer) => offer.price === 1480),
     false,
   );
-  assert.match(application.offers[0].description, /合計3分以内・最大2動画/);
+  assert.match(application.offers[0].description, /合計3分以内・動画2本まで/);
   assert.ok(application.offers.slice(1).every((offer) => /税込/.test(offer.description)));
 });
 

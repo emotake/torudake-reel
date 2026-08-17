@@ -99,16 +99,16 @@ export default function CommercialDisclosurePage() {
         <dl className="legalDetails">
           <div>
             <dt>無料体験</dt>
-            <dd>1動画あたり{FREE_AI_OPERATION_SUCCESS_LIMIT}回</dd>
+            <dd>動画1本あたり{FREE_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
             <dt>{ONE_TIME_PLAN_LABEL}</dt>
-            <dd>1動画あたり{ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回</dd>
+            <dd>動画1本あたり{ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回</dd>
           </div>
           <div>
             <dt>月3本プラン・月7本プラン・旧月{LEGACY_MONTHLY_VIDEO_LIMIT}本プラン</dt>
             <dd>
-              1動画あたり{SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+              動画1本あたり{SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
             </dd>
           </div>
         </dl>
@@ -141,8 +141,8 @@ export default function CommercialDisclosurePage() {
           Stripeでの決済完了を確認後、通常は直ちに利用枠へ反映します。通信状況などにより反映に時間がかかる場合があります。
         </p>
         <p>
-          無料体験は合計{FREE_MINUTES}分以内・最大{FREE_VIDEO_LIMIT}
-          動画までの範囲で、いずれかの上限に先に達するまで編集とプレビューを利用できます。完成動画の保存には有料の利用枠が必要です。無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
+          無料体験は合計{FREE_MINUTES}分以内・動画{FREE_VIDEO_LIMIT}
+          本までの範囲で、いずれかの上限に先に達するまで編集とプレビューを利用できます。完成動画の保存には有料の利用枠が必要です。無料体験は編集結果が完成した時点で1本分を使用します。有料プランでは、動画の書き出しに成功した時点で、保存できる残り本数が1本減ります。
         </p>
       </article>
 
@@ -167,7 +167,7 @@ export default function CommercialDisclosurePage() {
       <article>
         <h2>動作環境</h2>
         <p>
-          JavaScriptとCookieを有効にした最新のSafari、Google ChromeまたはMicrosoft Edgeをご利用ください。スマートフォンでの動画書き出しには最新のiOSまたはAndroidを推奨します。対応動画形式はMP4、MOV、M4V、WebMで、1動画あたり最大500MBです。端末の空き容量やメモリ、動画の形式によって処理できない場合があります。
+          JavaScriptとCookieを有効にした最新のSafari、Google ChromeまたはMicrosoft Edgeをご利用ください。スマートフォンでの動画書き出しには最新のiOSまたはAndroidを推奨します。対応動画形式はMP4、MOV、M4V、WebMで、動画1本あたり最大500MBです。端末の空き容量やメモリ、動画の形式によって処理できない場合があります。
         </p>
       </article>
 

@@ -65,7 +65,7 @@ export function buildSiteStructuredData() {
           {
             "@type": "Offer",
             name: "無料体験（編集・プレビュー）",
-            description: `合計${freeMinutes}分以内・最大${FREE_VIDEO_LIMIT}動画まで（いずれか先に達するまで）。完成動画の保存は有料です。`,
+            description: `合計${freeMinutes}分以内・動画${FREE_VIDEO_LIMIT}本まで（いずれか先に達するまで）。完成動画の保存は有料です。`,
             price: 0,
             priceCurrency: "JPY",
             availability: "https://schema.org/InStock",

@@ -93,8 +93,9 @@ test("uses real media to distinguish all three creation modes", () => {
   assert.match(landingSource, /onClick=\{openPicker\}/);
   assert.match(landingSource, /href="\/video-mix"/);
   assert.match(landingSource, /href="\/photo-reel"/);
+  assert.match(landingSource, />動画 1本</);
   assert.match(landingSource, />動画 2〜5本</);
-  assert.match(landingSource, />写真 最大10枚</);
+  assert.match(landingSource, />写真 2〜10枚</);
 });
 
 test("does not present multiple videos and photos as the same material in a different grid", async () => {

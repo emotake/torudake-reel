@@ -81,7 +81,7 @@ function CreationChooser({
           className="creationModeCard isRecommended creationModeSingle"
         >
           <div className="creationModeLabel">
-            <span aria-hidden="true">1</span>
+            <span aria-hidden="true">動画 1本</span>
             <em>はじめてにおすすめ</em>
           </div>
           <ModeMediaVisual mode="single" />
@@ -114,7 +114,7 @@ function CreationChooser({
             <p>2〜5本から使う場面を選び、素材の順番を保ったまま1本にします。</p>
           </div>
           <Link className="creationModeAction" href="/video-mix">
-            複数動画で作る <span aria-hidden="true">→</span>
+            動画を2〜5本選ぶ <span aria-hidden="true">→</span>
           </Link>
         </article>
 
@@ -122,15 +122,15 @@ function CreationChooser({
           className="creationModeCard creationModePhotos"
         >
           <div className="creationModeLabel">
-            <span aria-hidden="true">写真 最大10枚</span>
+            <span aria-hidden="true">写真 2〜10枚</span>
           </div>
           <ModeMediaVisual mode="photos" />
           <div className="creationModeCopy">
             <h3>写真から作る</h3>
-            <p>最大10枚の写真を選び、動きのある縦型リールへまとめます。</p>
+            <p>2〜10枚の写真を選び、動きのある縦型リールへまとめます。</p>
           </div>
           <Link className="creationModeAction" href="/photo-reel">
-            写真で作る <span aria-hidden="true">→</span>
+            写真を2〜10枚選ぶ <span aria-hidden="true">→</span>
           </Link>
         </article>
       </div>
@@ -172,12 +172,12 @@ function PricingTeaser() {
       </header>
       <div className="homeFreePreview">
         <strong>¥0</strong>
-        <span>無料体験は合計3分以内・最大2動画まで。AI処理は1動画につき3回です。</span>
+        <span>無料体験は合計3分以内・動画2本まで。AI処理は動画1本につき3回です。</span>
       </div>
       <div className="homePriceChips" aria-label="保存料金の概要">
         <article>
           <small>まず1本だけ</small>
-          <strong>¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+          <strong>動画1本 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
           <span>1回払い・税込・自動更新なし</span>
         </article>
         <article>
@@ -397,7 +397,7 @@ export function HomeLanding(props: LandingSharedProps) {
         </header>
         <details>
           <summary>どの作り方を選べばよいですか？</summary>
-          <p>動画が1本なら「動画1本から作る」、2〜5本なら「複数の動画から作る」、写真だけなら「写真から作る」を選んでください。</p>
+          <p>動画が1本なら「動画1本から作る」、2〜5本なら「複数の動画から作る」、写真なら2〜10枚を選んでください。</p>
         </details>
         <details>
           <summary>動画や写真はどこで処理されますか？</summary>
@@ -422,7 +422,7 @@ export function HomeLanding(props: LandingSharedProps) {
         <div className="homeFinalActions">
           <button type="button" onClick={props.openPicker}>動画を1本選ぶ</button>
           <Link href="/video-mix">2〜5本の動画をつなぐ</Link>
-          <Link href="/photo-reel">写真から作る</Link>
+          <Link href="/photo-reel">写真を2〜10枚選ぶ</Link>
         </div>
       </section>
     </div>
