@@ -2,6 +2,7 @@ import {
   deleteAccountPasskey,
   getAccountPasskeys,
   renameAccountPasskey,
+  requirePasskeyAuthenticationAvailable,
 } from "../../../../lib/account-auth";
 import {
   accountAuthErrorResponse,
@@ -12,6 +13,7 @@ import { isSameOriginMutation } from "../../../../lib/operator-session";
 
 export async function GET(request: Request) {
   try {
+    requirePasskeyAuthenticationAvailable();
     return privateJson({ passkeys: await getAccountPasskeys(request) });
   } catch (error) {
     return accountAuthErrorResponse(error);
@@ -19,8 +21,9 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!isSameOriginMutation(request)) return invalidOrigin();
   try {
+    requirePasskeyAuthenticationAvailable();
+    if (!isSameOriginMutation(request)) return invalidOrigin();
     const payload = await readAuthJson(request);
     const result = await renameAccountPasskey(
       request,
@@ -34,8 +37,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!isSameOriginMutation(request)) return invalidOrigin();
   try {
+    requirePasskeyAuthenticationAvailable();
+    if (!isSameOriginMutation(request)) return invalidOrigin();
     const payload = await readAuthJson(request);
     const result = await deleteAccountPasskey(
       request,

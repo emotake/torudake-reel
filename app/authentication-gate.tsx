@@ -3,6 +3,7 @@
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { useCallback, useEffect, useRef, useState } from "react";
+import lineButtonStyles from "./line-login-button.module.css";
 
 type AuthenticationReason = "billing" | "account" | "ai";
 type AuthenticationMode = "authenticate" | "reauthenticate";
@@ -22,18 +23,29 @@ type AuthenticationMethods = AccountAuthenticationMethods & {
 
 type AuthPayload<T> = T & { error?: string; code?: string };
 
-const reasonCopy: Record<AuthenticationReason, { title: string; body: string }> = {
+const reasonCopy: Record<
+  AuthenticationReason,
+  { title: string; lineBody: string; passkeyBody: string }
+> = {
   ai: {
     title: "AI機能を使うにはログイン",
-    body: "素材と編集内容はこの画面に残ります。Googleまたは登録済みのパスキーでログインしてください。",
+    lineBody:
+      "素材と編集内容はこの画面に残ります。LINEでログインしてください。",
+    passkeyBody:
+      "素材と編集内容はこの画面に残ります。LINEまたは登録済みのパスキーでログインしてください。",
   },
   billing: {
     title: "保存方法を選ぶ",
-    body: "購入履歴や月額契約を安全に管理するため、Googleまたは登録済みパスキーでログインしてください。",
+    lineBody:
+      "購入履歴や月額契約を安全に管理するため、LINEでログインしてください。",
+    passkeyBody:
+      "購入履歴や月額契約を安全に管理するため、LINEまたは登録済みパスキーでログインしてください。",
   },
   account: {
     title: "アカウントへログイン",
-    body: "Googleまたは登録済みパスキーで、利用枠とお支払いを安全に管理できます。",
+    lineBody: "LINEでログインすると、利用枠とお支払いを安全に管理できます。",
+    passkeyBody:
+      "LINEまたは登録済みパスキーで、利用枠とお支払いを安全に管理できます。",
   },
 };
 
@@ -69,7 +81,7 @@ export default function AuthenticationGate({
   mode?: AuthenticationMode;
 }) {
   const [methods, setMethods] = useState<AuthenticationMethods | null>(null);
-  const [busy, setBusy] = useState<"passkey" | "google" | null>(null);
+  const [busy, setBusy] = useState<"passkey" | "line" | null>(null);
   const [error, setError] = useState("");
   const settledRef = useRef(false);
   const trialReadyRef = useRef(false);
@@ -199,53 +211,79 @@ export default function AuthenticationGate({
     }
   };
 
-  const authenticateWithGoogle = async () => {
+  const authenticateWithLine = async () => {
     setError("");
-    setBusy("google");
-    try {
-      await ensureAuthenticationContext();
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Googleログインを開始できませんでした。",
-      );
-      setBusy(null);
-      return;
-    }
+    setBusy("line");
+
+    // Open synchronously inside the click event. Opening after the trial
+    // request resolves is commonly blocked, especially on mobile browsers.
     const popup = window.open(
       "about:blank",
-      "torudake-google-login",
+      "torudake-line-login",
       "popup=yes,width=520,height=720",
     );
     if (!popup) {
       setError(
-        "Googleログイン画面を開けませんでした。ポップアップを許可して、もう一度お試しください。",
+        "LINEログイン画面を開けませんでした。ブラウザでポップアップを許可して、もう一度お試しください。",
       );
       setBusy(null);
       return;
     }
     popup.opener = null;
-    const reauthenticationQuery =
-      mode === "reauthenticate" ? "&reauthenticate=1" : "";
-    popup.location.href =
-      `/api/account/oauth/google/start?popup=1${reauthenticationQuery}`;
+
+    try {
+      await ensureAuthenticationContext();
+    } catch (cause) {
+      popup.close();
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "LINEログインを開始できませんでした。",
+      );
+      setBusy(null);
+      return;
+    }
+
+    const startUrl = new URL(
+      "/api/account/oauth/line/start",
+      window.location.origin,
+    );
+    startUrl.searchParams.set("popup", "1");
+    if (mode === "reauthenticate") {
+      startUrl.searchParams.set("reauthenticate", "1");
+    }
+    try {
+      popup.location.replace(startUrl.toString());
+    } catch {
+      popup.close();
+      setError(
+        "LINEログイン画面へ移動できませんでした。もう一度お試しください。",
+      );
+      setBusy(null);
+      return;
+    }
     window.setTimeout(() => setBusy(null), 1_000);
   };
 
-  const googleAvailable =
-    methods?.google === true &&
-    (mode !== "reauthenticate" || methods.accountMethods.google);
+  const lineAvailable =
+    methods?.line === true &&
+    (mode !== "reauthenticate" || methods.accountMethods.line);
   const passkeyAvailable =
     methods?.passkey === true &&
     (mode !== "reauthenticate" || methods.accountMethods.passkey);
+  const selectedReasonCopy = reasonCopy[reason];
   const copy =
     mode === "reauthenticate"
       ? {
           title: "本人確認をやり直す",
           body: "このアカウントに登録済みの方法で本人確認してください。",
         }
-      : reasonCopy[reason];
+      : {
+          title: selectedReasonCopy.title,
+          body: passkeyAvailable
+            ? selectedReasonCopy.passkeyBody
+            : selectedReasonCopy.lineBody,
+        };
 
   return (
     <div className="authenticationGateBackdrop" role="presentation">
@@ -271,18 +309,27 @@ export default function AuthenticationGate({
         <p>{copy.body}</p>
 
         <div className="authenticationGateActions">
-          {googleAvailable ? (
+          {lineAvailable ? (
             <button
               type="button"
-              className="authenticationProvider google"
-              onClick={() => void authenticateWithGoogle()}
+              className={`authenticationProvider line ${lineButtonStyles.button}`}
+              onClick={() => void authenticateWithLine()}
               disabled={busy !== null}
             >
-              {busy === "google"
-                ? "Googleを確認中…"
-                : mode === "reauthenticate"
-                  ? "Googleで本人確認"
-                  : "Googleで続ける"}
+              <span className={lineButtonStyles.content}>
+                <span
+                  className={lineButtonStyles.icon}
+                  aria-hidden="true"
+                />
+                <span className={lineButtonStyles.label}>
+                  {busy === "line"
+                    ? "LINEを確認中…"
+                    : mode === "reauthenticate"
+                      ? "LINEで本人確認"
+                      : "LINEでログイン"}
+                </span>
+                <span className={lineButtonStyles.balance} aria-hidden="true" />
+              </span>
             </button>
           ) : null}
           {passkeyAvailable ? (
@@ -304,7 +351,7 @@ export default function AuthenticationGate({
         {!methods ? (
           <p className="authenticationGateStatus">ログイン方法を確認中…</p>
         ) : null}
-        {methods && !googleAvailable && !passkeyAvailable ? (
+        {methods && !lineAvailable && !passkeyAvailable ? (
           <p className="authenticationGateError" role="alert">
             現在利用できるログイン方法がありません。サポートへお問い合わせください。
           </p>
@@ -313,7 +360,7 @@ export default function AuthenticationGate({
           <p className="authenticationGateError" role="alert">{error}</p>
         ) : null}
         <small>
-          Googleへの投稿操作は行いません。ログイン情報は利用枠と購入履歴の管理にだけ使用します。
+          LINEへの投稿やLINE公式アカウントの友だち追加は行いません。ログイン情報は利用枠と購入履歴の管理にだけ使用します。
         </small>
       </div>
     </div>

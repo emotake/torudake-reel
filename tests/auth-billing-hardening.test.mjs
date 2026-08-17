@@ -71,6 +71,7 @@ for (const fileName of (await readdir(migrationDirectory))
 
 const runtimeEnv = {
   DB: database,
+  PASSKEY_AUTH_ENABLED: "true",
   TRIAL_ISSUANCE_SECRET: "test-secret-with-at-least-thirty-two-characters",
   STRIPE_SECRET_KEY: "sk_test_hardening",
   STRIPE_PRICE_STARTER_MONTHLY: "price_starter",

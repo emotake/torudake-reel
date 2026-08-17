@@ -430,7 +430,7 @@ test("publishes safe support guidance for billing, recovery, and export failures
 
   assert.match(html, /決済・月額プランの解約/);
   assert.match(html, /書き出しや保存に失敗した/);
-  assert.match(html, /Googleログインまたはパスキーで困った/);
+  assert.match(html, /LINEログインで困った/);
   assert.match(html, /二重請求・返金について/);
   assert.match(html, /エラー番号/);
   assert.match(html, /利用端末とブラウザ/);

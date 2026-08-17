@@ -122,6 +122,7 @@ export function buildOidcAuthorizationUrl(
     state: string;
     nonce: string;
     pkceChallenge: string;
+    forceLogin?: boolean;
   },
 ) {
   const endpoint =
@@ -143,7 +144,9 @@ export function buildOidcAuthorizationUrl(
   url.searchParams.set("nonce", values.nonce);
   url.searchParams.set("code_challenge", values.pkceChallenge);
   url.searchParams.set("code_challenge_method", "S256");
-  if (config.provider === "google") {
+  if (config.provider === "line" && values.forceLogin === true) {
+    url.searchParams.set("prompt", "login");
+  } else if (config.provider === "google") {
     url.searchParams.set("prompt", "select_account");
   }
   return url;
@@ -546,13 +549,54 @@ function decodeBase64Url(value: string, maxBytes: number) {
 }
 
 async function readBoundedJsonObject(response: Response, limit: number) {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > limit) {
-    throw new OidcProtocolError("provider_response_too_large");
+  const rawLength = response.headers.get("content-length");
+  if (rawLength !== null) {
+    const declaredLength = Number(rawLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength < 0 ||
+      declaredLength > limit
+    ) {
+      await response.body?.cancel("provider_response_too_large").catch(
+        () => undefined,
+      );
+      throw new OidcProtocolError("provider_response_too_large");
+    }
   }
-  const text = await response.text();
-  if (new TextEncoder().encode(text).length > limit) {
-    throw new OidcProtocolError("provider_response_too_large");
+
+  const reader = response.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > limit) {
+          await reader.cancel("provider_response_too_large").catch(
+            () => undefined,
+          );
+          throw new OidcProtocolError("provider_response_too_large");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new OidcProtocolError("invalid_provider_response");
   }
   try {
     const value: unknown = JSON.parse(text);

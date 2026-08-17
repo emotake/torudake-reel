@@ -52,11 +52,11 @@ test("polls the authenticated account after Stripe redirects back", () => {
 test("reauthenticates an existing account before adding a backup passkey", () => {
   assert.match(
     accountSource,
-    /if \(status\?\.authenticated !== true\) \{\s*throw new Error\([\s\S]*?先にGoogleでログインしてください。/,
+    /if \(status\?\.authenticated !== true\) \{\s*throw new Error\([\s\S]*?先にLINEでログインしてください。/,
   );
   assert.match(accountSource, /await reauthenticate\(\);[\s\S]*?\/api\/account\/passkey\/register\/options/);
   assert.doesNotMatch(accountSource, /\/api\/session\/trial/);
-  assert.match(accountSource, /Googleで登録した方も追加できます/);
+  assert.match(accountSource, /LINEで登録した方も追加できます/);
   assert.match(accountSource, /予備パスキーを追加/);
   assert.match(accountSource, /予備のパスキーを追加しました/);
 });

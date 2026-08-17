@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import {
   AccountAuthError,
   getAccountIdentity,
+  requireRecentAccountReauthentication,
   requireRecentAccountSession,
 } from "../../../../lib/account-auth";
 import {
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
       );
     }
     const session = await requireRecentAccountSession(request);
+    await requireDeletionReauthentication(request, session.userId);
     const [billing, billingUser] = await Promise.all([
       getBillingStatusForUser(session.userId),
       getBillingUserById(session.userId),
@@ -259,6 +261,27 @@ function deletionErrorResponse(error: unknown) {
     },
     { status: 502 },
   );
+}
+
+async function requireDeletionReauthentication(
+  request: Request,
+  userId: string,
+) {
+  try {
+    await requireRecentAccountReauthentication(request, userId);
+  } catch (error) {
+    if (
+      error instanceof AccountAuthError &&
+      error.code === "backup_passkey_reauthentication_required"
+    ) {
+      throw new AccountAuthError(
+        "reauthentication_required",
+        401,
+        "安全のため、登録済みのログイン方法で本人確認をやり直してください。",
+      );
+    }
+    throw error;
+  }
 }
 
 function databaseOrThrow() {

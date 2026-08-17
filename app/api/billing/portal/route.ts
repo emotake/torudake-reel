@@ -58,11 +58,13 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
-  if (!isAccountAuthenticationAvailable()) {
-    return authenticationUnavailable();
-  }
   const currentUser = await getCurrentUser(request);
-  if (!currentUser) return authenticationRequired();
+  if (!currentUser) {
+    if (!isAccountAuthenticationAvailable()) {
+      return authenticationUnavailable();
+    }
+    return authenticationRequired();
+  }
 
   if (!isBillingConfigured()) {
     return Response.json(
@@ -119,11 +121,13 @@ export async function GET(request: Request) {
       { status: 403 },
     );
   }
-  if (!isAccountAuthenticationAvailable()) {
-    return authenticationUnavailable();
-  }
   const currentUser = await getCurrentUser(request);
-  if (!currentUser) return authenticationRequired();
+  if (!currentUser) {
+    if (!isAccountAuthenticationAvailable()) {
+      return authenticationUnavailable();
+    }
+    return authenticationRequired();
+  }
   if (!isBillingConfigured()) {
     return privateJson(
       { error: "領収書の確認は現在準備中です。" },

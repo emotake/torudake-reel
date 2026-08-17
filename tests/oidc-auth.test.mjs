@@ -53,7 +53,23 @@ test("authorization requests always contain state, nonce and S256 PKCE", async (
     assert.equal(url.searchParams.get("code_challenge_method"), "S256");
     assert.equal(url.searchParams.get("redirect_uri"), oidcRedirectUri(provider, canonicalOrigin));
     assert.equal(url.searchParams.has("client_secret"), false);
+    assert.equal(
+      url.searchParams.get("prompt"),
+      provider === "google" ? "select_account" : null,
+    );
   }
+
+  const lineConfig = {
+    provider: "line",
+    clientId: "1234567890",
+    clientSecret: "secret-value-not-exposed",
+    canonicalOrigin,
+  };
+  const reauthenticationUrl = buildOidcAuthorizationUrl(lineConfig, {
+    ...values,
+    forceLogin: true,
+  });
+  assert.equal(reauthenticationUrl.searchParams.get("prompt"), "login");
 });
 
 test("authorization code exchange sends PKCE verifier only to the fixed token endpoint", async () => {
@@ -86,6 +102,42 @@ test("authorization code exchange sends PKCE verifier only to the fixed token en
   assert.equal(body.get("redirect_uri"), oidcRedirectUri("google", canonicalOrigin));
   assert.equal(body.get("client_secret"), config.clientSecret);
   assert.equal(result.accessToken, "access-token-value");
+});
+
+test("chunked provider responses are cancelled at the byte limit", async () => {
+  const config = {
+    provider: "line",
+    clientId: "1234567890",
+    clientSecret: "line-client-secret",
+    canonicalOrigin,
+  };
+  let cancelled = false;
+  const fetcher = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(40 * 1024));
+          controller.enqueue(new Uint8Array(30 * 1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { status: 200 },
+    );
+
+  await assert.rejects(
+    exchangeOidcAuthorizationCode(
+      config,
+      {
+        code: "authorization-code-value",
+        pkceVerifier: "v".repeat(64),
+      },
+      fetcher,
+    ),
+    (error) => error?.code === "provider_response_too_large",
+  );
+  assert.equal(cancelled, true);
 });
 
 test("LINE identity is accepted only after server-side verify response claim checks", async () => {

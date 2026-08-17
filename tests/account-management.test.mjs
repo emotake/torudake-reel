@@ -73,6 +73,7 @@ for (const fileName of (await readdir(migrationDirectory))
 }
 globalThis.__cloudflareEnv = {
   DB: database,
+  PASSKEY_AUTH_ENABLED: "true",
   TRIAL_ISSUANCE_SECRET: "test-secret-with-at-least-thirty-two-characters",
 };
 

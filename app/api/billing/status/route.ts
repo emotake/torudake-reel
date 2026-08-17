@@ -18,12 +18,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const authenticationAvailable = isAccountAuthenticationAvailable();
   const stripeConfigured = isBillingConfigured();
-  const configured = authenticationAvailable && stripeConfigured;
   const billingMode = stripeBillingMode();
   const currentUser = await getCurrentUser(request);
   if (!currentUser) {
     return privateJson({
-      configured,
+      configured: authenticationAvailable && stripeConfigured,
       authenticationAvailable,
       billingMode,
       authenticated: false,
@@ -37,7 +36,7 @@ export async function GET(request: Request) {
     const user = await getOrCreateBillingUser(currentUser);
     const status = await getBillingStatusForUser(user.id);
     return privateJson({
-      configured: configured && readiness?.ready === true,
+      configured: stripeConfigured && readiness?.ready === true,
       authenticationAvailable,
       billingMode,
       billingReadiness: readiness

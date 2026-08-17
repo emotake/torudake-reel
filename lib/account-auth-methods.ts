@@ -12,8 +12,10 @@ export type AccountAuthenticationMethodAvailability = {
 export function configuredAccountAuthenticationMethods(): AccountAuthenticationMethodAvailability {
   return {
     passkey: isPasskeyAuthenticationConfigured(),
-    line: false,
-    google: isOidcProviderConfigured("google"),
+    line: isOidcProviderConfigured("line"),
+    // Google routes remain available for a controlled rollback, but the
+    // public account chooser is deliberately LINE-first.
+    google: false,
     email: false,
   };
 }

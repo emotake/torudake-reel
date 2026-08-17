@@ -119,8 +119,9 @@ test("account UI discloses pending checkout before authentication", async () => 
   assert.match(source, /解約するまで1か月ごとに自動更新/);
   assert.match(source, /1回払い・自動更新なし/);
   assert.match(source, /ログインしたあと、Stripeの決済画面を開きます/);
-  assert.match(source, /Googleでアカウントを作成またはログイン/);
-  assert.match(source, /登録済みのパスキーでもログイン/);
+  assert.match(source, /LINEでアカウントを作成またはログイン/);
+  assert.match(source, /authenticationMethods\?\.passkey/);
+  assert.match(source, /\/api\/account\/auth\/methods/);
   assert.match(source, /\/api\/account\/passkeys/);
   assert.match(
     source,
@@ -157,8 +158,8 @@ test("dangerous account actions require recent same-account reauthentication", a
     "the step-up gate must render in the authenticated account branch",
   );
   assert.match(gate, /\/api\/account\/passkey\/reauth\/options/);
-  assert.match(gate, /reauthenticate=1/);
-  assert.match(gate, /methods\.accountMethods\.google/);
+  assert.match(gate, /searchParams\.set\("reauthenticate", "1"\)/);
+  assert.match(gate, /methods\.accountMethods\.line/);
   assert.match(gate, /methods\.accountMethods\.passkey/);
   assert.match(
     gate,
@@ -212,8 +213,20 @@ test("billing entry points consume D1 account rate limits", async () => {
     assert.match(route, /isAccountAuthenticationAvailable\(\)/);
     assert.doesNotMatch(route, /isPasskeyAuthenticationConfigured\(\)/);
   }
-  assert.match(methods, /isOidcProviderConfigured\("google"\)/);
-  assert.match(methods, /line: false/);
+  assert.match(
+    checkout,
+    /isCanonicalBillingRequest\(request\)[\s\S]*?getCurrentUser\(request\)[\s\S]*?if \(!currentUser\)[\s\S]*?isAccountAuthenticationAvailable\(\)/,
+  );
+  assert.match(
+    portal,
+    /isCanonicalBillingRequest\(request\)[\s\S]*?getCurrentUser\(request\)[\s\S]*?if \(!currentUser\)[\s\S]*?isAccountAuthenticationAvailable\(\)/,
+  );
+  assert.match(
+    status,
+    /configured: stripeConfigured && readiness\?\.ready === true/,
+  );
+  assert.match(methods, /line: isOidcProviderConfigured\("line"\)/);
+  assert.match(methods, /google: false/);
   assert.match(methods, /email: false/);
 });
 

@@ -67,6 +67,19 @@ type BillingStatus = {
 
 type AuthOptions<T> = { options?: T; error?: string; code?: string };
 
+type AccountAuthenticationMethods = {
+  passkey: boolean;
+  line: boolean;
+  google: boolean;
+  email: boolean;
+};
+
+type AccountAuthenticationState = AccountAuthenticationMethods & {
+  authenticated: boolean;
+  recentlyAuthenticated: boolean;
+  accountMethods: AccountAuthenticationMethods;
+};
+
 type AccountPasskey = {
   id: string;
   displayName: string;
@@ -160,6 +173,8 @@ function activeMonthlyPlanLabel(status: BillingStatus) {
 
 export default function AccountClient() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [authenticationMethods, setAuthenticationMethods] =
+    useState<AccountAuthenticationState | null>(null);
   const [pendingCheckoutPlan, setPendingCheckoutPlan] =
     useState<CheckoutPlan | null>(null);
   const [passkeys, setPasskeys] = useState<AccountPasskey[]>([]);
@@ -211,6 +226,21 @@ export default function AccountClient() {
       window.localStorage.removeItem(ACCOUNT_AUTH_HINT_STORAGE_KEY);
     }
     setStatus(payload);
+    return payload;
+  }
+
+  async function loadAuthenticationMethods() {
+    const response = await fetch("/api/account/auth/methods", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | (AccountAuthenticationState & { error?: string })
+      | null;
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || "ログイン方法を確認できませんでした。");
+    }
+    setAuthenticationMethods(payload);
     return payload;
   }
 
@@ -296,7 +326,7 @@ export default function AccountClient() {
     try {
       if (status?.authenticated !== true) {
         throw new Error(
-          "パスキーを追加するには、先にGoogleでログインしてください。",
+          "パスキーを追加するには、先にLINEでログインしてください。",
         );
       }
       await reauthenticate();
@@ -661,6 +691,13 @@ export default function AccountClient() {
 
       void (async () => {
         try {
+          try {
+            await loadAuthenticationMethods();
+          } catch {
+            // Fail closed: unavailable feature flags must not expose a
+            // Passkey action that will be rejected by the server.
+            setAuthenticationMethods(null);
+          }
           if (checkout !== "success") {
             await loadStatus();
             return;
@@ -711,7 +748,12 @@ export default function AccountClient() {
     let cancelled = false;
     void (async () => {
       try {
-        await loadPasskeys();
+        if (authenticationMethods?.passkey) {
+          await loadPasskeys();
+        } else {
+          setPasskeys([]);
+          setPasskeyNames({});
+        }
         await loadAccountDeletion();
         if (status.user?.hasStripeCustomer) {
           await loadBillingDocuments();
@@ -729,7 +771,11 @@ export default function AccountClient() {
     return () => {
       cancelled = true;
     };
-  }, [status?.authenticated, status?.user?.hasStripeCustomer]);
+  }, [
+    authenticationMethods?.passkey,
+    status?.authenticated,
+    status?.user?.hasStripeCustomer,
+  ]);
 
   useEffect(() => {
     if (!status?.authenticated || checkoutStarted.current) return;
@@ -763,7 +809,11 @@ export default function AccountClient() {
           <p className="eyebrow">ACCOUNT</p>
           <h1>本人確認して、利用枠とお支払いを管理</h1>
           <p>
-            Googleでアカウントを作成またはログインできます。登録済みのパスキーでもログインできます。プロフィール入力やパスワード登録は不要です。
+            LINEでアカウントを作成またはログインできます。
+            {authenticationMethods?.passkey
+              ? "登録済みのパスキーでもログインできます。"
+              : ""}
+            プロフィール入力やパスワード登録は不要です。
           </p>
           {selectedPlan && (
             <article className="accountNotice accountSelectedPlan" aria-label="選択中の料金プラン">
@@ -783,25 +833,28 @@ export default function AccountClient() {
               <button
                 className="accountPrimaryAction"
                 disabled={busy !== null}
+                aria-haspopup="dialog"
                 onClick={() => setAccountAuthOpen(true)}
               >
-                ログイン方法を選ぶ
+                ログインへ進む
               </button>
-              <details className="accountRecoveryHelp">
-                <summary>登録済みパスキーを使う</summary>
-                <button
-                  className="accountSecondaryAction"
-                  disabled={busy !== null}
-                  onClick={loginPasskey}
-                >
-                  {busy === "login" ? "本人確認中…" : "登録済みパスキーでログイン"}
-                </button>
-              </details>
+              {authenticationMethods?.passkey ? (
+                <details className="accountRecoveryHelp">
+                  <summary>登録済みパスキーを使う</summary>
+                  <button
+                    className="accountSecondaryAction"
+                    disabled={busy !== null}
+                    onClick={loginPasskey}
+                  >
+                    {busy === "login" ? "本人確認中…" : "登録済みパスキーでログイン"}
+                  </button>
+                </details>
+              ) : null}
             </div>
           )}
           {error && <p className="accountError" role="alert">{error}</p>}
           <small>
-            Googleへの投稿操作は行いません。カード情報はStripeが管理します。
+            LINEへの投稿やLINE公式アカウントの友だち追加は行いません。カード情報はStripeが管理します。
           </small>
           <AuthenticationGate
             open={accountAuthOpen}
@@ -819,37 +872,39 @@ export default function AccountClient() {
             </Link>
             してください。
           </p>
-          <details className="accountRecoveryHelp">
-            <summary>パスキーをすべて失い、ログインできない場合</summary>
-            <p>
-              決済時のメールアドレスから復旧・解約の相談を受け付けます。ここでログイン権限が自動発行されることはありません。
-            </p>
-            <label className="accountField">
-              決済時のメールアドレス
-              <input
-                className="accountTextField"
-                type="email"
-                value={recoveryEmail}
-                autoComplete="email"
-                onChange={(event) => setRecoveryEmail(event.target.value)}
-              />
-            </label>
-            <button
-              className="accountSecondaryAction"
-              disabled={busy !== null || !recoveryEmail.trim()}
-              onClick={requestRecovery}
-            >
-              {busy === "recovery" ? "受付中…" : "復旧・解約の相談を受け付ける"}
-            </button>
-            {recoveryReference && (
-              <p role="status">
-                受付番号：<strong>{recoveryReference}</strong><br />
-                <Link href={`/support?recovery=${encodeURIComponent(recoveryReference)}`}>
-                  受付番号を添えて運営へ連絡する
-                </Link>
+          {authenticationMethods?.passkey ? (
+            <details className="accountRecoveryHelp">
+              <summary>パスキーをすべて失い、ログインできない場合</summary>
+              <p>
+                決済時のメールアドレスから復旧・解約の相談を受け付けます。ここでログイン権限が自動発行されることはありません。
               </p>
-            )}
-          </details>
+              <label className="accountField">
+                決済時のメールアドレス
+                <input
+                  className="accountTextField"
+                  type="email"
+                  value={recoveryEmail}
+                  autoComplete="email"
+                  onChange={(event) => setRecoveryEmail(event.target.value)}
+                />
+              </label>
+              <button
+                className="accountSecondaryAction"
+                disabled={busy !== null || !recoveryEmail.trim()}
+                onClick={requestRecovery}
+              >
+                {busy === "recovery" ? "受付中…" : "復旧・解約の相談を受け付ける"}
+              </button>
+              {recoveryReference && (
+                <p role="status">
+                  受付番号：<strong>{recoveryReference}</strong><br />
+                  <Link href={`/support?recovery=${encodeURIComponent(recoveryReference)}`}>
+                    受付番号を添えて運営へ連絡する
+                  </Link>
+                </p>
+              )}
+            </details>
+          ) : null}
           <div className="accountLegalLinks">
             <Link href="/terms">利用規約</Link>
             <Link href="/commercial-disclosure">特定商取引法に基づく表記</Link>
@@ -940,6 +995,7 @@ export default function AccountClient() {
             </article>
           </section>
 
+          {authenticationMethods?.passkey ? (
           <section className="accountPlans" aria-labelledby="accountSecurityTitle">
             <header className="accountPlansIntro">
               <p className="eyebrow">SECURITY</p>
@@ -973,7 +1029,7 @@ export default function AccountClient() {
               <small>
                 {passkeys.length > 0
                   ? "最大10件。追加時にFace ID・Touch ID・端末の画面ロックで本人確認します。"
-                  : "Googleで登録した方も追加できます。以後の本人確認とログインに利用します。"}
+                  : "LINEで登録した方も追加できます。以後の本人確認とログインに利用します。"}
               </small>
             </article>
             {passkeys.map((passkey) => (
@@ -1034,6 +1090,7 @@ export default function AccountClient() {
               {busy === "revoke_sessions" ? "本人確認中…" : "すべての端末をログアウト"}
             </button>
           </section>
+          ) : null}
 
           <section className="accountPlans" aria-labelledby="accountPlansTitle">
             <header className="accountPlansIntro">
@@ -1231,6 +1288,9 @@ export default function AccountClient() {
             )}
             <small>
               返金・支払い異議・法令対応に必要な課金記録は、個人情報を最小化したうえで必要な期間保持する場合があります。
+            </small>
+            <small>
+              LINEの認証権限はログイン確認直後に解除し、継続保持しません。削除確定時には、本サービス内のLINE連携識別情報も削除します。
             </small>
           </section>
         </>

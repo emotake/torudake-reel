@@ -96,8 +96,8 @@ test("pricing page includes the paid-service trust and legal essentials", () => 
     "自動更新",
     "繰り越されません",
     "書き出しに成功した時点",
-    "新しいアカウントはGoogleで作成",
-    "Face ID・Touch ID",
+    "新しいアカウントはLINEで作成",
+    "LINE公式アカウントの友だち追加は行いません",
     "Stripe",
     "いつでも解約",
   ]) {

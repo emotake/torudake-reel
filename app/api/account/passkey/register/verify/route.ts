@@ -1,5 +1,8 @@
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
-import { verifyRegistration } from "../../../../../../lib/account-auth";
+import {
+  requirePasskeyAuthenticationAvailable,
+  verifyRegistration,
+} from "../../../../../../lib/account-auth";
 import {
   accountAuthErrorResponse,
   privateJson,
@@ -15,6 +18,7 @@ export async function POST(request: Request) {
     );
   }
   try {
+    requirePasskeyAuthenticationAvailable();
     const payload = await readAuthJson(request);
     const wrappedCredential = "credential" in payload ? payload.credential : payload;
     if (!wrappedCredential || typeof wrappedCredential !== "object") {

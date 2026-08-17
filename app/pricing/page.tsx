@@ -218,10 +218,10 @@ export default function PricingPage() {
             <div>
               <h3 id="checkout-title">ログイン後に、Stripeでお支払い</h3>
               <p>
-                新しいアカウントはGoogleで作成します。既存のパスキー利用者は登録済みパスキーでもログインできます。ログイン後にStripeの決済画面を開きます。アカウント画面ではまだ決済されません。
+                新しいアカウントはLINEで作成します。ログイン後にStripeの決済画面を開きます。アカウント画面ではまだ決済されません。
               </p>
               <small>
-                登録済みパスキーはFace ID・Touch ID・端末の画面ロックで確認でき、秘密情報は端末から送信されません。カード情報はStripeが管理します。
+                LINEへの投稿やLINE公式アカウントの友だち追加は行いません。カード情報はStripeが管理します。
               </small>
             </div>
           </aside>
@@ -314,7 +314,7 @@ export default function PricingPage() {
             <details>
               <summary>購入ボタンを押すと、すぐ請求されますか？</summary>
               <p>
-                いいえ。Googleでアカウントを作成するか、利用可能な登録済み方法でログインしたあとにStripeの決済画面が開きます。最終金額を確認し、Stripeで注文を確定するまでは料金は発生しません。
+                いいえ。LINEでログインしたあとにStripeの決済画面が開きます。最終金額を確認し、Stripeで注文を確定するまでは料金は発生しません。
               </p>
             </details>
             <details>

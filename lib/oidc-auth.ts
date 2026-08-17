@@ -38,6 +38,7 @@ import {
   readRequestBodyWithLimit,
   RequestBodyTooLargeError,
 } from "./request-safety";
+import { deauthorizeLineAuthorization } from "./line-deauthorization";
 
 const OIDC_TRANSACTION_LIFETIME_SECONDS = 10 * 60;
 const OIDC_RATE_WINDOW_SECONDS = 10 * 60;
@@ -109,6 +110,9 @@ export async function beginOidcAuthorization(
       400,
       "ログイン方法の追加と本人確認を同時に開始することはできません。",
     );
+  }
+  if (provider === "line" && link) {
+    throw lineLinkUnavailableError();
   }
   const authenticatedAccount = await getAccountIdentity(request);
   if (authenticatedAccount && !reauthenticate && !link) {
@@ -246,6 +250,7 @@ export async function beginOidcAuthorization(
     state: transaction.state,
     nonce: transaction.nonce,
     pkceChallenge: transaction.pkceChallenge,
+    forceLogin: reauthenticate,
   });
   const secure = config.canonicalOrigin.startsWith("https://");
   const response = redirectResponse(authorizationUrl.toString(), 302);
@@ -418,6 +423,9 @@ export async function completeOidcAuthorization(
       );
     }
     validateStoredTransaction(transaction, config);
+    if (provider === "line" && transaction.intent === "link") {
+      throw lineLinkUnavailableError();
+    }
 
     const providerError = optionalSingleQueryParameter(callbackUrl, "error");
     if (providerError) {
@@ -431,7 +439,9 @@ export async function completeOidcAuthorization(
       );
     }
 
-    const currentAccount = await getAccountIdentity(request);
+    const currentAccount = await getAccountIdentity(request, {
+      touchLastSeen: false,
+    });
     let trial: ExternalAuthTrialContext | null = null;
     let initiatingSessionTokenHash: string | null = null;
     if (
@@ -523,6 +533,20 @@ export async function completeOidcAuthorization(
             clientId: config.clientId,
             nowSeconds: completionNow,
           });
+
+    if (provider === "line") {
+      // LINE requires an app grant to be removed when its service account is
+      // deleted, but its deauthorization endpoint needs the short-lived user
+      // access token. Remove the grant before any local identity/session
+      // mutation so we never persist tokens and a provider failure fails
+      // closed. LINE documents that the stable provider user ID remains usable
+      // after deauthorization; a later login simply asks for consent again.
+      await deauthorizeLineAuthorization({
+        channelId: config.clientId,
+        channelSecret: config.clientSecret,
+        userAccessToken: tokenSet.accessToken,
+      });
+    }
 
     const subjectHash = await oidcSubjectHash(
       config.authSecret,
@@ -1000,6 +1024,15 @@ function strictStartFlag(url: URL, name: string, errorCode: string) {
     );
   }
   return values[0] === "1";
+}
+
+function lineLinkUnavailableError() {
+  return new OidcAuthError(
+    "authentication_method_unavailable",
+    409,
+    "このログイン操作は現在利用できません。",
+    "failed",
+  );
 }
 
 function callbackError(

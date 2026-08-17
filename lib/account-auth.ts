@@ -127,7 +127,9 @@ export class AccountAuthError extends Error {
     this.publicMessage = publicMessage;
   }
 }
+
 export function isPasskeyAuthenticationConfigured() {
+  if (env.PASSKEY_AUTH_ENABLED !== "true") return false;
   const configuredSecret =
     typeof env.TRIAL_ISSUANCE_SECRET === "string"
       ? env.TRIAL_ISSUANCE_SECRET.trim()
@@ -136,6 +138,7 @@ export function isPasskeyAuthenticationConfigured() {
 }
 
 export async function registrationOptions(request: Request) {
+  requirePasskeyAuthenticationAvailable();
   const context = relyingPartyContext(request);
   const database = databaseOrThrow();
   const now = Math.floor(Date.now() / 1_000);
@@ -144,7 +147,7 @@ export async function registrationOptions(request: Request) {
     throw new AccountAuthError(
       "external_identity_authentication_required",
       401,
-      "パスキーは、Googleでログインしたアカウントに追加できます。先にログインしてください。",
+      "パスキーは、LINEでログインしたアカウントに追加できます。先にログインしてください。",
     );
   }
   const user = { id: authenticatedAccount.id };
@@ -211,6 +214,7 @@ export async function verifyRegistration(
   response: RegistrationResponseJSON,
   requestedDisplayName?: unknown,
 ) {
+  requirePasskeyAuthenticationAvailable();
   const challenge = await consumeChallenge(request, "registration");
   if (!challenge.user_id) throw new Error("Registration user is missing.");
   const database = databaseOrThrow();
@@ -350,6 +354,7 @@ export async function verifyRegistration(
 }
 
 export async function authenticationOptions(request: Request) {
+  requirePasskeyAuthenticationAvailable();
   const context = relyingPartyContext(request);
   const options = await generateAuthenticationOptions({
     rpID: context.rpId,
@@ -374,6 +379,7 @@ export async function authenticationOptions(request: Request) {
 }
 
 export async function reauthenticationOptions(request: Request) {
+  requirePasskeyAuthenticationAvailable();
   const context = relyingPartyContext(request);
   const identity = await requireAccountIdentity(request);
   const database = databaseOrThrow();
@@ -433,6 +439,7 @@ export async function verifyAuthentication(
   request: Request,
   response: AuthenticationResponseJSON,
 ) {
+  requirePasskeyAuthenticationAvailable();
   const challenge = await consumeChallenge(request, "authentication");
   if (!/^[A-Za-z0-9_-]{16,1024}$/.test(response.id)) {
     throw new AccountAuthError(
@@ -613,7 +620,10 @@ export async function verifyAuthentication(
   return authenticationResult(request, sessionToken);
 }
 
-export async function getAccountIdentity(request: Request) {
+export async function getAccountIdentity(
+  request: Request,
+  options: { touchLastSeen?: boolean } = {},
+) {
   const token = getAccountSessionToken(request);
   if (!token) return null;
   const database = databaseOrNull();
@@ -649,15 +659,17 @@ export async function getAccountIdentity(request: Request) {
       full_name: string | null;
     }>();
   if (!identity) return null;
-  await database
-    .prepare(`
-      UPDATE account_sessions
-      SET last_seen_at = ?
-      WHERE token_hash = ? AND last_seen_at < ?
-    `)
-    .bind(now, tokenHash, now - 24 * 60 * 60)
-    .run()
-    .catch(() => undefined);
+  if (options.touchLastSeen !== false) {
+    await database
+      .prepare(`
+        UPDATE account_sessions
+        SET last_seen_at = ?
+        WHERE token_hash = ? AND last_seen_at < ?
+      `)
+      .bind(now, tokenHash, now - 24 * 60 * 60)
+      .run()
+      .catch(() => undefined);
+  }
   return {
     id: identity.id,
     email: identity.email,
@@ -743,6 +755,7 @@ export async function getAccountAuthenticationState(
 export async function getAccountPasskeys(
   request: Request,
 ): Promise<AccountPasskeySummary[]> {
+  requirePasskeyAuthenticationAvailable();
   const identity = await requireAccountIdentity(request);
   const rows = await databaseOrThrow()
     .prepare(`
@@ -780,6 +793,7 @@ export async function renameAccountPasskey(
   credentialId: unknown,
   requestedDisplayName: unknown,
 ) {
+  requirePasskeyAuthenticationAvailable();
   const identity = await requireAccountIdentity(request);
   const id = validateCredentialId(credentialId);
   const displayName = normalizePasskeyDisplayName(
@@ -809,6 +823,7 @@ export async function deleteAccountPasskey(
   request: Request,
   credentialId: unknown,
 ) {
+  requirePasskeyAuthenticationAvailable();
   const session = await requireRecentAccountSession(request);
   const id = validateCredentialId(credentialId);
   const database = databaseOrThrow();
@@ -1250,7 +1265,7 @@ export async function createAccountSession(
       now,
       now,
       now + SESSION_LIFETIME_SECONDS,
-      now,
+      initiatingSession ? now : null,
       authMethod,
       externalIdentityId,
       userId,
@@ -1361,6 +1376,23 @@ function relyingPartyContext(request: Request) {
     rpId: url.hostname,
     secure: url.protocol === "https:",
   };
+}
+
+export function requirePasskeyAuthenticationAvailable() {
+  if (env.PASSKEY_AUTH_ENABLED !== "true") {
+    throw new AccountAuthError(
+      "passkey_authentication_disabled",
+      503,
+      "パスキーは現在利用できません。LINEでログインしてください。",
+    );
+  }
+  if (!isPasskeyAuthenticationConfigured()) {
+    throw new AccountAuthError(
+      "authentication_not_configured",
+      503,
+      "パスキー認証を現在利用できません。少し待ってからお試しください。",
+    );
+  }
 }
 
 function databaseOrNull() {

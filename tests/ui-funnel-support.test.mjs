@@ -38,7 +38,7 @@ test("support page covers billing and recovery questions without collecting medi
   for (const text of [
     "決済・月額プランの解約",
     "書き出しや保存に失敗した",
-    "Googleログインまたはパスキーで困った",
+    "LINEログインで困った",
     "二重請求・返金について",
     "エラー番号",
     "利用端末とブラウザ",

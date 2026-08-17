@@ -1,5 +1,8 @@
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { verifyAuthentication } from "../../../../../../lib/account-auth";
+import {
+  requirePasskeyAuthenticationAvailable,
+  verifyAuthentication,
+} from "../../../../../../lib/account-auth";
 import {
   accountAuthErrorResponse,
   privateJson,
@@ -15,6 +18,7 @@ export async function POST(request: Request) {
     );
   }
   try {
+    requirePasskeyAuthenticationAvailable();
     const credential = (await readAuthJson(request)) as AuthenticationResponseJSON;
     const result = await verifyAuthentication(request, credential);
     const response = privateJson({ authenticated: true });

@@ -39,25 +39,55 @@ pnpm run test
 `TRUST_SITES_AUTH_HEADERS` は未設定または `false` のままにしてください。
 この値を `true` にできるのは、OpenAI Sitesの認証ディスパッチャー配下だけです。
 
-一般公開環境では、新しいアカウントをGoogleで作成します。Passkeyは登録済み
-アカウントのログイン・本人確認・予備鍵としてのみ使用し、Passkey単独では新しい
-アカウントを作成しません。Passkeyの秘密鍵は利用者の端末から送信されず、サーバー
-には公開鍵とハッシュ化したセッションだけを保存します。GoogleのCallback URLは
-`/api/account/oauth/google/callback` です。`OIDC_CANONICAL_ORIGIN` には公開originを
-パスなしで設定し、Google Cloud側のredirect URIと完全一致させてください。
+一般公開環境では、新しいアカウントをLINE Loginで作成します。認可scopeは
+`openid` のみで、LINEのメールアドレス、表示名、プロフィール画像は取得しません。
+Callback URLは `/api/account/oauth/line/callback` です。現在の本番では
+`https://torudake-reel.pages.dev/api/account/oauth/line/callback` をLINE Developers
+Consoleへ完全一致で登録し、`OIDC_CANONICAL_ORIGIN` はパスなしの
+`https://torudake-reel.pages.dev` にします。
+
+LINE LoginチャネルはWebアプリとして作成します。`OIDC_AUTH_SECRET` と
+`LINE_LOGIN_CHANNEL_SECRET` は必ずCloudflare Pagesの暗号化されたSecretとして
+設定し、平文の環境変数・vars・`.env`・リポジトリへ保存してはいけません。
+`LINE_LOGIN_CHANNEL_ID` だけは非secretの環境変数として設定できます。
+
+- Secret `OIDC_AUTH_SECRET`: 32文字以上のランダム値
+- Secret `LINE_LOGIN_CHANNEL_SECRET`: LINE Loginチャネルシークレット
+- 非secret変数 `LINE_LOGIN_CHANNEL_ID`: LINE LoginチャネルID
+
+初期はLINE LoginチャネルをDevelopingのままにし、AdminまたはTesterに登録した
+アカウントだけで、認可開始からcallback、アプリ内セッション、ログアウトまでの
+E2E smokeを実施します。一般公開の直前にチャネルをPublishedへ変更します。
+PublishedからDevelopingへは戻せないため、変更前に `LINE_LOGIN_ENABLED=false` で
+LINEの新規認証入口を停止できる無効化候補を確保し、切り戻し手順を確認します。
+
+設定とCallback URLを確認してから、`OIDC_AUTH_ENABLED=true` と
+`LINE_LOGIN_ENABLED=true` を同時に有効化します。Google OAuthのルートは緊急時の
+切り戻し用に残しますが、公開UIには表示せず、`GOOGLE_OIDC_ENABLED=false` のままにします。
+LINEのアクセストークンとIDトークンはログイン確認にだけ使用し、継続保存しません。
+認証完了後は直ちにLINE側の連携権限を解除するため、サービス退会時にLINE側の
+連携権限は残りません。アプリ側のログイン状態は、有効期限と取消機能を持つ
+独自の期限付きセッション（30日）で管理します。
 
 公開前に `drizzle/0025_worried_lake.sql` と `drizzle/0026_odd_blob.sql` を順番に
 適用します。0025に含まれる初回無料用テーブルは将来互換のための未使用schemaで、
-このリリースでは対応するAPI・画面・集計処理を公開しません。Googleの資格情報と
-callbackを準備してから `OIDC_AUTH_ENABLED=true` と
-`GOOGLE_OIDC_ENABLED=true` を同時に有効化してください。認証方式をすべて無効の
-まま本番公開すると、新規利用者がログインできません。
-`OIDC_AUTH_SECRET` と `GOOGLE_OIDC_CLIENT_ID` はGoogle利用者識別子のハッシュ入力
-です。既存の `account_external_identities` を移行せずに変更してはいけません。
+このリリースでは対応するAPI・画面・集計処理を公開しません。認証方式をすべて無効の
+まま本番公開すると、新規利用者がログインできません。`OIDC_AUTH_SECRET` と
+`LINE_LOGIN_CHANNEL_ID` はLINE利用者識別子のハッシュ入力です。既存の
+`account_external_identities` を移行せずに変更してはいけません。
+
+Passkeyは最終的な独自ドメインとWebAuthn RP IDが確定するまで
+`PASSKEY_AUTH_ENABLED=false` のままにします。D1 migrationと
+`TRIAL_ISSUANCE_SECRET` を準備し、独自ドメインへの移行手順を確認した場合だけ
+`true` に変更します。無効時はPasskeyの登録、ログイン、本人確認、公開UIをすべて
+停止します。将来有効化しても、Passkey単独では新しいアカウントを作成せず、LINEで
+作成したアカウントの予備ログイン方法としてだけ追加します。Passkeyの秘密鍵は利用者の
+端末から送信されず、サーバーには公開鍵とハッシュ化したセッションだけを保存します。
 
 編集とプレビュー用の利用枠予約は匿名trialでも利用できます。一方、外部AI原価が
 発生する文字起こし・AI台本・AI音声の各APIは匿名trialを受け付けません。運営権限
-またはGoogle／登録済みPasskeyでログインしたアカウントが必要です。
+またはLINEでログインしたアカウントが必要です。Passkeyを将来有効化した場合は、
+登録済みPasskeyでログインしたアカウントも利用できます。
 
 無料体験の新規発行には、32文字以上のランダムな
 `TRIAL_ISSUANCE_SECRET` が必要です。値はCloudflareのシークレットとして設定し、
