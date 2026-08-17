@@ -4,6 +4,8 @@ export const CLIENT_PRODUCT_EVENTS = [
   "preview_completed",
   "preview_failed",
   "pricing_viewed",
+  "purchase_options_shown",
+  "one_time_rescue_revealed",
   "checkout_started",
   "draft_recovery_shown",
   "draft_recovered",
@@ -64,7 +66,8 @@ const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     "legacy_1480",
     "unknown",
   ]),
-  source: new Set(["landing", "result", "hero_video"]),
+  source: new Set(["landing", "pricing", "account", "result", "hero_video"]),
+  offer_version: new Set(["monthly_primary_rescue_v1"]),
   transition: new Set([
     "crossfade",
     "cut",

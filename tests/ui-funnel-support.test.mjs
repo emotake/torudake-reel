@@ -19,17 +19,17 @@ test("pricing and result checkout events use only allow-listed dimensions", asyn
   );
   assert.ok(landing.includes("ref={pricingSectionRef}"));
   for (const plan of ["one_time", "starter", "standard"]) {
-    assert.ok(
-      videoMix.includes(
-        `trackClientEvent("checkout_started", { plan: "${plan}", source: "result" })`,
+    assert.match(
+      videoMix,
+      new RegExp(
+        `trackClientEvent\\("checkout_started", \\{ plan: "${plan}", source: "result", mode: "video_mix", offer_version: MONTHLY_FIRST_OFFER_VERSION \\}\\)`,
       ),
     );
     assert.ok(photoReel.includes(`markCheckoutStarted("${plan}")`));
   }
-  assert.ok(
-    photoReel.includes(
-      'trackClientEvent("checkout_started", { plan, source: "result" })',
-    ),
+  assert.match(
+    photoReel,
+    /trackClientEvent\("checkout_started",\s*\{[\s\S]*?plan,[\s\S]*?source: "result",[\s\S]*?mode: "photo",[\s\S]*?offer_version: MONTHLY_FIRST_OFFER_VERSION/,
   );
 });
 

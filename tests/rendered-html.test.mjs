@@ -172,9 +172,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /元の音声とAIナレーションを自然に組み合わせる/);
   assert.doesNotMatch(html, /元の音声があっても、なくても対応/);
   assert.doesNotMatch(html, /AIが全部整える/);
-  assert.match(html, /仕上がりを見てから、保存方法を選べます/);
+  assert.match(html, /続けて投稿するなら、月額がお得です/);
   assert.match(html, /無料体験は合計3分以内・動画2本まで/);
-  assert.match(html, /1回払い・税込・自動更新なし/);
+  assert.match(html, /月額にせず、今回だけ保存する/);
+  assert.match(html, /1回払い・自動更新なし・有効期限なし/);
   assert.match(html, /月(?:<!-- -->)?3(?:<!-- -->)?本 ¥(?:<!-- -->)?500/);
   assert.match(html, /月(?:<!-- -->)?7(?:<!-- -->)?本 ¥(?:<!-- -->)?1,000/);
   assert.match(html, /¥(?:<!-- -->)?200/);
@@ -203,20 +204,26 @@ test("renders the single-video editor as a focused public route", async () => {
   }
 });
 
-test("renders a dedicated, frequency-first pricing page", async () => {
+test("renders a dedicated, monthly-first pricing page with one-time rescue", async () => {
   const response = await render("/pricing");
   assert.equal(response.status, 200);
   const html = await response.text();
 
   assert.match(html, /<title>料金プラン｜撮るだけリール<\/title>/);
   assert.match(html, /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/pricing"/);
-  assert.match(html, /まず1本。/);
+  assert.match(html, /続けて投稿するなら/);
+  assert.match(html, /月額がお得です/);
+  assert.match(html, /href="\/account\?checkout=starter"/);
   const planHtml = html.slice(html.indexOf('id="plans"'));
-  const oneTimeIndex = planHtml.indexOf("動画1本だけ保存");
   const starterIndex = planHtml.search(/1か月に動画(?:<!-- -->)?3(?:<!-- -->)?本まで/);
   const standardIndex = planHtml.search(/1か月に動画(?:<!-- -->)?7(?:<!-- -->)?本まで/);
-  assert.ok(oneTimeIndex >= 0 && oneTimeIndex < starterIndex);
+  const oneTimeIndex = planHtml.indexOf("月額にせず、今回だけ保存する");
+  assert.ok(starterIndex >= 0);
   assert.ok(starterIndex < standardIndex);
+  assert.ok(standardIndex < oneTimeIndex);
+  assert.match(planHtml, /<details[^>]*>/);
+  assert.doesNotMatch(planHtml, /<details[^>]*\sopen(?:=""|=|[ >])/);
+  assert.match(planHtml, /href="\/account\?checkout=one_time"/);
   assert.match(html, /本人確認後に、Stripeでお支払い/);
   assert.match(html, /1か月ごとに自動更新/);
 });

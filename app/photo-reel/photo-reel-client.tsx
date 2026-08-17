@@ -2,6 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import {
+  MONTHLY_FIRST_OFFER_VERSION,
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "../monthly-first-purchase";
 import SiteFooter from "../site-footer";
 import {
   useCallback,
@@ -549,7 +554,12 @@ export default function PhotoReelClient() {
   const markCheckoutStarted = (
     plan: "starter" | "standard" | "one_time",
   ) => {
-    trackClientEvent("checkout_started", { plan, source: "result" });
+    trackClientEvent("checkout_started", {
+      plan,
+      source: "result",
+      mode: "photo",
+      offer_version: MONTHLY_FIRST_OFFER_VERSION,
+    });
     purchaseReturnPendingRef.current = true;
     setMessage(
       "別タブで決済を完了してください。この画面へ戻ると購入状況を自動で確認します。",
@@ -1582,36 +1592,36 @@ export default function PhotoReelClient() {
           <div className="photoReelStatus" aria-live="polite">
             {error ? <p className="photoReelError">{error}</p> : null}
             {showPurchase ? (
-              <div className="photoReelPurchaseOptions">
-                <strong>完成動画を保存するにはプランを選択</strong>
+              <MonthlyFirstPurchaseOptions
+                className="photoReelPurchaseOptions"
+                source="result"
+                mode="photo"
+              >
+                <strong>続けて保存するなら月額がお得</strong>
                 <small>
                   決済は別タブで開きます。購入後、この編集画面へ戻って上の「購入を確認して写真リールを書き出す」を押してください。
                 </small>
                 <div className="photoReelPurchaseGrid">
                   <Link
-                    className="photoReelPurchaseLink oneTime primary"
-                    href="/account?checkout=one_time"
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => markCheckoutStarted("one_time")}
-                  >
-                    <span>初めての保存におすすめ・1回だけ</span>
-                    <strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存（税込）</strong>
-                    <small>自動更新なし・有効期限なし</small>
-                  </Link>
-                  <Link
-                    className="photoReelPurchaseLink starter"
+                    className="photoReelPurchaseLink starter primary"
                     href="/account?checkout=starter"
                     target="_blank"
                     rel="noreferrer"
                     onClick={() => markCheckoutStarted("starter")}
                   >
-                    <span>1か月ごと</span>
+                    <span>おすすめ・月に数回使う方</span>
                     <strong>
                       {STARTER_MONTHLY_PLAN_LABEL}・¥
                       {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）
                     </strong>
-                    <small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存・1か月ごとの自動更新</small>
+                    <small>
+                      1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで保存・単発3回より¥
+                      {(
+                        ONE_TIME_PRICE_JPY * STARTER_MONTHLY_VIDEO_LIMIT -
+                        STARTER_MONTHLY_PRICE_JPY
+                      ).toLocaleString("ja-JP")}
+                      お得
+                    </small>
                   </Link>
                   <Link
                     className="photoReelPurchaseLink standard"
@@ -1635,6 +1645,27 @@ export default function PhotoReelClient() {
                     </small>
                   </Link>
                 </div>
+                <OneTimeRescue
+                  className="photoReelOneTimeRescue"
+                  source="result"
+                  mode="photo"
+                >
+                  <p>
+                    継続利用の予定がない場合は、この1本だけを¥
+                    {ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+                    （税込）で保存できます。
+                  </p>
+                  <Link
+                    className="photoReelPurchaseLink oneTime"
+                    href="/account?checkout=one_time"
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => markCheckoutStarted("one_time")}
+                  >
+                    <strong>この1本だけ・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}（税込）</strong>
+                    <small>1回払い・自動更新なし・有効期限なし</small>
+                  </Link>
+                </OneTimeRescue>
                 <button
                   className="photoReelRetryButton"
                   type="button"
@@ -1643,7 +1674,7 @@ export default function PhotoReelClient() {
                 >
                   {purchaseChecking ? "購入状況を確認中…" : "購入状況を再確認"}
                 </button>
-              </div>
+              </MonthlyFirstPurchaseOptions>
             ) : null}
             {message ? <p className="photoReelMessage">{message}</p> : null}
           </div>

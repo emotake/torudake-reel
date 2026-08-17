@@ -16,6 +16,8 @@ import { describeStripeProductTelemetry } from "../lib/stripe-product-analytics.
 test("accepts only the bounded product funnel vocabulary", () => {
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_selected"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("checkout_started"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("purchase_options_shown"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("one_time_rescue_revealed"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("export_completed"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_mix_narration_started"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_mix_paywall_shown"));
@@ -48,6 +50,26 @@ test("keeps product properties content-free and bounded", () => {
       tags: ["voice", "quality"],
     },
   );
+  assert.deepEqual(
+    sanitizeProductProperties({
+      mode: "photo",
+      plan: "one_time",
+      source: "result",
+      offer_version: "monthly_primary_rescue_v1",
+    }),
+    {
+      mode: "photo",
+      plan: "one_time",
+      source: "result",
+      offer_version: "monthly_primary_rescue_v1",
+    },
+  );
+  assert.deepEqual(sanitizeProductProperties({ source: "pricing" }), {
+    source: "pricing",
+  });
+  assert.deepEqual(sanitizeProductProperties({ source: "account" }), {
+    source: "account",
+  });
 
   assert.deepEqual(
     sanitizeProductProperties({
@@ -72,6 +94,10 @@ test("keeps product properties content-free and bounded", () => {
   assert.equal(sanitizeProductProperties({ transcript: "spoken content" }), null);
   assert.equal(sanitizeProductProperties({ mode: "x".repeat(49) }), null);
   assert.equal(sanitizeProductProperties({ source: "山田太郎" }), null);
+  assert.equal(
+    sanitizeProductProperties({ offer_version: "unreviewed_experiment" }),
+    null,
+  );
   assert.equal(sanitizeProductProperties({ status: "private caption excerpt" }), null);
   assert.equal(sanitizeProductProperties({ count: -1 }), null);
   assert.equal(sanitizeProductProperties({ count: 10_001 }), null);

@@ -1,6 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import {
+  MONTHLY_FIRST_OFFER_VERSION,
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "./monthly-first-purchase";
 import SiteFooter from "./site-footer";
 import {
   useEffect,
@@ -3407,9 +3412,12 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     notify("前回の編集データをこの端末から削除しました");
   }
 
-  function markCheckoutStarted() {
+  function markCheckoutStarted(plan: "starter" | "standard" | "one_time") {
     trackClientEvent("checkout_started", {
+      plan,
       source: "result",
+      mode: audioMode === "narration" ? "narration" : "spoken",
+      offer_version: MONTHLY_FIRST_OFFER_VERSION,
     });
     checkoutReturnPendingRef.current = true;
     setCheckoutReturnMessage(
@@ -3703,6 +3711,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
         <ResultWorkspace
           file={file}
           videoUrl={videoUrl}
+          audioMode={audioMode}
           previewMode={previewMode}
           spokenCaptionsEnabled={spokenCaptionsEnabled}
           setSpokenCaptionsEnabled={(enabled) => {
@@ -5346,6 +5355,7 @@ function Processing({
 function ResultWorkspace({
   file,
   videoUrl,
+  audioMode,
   previewMode,
   spokenCaptionsEnabled,
   setSpokenCaptionsEnabled,
@@ -5390,6 +5400,7 @@ function ResultWorkspace({
 }: {
   file: File | null;
   videoUrl: string;
+  audioMode: VideoAudioMode;
   previewMode: PreviewMode;
   spokenCaptionsEnabled: boolean;
   setSpokenCaptionsEnabled: (enabled: boolean) => void;
@@ -5438,7 +5449,7 @@ function ResultWorkspace({
   ) => void;
   checkPaidExportAccess: () => Promise<boolean>;
   isCheckingPaidExportAccess: boolean;
-  markCheckoutStarted: () => void;
+  markCheckoutStarted: (plan: "starter" | "standard" | "one_time") => void;
   checkoutReturnMessage: string;
   markExportReservationCompleted: () => void;
   setExportReservationFinalizing: (finalizing: boolean) => void;
@@ -9379,15 +9390,18 @@ function ResultWorkspace({
             <div className="resultPrimaryPurchase">
               <Link
                 className="mainCta"
-                href="/account?checkout=one_time"
+                href="/account?checkout=starter"
                 target="_blank"
                 rel="noreferrer"
-                onClick={markCheckoutStarted}
+                onClick={() => markCheckoutStarted("starter")}
               >
-                <span>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存</span>
+                <span>
+                  {STARTER_MONTHLY_PLAN_LABEL}・¥
+                  {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月
+                </span>
                 <i>→</i>
               </Link>
-              <a href="#free-export-plans">月額プランも見る</a>
+              <a href="#free-export-plans">ほかの月額プラン・今回だけ保存を見る</a>
             </div>
           ) : (
             <button
@@ -10971,46 +10985,64 @@ function ResultWorkspace({
             </button>
           )}
           {file && !completedVideoSaveAllowed ? (
-            <div className="freeExportGate" id="free-export-plans">
+            <MonthlyFirstPurchaseOptions
+              className="freeExportGate"
+              id="free-export-plans"
+              source="result"
+              mode={audioMode === "narration" ? "narration" : "spoken"}
+            >
               <p>
-                <strong>完成動画を保存するにはプランを選択</strong>
+                <strong>続けて保存するなら月額がお得</strong>
                 <small>
-                  編集内容はプレビューで確認できます。1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで、1か月に動画
-                  {STANDARD_MONTHLY_VIDEO_LIMIT}本まで、または1回払いで動画1本だけの3つから選べます。
+                  月3本・500円なら、1本ずつ3回購入するより100円お得です。月額にしない場合は、今回だけ1本の購入も選べます。
                 </small>
               </p>
               <div>
                 <Link
                   className="mainCta"
-                  href="/account?checkout=one_time"
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={markCheckoutStarted}
-                >
-                  <span>
-                    {`この動画1本を¥${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存（税込）`}
-                  </span>
-                  <i>→</i>
-                </Link>
-                <Link
-                  className="quietButton"
                   href="/account?checkout=starter"
                   target="_blank"
                   rel="noreferrer"
-                  onClick={markCheckoutStarted}
+                  onClick={() => markCheckoutStarted("starter")}
                 >
-                  {`${STARTER_MONTHLY_PLAN_LABEL}・¥${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`}
+                  <span>
+                    {STARTER_MONTHLY_PLAN_LABEL}・¥
+                    {STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）
+                  </span>
+                  <i>→</i>
                 </Link>
                 <Link
                   className="quietButton"
                   href="/account?checkout=standard"
                   target="_blank"
                   rel="noreferrer"
-                  onClick={markCheckoutStarted}
+                  onClick={() => markCheckoutStarted("standard")}
                 >
-                  {`${STANDARD_MONTHLY_PLAN_LABEL}・¥${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）`}
+                  {STANDARD_MONTHLY_PLAN_LABEL}・¥
+                  {STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}／1か月（税込）
                 </Link>
               </div>
+              <OneTimeRescue
+                source="result"
+                mode={audioMode === "narration" ? "narration" : "spoken"}
+                className="freeExportOneTimeRescue"
+              >
+                <div>
+                  <strong>
+                    この1本だけ・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}（税込）
+                  </strong>
+                  <small>1回払い・自動更新なし・有効期限なし</small>
+                </div>
+                <Link
+                  className="quietButton"
+                  href="/account?checkout=one_time"
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => markCheckoutStarted("one_time")}
+                >
+                  この1本だけ保存する
+                </Link>
+              </OneTimeRescue>
               <small className="freeExportReturnNote">
                 決済は別タブで開きます。購入後、この編集画面へ戻ってください。
                 月3本・月7本プランは1か月ごとの自動更新です。動画1本プランは1回払いです。
@@ -11025,7 +11057,7 @@ function ResultWorkspace({
                   ? "購入状況を確認中…"
                   : "購入済みの方：保存を有効にする（再確認）"}
               </button>
-            </div>
+            </MonthlyFirstPurchaseOptions>
           ) : file ? (
             <button
               className="mainCta reviewCta"

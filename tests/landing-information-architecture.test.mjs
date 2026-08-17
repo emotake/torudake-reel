@@ -2,13 +2,21 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, landingSource, cssSource, videoEditSource, sitemapSource] =
+const [
+  pageSource,
+  landingSource,
+  cssSource,
+  videoEditSource,
+  sitemapSource,
+  purchaseOptionsSource,
+] =
   await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/video-edit/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8"),
+    readFile(new URL("../app/monthly-first-purchase.tsx", import.meta.url), "utf8"),
   ]);
 
 test("shows the playable finish before three equal creation choices", () => {
@@ -293,12 +301,25 @@ test("keeps one video editor engine while giving it a focused public entry", () 
 });
 
 test("keeps pricing concise on home and links to the full trusted explanation", () => {
+  const pricing = landingSource.slice(
+    landingSource.indexOf("function PricingTeaser"),
+    landingSource.indexOf("function VoiceSamples"),
+  );
   assert.match(landingSource, /ONE_TIME_PRICE_JPY/);
   assert.match(landingSource, /STARTER_MONTHLY_PRICE_JPY/);
   assert.match(landingSource, /STANDARD_MONTHLY_PRICE_JPY/);
   assert.match(landingSource, /href="\/pricing"/);
-  assert.match(landingSource, /1回払い・税込・自動更新なし/);
-  assert.match(landingSource, /1か月ごとの自動更新・税込/);
+  assert.match(pricing, /<MonthlyFirstPurchaseOptions[\s\S]*?source="landing"/);
+  assert.match(pricing, /aria-label="月額保存プランの概要"/);
+  assert.match(pricing, /<OneTimeRescue\s+source="landing"/);
+  assert.match(pricing, /1回払い・自動更新なし・有効期限なし/);
+  assert.match(pricing, /1か月ごとの自動更新・税込/);
+  const starterIndex = pricing.indexOf("STARTER_MONTHLY_VIDEO_LIMIT");
+  const standardIndex = pricing.indexOf("STANDARD_MONTHLY_VIDEO_LIMIT");
+  const rescueIndex = pricing.indexOf("<OneTimeRescue");
+  assert.ok(starterIndex > -1 && starterIndex < standardIndex);
+  assert.ok(standardIndex < rescueIndex);
+  assert.match(purchaseOptionsSource, /summary\s*=\s*"月額にせず、今回だけ保存する"/);
 });
 
 test("uses DOM order as visual order and collapses mode cards on mobile", () => {

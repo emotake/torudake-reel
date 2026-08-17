@@ -357,12 +357,16 @@ test("shows photo-reel preview and save pricing before editing", () => {
   assert.match(photoReelSource, /checkout=starter/);
   assert.match(photoReelSource, /checkout=standard/);
   assert.doesNotMatch(photoReelSource, /checkout=light/);
-  assert.match(cssSource, /\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/);
+  assert.match(cssSource, /\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/);
   assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*?\.photoReelPurchaseOptions > div\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
-  assert.match(cssSource, /\.accountPlans\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/);
+  assert.match(cssSource, /\.accountPurchaseOptions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/);
   assert.ok(
-    photoReelSource.indexOf('checkout=one_time') <
-      photoReelSource.indexOf('checkout=starter'),
+    photoReelSource.indexOf('checkout=starter') <
+      photoReelSource.indexOf('checkout=standard'),
+  );
+  assert.ok(
+    photoReelSource.indexOf('checkout=standard') <
+      photoReelSource.indexOf('checkout=one_time'),
   );
   assert.match(photoReelSource, /function moveRadioSelection/);
   assert.match(photoReelSource, /event\.key === "ArrowRight"/);
@@ -416,7 +420,7 @@ test("restores paid export access safely after returning from checkout", () => {
     pageSource,
     /document\.addEventListener\("visibilitychange", recheckAfterCheckout\)/,
   );
-  assert.match(pageSource, /onClick=\{markCheckoutStarted\}/);
+  assert.match(pageSource, /onClick=\{\(\) => markCheckoutStarted\("starter"\)\}/);
   assert.match(pageSource, /保存を有効にする（再確認）/);
   assert.match(pageSource, /動画の書き出しを再開できます/);
   assert.doesNotMatch(

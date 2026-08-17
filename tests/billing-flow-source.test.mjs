@@ -22,8 +22,8 @@ test("polls the authenticated account after Stripe redirects back", () => {
   assert.match(accountSource, /window\.history\.replaceState\(\{\}, "", "\/account"\)/);
   assert.match(accountSource, /運営へ復旧・解約を相談/);
   assert.match(accountSource, /type CheckoutPlan = "starter" \| "standard" \| "one_time"/);
-  assert.match(accountSource, /startCheckout\("starter"\)/);
-  assert.match(accountSource, /startCheckout\("standard"\)/);
+  assert.match(accountSource, /beginCheckoutFromAccount\("starter"\)/);
+  assert.match(accountSource, /beginCheckoutFromAccount\("standard"\)/);
   assert.doesNotMatch(accountSource, /startCheckout\("light"\)/);
   assert.match(accountSource, /accountPlanRecommend">おすすめ/);
   assert.match(accountSource, /STARTER_MONTHLY_PRICE_JPY/);
@@ -33,16 +33,20 @@ test("polls the authenticated account after Stripe redirects back", () => {
     /STANDARD_MONTHLY_PRICE_JPY\s*\/\s*STANDARD_MONTHLY_VIDEO_LIMIT/,
   );
   assert.doesNotMatch(accountSource, /125円|42円お得/);
-  assert.match(accountSource, /月3本プランは1か月に動画3本まで/);
-  assert.match(accountSource, /月7本プランは1か月に動画7本まで/);
-  assert.match(accountSource, /動画1本プランは、必要なときに動画1本だけ/);
+  assert.match(accountSource, /月3本・500円なら、1本ずつ3回購入するより100円お得/);
+  assert.match(accountSource, /月額にしない場合は、今回だけ1本の購入も選べます/);
+  assert.match(accountSource, /<OneTimeRescue source="account"/);
   assert.match(accountSource, /今月.*本保存済み・あと.*本保存できます/);
   assert.match(accountSource, /買い切りで保存できる残り本数/);
   assert.match(accountSource, /表示価格はすべて税込/);
   assert.doesNotMatch(accountSource, /違いは毎月保存できる本数です/);
   assert.ok(
-    accountSource.indexOf('className="accountPlanCard standardPlan featured"') <
-      accountSource.indexOf('className="accountPlanCard starterPlan"'),
+    accountSource.indexOf('className="accountPlanCard starterPlan featured"') <
+      accountSource.indexOf('className="accountPlanCard standardPlan"'),
+  );
+  assert.ok(
+    accountSource.indexOf('className="accountPlanCard standardPlan"') <
+      accountSource.indexOf('<OneTimeRescue source="account"'),
   );
 });
 

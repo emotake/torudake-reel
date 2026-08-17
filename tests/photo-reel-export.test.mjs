@@ -185,7 +185,7 @@ test("does not create or expose a completed photo reel for the free bucket", asy
   assert.match(client, /href="\/account\?checkout=starter"/);
   assert.match(client, /href="\/account\?checkout=standard"/);
   assert.doesNotMatch(client, /checkout=light/);
-  assert.match(client, /この動画1本を¥\{ONE_TIME_PRICE_JPY/);
+  assert.match(client, /この1本だけ・¥\{ONE_TIME_PRICE_JPY/);
   assert.match(client, /自動更新なし・有効期限なし/);
   assert.match(client, /target="_blank"/);
   assert.match(client, /購入を確認して写真リールを書き出す/);

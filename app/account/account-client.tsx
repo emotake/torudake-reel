@@ -11,6 +11,12 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  MONTHLY_FIRST_OFFER_VERSION,
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "../monthly-first-purchase";
+import { trackClientEvent } from "../../lib/client-analytics";
+import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
   monthlyVideoAllowanceLabel,
@@ -21,6 +27,7 @@ import {
   STANDARD_MONTHLY_PLAN_LABEL,
   STANDARD_MONTHLY_VIDEO_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
+  ONE_TIME_AI_OPERATION_SUCCESS_LIMIT,
   ONE_TIME_PRICE_JPY,
   type MonthlyPlanKey,
 } from "../../lib/billing-policy";
@@ -562,6 +569,15 @@ export default function AccountClient() {
     }
   }
 
+  function beginCheckoutFromAccount(plan: CheckoutPlan) {
+    trackClientEvent("checkout_started", {
+      plan,
+      source: "account",
+      offer_version: MONTHLY_FIRST_OFFER_VERSION,
+    });
+    void startCheckout(plan);
+  }
+
   async function openPortal() {
     setBusy("portal");
     setError("");
@@ -978,116 +994,116 @@ export default function AccountClient() {
           <section className="accountPlans" aria-labelledby="accountPlansTitle">
             <header className="accountPlansIntro">
               <p className="eyebrow">SAVE PLAN</p>
-              <h2 id="accountPlansTitle">保存するペースで選ぶ</h2>
+              <h2 id="accountPlansTitle">続けて投稿するなら月額がお得</h2>
               <p>
-                編集・プレビュー機能は共通です。月3本プランは1か月に動画3本まで、月7本プランは1か月に動画7本まで保存できます。動画1本プランは、必要なときに動画1本だけ保存できます。表示価格はすべて税込です。
+                編集・プレビュー機能は共通です。月3本・500円なら、1本ずつ3回購入するより100円お得です。月額にしない場合は、今回だけ1本の購入も選べます。表示価格はすべて税込です。
               </p>
             </header>
-            <article className="accountPlanCard standardPlan featured">
-              <span className="accountPlanRecommend">おすすめ</span>
-              <span className="accountPlanFit">継続して投稿したい方</span>
-              <p>1か月ごと</p>
-              <h2>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h2>
-              <strong>
-                ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small>／1か月（税込）</small>
-              </strong>
-              <span className="accountPlanUnit">
-                1本あたり約
-                {Math.round(
-                  STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
-                )}
-                円
-              </span>
-              <ul>
-                <li>{monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}</li>
-                <li>
-                  AI処理は動画1本あたり
-                  {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
-                </li>
-                <li>解約するまで1か月ごとに自動更新</li>
-                <li>未使用の保存本数は翌月へ繰り越しなし</li>
-                <li>
-                  月3本プランより1本あたり約
+            <MonthlyFirstPurchaseOptions className="accountPurchaseOptions" source="account">
+              <article className="accountPlanCard starterPlan featured">
+                <span className="accountPlanRecommend">おすすめ</span>
+                <span className="accountPlanFit">少ない本数から始めたい方</span>
+                <p>1か月ごと</p>
+                <h2>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h2>
+                <strong>
+                  ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                  <small>／1か月（税込）</small>
+                </strong>
+                <span className="accountPlanUnit">
+                  1本あたり約
                   {Math.round(
-                    STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT -
-                      STANDARD_MONTHLY_PRICE_JPY /
-                        STANDARD_MONTHLY_VIDEO_LIMIT,
+                    STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
                   )}
-                  円お得
-                </li>
-              </ul>
-              <button
-                disabled={busy !== null || !status.configured || status.monthly?.active}
-                onClick={() => startCheckout("standard")}
-              >
-                {status.monthly?.active
-                  ? status.monthly.planKey === "standard"
-                    ? "利用中"
-                    : "変更は支払い管理から"
-                  : busy === "standard"
-                    ? "準備中…"
-                    : `${STANDARD_MONTHLY_PLAN_LABEL}を始める`}
-              </button>
-            </article>
-            <article className="accountPlanCard starterPlan">
-              <span className="accountPlanFit">少ない本数から始めたい方</span>
-              <p>1か月ごと</p>
-              <h2>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</h2>
-              <strong>
-                ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
-                <small>／1か月（税込）</small>
-              </strong>
-              <span className="accountPlanUnit">
-                1本あたり約
-                {Math.round(
-                  STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT,
-                )}
-                円
-              </span>
-              <ul>
-                <li>{monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}</li>
-                <li>
-                  AI処理は動画1本あたり
-                  {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
-                </li>
-                <li>解約するまで1か月ごとに自動更新</li>
-                <li>未使用の保存本数は翌月へ繰り越しなし</li>
-              </ul>
-              <button
-                disabled={busy !== null || !status.configured || status.monthly?.active}
-                onClick={() => startCheckout("starter")}
-              >
-                {status.monthly?.active
-                  ? status.monthly.planKey === "starter"
-                    ? "利用中"
-                    : "変更は支払い管理から"
-                  : busy === "starter"
-                    ? "準備中…"
-                    : `${STARTER_MONTHLY_PLAN_LABEL}を始める`}
-              </button>
-            </article>
-            <article className="accountPlanCard oneTimePlan">
-              <span className="accountPlanFit">必要なときだけ保存</span>
-              <p>1回だけ</p>
-              <h2>動画1本だけ保存</h2>
-              <strong>
-                ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
-                <small> / 1本・税込</small>
-              </strong>
-              <span className="accountPlanUnit">動画1本だけ保存・月額料金なし・有効期限なし</span>
-              <ul>
-                <li>完成動画を1本保存</li>
-                <li>AI処理はこの動画で5回</li>
-                <li>自動更新なし</li>
-              </ul>
-              <button
-                disabled={busy !== null || !status.configured}
-                onClick={() => startCheckout("one_time")}
-              >
-                {busy === "one_time" ? "準備中…" : "動画1本分を購入する"}
-              </button>
-            </article>
+                  円
+                </span>
+                <ul>
+                  <li>{monthlyVideoAllowanceLabel(STARTER_MONTHLY_VIDEO_LIMIT)}</li>
+                  <li>
+                    AI処理は動画1本あたり
+                    {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+                  </li>
+                  <li>解約するまで1か月ごとに自動更新</li>
+                  <li>未使用の保存本数は翌月へ繰り越しなし</li>
+                </ul>
+                <button
+                  disabled={busy !== null || !status.configured || status.monthly?.active}
+                  onClick={() => beginCheckoutFromAccount("starter")}
+                >
+                  {status.monthly?.active
+                    ? status.monthly.planKey === "starter"
+                      ? "利用中"
+                      : "変更は支払い管理から"
+                    : busy === "starter"
+                      ? "準備中…"
+                      : `${STARTER_MONTHLY_PLAN_LABEL}を始める`}
+                </button>
+              </article>
+              <article className="accountPlanCard standardPlan">
+                <span className="accountPlanFit">週2本ほど投稿したい方</span>
+                <p>1か月ごと</p>
+                <h2>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</h2>
+                <strong>
+                  ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}
+                  <small>／1か月（税込）</small>
+                </strong>
+                <span className="accountPlanUnit">
+                  1本あたり約
+                  {Math.round(
+                    STANDARD_MONTHLY_PRICE_JPY / STANDARD_MONTHLY_VIDEO_LIMIT,
+                  )}
+                  円
+                </span>
+                <ul>
+                  <li>{monthlyVideoAllowanceLabel(STANDARD_MONTHLY_VIDEO_LIMIT)}</li>
+                  <li>
+                    AI処理は動画1本あたり
+                    {SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT}回
+                  </li>
+                  <li>解約するまで1か月ごとに自動更新</li>
+                  <li>未使用の保存本数は翌月へ繰り越しなし</li>
+                  <li>
+                    月3本プランより1本あたり約
+                    {Math.round(
+                      STARTER_MONTHLY_PRICE_JPY / STARTER_MONTHLY_VIDEO_LIMIT -
+                        STANDARD_MONTHLY_PRICE_JPY /
+                          STANDARD_MONTHLY_VIDEO_LIMIT,
+                    )}
+                    円お得
+                  </li>
+                </ul>
+                <button
+                  disabled={busy !== null || !status.configured || status.monthly?.active}
+                  onClick={() => beginCheckoutFromAccount("standard")}
+                >
+                  {status.monthly?.active
+                    ? status.monthly.planKey === "standard"
+                      ? "利用中"
+                      : "変更は支払い管理から"
+                    : busy === "standard"
+                      ? "準備中…"
+                      : `${STANDARD_MONTHLY_PLAN_LABEL}を始める`}
+                </button>
+              </article>
+              <OneTimeRescue source="account" className="accountPlanRescue">
+                <div className="accountOneTimeOffer">
+                  <span>今回だけ1本</span>
+                  <strong>
+                    ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}
+                    <small>／1本（税込）</small>
+                  </strong>
+                  <small>
+                    完成動画を1本保存・AI処理はこの動画で
+                    {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回・1回払い・自動更新なし・有効期限なし
+                  </small>
+                </div>
+                <button
+                  disabled={busy !== null || !status.configured}
+                  onClick={() => beginCheckoutFromAccount("one_time")}
+                >
+                  {busy === "one_time" ? "準備中…" : "この1本だけ保存する"}
+                </button>
+              </OneTimeRescue>
+            </MonthlyFirstPurchaseOptions>
           </section>
 
           {status.user?.hasStripeCustomer && (

@@ -283,13 +283,19 @@ test("keeps free users in editing and preview while paid buckets can export", ()
   assert.match(saveFlow, /if \(!completedVideoSaveAllowed\)/);
   assert.match(requestFlow, /if \(!completedVideoSaveAllowed\)/);
   assert.match(confirmationFlow, /if \(!completedVideoSaveAllowed\)/);
-  assert.match(pageSource, /完成動画を保存するにはプランを選択/);
-  assert.match(pageSource, /STANDARD_MONTHLY_PLAN_LABEL.*STANDARD_MONTHLY_PRICE_JPY/);
-  assert.match(pageSource, /STARTER_MONTHLY_PLAN_LABEL.*STARTER_MONTHLY_PRICE_JPY/);
+  assert.match(pageSource, /続けて保存するなら月額がお得/);
+  assert.match(
+    pageSource,
+    /STANDARD_MONTHLY_PLAN_LABEL[\s\S]{0,160}STANDARD_MONTHLY_PRICE_JPY/,
+  );
+  assert.match(
+    pageSource,
+    /STARTER_MONTHLY_PLAN_LABEL[\s\S]{0,160}STARTER_MONTHLY_PRICE_JPY/,
+  );
   assert.doesNotMatch(pageSource, /月3本・月8本・1動画作成/);
-  assert.match(pageSource, /この動画1本を¥\{ONE_TIME_PRICE_JPY/);
+  assert.match(pageSource, /この1本だけ・¥\{ONE_TIME_PRICE_JPY/);
   assert.match(pageSource, /1か月に動画\{STARTER_MONTHLY_VIDEO_LIMIT\}本まで/);
-  assert.match(pageSource, /1回払いで動画1本だけ/);
+  assert.match(pageSource, /月額にしない場合は、今回だけ1本の購入も選べます/);
   assert.match(pageSource, /編集・プレビューまで/);
   assert.match(pageSource, /完成動画の保存は有料/);
   assert.match(pageSource, /target="_blank"/);

@@ -16,6 +16,10 @@ import {
 } from "../../lib/billing-policy";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import SiteFooter from "../site-footer";
+import {
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "../monthly-first-purchase";
 import CheckoutLink from "./checkout-link";
 import styles from "./pricing.module.css";
 
@@ -23,32 +27,14 @@ const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
 
 export const metadata = buildPublicPageMetadata({
   title: "料金プラン｜撮るだけリール",
-  description: `まずは無料で編集とプレビュー。完成動画は1本${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円、月${STARTER_MONTHLY_VIDEO_LIMIT}本${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、月${STANDARD_MONTHLY_VIDEO_LIMIT}本${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円から保存できます。表示価格はすべて税込です。`,
+  description: `まずは無料で編集とプレビュー。続けて保存するなら月${STARTER_MONTHLY_VIDEO_LIMIT}本${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、月${STANDARD_MONTHLY_VIDEO_LIMIT}本${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円。今回だけ必要な方は1本${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円で保存できます。表示価格はすべて税込です。`,
   path: "/pricing",
 });
 
 const plans = [
   {
-    key: "one_time",
-    badge: "初めての保存におすすめ",
-    cadence: "1回だけ",
-    name: ONE_TIME_PLAN_LABEL,
-    title: "動画1本だけ保存",
-    price: ONE_TIME_PRICE_JPY,
-    priceSuffix: "/ 1本・税込",
-    unit: "月額料金なし・有効期限なし",
-    features: [
-      "90秒までの完成動画を1本保存",
-      `AI処理はこの動画で${ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回`,
-      "最大1080p・透かしなし",
-      "表紙つき・AIナレーションなら投稿文も作成",
-      "1回払い・自動更新なし",
-    ],
-    cta: "動画1本分を購入する",
-  },
-  {
     key: "starter",
-    badge: "月に数回使う方",
+    badge: "おすすめ・月に数回使う方",
     cadence: "1か月ごと",
     name: STARTER_MONTHLY_PLAN_LABEL,
     title: `1か月に動画${STARTER_MONTHLY_VIDEO_LIMIT}本まで`,
@@ -68,7 +54,7 @@ const plans = [
   },
   {
     key: "standard",
-    badge: "継続して投稿する方",
+    badge: "週2本ほど投稿する方",
     cadence: "1か月ごと",
     name: STANDARD_MONTHLY_PLAN_LABEL,
     title: `1か月に動画${STANDARD_MONTHLY_VIDEO_LIMIT}本まで`,
@@ -111,16 +97,16 @@ export default function PricingPage() {
           <div className={styles.heroCopy}>
             <p className={styles.eyebrow}>料金</p>
             <h1 id="pricing-title">
-              まず1本。
+              続けて投稿するなら、
               <br />
-              続けるなら、使う本数に合わせて。
+              月額がお得です。
             </h1>
             <p className={styles.lead}>
-              編集とプレビューは、先に無料で試せます。仕上がりを確認してから、保存したい本数だけ選べます。
+              編集とプレビューは、先に無料で試せます。保存するなら、まず月3本・500円のプランがおすすめです。今回だけ必要な方は、1回払いも選べます。
             </p>
             <div className={styles.heroActions}>
-              <CheckoutLink plan="one_time" className={styles.primaryLink}>
-                1本{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円から保存する
+              <CheckoutLink plan="starter" className={styles.primaryLink}>
+                月{STARTER_MONTHLY_VIDEO_LIMIT}本・{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円から始める
               </CheckoutLink>
               <Link className={styles.secondaryLink} href="/video-edit">
                 無料で編集を試す
@@ -168,40 +154,62 @@ export default function PricingPage() {
 
         <section className={styles.planSection} id="plans" aria-labelledby="plans-title">
           <header className={styles.sectionHeader}>
-            <p className={styles.eyebrow}>保存方法を選ぶ</p>
-            <h2 id="plans-title">使う頻度に合う3つのプラン</h2>
-            <p>迷ったら1本だけ。必要になった時点で、月額プランを選べます。</p>
+            <p className={styles.eyebrow}>続けるなら月額がお得</p>
+            <h2 id="plans-title">投稿するペースに合わせた月額プラン</h2>
+            <p>月3本・500円なら、1本ずつ3回購入するより100円お得です。</p>
           </header>
 
-          <div className={styles.planGrid}>
-            {plans.map((plan, index) => (
-              <article
-                className={`${styles.planCard} ${index === 0 ? styles.firstPlan : ""}`}
-                key={plan.key}
-                aria-labelledby={`${plan.key}-title`}
-              >
-                <span className={styles.planBadge}>{plan.badge}</span>
-                <p className={styles.cadence}>{plan.cadence}</p>
-                <h3 id={`${plan.key}-title`}>{plan.title}</h3>
-                <p className={styles.planName}>{plan.name}</p>
-                <p className={styles.price}>
-                  <span aria-label={`${plan.price.toLocaleString("ja-JP")}円`}>
-                    ¥{plan.price.toLocaleString("ja-JP")}
-                  </span>
-                  <small>{plan.priceSuffix}</small>
-                </p>
-                <p className={styles.unit}>{plan.unit}</p>
-                <ul className={styles.featureList}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>{feature}</li>
-                  ))}
-                </ul>
-                <CheckoutLink plan={plan.key} className={styles.planLink}>
-                  {plan.cta}
-                </CheckoutLink>
-              </article>
-            ))}
-          </div>
+          <MonthlyFirstPurchaseOptions
+            className={styles.purchaseOptions}
+            source="pricing"
+          >
+            <div className={styles.planGrid}>
+              {plans.map((plan) => (
+                <article
+                  className={`${styles.planCard} ${plan.key === "starter" ? styles.firstPlan : ""}`}
+                  key={plan.key}
+                  aria-labelledby={`${plan.key}-title`}
+                >
+                  <span className={styles.planBadge}>{plan.badge}</span>
+                  <p className={styles.cadence}>{plan.cadence}</p>
+                  <h3 id={`${plan.key}-title`}>{plan.title}</h3>
+                  <p className={styles.planName}>{plan.name}</p>
+                  <p className={styles.price}>
+                    <span aria-label={`${plan.price.toLocaleString("ja-JP")}円`}>
+                      ¥{plan.price.toLocaleString("ja-JP")}
+                    </span>
+                    <small>{plan.priceSuffix}</small>
+                  </p>
+                  <p className={styles.unit}>{plan.unit}</p>
+                  <ul className={styles.featureList}>
+                    {plan.features.map((feature) => (
+                      <li key={feature}>{feature}</li>
+                    ))}
+                  </ul>
+                  <CheckoutLink plan={plan.key} className={styles.planLink}>
+                    {plan.cta}
+                  </CheckoutLink>
+                </article>
+              ))}
+            </div>
+
+            <OneTimeRescue source="pricing" className={styles.oneTimeRescue}>
+              <div className={styles.oneTimeRescueCopy}>
+                <p>今回だけ1本</p>
+                <strong>
+                  {ONE_TIME_PLAN_LABEL}・¥
+                  {ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}（税込）
+                </strong>
+                <span>
+                  90秒まで・最大1080p・AI処理はこの動画で
+                  {ONE_TIME_AI_OPERATION_SUCCESS_LIMIT}回。1回払い・自動更新なし・有効期限なし。
+                </span>
+              </div>
+              <CheckoutLink plan="one_time" className={styles.oneTimeRescueLink}>
+                この1本だけ保存する
+              </CheckoutLink>
+            </OneTimeRescue>
+          </MonthlyFirstPurchaseOptions>
 
           <aside className={styles.checkoutNotice} aria-labelledby="checkout-title">
             <div className={styles.lockIcon} aria-hidden="true">

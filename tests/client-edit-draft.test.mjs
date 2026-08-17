@@ -35,11 +35,11 @@ test("keeps edit recovery device-local without storing video bytes", () => {
   assert.match(pageSource, /clearLocalEditDraft/);
 });
 
-test("puts the one-time save before monthly plans at the result gate", () => {
+test("puts monthly plans before the closed one-time rescue at the result gate", () => {
   const gate = pageSource.slice(pageSource.indexOf('id="free-export-plans"'));
-  assert.ok(gate.indexOf('checkout=one_time') < gate.indexOf('checkout=starter'));
   assert.ok(gate.indexOf('checkout=starter') < gate.indexOf('checkout=standard'));
-  assert.match(pageSource, /この動画1本を¥/);
+  assert.ok(gate.indexOf('checkout=standard') < gate.indexOf('checkout=one_time'));
+  assert.match(gate, /<OneTimeRescue[\s\S]*?この1本だけ・¥/);
   assert.match(pageSource, /resultPrimaryAction/);
 });
 

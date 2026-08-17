@@ -17,6 +17,10 @@ import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
 import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
 import { ModeMediaVisual } from "./home-rich-visuals";
+import {
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "./monthly-first-purchase";
 
 type LandingSharedProps = {
   openPicker: () => void;
@@ -167,30 +171,38 @@ function PricingTeaser() {
     >
       <header>
         <p className="eyebrow">料金</p>
-        <h2 id="homePriceTitle">仕上がりを見てから、保存方法を選べます。</h2>
-        <p>編集とプレビューは無料。完成動画を保存するときだけ、1回払いか月額を選びます。</p>
+        <h2 id="homePriceTitle">続けて投稿するなら、月額がお得です。</h2>
+        <p>編集とプレビューは無料。保存するなら、まず月3本・500円のプランがおすすめです。月額にしない場合は、1回払いも選べます。</p>
       </header>
       <div className="homeFreePreview">
         <strong>¥0</strong>
         <span>無料体験は合計3分以内・動画2本まで。AI処理は動画1本につき3回です。</span>
       </div>
-      <div className="homePriceChips" aria-label="保存料金の概要">
-        <article>
-          <small>まず1本だけ</small>
-          <strong>動画1本 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-          <span>1回払い・税込・自動更新なし</span>
-        </article>
-        <article>
-          <small>ときどき投稿</small>
-          <strong>月{STARTER_MONTHLY_VIDEO_LIMIT}本 ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-          <span>1か月ごとの自動更新・税込</span>
-        </article>
-        <article>
-          <small>定期的に投稿</small>
-          <strong>月{STANDARD_MONTHLY_VIDEO_LIMIT}本 ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong>
-          <span>1か月ごとの自動更新・税込</span>
-        </article>
-      </div>
+      <MonthlyFirstPurchaseOptions
+        className="homePurchaseOptions"
+        source="landing"
+      >
+        <div className="homePriceChips" aria-label="月額保存プランの概要">
+          <article>
+            <small>おすすめ・月に数回投稿</small>
+            <strong>月{STARTER_MONTHLY_VIDEO_LIMIT}本 ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+            <span>1か月ごとの自動更新・税込</span>
+          </article>
+          <article>
+            <small>週2本ほど投稿</small>
+            <strong>月{STANDARD_MONTHLY_VIDEO_LIMIT}本 ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong>
+            <span>1か月ごとの自動更新・税込</span>
+          </article>
+        </div>
+        <OneTimeRescue source="landing" className="homeOneTimeRescue">
+          <div>
+            <small>今回だけ1本</small>
+            <strong>動画1本 ¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}（税込）</strong>
+            <span>1回払い・自動更新なし・有効期限なし</span>
+          </div>
+          <Link href="/pricing#plans">今回だけ保存の条件を見る</Link>
+        </OneTimeRescue>
+      </MonthlyFirstPurchaseOptions>
       <div className="homePricingActions">
         <Link href="/pricing">料金と違いを詳しく見る</Link>
         <Link href="/support">決済・解約のよくある質問</Link>

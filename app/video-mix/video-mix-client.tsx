@@ -3,6 +3,11 @@
 /* eslint-disable react-hooks/preserve-manual-memoization -- This media editor deliberately keeps stable callbacks around long-running browser media and reservation lifecycles. */
 
 import Link from "next/link";
+import {
+  MONTHLY_FIRST_OFFER_VERSION,
+  MonthlyFirstPurchaseOptions,
+  OneTimeRescue,
+} from "../monthly-first-purchase";
 import SiteFooter from "../site-footer";
 import {
   useCallback,
@@ -5039,15 +5044,25 @@ export default function VideoMixClient() {
             {error ? <p className="videoMixError" role="alert">{error}</p> : null}
             {message ? <p className="videoMixMessage">{message}</p> : null}
             {showPurchase ? (
-              <div className="videoMixPurchase">
-                <strong>完成動画を保存するプランを選択</strong>
+              <MonthlyFirstPurchaseOptions
+                className="videoMixPurchase"
+                source="result"
+                mode="video_mix"
+              >
+                <strong>続けて保存するなら月額がお得</strong>
                 <small>決済後、この画面へ戻って「購入を確認して書き出す」を押してください。</small>
                 <div>
-                  <Link className="primary" href="/account?checkout=one_time" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "one_time", source: "result" })}><span>1回払い・自動更新なし</span><strong>この動画1本を¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}で保存</strong></Link>
-                  <Link href="/account?checkout=starter" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "starter", source: "result" })}><span>1か月ごと</span><strong>{STARTER_MONTHLY_PLAN_LABEL} ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
-                  <Link href="/account?checkout=standard" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "standard", source: "result" })}><span>1か月ごと</span><strong>{STANDARD_MONTHLY_PLAN_LABEL} ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
+                  <Link className="primary" href="/account?checkout=starter" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "starter", source: "result", mode: "video_mix", offer_version: MONTHLY_FIRST_OFFER_VERSION })}><span>おすすめ・1か月ごと</span><strong>{STARTER_MONTHLY_PLAN_LABEL} ¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STARTER_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
+                  <Link href="/account?checkout=standard" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "standard", source: "result", mode: "video_mix", offer_version: MONTHLY_FIRST_OFFER_VERSION })}><span>1か月ごと</span><strong>{STANDARD_MONTHLY_PLAN_LABEL} ¥{STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}</strong><small>1か月に動画{STANDARD_MONTHLY_VIDEO_LIMIT}本まで</small></Link>
                 </div>
-              </div>
+                <OneTimeRescue source="result" mode="video_mix">
+                  <div>
+                    <strong>この1本だけ・¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}（税込）</strong>
+                    <small>1回払い・自動更新なし・有効期限なし</small>
+                  </div>
+                  <Link href="/account?checkout=one_time" target="_blank" rel="noreferrer" onClick={() => trackClientEvent("checkout_started", { plan: "one_time", source: "result", mode: "video_mix", offer_version: MONTHLY_FIRST_OFFER_VERSION })}><strong>この1本だけ保存する</strong></Link>
+                </OneTimeRescue>
+              </MonthlyFirstPurchaseOptions>
             ) : null}
           </div>
 
