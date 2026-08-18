@@ -671,22 +671,52 @@ export function validateAnalyticsEngineDatasetList(payload, expectedDataset) {
   ) {
     return ["Pinned Analytics Engine dataset name is invalid."];
   }
+  const hasRowsBeforeLimit =
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    Object.hasOwn(payload, "rows_before_limit_at_least");
+  const expectedPayloadKeys = [
+    "meta",
+    "data",
+    "rows",
+    ...(hasRowsBeforeLimit ? ["rows_before_limit_at_least"] : []),
+  ].sort();
   if (
     !payload ||
     typeof payload !== "object" ||
     Array.isArray(payload) ||
+    !isDeepStrictEqual(Object.keys(payload).sort(), expectedPayloadKeys) ||
+    !Array.isArray(payload.meta) ||
+    payload.meta.length !== 1 ||
+    !payload.meta[0] ||
+    typeof payload.meta[0] !== "object" ||
+    Array.isArray(payload.meta[0]) ||
+    !isDeepStrictEqual(Object.keys(payload.meta[0]).sort(), ["name", "type"]) ||
+    payload.meta[0].name !== "dataset" ||
+    payload.meta[0].type !== "String" ||
     !Array.isArray(payload.data) ||
+    !Number.isSafeInteger(payload.rows) ||
+    payload.rows < 0 ||
+    payload.rows !== payload.data.length ||
+    (hasRowsBeforeLimit &&
+      (!Number.isSafeInteger(payload.rows_before_limit_at_least) ||
+        payload.rows_before_limit_at_least < payload.rows)) ||
     payload.data.some(
       (row) =>
         !row ||
         typeof row !== "object" ||
         Array.isArray(row) ||
-        typeof row.name !== "string",
+        Object.keys(row).length !== 1 ||
+        !Object.hasOwn(row, "dataset") ||
+        typeof row.dataset !== "string",
     )
   ) {
     return ["Analytics Engine SHOW TABLES response is invalid."];
   }
-  const matches = payload.data.filter((row) => row.name === expectedDataset);
+  const matches = payload.data.filter(
+    (row) => row.dataset === expectedDataset,
+  );
   if (matches.length !== 1) {
     errors.push("Pinned Analytics Engine dataset is not uniquely queryable.");
   }

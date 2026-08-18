@@ -45,6 +45,21 @@ import {
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
+function analyticsEngineDatasetListFixture(
+  datasets = ["torudake_line_auth_events"],
+  { rowsBeforeLimit = 10 } = {},
+) {
+  const data = datasets.map((dataset) => ({ dataset }));
+  return {
+    meta: [{ name: "dataset", type: "String" }],
+    data,
+    rows: data.length,
+    ...(rowsBeforeLimit === undefined
+      ? {}
+      : { rows_before_limit_at_least: rowsBeforeLimit }),
+  };
+}
+
 test("scheduler provenance JSON uses a bounded descriptor-stable reader", async () => {
   const directory = await mkdtemp(join(tmpdir(), "torudake-bounded-json-"));
   try {
@@ -94,31 +109,112 @@ test("scheduler provenance JSON uses a bounded descriptor-stable reader", async 
 test("Analytics Engine release gate requires exactly one queryable pinned dataset", () => {
   assert.deepEqual(
     validateAnalyticsEngineDatasetList(
-      { data: [{ name: "torudake_line_auth_events" }] },
+      analyticsEngineDatasetListFixture(),
+      "torudake_line_auth_events",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    validateAnalyticsEngineDatasetList(
+      analyticsEngineDatasetListFixture([
+        "torudake_line_auth_events",
+        "another_dataset",
+      ]),
       "torudake_line_auth_events",
     ),
     [],
   );
   assert.match(
     validateAnalyticsEngineDatasetList(
-      { data: [] },
+      analyticsEngineDatasetListFixture([]),
       "torudake_line_auth_events",
     ).join(" "),
     /not uniquely queryable/,
   );
   assert.match(
     validateAnalyticsEngineDatasetList(
-      { data: [{ name: "torudake_line_auth_events" }, { name: "torudake_line_auth_events" }] },
+      analyticsEngineDatasetListFixture([
+        "torudake_line_auth_events",
+        "torudake_line_auth_events",
+      ]),
       "torudake_line_auth_events",
     ).join(" "),
     /not uniquely queryable/,
   );
   assert.match(
     validateAnalyticsEngineDatasetList(
-      { data: [{ table: "torudake_line_auth_events" }] },
+      {
+        ...analyticsEngineDatasetListFixture(),
+        data: [{ name: "torudake_line_auth_events" }],
+      },
       "torudake_line_auth_events",
     ).join(" "),
     /response is invalid/,
+  );
+  assert.match(
+    validateAnalyticsEngineDatasetList(
+      {
+        ...analyticsEngineDatasetListFixture(),
+        data: [
+          {
+            dataset: "torudake_line_auth_events",
+            unexpected: true,
+          },
+        ],
+      },
+      "torudake_line_auth_events",
+    ).join(" "),
+    /response is invalid/,
+  );
+  for (const mutate of [
+    (payload) => {
+      payload.meta[0].type = "string";
+    },
+    (payload) => {
+      payload.rows = 0;
+    },
+    (payload) => {
+      payload.rows_before_limit_at_least = 0;
+    },
+    (payload) => {
+      payload.unexpected = true;
+    },
+  ]) {
+    const payload = analyticsEngineDatasetListFixture();
+    mutate(payload);
+    assert.match(
+      validateAnalyticsEngineDatasetList(
+        payload,
+        "torudake_line_auth_events",
+      ).join(" "),
+      /response is invalid/,
+    );
+  }
+  for (const payload of [
+    { data: [{ dataset: "torudake_line_auth_events" }] },
+    { ...analyticsEngineDatasetListFixture(), rows: 1.5 },
+    { ...analyticsEngineDatasetListFixture(), rows: -1 },
+    {
+      ...analyticsEngineDatasetListFixture(),
+      rows_before_limit_at_least: 1.5,
+    },
+  ]) {
+    assert.match(
+      validateAnalyticsEngineDatasetList(
+        payload,
+        "torudake_line_auth_events",
+      ).join(" "),
+      /response is invalid/,
+    );
+  }
+  assert.deepEqual(
+    validateAnalyticsEngineDatasetList(
+      analyticsEngineDatasetListFixture(["torudake_line_auth_events"], {
+        rowsBeforeLimit: undefined,
+      }),
+      "torudake_line_auth_events",
+    ),
+    [],
   );
 });
 

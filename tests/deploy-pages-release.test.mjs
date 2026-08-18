@@ -261,6 +261,21 @@ function jsonResponse(value, { noStore = false, status = 200 } = {}) {
   });
 }
 
+function analyticsEngineTablesFixture(
+  datasets = ["torudake_line_auth_events"],
+  { rowsBeforeLimit = 10 } = {},
+) {
+  const data = datasets.map((dataset) => ({ dataset }));
+  return {
+    meta: [{ name: "dataset", type: "String" }],
+    data,
+    rows: data.length,
+    ...(rowsBeforeLimit === undefined
+      ? {}
+      : { rows_before_limit_at_least: rowsBeforeLimit }),
+  };
+}
+
 function healthFixture() {
   return {
     status: "ready",
@@ -352,9 +367,11 @@ function pagesApiBehavior({
       assert.equal(options.method, "POST");
       assert.equal(options.body, "SHOW TABLES FORMAT JSON");
       assert.equal(options.headers["Content-Type"], "text/plain; charset=utf-8");
-      return jsonResponse({
-        data: failAnalytics ? [] : [{ name: "torudake_line_auth_events" }],
-      });
+      return jsonResponse(
+        analyticsEngineTablesFixture(
+          failAnalytics ? [] : ["torudake_line_auth_events"],
+        ),
+      );
     }
     if (url.hostname.endsWith(".torudake-reel.pages.dev")) {
       const isNew = url.hostname.startsWith("11111111.");
@@ -788,7 +805,17 @@ test("mode probes require exact methods, raw flags, health, and Analytics Engine
   );
   assert.equal(
     validateAnalyticsEngineTables(
-      { data: [{ name: "torudake_line_auth_events" }] },
+      analyticsEngineTablesFixture(),
+      "torudake_line_auth_events",
+    ),
+    true,
+  );
+  assert.equal(
+    validateAnalyticsEngineTables(
+      analyticsEngineTablesFixture([
+        "torudake_line_auth_events",
+        "another_dataset",
+      ]),
       "torudake_line_auth_events",
     ),
     true,
@@ -796,7 +823,7 @@ test("mode probes require exact methods, raw flags, health, and Analytics Engine
   assert.throws(
     () =>
       validateAnalyticsEngineTables(
-        { data: [{ name: "different" }] },
+        analyticsEngineTablesFixture(["different"]),
         "torudake_line_auth_events",
       ),
     /not uniquely queryable/,
@@ -804,23 +831,84 @@ test("mode probes require exact methods, raw flags, health, and Analytics Engine
   assert.throws(
     () =>
       validateAnalyticsEngineTables(
-        {
-          data: [
-            { name: "torudake_line_auth_events" },
-            { name: "torudake_line_auth_events" },
-          ],
-        },
+        analyticsEngineTablesFixture([
+          "torudake_line_auth_events",
+          "torudake_line_auth_events",
+        ]),
         "torudake_line_auth_events",
       ),
     /not uniquely queryable/,
   );
   assert.throws(
-    () =>
-      validateAnalyticsEngineTables(
-        { data: [{ name: "torudake_line_auth_events" }, null] },
-        "torudake_line_auth_events",
-      ),
+    () => {
+      const payload = analyticsEngineTablesFixture();
+      payload.data.push(null);
+      payload.rows += 1;
+      return validateAnalyticsEngineTables(payload, "torudake_line_auth_events");
+    },
     /malformed/,
+  );
+  assert.throws(
+    () => {
+      const payload = analyticsEngineTablesFixture();
+      payload.data = [{ name: "torudake_line_auth_events" }];
+      return validateAnalyticsEngineTables(payload, "torudake_line_auth_events");
+    },
+    /malformed/,
+  );
+  assert.throws(
+    () => {
+      const payload = analyticsEngineTablesFixture();
+      payload.data[0].unexpected = true;
+      return validateAnalyticsEngineTables(payload, "torudake_line_auth_events");
+    },
+    /malformed/,
+  );
+  for (const mutate of [
+    (payload) => {
+      payload.meta[0].name = "name";
+    },
+    (payload) => {
+      payload.rows = 0;
+    },
+    (payload) => {
+      payload.rows_before_limit_at_least = 0;
+    },
+    (payload) => {
+      payload.unexpected = true;
+    },
+  ]) {
+    const payload = analyticsEngineTablesFixture();
+    mutate(payload);
+    assert.throws(
+      () =>
+        validateAnalyticsEngineTables(payload, "torudake_line_auth_events"),
+      /malformed/,
+    );
+  }
+  for (const payload of [
+    { data: [{ dataset: "torudake_line_auth_events" }] },
+    { ...analyticsEngineTablesFixture(), rows: 1.5 },
+    { ...analyticsEngineTablesFixture(), rows: -1 },
+    {
+      ...analyticsEngineTablesFixture(),
+      rows_before_limit_at_least: 1.5,
+    },
+  ]) {
+    assert.throws(
+      () =>
+        validateAnalyticsEngineTables(payload, "torudake_line_auth_events"),
+      /malformed/,
+    );
+  }
+  assert.equal(
+    validateAnalyticsEngineTables(
+      analyticsEngineTablesFixture(["torudake_line_auth_events"], {
+        rowsBeforeLimit: undefined,
+      }),
+      "torudake_line_auth_events",
+    ),
+    true,
   );
 });
 

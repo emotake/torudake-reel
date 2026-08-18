@@ -929,11 +929,33 @@ async function probeDeployment({
 }
 
 export function validateAnalyticsEngineTables(payload, dataset) {
+  const hasRowsBeforeLimit =
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    Object.hasOwn(payload, "rows_before_limit_at_least");
   if (
     !payload ||
     typeof payload !== "object" ||
     Array.isArray(payload) ||
+    !exactKeys(payload, [
+      "meta",
+      "data",
+      "rows",
+      ...(hasRowsBeforeLimit ? ["rows_before_limit_at_least"] : []),
+    ]) ||
+    !Array.isArray(payload.meta) ||
+    payload.meta.length !== 1 ||
+    !exactKeys(payload.meta[0], ["name", "type"]) ||
+    payload.meta[0].name !== "dataset" ||
+    payload.meta[0].type !== "String" ||
     !Array.isArray(payload.data) ||
+    !Number.isSafeInteger(payload.rows) ||
+    payload.rows < 0 ||
+    payload.rows !== payload.data.length ||
+    (hasRowsBeforeLimit &&
+      (!Number.isSafeInteger(payload.rows_before_limit_at_least) ||
+        payload.rows_before_limit_at_least < payload.rows)) ||
     typeof dataset !== "string" ||
     !/^[A-Za-z0-9_]{1,64}$/.test(dataset) ||
     payload.data.some(
@@ -941,12 +963,13 @@ export function validateAnalyticsEngineTables(payload, dataset) {
         !row ||
         typeof row !== "object" ||
         Array.isArray(row) ||
-        typeof row.name !== "string",
+        !exactKeys(row, ["dataset"]) ||
+        typeof row.dataset !== "string",
     )
   ) {
     throw new Error("Analytics Engine SHOW TABLES response is malformed.");
   }
-  if (payload.data.filter((row) => row.name === dataset).length !== 1) {
+  if (payload.data.filter((row) => row.dataset === dataset).length !== 1) {
     throw new Error("Analytics Engine dataset is not uniquely queryable.");
   }
   return true;
