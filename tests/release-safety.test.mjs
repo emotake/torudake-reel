@@ -40,12 +40,18 @@ test("release targets are pinned to the reviewed Cloudflare Pages and D1 resourc
   const wrangler = JSON.parse(
     await readFile(new URL("../wrangler.d1.jsonc", import.meta.url), "utf8"),
   );
-
   assert.equal(targets.hosting, "cloudflare-pages-direct-upload");
   assert.equal(targets.pagesProject, "torudake-reel");
   assert.equal(targets.productionBranch, "main");
   assert.equal(targets.d1Database, "torudake-reel-db");
   assert.equal(targets.d1Binding, "DB");
+  assert.equal(targets.authObservabilityBinding, "AUTH_OBSERVABILITY");
+  assert.equal(targets.authObservabilityDataset, "torudake_line_auth_events");
+  assert.equal(
+    existsSync(new URL("../wrangler.jsonc", import.meta.url)),
+    false,
+    "a partial root Wrangler config would overwrite dashboard-managed Pages bindings and variables",
+  );
   assert.equal(wrangler.pages_build_output_dir, undefined);
   assert.equal(wrangler.r2_buckets, undefined);
   assert.deepEqual(wrangler.d1_databases, [

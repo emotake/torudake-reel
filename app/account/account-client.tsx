@@ -110,6 +110,18 @@ type AccountDeletion = {
 const ACCOUNT_AUTH_HINT_STORAGE_KEY = "torudake-account-authenticated";
 const CHECKOUT_STATUS_POLL_ATTEMPTS = 8;
 const CHECKOUT_STATUS_POLL_INTERVAL_MS = 1_500;
+const ACCOUNT_AUTH_ERROR_MESSAGES: Record<string, string> = {
+  "cancelled": "LINEログインをキャンセルしました。料金は発生していません。",
+  "expired": "LINEログインの有効時間が切れました。もう一度お試しください。",
+  "failed": "LINEログインを完了できませんでした。もう一度お試しください。",
+  "identity_already_linked":
+    "このLINEアカウントは別のアカウントに連携されています。",
+  "account_unavailable":
+    "このアカウントではログインを続けられません。サポートへお問い合わせください。",
+  "account_changed":
+    "ログイン中のアカウントが変わりました。最初からやり直してください。",
+  "already_authenticated": "すでにログインしています。",
+};
 
 function checkoutPlanDetails(plan: CheckoutPlan | null) {
   switch (plan) {
@@ -657,7 +669,46 @@ export default function AccountClient() {
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      const query = new URLSearchParams(window.location.search);
+      const currentUrl = new URL(window.location.href);
+      const query = currentUrl.searchParams;
+      const authErrorValues = query.getAll("auth_error");
+      const authErrorCode =
+        authErrorValues.length === 0
+          ? null
+          : authErrorValues.length === 1
+            ? query.get("auth_error")
+            : "failed";
+      const authErrorMessage = authErrorCode !== null
+        ? (ACCOUNT_AUTH_ERROR_MESSAGES[authErrorCode] ??
+          "LINEログインを完了できませんでした。もう一度お試しください。")
+        : null;
+      const authErrorIsNotice =
+        authErrorCode === "cancelled" || authErrorCode === "already_authenticated";
+      const authResult = query.get("auth_result");
+      const authResultMessage =
+        authResult === "reauthenticated"
+          ? "本人確認が完了しました。安全のため、操作をもう一度実行してください。"
+          : authResult === "authenticated"
+            ? "LINEログインが完了しました。"
+            : null;
+      if (query.has("auth_error") || query.has("auth_result")) {
+        query.delete("auth_error");
+        query.delete("auth_result");
+        const cleanedSearch = query.toString();
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `${window.location.pathname}${cleanedSearch ? `?${cleanedSearch}` : ""}${window.location.hash}`,
+        );
+      }
+      const showAuthReturnFeedback = () => {
+        if (authErrorMessage) {
+          if (authErrorIsNotice) setNotice(authErrorMessage);
+          else setError(authErrorMessage);
+        } else if (authResultMessage) {
+          setNotice(authResultMessage);
+        }
+      };
       const checkout = query.get("checkout");
       const rawPlan = query.get("plan");
       const checkoutPlan =
@@ -700,6 +751,7 @@ export default function AccountClient() {
           }
           if (checkout !== "success") {
             await loadStatus();
+            if (!cancelled) showAuthReturnFeedback();
             return;
           }
           let reflected = false;
@@ -853,6 +905,7 @@ export default function AccountClient() {
             </div>
           )}
           {error && <p className="accountError" role="alert">{error}</p>}
+          {notice && <p className="accountNotice" role="status">{notice}</p>}
           <small>
             LINEへの投稿やLINE公式アカウントの友だち追加は行いません。カード情報はStripeが管理します。
           </small>

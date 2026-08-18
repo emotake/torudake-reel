@@ -6,10 +6,31 @@
     "structuredLogs": true,
     "requestHeader": "X-Request-Id",
     "correlationHeader": "X-Correlation-Id",
+    "durableAuthentication": {
+      "binding": "AUTH_OBSERVABILITY",
+      "dataset": "torudake_line_auth_events",
+      "retention": "three_months",
+      "sampling": 1,
+      "forbiddenFields": [
+        "code",
+        "authorization_code",
+        "access_token",
+        "id_token",
+        "state",
+        "nonce",
+        "provider_subject",
+        "subject_hash",
+        "email",
+        "cookie",
+        "ip_address",
+        "user_agent",
+        "cf_ray"
+      ]
+    },
     "sampling": {
       "errors": 1,
       "warnings": 1,
-      "success": 0.01
+      "success": 1
     },
     "alerts": {
       "syntheticReadinessMinutes": 5,

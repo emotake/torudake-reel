@@ -5,6 +5,14 @@ type D1Database = object;
 
 type R2Bucket = object;
 
+interface AnalyticsEngineDataset {
+  writeDataPoint(event?: {
+    indexes?: ((ArrayBuffer | string) | null)[];
+    doubles?: number[];
+    blobs?: ((ArrayBuffer | string) | null)[];
+  }): void;
+}
+
 declare module "cloudflare:workers" {
   export const env: {
     DB: D1Database;
@@ -33,6 +41,7 @@ declare module "cloudflare:workers" {
     GOOGLE_OIDC_ENABLED?: string;
     GOOGLE_OIDC_CLIENT_ID?: string;
     GOOGLE_OIDC_CLIENT_SECRET?: string;
+    AUTH_OBSERVABILITY?: AnalyticsEngineDataset;
     [binding: string]: unknown;
   };
 }

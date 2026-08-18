@@ -10,6 +10,7 @@ import {
   SITE_TITLE,
 } from "../lib/site";
 import GoogleAnalytics from "./google-analytics";
+import AuthenticationReturnNotice from "./authentication-return-notice";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -64,6 +65,7 @@ export default function RootLayout({
           本文へ移動
         </a>
         <GoogleAnalytics />
+        <AuthenticationReturnNotice />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

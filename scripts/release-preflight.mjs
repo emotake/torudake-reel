@@ -191,6 +191,8 @@ export function runLocalChecks({ root = PROJECT_ROOT } = {}) {
     d1DatabaseId: "c0b9cc06-fc19-4e02-acac-2c19d32f3fdc",
     d1MigrationsDir: "drizzle",
     d1MigrationsTable: "d1_migrations",
+    authObservabilityBinding: "AUTH_OBSERVABILITY",
+    authObservabilityDataset: "torudake_line_auth_events",
     observabilityContract: "config/observability.json",
   };
   checkExactObject(targets, expectedTargets, "Release targets", errors);
@@ -202,13 +204,29 @@ export function runLocalChecks({ root = PROJECT_ROOT } = {}) {
     observability?.schemaVersion !== 1 ||
     observability?.production?.structuredLogs !== true ||
     observability?.production?.sampling?.errors !== 1 ||
-    observability?.production?.sampling?.warnings !== 1
+    observability?.production?.sampling?.warnings !== 1 ||
+    observability?.production?.sampling?.success !== 1 ||
+    observability?.production?.durableAuthentication?.binding !==
+      targets.authObservabilityBinding ||
+    observability?.production?.durableAuthentication?.dataset !==
+      targets.authObservabilityDataset ||
+    observability?.production?.durableAuthentication?.retention !==
+      "three_months" ||
+    observability?.production?.durableAuthentication?.sampling !== 1
   ) {
     errors.push(
-      "Production observability must keep structured error/warning logs at full sampling.",
+      "Production observability must keep structured LINE authentication events at full sampling.",
     );
   } else {
     notes.push("Production observability contract is present.");
+  }
+
+  if (existsSync(resolve(root, "wrangler.jsonc"))) {
+    errors.push(
+      "Do not deploy a partial root wrangler.jsonc: it would replace the existing Pages dashboard configuration. Add Pages bindings in the dashboard and redeploy instead.",
+    );
+  } else {
+    notes.push("Pages dashboard remains the source of truth for production bindings.");
   }
 
   const wranglerConfig = readJson(resolve(root, "wrangler.d1.jsonc"));

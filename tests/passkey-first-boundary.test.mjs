@@ -93,11 +93,17 @@ test("the public authentication chooser enables LINE and hides Google", async ()
     gate.indexOf("const authenticateWithLine"),
     gate.indexOf("const lineAvailable"),
   );
-  assert.ok(
-    lineAuthentication.indexOf("window.open(") <
-      lineAuthentication.indexOf("await ensureAuthenticationContext()"),
-    "the popup must open in the original click task before any awaited work",
+  assert.match(
+    lineAuthentication,
+    /const authenticateWithLine = async \(sameTabOnly = false\)/,
   );
+  assert.match(
+    lineAuthentication,
+    /if \(sameTabOnly\) \{[\s\S]*?await navigateLineSameTab\(\);[\s\S]*?return;[\s\S]*?const popup = window\.open\(/,
+    "the default click path must open the popup synchronously; only the explicit fallback may navigate this tab first",
+  );
+  assert.match(gate, /onClick=\{\(\) => void authenticateWithLine\(\)\}/);
+  assert.match(gate, /onClick=\{\(\) => void authenticateWithLine\(true\)\}/);
   assert.match(lineAuthentication, /popup\.opener = null/);
   assert.match(start, /beginOidcAuthorization\(request, "line"\)/);
   assert.match(callback, /oidcCallbackFinalizationPage\(request, "line"\)/);

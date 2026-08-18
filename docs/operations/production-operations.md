@@ -18,10 +18,15 @@ not authorize a deployment, a D1 mutation, or a real payment.
 - Every Pages response carries `X-Request-Id` and `X-Correlation-Id`. Only
   bounded safe identifiers are accepted from clients; otherwise the entry point
   creates a UUID. Use that same ID to search structured error logs.
-- The production Pages project currently uses deployment-tail and Functions
-  metrics. `config/observability.json` is the reviewable sampling and alert
-  contract. `wrangler.d1.jsonc` is intentionally D1-maintenance-only and must
-  never be used to deploy Pages.
+- Deployment-tail and Functions metrics remain available, but Pages tail logs
+  are transient. LINE authentication therefore writes its privacy-safe
+  lifecycle events to the three-month
+  `torudake_line_auth_events` Analytics Engine dataset. See
+  `line-auth-observability.md`. `config/observability.json` is the reviewable
+  sampling and alert contract. Production Pages bindings remain managed in the
+  dashboard; a partial root `wrangler.jsonc` would replace that configuration
+  and must not be deployed. `wrangler.d1.jsonc` is D1-maintenance-only and must
+  never deploy Pages.
 
 Run a non-mutating probe:
 
@@ -33,12 +38,11 @@ pnpm ops:health:detailed
 
 ## Alerts to configure
 
-These settings require a human to select a notification destination in the
-Cloudflare and Stripe dashboards; source control does not make that external
-change. **No production alert or log-retention setting has been applied by this
-repository change.** Pages Functions logs are live streams and are not stored;
-`config/observability.json` is a contract for review, not a Pages dashboard
-setting.
+Alert destinations and the `AUTH_OBSERVABILITY` Analytics Engine binding
+require reviewed Cloudflare dashboard changes; source control does not make
+those external changes. Add the binding to the production Pages environment,
+then redeploy the reviewed artifact. Deployment tails complement, but do not
+replace, the durable LINE authentication dataset.
 
 Print the no-mutation plan with `pnpm ops:cloudflare-alerts`. With a
 read-only/Notifications token in the process environment, inspect eligible

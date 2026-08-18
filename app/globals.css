@@ -234,6 +234,66 @@
   color: #9b251c !important;
 }
 
+.authenticationSameTabFallback {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 10px;
+  padding: 10px 16px;
+  border: 1px solid rgba(39, 52, 73, 0.2);
+  border-radius: 12px;
+  background: #fff;
+  color: #273449;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.authenticationSameTabFallback:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.authenticationReturnNotice {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 1300;
+  display: flex;
+  width: min(calc(100% - 32px), 560px);
+  min-height: 52px;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 12px 18px;
+  border: 1px solid rgba(39, 52, 73, 0.16);
+  border-radius: 14px;
+  background: #fffdf8;
+  color: #273449;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+  box-shadow: 0 18px 48px rgba(16, 24, 40, 0.2);
+  transform: translateX(-50%);
+}
+
+.authenticationReturnNotice.error {
+  border-color: rgba(155, 37, 28, 0.28);
+  color: #7f1f18;
+}
+
+.authenticationReturnNotice button {
+  flex: 0 0 auto;
+  min-width: 38px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: #f2eee8;
+  color: #273449;
+  cursor: pointer;
+  font-size: 18px;
+}
+
 .authenticationGate > small {
   display: block;
   margin-top: 20px;

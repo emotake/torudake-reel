@@ -44,6 +44,11 @@ const OIDC_TRANSACTION_LIFETIME_SECONDS = 10 * 60;
 const OIDC_RATE_WINDOW_SECONDS = 10 * 60;
 const OIDC_NETWORK_START_LIMIT = 30;
 const OIDC_GLOBAL_START_LIMIT = 3_000;
+const OIDC_POPUP_CHANNEL = "torudake-oidc-results";
+const OIDC_LEGACY_POPUP_RETURN_TO = "/account?auth_popup=pending";
+const OIDC_POPUP_RETURN_TO_PREFIX = "oidc-popup:";
+const OIDC_POPUP_FLOW_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type D1Database = ExternalAccountDatabase;
 
@@ -164,10 +169,29 @@ export async function beginOidcAuthorization(
   }
 
   const returnToValues = requestUrl.searchParams.getAll("returnTo");
-  const popupValues = requestUrl.searchParams.getAll("popup");
-  const popup = popupValues.length === 1 && popupValues[0] === "1";
+  const popup = strictStartFlag(
+    requestUrl,
+    "popup",
+    "invalid_popup_authentication_request",
+  );
+  const popupFlowValues = requestUrl.searchParams.getAll("popupFlow");
+  if (
+    popupFlowValues.length > 1 ||
+    (popupFlowValues.length === 1 &&
+      !OIDC_POPUP_FLOW_PATTERN.test(popupFlowValues[0])) ||
+    (!popup && popupFlowValues.length > 0)
+  ) {
+    throw new OidcAuthError(
+      "invalid_popup_authentication_request",
+      400,
+      "ログインを開始できませんでした。ページを再読み込みしてお試しください。",
+    );
+  }
+  const popupFlow = popupFlowValues[0] ?? null;
   const returnTo = popup
-    ? "/account?auth_popup=pending"
+    ? popupFlow
+      ? `${OIDC_POPUP_RETURN_TO_PREFIX}${popupFlow}`
+      : OIDC_LEGACY_POPUP_RETURN_TO
     : normalizeOidcReturnTo(
         returnToValues.length === 1 ? returnToValues[0] : null,
       );
@@ -1107,8 +1131,9 @@ function callbackResponse(
   errorStatus?: number,
   linked = false,
 ) {
-  if (returnTo === "/account?auth_popup=pending") {
-    return popupCallbackResponse(errorCode, errorStatus, linked);
+  const popupFlow = popupFlowFromReturnTo(returnTo);
+  if (popupFlow !== undefined) {
+    return popupCallbackResponse(errorCode, errorStatus, linked, popupFlow);
   }
   const location = new URL(normalizeOidcReturnTo(returnTo), canonicalOrigin);
   if (errorCode) location.searchParams.set("auth_error", errorCode);
@@ -1119,6 +1144,7 @@ function popupCallbackResponse(
   errorCode?: string,
   errorStatus?: number,
   linked = false,
+  flowId: string | null = null,
 ) {
   const nonceBytes = new Uint8Array(16);
   crypto.getRandomValues(nonceBytes);
@@ -1138,12 +1164,22 @@ function popupCallbackResponse(
     : errorCode === "cancelled"
       ? "ログインをキャンセルしました。この画面を閉じて、もう一度お試しください。"
       : "ログインを完了できませんでした。この画面を閉じて、もう一度お試しください。";
+  const outcome = succeeded
+    ? "succeeded"
+    : errorCode === "cancelled"
+      ? "cancelled"
+      : "failed";
+  const popupResult = JSON.stringify({
+    type: "torudake:oidc-result",
+    flowId: flowId ?? "",
+    outcome,
+  }).replaceAll("<", "\\u003c");
   const autoClose = succeeded ? "window.close();" : "";
   const html = `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><style nonce="${nonce}">body{font-family:system-ui,sans-serif;margin:0;display:grid;min-height:100vh;place-items:center;background:#faf8f3;color:#17231c}.panel{max-width:28rem;padding:2rem;text-align:center}button{border:0;border-radius:999px;padding:.8rem 1.5rem;background:#173f2b;color:#fff;font:inherit;cursor:pointer}</style></head>
 <body><main class="panel"><h1>${title}</h1><p>${message}</p><button id="close" type="button">この画面を閉じる</button></main>
-<script nonce="${nonce}">document.getElementById("close").addEventListener("click",()=>window.close());${autoClose}</script></body></html>`;
+<script nonce="${nonce}">const result=${popupResult};try{const channel=new BroadcastChannel("${OIDC_POPUP_CHANNEL}");channel.postMessage(result);channel.close()}catch{}if(window.opener){window.opener.postMessage(result,window.location.origin)}document.getElementById("close").addEventListener("click",()=>window.close());${autoClose}</script></body></html>`;
   const response = new Response(html, {
     status: succeeded ? 200 : (errorStatus ?? 400),
     headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -1156,7 +1192,15 @@ function popupCallbackResponse(
   response.headers.set("Referrer-Policy", "no-referrer");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("X-Torudake-Auth-Outcome", outcome);
   return response;
+}
+
+function popupFlowFromReturnTo(returnTo: string) {
+  if (returnTo === OIDC_LEGACY_POPUP_RETURN_TO) return null;
+  if (!returnTo.startsWith(OIDC_POPUP_RETURN_TO_PREFIX)) return undefined;
+  const flowId = returnTo.slice(OIDC_POPUP_RETURN_TO_PREFIX.length);
+  return OIDC_POPUP_FLOW_PATTERN.test(flowId) ? flowId : undefined;
 }
 
 function redirectResponse(location: string, status: 302 | 303) {

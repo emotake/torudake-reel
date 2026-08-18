@@ -8,5 +8,7 @@
   "d1DatabaseId": "c0b9cc06-fc19-4e02-acac-2c19d32f3fdc",
   "d1MigrationsDir": "drizzle",
   "d1MigrationsTable": "d1_migrations",
+  "authObservabilityBinding": "AUTH_OBSERVABILITY",
+  "authObservabilityDataset": "torudake_line_auth_events",
   "observabilityContract": "config/observability.json"
 }
