@@ -74,6 +74,27 @@ const PINNED_LEGACY_PREVIOUS_PRODUCTION = Object.freeze({
   methodsSchema: "line_only_without_authentication_flags",
 });
 
+class ReleaseVerificationNonSuccessError extends Error {
+  constructor(status) {
+    super("Release verification endpoint returned a non-success response.");
+    this.status = status;
+  }
+}
+
+class ReleaseVerificationNetworkError extends Error {}
+
+function isTransientDeploymentProbeError(error) {
+  return (
+    error instanceof ReleaseVerificationNetworkError ||
+    (error instanceof ReleaseVerificationNonSuccessError &&
+      (error.status === 404 ||
+        error.status === 408 ||
+        error.status === 425 ||
+        error.status === 429 ||
+        (error.status >= 500 && error.status <= 599)))
+  );
+}
+
 function exactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const actual = Object.keys(value).sort();
@@ -482,17 +503,31 @@ async function fetchBoundedJson({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, {
-      method,
-      headers,
-      body,
-      redirect: "error",
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method,
+        headers,
+        body,
+        redirect: "error",
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (error) {
+      if (
+        error instanceof TypeError ||
+        error?.name === "AbortError" ||
+        error?.name === "TimeoutError"
+      ) {
+        throw new ReleaseVerificationNetworkError(
+          "Release verification endpoint network request failed or timed out.",
+        );
+      }
+      throw error;
+    }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      throw new Error("Release verification endpoint returned a non-success response.");
+      throw new ReleaseVerificationNonSuccessError(response.status);
     }
     const value = await readBoundedJsonResponse(response, { maxBytes });
     return { value, response };
@@ -1141,7 +1176,14 @@ async function verifyNewDeployment({
   onOwnedCandidate,
 }) {
   let lastErrors = ["New Pages deployment was not visible."];
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  let visibilityAttempts = 0;
+  let probeAttempts = 0;
+  let ownedCandidateId = null;
+  while (
+    (ownedCandidateId === null && visibilityAttempts < 10) ||
+    (ownedCandidateId !== null && probeAttempts < 10)
+  ) {
+    if (ownedCandidateId === null) visibilityAttempts += 1;
     const listed = await listAllProductionDeployments({ fetchImpl, token, targets });
     const afterIds = new Set(
       listed.map((deployment) => deployment.id.toLowerCase()),
@@ -1157,18 +1199,28 @@ async function verifyNewDeployment({
       newIds.length === 1
         ? listed.find((deployment) => deployment.id.toLowerCase() === newIds[0])
         : null;
+    if (!candidate && ownedCandidateId !== null) {
+      throw new Error("The owned Pages deployment disappeared during probe retries.");
+    }
     if (candidate) {
+      const candidateId = candidate.id.toLowerCase();
+      if (ownedCandidateId !== null && candidateId !== ownedCandidateId) {
+        throw new Error("The Pages deployment candidate changed during probe retries.");
+      }
       const canonicalId = await canonicalProductionDeploymentId({
         fetchImpl,
         token,
         targets,
       });
-      if (canonicalId !== candidate.id.toLowerCase()) {
+      if (canonicalId !== candidateId) {
         if (!beforeIds.has(canonicalId)) {
           throw new Error("A concurrent Pages deployment became canonical.");
         }
+        if (ownedCandidateId !== null) {
+          throw new Error("The owned Pages deployment stopped being canonical.");
+        }
         lastErrors = ["Reviewed deployment is not canonical yet."];
-        if (attempt < 9) await sleep(2_000);
+        if (visibilityAttempts < 10) await sleep(2_000);
         continue;
       }
       const detail = await deploymentDetail({
@@ -1189,14 +1241,29 @@ async function verifyNewDeployment({
       });
       lastErrors = [...listedErrors, ...detailErrors];
       if (lastErrors.length === 0) {
-        onOwnedCandidate?.(detail.id.toLowerCase());
-        const probe = await probeDeployment({
-          deployment: detail,
-          mode,
-          fetchImpl,
-          targets,
-          now,
-        });
+        if (ownedCandidateId === null) {
+          ownedCandidateId = detail.id.toLowerCase();
+          onOwnedCandidate?.(ownedCandidateId);
+        }
+        probeAttempts += 1;
+        let probe;
+        try {
+          probe = await probeDeployment({
+            deployment: detail,
+            mode,
+            fetchImpl,
+            targets,
+            now,
+          });
+        } catch (error) {
+          if (!isTransientDeploymentProbeError(error)) throw error;
+          lastErrors = [error.message];
+          if (probeAttempts < 10) {
+            await sleep(2_000);
+            continue;
+          }
+          break;
+        }
         const finalInventory = await listAllProductionDeployments({
           fetchImpl,
           token,
@@ -1231,8 +1298,15 @@ async function verifyNewDeployment({
       if (terminalFailure) {
         throw new Error(`Pages deployment failed: ${lastErrors.join(" ")}`);
       }
+      if (ownedCandidateId !== null) {
+        throw new Error(
+          `Owned Pages deployment metadata changed during probe retries: ${lastErrors.join(
+            " ",
+          )}`,
+        );
+      }
     }
-    if (attempt < 9) await sleep(2_000);
+    if (visibilityAttempts < 10) await sleep(2_000);
   }
   throw new Error(`Pages deployment verification timed out: ${lastErrors.join(" ")}`);
 }

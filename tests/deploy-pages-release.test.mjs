@@ -352,6 +352,12 @@ function pagesApiBehavior({
   failPreviousProbe = false,
   failAnalytics = false,
   failRollback = false,
+  newDeploymentVisibilityDelay = 0,
+  newHealthNetworkFailures = 0,
+  newHealthNonSuccesses = 0,
+  newHealthHardFailures = 0,
+  newMethodsTimeouts = 0,
+  newMethodsNonSuccesses = 0,
   flipCanonicalBeforeDeploy = false,
   legacyPreviousMethods = false,
   legacyPreviousSourceMismatch = false,
@@ -403,6 +409,12 @@ function pagesApiBehavior({
     rollbackCalls: 0,
     projectReads: 0,
     fetchCalls: [],
+    remainingNewDeploymentVisibilityReads: newDeploymentVisibilityDelay,
+    remainingNewHealthNetworkFailures: newHealthNetworkFailures,
+    remainingNewHealthNonSuccesses: newHealthNonSuccesses,
+    remainingNewHealthHardFailures: newHealthHardFailures,
+    remainingNewMethodsTimeouts: newMethodsTimeouts,
+    remainingNewMethodsNonSuccesses: newMethodsNonSuccesses,
   };
   const oldMode = "normal";
   const newMode =
@@ -424,6 +436,18 @@ function pagesApiBehavior({
       const isNew = url.hostname.startsWith("11111111.");
       const mode = isNew ? newMode : oldMode;
       if (url.pathname === "/api/health") {
+        if (isNew && state.remainingNewHealthNetworkFailures > 0) {
+          state.remainingNewHealthNetworkFailures -= 1;
+          throw new TypeError("simulated network failure");
+        }
+        if (isNew && state.remainingNewHealthNonSuccesses > 0) {
+          state.remainingNewHealthNonSuccesses -= 1;
+          return jsonResponse({ error: "deployment not ready" }, { status: 404 });
+        }
+        if (isNew && state.remainingNewHealthHardFailures > 0) {
+          state.remainingNewHealthHardFailures -= 1;
+          return jsonResponse({ error: "unauthorized" }, { status: 401 });
+        }
         const health = healthFixture();
         if ((!isNew && failPreviousProbe) || (isNew && failNewProbe)) {
           health.status = "not_ready";
@@ -431,6 +455,16 @@ function pagesApiBehavior({
         return jsonResponse(health, { noStore: true });
       }
       if (url.pathname === "/api/account/auth/methods") {
+        if (isNew && state.remainingNewMethodsTimeouts > 0) {
+          state.remainingNewMethodsTimeouts -= 1;
+          const error = new Error("simulated timeout");
+          error.name = "AbortError";
+          throw error;
+        }
+        if (isNew && state.remainingNewMethodsNonSuccesses > 0) {
+          state.remainingNewMethodsNonSuccesses -= 1;
+          return jsonResponse({ error: "deployment not ready" }, { status: 503 });
+        }
         const methods = methodsFixture(mode);
         if (
           (!isNew && legacyPreviousMethods) ||
@@ -463,7 +497,12 @@ function pagesApiBehavior({
     if (url.pathname.endsWith("/deployments")) {
       assert.equal(url.searchParams.get("env"), "production");
       assert.equal(url.searchParams.get("per_page"), "25");
-      const result = state.deployed
+      const deployedVisible =
+        state.deployed && state.remainingNewDeploymentVisibilityReads === 0;
+      if (state.deployed && state.remainingNewDeploymentVisibilityReads > 0) {
+        state.remainingNewDeploymentVisibilityReads -= 1;
+      }
+      const result = deployedVisible
         ? [
             newDeployment,
             oldDeployment,
@@ -1296,6 +1335,206 @@ test("normal deploy uses isolated cwd and snapshot, probes, AE, and exact record
   );
   assert.ok(probes.length >= 4);
   assert.ok(probes.every((call) => !call.options.headers.Authorization));
+});
+
+test("new deployment transient probe failures retry within a fixed bound", async (t) => {
+  await t.test("network, timeout, 404, and 5xx responses recover", async (t) => {
+    const fixture = await createProject(t);
+    const manifest = manifestFixture();
+    const behavior = pagesApiBehavior({
+      manifest,
+      legacyPreviousMethods: true,
+      newHealthNetworkFailures: 1,
+      newHealthNonSuccesses: 1,
+      newMethodsTimeouts: 1,
+      newMethodsNonSuccesses: 1,
+    });
+    const sleeps = [];
+    const operations = [];
+    const result = await runPagesReleaseCommand({
+      argv: [
+        "--deploy",
+        "--manifest",
+        fixture.manifestPath,
+        "--external-root",
+        fixture.externalRoot,
+        "--execute",
+        "--confirm",
+        DEPLOY_CONFIRMATION,
+      ],
+      projectRoot: fixture.projectRoot,
+      spawnCommand: spawnHarness(fixture.projectRoot, [], {
+        onDeploy: () => {
+          behavior.state.deployed = true;
+        },
+      }),
+      fetchImpl: behavior.fetchImpl,
+      sleep: async (milliseconds) => sleeps.push(milliseconds),
+      artifactOperations: stubArtifactOperations(manifest, operations),
+      output: outputCollector().output,
+      now: () => new Date(NOW),
+    });
+    assert.equal(result.deploymentId, DEPLOYMENT_ID);
+    assert.deepEqual(sleeps, Array(4).fill(2_000));
+    assert.equal(behavior.state.rollbackCalls, 0);
+    assert.ok(
+      operations.some((operation) => operation.operation === "writeDeploymentRecord"),
+    );
+    const newProbeCalls = behavior.state.fetchCalls.filter((call) =>
+      call.url.startsWith("https://11111111.torudake-reel.pages.dev/api/"),
+    );
+    assert.equal(
+      newProbeCalls.filter((call) => call.url.endsWith("/api/health")).length,
+      5,
+    );
+    assert.equal(
+      newProbeCalls.filter((call) =>
+        call.url.endsWith("/api/account/auth/methods"),
+      ).length,
+      3,
+    );
+  });
+
+  await t.test("late visibility still receives a separate probe retry budget", async (t) => {
+    const fixture = await createProject(t);
+    const manifest = manifestFixture();
+    const behavior = pagesApiBehavior({
+      manifest,
+      legacyPreviousMethods: true,
+      newDeploymentVisibilityDelay: 9,
+      newHealthNonSuccesses: 1,
+    });
+    const sleeps = [];
+    const result = await runPagesReleaseCommand({
+      argv: [
+        "--deploy",
+        "--manifest",
+        fixture.manifestPath,
+        "--external-root",
+        fixture.externalRoot,
+        "--execute",
+        "--confirm",
+        DEPLOY_CONFIRMATION,
+      ],
+      projectRoot: fixture.projectRoot,
+      spawnCommand: spawnHarness(fixture.projectRoot, [], {
+        onDeploy: () => {
+          behavior.state.deployed = true;
+        },
+      }),
+      fetchImpl: behavior.fetchImpl,
+      sleep: async (milliseconds) => sleeps.push(milliseconds),
+      artifactOperations: stubArtifactOperations(manifest, []),
+      output: outputCollector().output,
+      now: () => new Date(NOW),
+    });
+    assert.equal(result.deploymentId, DEPLOYMENT_ID);
+    assert.deepEqual(sleeps, Array(10).fill(2_000));
+    assert.equal(behavior.state.rollbackCalls, 0);
+    const newHealthCalls = behavior.state.fetchCalls.filter(
+      (call) =>
+        call.url ===
+        "https://11111111.torudake-reel.pages.dev/api/health",
+    );
+    assert.equal(newHealthCalls.length, 2);
+  });
+
+  await t.test("hard 401 response fails immediately and restores production", async (t) => {
+    const fixture = await createProject(t);
+    const manifest = manifestFixture();
+    const behavior = pagesApiBehavior({
+      manifest,
+      legacyPreviousMethods: true,
+      newHealthHardFailures: 1,
+    });
+    const sleeps = [];
+    await assert.rejects(
+      runPagesReleaseCommand({
+        argv: [
+          "--deploy",
+          "--manifest",
+          fixture.manifestPath,
+          "--external-root",
+          fixture.externalRoot,
+          "--execute",
+          "--confirm",
+          DEPLOY_CONFIRMATION,
+        ],
+        projectRoot: fixture.projectRoot,
+        spawnCommand: spawnHarness(fixture.projectRoot, [], {
+          onDeploy: () => {
+            behavior.state.deployed = true;
+          },
+        }),
+        fetchImpl: behavior.fetchImpl,
+        sleep: async (milliseconds) => sleeps.push(milliseconds),
+        artifactOperations: stubArtifactOperations(manifest, []),
+        output: outputCollector().output,
+        now: () => new Date(NOW),
+      }),
+      /previous production was restored:.*non-success response/is,
+    );
+    assert.deepEqual(sleeps, []);
+    assert.equal(behavior.state.rollbackCalls, 1);
+    assert.equal(behavior.state.rolledBack, true);
+    const newHealthCalls = behavior.state.fetchCalls.filter(
+      (call) =>
+        call.url ===
+        "https://11111111.torudake-reel.pages.dev/api/health",
+    );
+    assert.equal(newHealthCalls.length, 1);
+  });
+
+  await t.test("persistent non-success exhausts ten attempts and rolls back", async (t) => {
+    const fixture = await createProject(t);
+    const manifest = manifestFixture();
+    const behavior = pagesApiBehavior({
+      manifest,
+      legacyPreviousMethods: true,
+      newHealthNonSuccesses: 10,
+    });
+    const sleeps = [];
+    const operations = [];
+    await assert.rejects(
+      runPagesReleaseCommand({
+        argv: [
+          "--deploy",
+          "--manifest",
+          fixture.manifestPath,
+          "--external-root",
+          fixture.externalRoot,
+          "--execute",
+          "--confirm",
+          DEPLOY_CONFIRMATION,
+        ],
+        projectRoot: fixture.projectRoot,
+        spawnCommand: spawnHarness(fixture.projectRoot, [], {
+          onDeploy: () => {
+            behavior.state.deployed = true;
+          },
+        }),
+        fetchImpl: behavior.fetchImpl,
+        sleep: async (milliseconds) => sleeps.push(milliseconds),
+        artifactOperations: stubArtifactOperations(manifest, operations),
+        output: outputCollector().output,
+        now: () => new Date(NOW),
+      }),
+      /previous production was restored:.*non-success response/is,
+    );
+    assert.deepEqual(sleeps, Array(9).fill(2_000));
+    assert.equal(behavior.state.rollbackCalls, 1);
+    assert.equal(behavior.state.rolledBack, true);
+    assert.equal(
+      operations.some((operation) => operation.operation === "writeDeploymentRecord"),
+      false,
+    );
+    const newHealthCalls = behavior.state.fetchCalls.filter(
+      (call) =>
+        call.url ===
+        "https://11111111.torudake-reel.pages.dev/api/health",
+    );
+    assert.equal(newHealthCalls.length, 10);
+  });
 });
 
 test("disabled rollback provisioning records rollback schema then restores prior normal", async (t) => {
