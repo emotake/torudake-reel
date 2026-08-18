@@ -43,7 +43,7 @@ const MAX_API_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_PROBE_JSON_BYTES = 32 * 1024;
 const MAX_DEPLOYMENT_RECORD_BYTES = 64 * 1024;
 const MAX_DEPLOYMENT_PAGES = 50;
-const DEPLOYMENTS_PER_PAGE = 100;
+const DEPLOYMENTS_PER_PAGE = 25;
 const SNAPSHOT_PREFIX = ".torudake-pages-stage-";
 const WRANGLER_CWD_PREFIX = ".torudake-pages-wrangler-";
 const RELEASE_MESSAGE_PATTERN =
@@ -535,9 +535,10 @@ function pagesProjectApi(targets) {
   );
 }
 
-async function listAllProductionDeployments({ fetchImpl, token, targets }) {
+export async function listAllProductionDeployments({ fetchImpl, token, targets }) {
   const deployments = [];
   const seen = new Set();
+  let paginationTotals;
   for (let page = 1; page <= MAX_DEPLOYMENT_PAGES; page += 1) {
     const envelope = await fetchCloudflareJson(
       fetchImpl,
@@ -548,14 +549,54 @@ async function listAllProductionDeployments({ fetchImpl, token, targets }) {
     if (envelope?.success !== true || !Array.isArray(envelope.result)) {
       throw new Error("Cloudflare Pages deployment list schema is invalid.");
     }
-    const totalPages = envelope.result_info?.total_pages;
+    const resultInfo = envelope.result_info;
     if (
-      totalPages !== undefined &&
-      (!Number.isSafeInteger(totalPages) ||
-        totalPages < 1 ||
-        totalPages > MAX_DEPLOYMENT_PAGES)
+      !exactKeys(resultInfo, [
+        "page",
+        "per_page",
+        "count",
+        "total_count",
+        "total_pages",
+      ]) ||
+      !Number.isSafeInteger(resultInfo.page) ||
+      resultInfo.page !== page ||
+      resultInfo.per_page !== DEPLOYMENTS_PER_PAGE ||
+      !Number.isSafeInteger(resultInfo.count) ||
+      resultInfo.count < 0 ||
+      resultInfo.count !== envelope.result.length ||
+      !Number.isSafeInteger(resultInfo.total_count) ||
+      resultInfo.total_count < 0 ||
+      resultInfo.total_count > MAX_DEPLOYMENT_PAGES * DEPLOYMENTS_PER_PAGE ||
+      !Number.isSafeInteger(resultInfo.total_pages) ||
+      resultInfo.total_pages < 0 ||
+      resultInfo.total_pages > MAX_DEPLOYMENT_PAGES ||
+      resultInfo.total_pages !==
+        Math.ceil(resultInfo.total_count / DEPLOYMENTS_PER_PAGE)
     ) {
       throw new Error("Cloudflare Pages deployment pagination is invalid or excessive.");
+    }
+    const { count, total_count: totalCount, total_pages: totalPages } =
+      resultInfo;
+    if (
+      paginationTotals &&
+      (paginationTotals.totalCount !== totalCount ||
+        paginationTotals.totalPages !== totalPages)
+    ) {
+      throw new Error("Cloudflare Pages deployment pagination totals changed.");
+    }
+    paginationTotals ??= { totalCount, totalPages };
+    if (totalPages === 0) {
+      if (page !== 1 || count !== 0) {
+        throw new Error("Cloudflare Pages deployment pagination is invalid.");
+      }
+      return deployments;
+    }
+    const expectedCount =
+      page < totalPages
+        ? DEPLOYMENTS_PER_PAGE
+        : totalCount - (totalPages - 1) * DEPLOYMENTS_PER_PAGE;
+    if (page > totalPages || count !== expectedCount) {
+      throw new Error("Cloudflare Pages deployment page length is invalid.");
     }
     for (const deployment of envelope.result) {
       if (
@@ -572,10 +613,13 @@ async function listAllProductionDeployments({ fetchImpl, token, targets }) {
       seen.add(id);
       deployments.push(deployment);
     }
-    if (
-      (totalPages !== undefined && page >= totalPages) ||
-      (totalPages === undefined && envelope.result.length < DEPLOYMENTS_PER_PAGE)
-    ) {
+    if (deployments.length > totalCount) {
+      throw new Error("Cloudflare Pages deployment pagination exceeded its total.");
+    }
+    if (page === totalPages) {
+      if (deployments.length !== totalCount) {
+        throw new Error("Cloudflare Pages deployment pagination total is incomplete.");
+      }
       return deployments;
     }
   }
@@ -1008,6 +1052,11 @@ async function capturePreviousProduction({
     token,
     targets,
   });
+  if (inventory.length >= MAX_DEPLOYMENT_PAGES * DEPLOYMENTS_PER_PAGE) {
+    throw new Error(
+      "Cloudflare Pages deployment history has no capacity for a safely verified release.",
+    );
+  }
   const canonicalId = await canonicalProductionDeploymentId({
     fetchImpl,
     token,

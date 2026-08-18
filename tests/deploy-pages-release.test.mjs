@@ -9,6 +9,7 @@ import {
   PREPARE_CONFIRMATION,
   assertWranglerCwdHasNoConfig,
   isPinnedLegacyPreviousProduction,
+  listAllProductionDeployments,
   pagesBuildCommands,
   pagesDeployArguments,
   parsePagesReleaseArguments,
@@ -116,6 +117,14 @@ function deploymentFixture(manifest = manifestFixture()) {
     analytics_engine_datasets: {
       AUTH_OBSERVABILITY: { dataset: "torudake_line_auth_events" },
     },
+  };
+}
+
+function historicalDeploymentFixture(manifest, index) {
+  return {
+    ...deploymentFixture(manifest),
+    id: `50000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    url: `https://history-${index}.torudake-reel.pages.dev/`,
   };
 }
 
@@ -261,6 +270,32 @@ function jsonResponse(value, { noStore = false, status = 200 } = {}) {
   });
 }
 
+function paginatedInventoryBehavior(deployments, transform) {
+  const urls = [];
+  const fetchImpl = async (input) => {
+    const url = new URL(String(input));
+    urls.push(url);
+    assert.equal(url.searchParams.get("env"), "production");
+    assert.equal(url.searchParams.get("per_page"), "25");
+    const page = Number(url.searchParams.get("page"));
+    const result = deployments.slice((page - 1) * 25, page * 25);
+    const payload = {
+      success: true,
+      result,
+      result_info: {
+        page,
+        per_page: 25,
+        count: result.length,
+        total_count: deployments.length,
+        total_pages: Math.ceil(deployments.length / 25),
+      },
+    };
+    transform?.(payload, { page, url });
+    return jsonResponse(payload);
+  };
+  return { fetchImpl, urls };
+}
+
 function analyticsEngineTablesFixture(
   datasets = ["torudake_line_auth_events"],
   { rowsBeforeLimit = 10 } = {},
@@ -321,6 +356,8 @@ function pagesApiBehavior({
   legacyPreviousMethods = false,
   legacyPreviousSourceMismatch = false,
   newMethodsWithoutFlags = false,
+  multiPageInventory = false,
+  existingInventorySize,
 } = {}) {
   const newDeployment = deploymentFixture(manifest);
   const oldDeployment = {
@@ -349,6 +386,16 @@ function pagesApiBehavior({
     id: ALTERNATE_DEPLOYMENT_ID,
     url: "https://44444444.torudake-reel.pages.dev/",
   };
+  const historicalCount =
+    existingInventorySize === undefined
+      ? multiPageInventory
+        ? 23
+        : 0
+      : existingInventorySize - 1;
+  assert.ok(Number.isSafeInteger(historicalCount) && historicalCount >= 0);
+  const historical = Array.from({ length: historicalCount }, (_, index) =>
+    historicalDeploymentFixture(manifest, index + 1),
+  );
   const state = {
     deployed: false,
     foreignDeployment,
@@ -414,18 +461,35 @@ function pagesApiBehavior({
       return jsonResponse({ success: Boolean(deployment), result: deployment });
     }
     if (url.pathname.endsWith("/deployments")) {
+      assert.equal(url.searchParams.get("env"), "production");
+      assert.equal(url.searchParams.get("per_page"), "25");
       const result = state.deployed
         ? [
-            ...(state.foreignDeployment ? [foreign] : []),
             newDeployment,
             oldDeployment,
+            ...historical,
             ...(flipCanonicalBeforeDeploy ? [alternate] : []),
+            ...(state.foreignDeployment ? [foreign] : []),
           ]
-        : [oldDeployment, ...(flipCanonicalBeforeDeploy ? [alternate] : [])];
+        : [
+            oldDeployment,
+            ...historical,
+            ...(flipCanonicalBeforeDeploy ? [alternate] : []),
+          ];
+      const page = Number(url.searchParams.get("page"));
+      assert.ok(Number.isSafeInteger(page) && page >= 1);
+      const pageResult = result.slice((page - 1) * 25, page * 25);
+      const totalPages = Math.ceil(result.length / 25);
       return jsonResponse({
         success: true,
-        result,
-        result_info: { total_pages: 1 },
+        result: pageResult,
+        result_info: {
+          page,
+          per_page: 25,
+          count: pageResult.length,
+          total_count: result.length,
+          total_pages: totalPages,
+        },
       });
     }
     if (url.pathname.endsWith("/pages/projects/torudake-reel")) {
@@ -452,6 +516,101 @@ function pagesApiBehavior({
   };
   return { state, fetchImpl, newDeployment, oldDeployment };
 }
+
+test("deployment inventory uses per_page=25 and reads a complete 25+1 result", async () => {
+  const manifest = manifestFixture();
+  const expected = Array.from({ length: 26 }, (_, index) =>
+    historicalDeploymentFixture(manifest, index + 1),
+  );
+  const behavior = paginatedInventoryBehavior(expected);
+  const actual = await listAllProductionDeployments({
+    fetchImpl: behavior.fetchImpl,
+    token: "test-token",
+    targets: targetsFixture(),
+  });
+  assert.deepEqual(
+    actual.map((deployment) => deployment.id),
+    expected.map((deployment) => deployment.id),
+  );
+  assert.deepEqual(
+    behavior.urls.map((url) => url.searchParams.get("page")),
+    ["1", "2"],
+  );
+  assert.ok(
+    behavior.urls.every(
+      (url) =>
+        url.searchParams.get("env") === "production" &&
+        url.searchParams.get("per_page") === "25",
+    ),
+  );
+});
+
+test("deployment inventory fails closed on malformed or inconsistent pagination", async (t) => {
+  const manifest = manifestFixture();
+  const deployments = Array.from({ length: 26 }, (_, index) =>
+    historicalDeploymentFixture(manifest, index + 1),
+  );
+  const cases = [
+    ["missing result_info field", (payload) => delete payload.result_info.count],
+    ["extra result_info field", (payload) => (payload.result_info.extra = 1)],
+    ["wrong response page", (payload) => (payload.result_info.page += 1)],
+    ["wrong per_page", (payload) => (payload.result_info.per_page = 26)],
+    ["noninteger count", (payload) => (payload.result_info.count = 24.5)],
+    ["negative total_count", (payload) => (payload.result_info.total_count = -1)],
+    ["non-derived total_pages", (payload) => (payload.result_info.total_pages = 1)],
+    [
+      "more than 50 pages",
+      (payload) => {
+        payload.result_info.total_count = 1251;
+        payload.result_info.total_pages = 51;
+      },
+    ],
+    [
+      "short non-final page",
+      (payload, { page }) => {
+        if (page !== 1) return;
+        payload.result.pop();
+        payload.result_info.count = payload.result.length;
+      },
+    ],
+    [
+      "changed totals",
+      (payload, { page }) => {
+        if (page !== 2) return;
+        payload.result_info.total_count = 27;
+      },
+    ],
+    [
+      "wrong final-page count",
+      (payload, { page }) => {
+        if (page !== 2) return;
+        payload.result = [];
+        payload.result_info.count = 0;
+      },
+    ],
+    [
+      "duplicate ID across pages",
+      (payload, { page }) => {
+        if (page !== 2) return;
+        payload.result[0] = { ...payload.result[0], id: deployments[0].id };
+      },
+      /duplicate IDs/,
+    ],
+  ];
+  for (const [name, transform, errorPattern = /pagination|page length/] of cases) {
+    await t.test(name, async () => {
+      const behavior = paginatedInventoryBehavior(deployments, transform);
+      await assert.rejects(
+        listAllProductionDeployments({
+          fetchImpl: behavior.fetchImpl,
+          token: "test-token",
+          targets: targetsFixture(),
+        }),
+        errorPattern,
+      );
+    });
+  }
+});
 
 test("release CLI arguments are strict and mutations require mode-specific confirmation", () => {
   assert.equal(
@@ -1203,6 +1362,105 @@ test("disabled rollback provisioning records rollback schema then restores prior
   assert.equal(record.verification.verifiedAt, NOW);
 });
 
+test("1250 existing deployments exhaust safe release capacity before upload", async (t) => {
+  const fixture = await createProject(t);
+  const manifest = manifestFixture();
+  const behavior = pagesApiBehavior({ manifest, existingInventorySize: 1250 });
+  const spawns = [];
+  const operations = [];
+  await assert.rejects(
+    runPagesReleaseCommand({
+      argv: [
+        "--deploy",
+        "--manifest",
+        fixture.manifestPath,
+        "--external-root",
+        fixture.externalRoot,
+        "--execute",
+        "--confirm",
+        DEPLOY_CONFIRMATION,
+      ],
+      projectRoot: fixture.projectRoot,
+      spawnCommand: spawnHarness(fixture.projectRoot, spawns, {
+        onDeploy: () => {
+          behavior.state.deployed = true;
+        },
+      }),
+      fetchImpl: behavior.fetchImpl,
+      artifactOperations: stubArtifactOperations(manifest, operations),
+      output: outputCollector().output,
+      now: () => new Date(NOW),
+    }),
+    /no capacity for a safely verified release/,
+  );
+  assert.equal(behavior.state.deployed, false);
+  assert.equal(behavior.state.rollbackCalls, 0);
+  assert.equal(
+    spawns.some(
+      (call) => call.args.includes("pages") && call.args.includes("deploy"),
+    ),
+    false,
+  );
+  assert.equal(
+    operations.some((operation) => operation.operation === "writeDeploymentRecord"),
+    false,
+  );
+  const listUrls = behavior.state.fetchCalls
+    .map((call) => new URL(call.url))
+    .filter((url) => url.pathname.endsWith("/deployments"));
+  assert.equal(listUrls.length, 50);
+  assert.equal(listUrls.at(-1).searchParams.get("page"), "50");
+  assert.ok(listUrls.every((url) => url.searchParams.get("per_page") === "25"));
+});
+
+test("1249 existing deployments leave room to verify and roll back one candidate", async (t) => {
+  const fixture = await createProject(t);
+  const manifest = manifestFixture();
+  const behavior = pagesApiBehavior({
+    manifest,
+    releaseMode: "disabled_rollback_provisioning",
+    legacyPreviousMethods: true,
+    existingInventorySize: 1249,
+  });
+  const operations = [];
+  const result = await runPagesReleaseCommand({
+    argv: [
+      "--deploy",
+      "--manifest",
+      fixture.manifestPath,
+      "--external-root",
+      fixture.externalRoot,
+      "--provision-disabled-rollback",
+      "--execute",
+      "--confirm",
+      DEPLOY_CONFIRMATION,
+    ],
+    projectRoot: fixture.projectRoot,
+    spawnCommand: spawnHarness(fixture.projectRoot, [], {
+      onDeploy: () => {
+        behavior.state.deployed = true;
+      },
+    }),
+    fetchImpl: behavior.fetchImpl,
+    sleep: async () => assert.fail("successful deployment should not poll"),
+    artifactOperations: stubArtifactOperations(manifest, operations),
+    output: outputCollector().output,
+    now: () => new Date(NOW),
+  });
+  assert.equal(result.deploymentId, DEPLOYMENT_ID);
+  assert.equal(result.restoredDeploymentId, OLD_DEPLOYMENT_ID);
+  assert.equal(behavior.state.rollbackCalls, 1);
+  assert.equal(behavior.state.rolledBack, true);
+  assert.ok(
+    operations.some((operation) => operation.operation === "writeDeploymentRecord"),
+  );
+  const listUrls = behavior.state.fetchCalls
+    .map((call) => new URL(call.url))
+    .filter((url) => url.pathname.endsWith("/deployments"));
+  assert.ok(listUrls.some((url) => url.searchParams.get("page") === "50"));
+  assert.ok(listUrls.every((url) => url.searchParams.get("per_page") === "25"));
+});
+
 test("an unpinned legacy methods payload is rejected before Pages upload", async (t) => {
   const fixture = await createProject(t);
   const manifest = manifestFixture();
@@ -1279,10 +1537,14 @@ test("a new candidate without raw authentication flags is rolled back", async (t
   assert.equal(behavior.state.rolledBack, true);
 });
 
-test("foreign canonical deployment is rejected without rollback mutation", async (t) => {
+test("full paginated inventory detects foreign concurrency without rollback mutation", async (t) => {
   const fixture = await createProject(t);
   const manifest = manifestFixture();
-  const behavior = pagesApiBehavior({ manifest, foreignDeployment: true });
+  const behavior = pagesApiBehavior({
+    manifest,
+    foreignDeployment: true,
+    multiPageInventory: true,
+  });
   const operations = [];
   await assert.rejects(
     runPagesReleaseCommand({
@@ -1312,6 +1574,21 @@ test("foreign canonical deployment is rejected without rollback mutation", async
   );
   assert.equal(behavior.state.rollbackCalls, 0);
   assert.equal(behavior.state.rolledBack, false);
+  const listUrls = behavior.state.fetchCalls
+    .map((call) => new URL(call.url))
+    .filter((url) => url.pathname.endsWith("/deployments"));
+  assert.ok(listUrls.length >= 4);
+  assert.deepEqual(
+    new Set(listUrls.map((url) => url.searchParams.get("page"))),
+    new Set(["1", "2"]),
+  );
+  assert.ok(
+    listUrls.every(
+      (url) =>
+        url.searchParams.get("env") === "production" &&
+        url.searchParams.get("per_page") === "25",
+    ),
+  );
   assert.equal(
     operations.some((operation) => operation.operation === "writeDeploymentRecord"),
     false,
