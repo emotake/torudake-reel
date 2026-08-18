@@ -148,9 +148,31 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /<track default="" kind="captions"/);
   assert.doesNotMatch(html, /autoplay=""|muted=""|loop=""/);
   assert.match(html, /約10秒・音声付き/);
-  assert.match(html, /実際の仕上がり/);
-  assert.match(html, /サンプル動画で、仕上がりを確認できます/);
-  assert.match(html, /映像・音声・テロップをまとめて確認できます。登録は必要ありません/);
+  assert.match(html, /作れるリール/);
+  assert.match(html, /素材に合う作り方を、見比べられます/);
+  assert.match(html, /実際の完成動画と、複数動画・写真リールのイメージ/);
+  const showcaseDataIndex = html.indexOf("data-home-showcase-carousel");
+  const showcaseStart = html.lastIndexOf("<section", showcaseDataIndex);
+  const showcaseEnd = html.indexOf('id="create"', showcaseStart);
+  const showcaseHtml = html.slice(showcaseStart, showcaseEnd);
+  assert.ok(
+    showcaseDataIndex >= 0 && showcaseStart >= 0 && showcaseEnd > showcaseStart,
+  );
+  assert.match(showcaseHtml, /aria-roledescription="カルーセル"/);
+  assert.match(showcaseHtml, /aria-label="作れるリールの例"/);
+  const renderedSlides =
+    showcaseHtml.match(
+      /<article\b[^>]*aria-roledescription="スライド"[^>]*>/g,
+    ) ?? [];
+  assert.equal(renderedSlides.length, 3);
+  assert.equal(renderedSlides.filter((slide) => /\sinert=""/.test(slide)).length, 2);
+  assert.equal(
+    renderedSlides.filter((slide) => /aria-hidden="true"/.test(slide)).length,
+    2,
+  );
+  assert.match(showcaseHtml, /aria-label="前の仕上がり例を表示"/);
+  assert.match(showcaseHtml, /aria-label="次の仕上がり例を表示"/);
+  assert.match(showcaseHtml, /aria-live="polite"/);
   assert.doesNotMatch(html, /先に見てから、作り始められます/);
   assert.doesNotMatch(html, /AIナレーションの仕上がりを、先に聴けます/);
   assert.doesNotMatch(html, /固定見本は試聴用モデル/);

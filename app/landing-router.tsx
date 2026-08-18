@@ -17,6 +17,7 @@ import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
 import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
 import { ModeMediaVisual } from "./home-rich-visuals";
+import { HomeShowcaseCarousel } from "./home-showcase-carousel";
 import {
   MonthlyFirstPurchaseOptions,
   OneTimeRescue,
@@ -315,13 +316,13 @@ export function HomeLanding(props: LandingSharedProps) {
             aria-labelledby="landingHeroResultTitle"
           >
             <div className="landingHeroResultHeading">
-              <p className="eyebrow">実際の仕上がり</p>
+              <p className="eyebrow">作れるリール</p>
               <h2 id="landingHeroResultTitle">
-                サンプル動画で、仕上がりを確認できます。
+                素材に合う作り方を、見比べられます。
               </h2>
-              <p>映像・音声・テロップをまとめて確認できます。登録は必要ありません。</p>
+              <p>実際の完成動画と、複数動画・写真リールのイメージを切り替えて見られます。</p>
             </div>
-            {props.demo}
+            <HomeShowcaseCarousel demo={props.demo} openPicker={props.openPicker} />
           </div>
         </div>
         <DraftRecovery
