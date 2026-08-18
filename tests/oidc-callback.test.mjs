@@ -256,7 +256,11 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
   try {
     const moduleUrl = new URL("../lib/oidc-auth.ts", import.meta.url);
     moduleUrl.searchParams.set("callback-test", `${process.pid}-${Date.now()}`);
-    const { beginOidcAuthorization, completeOidcAuthorization } =
+    const {
+      beginOidcAuthorization,
+      completeOidcAuthorization,
+      oidcAuthErrorResponse,
+    } =
       await import(moduleUrl.href);
     const lineStartRouteUrl = new URL(
       "../app/api/account/oauth/line/start/route.ts",
@@ -337,10 +341,10 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
     );
     assert.equal(providerCalls, 4);
 
-    for (const [mode, stateCharacter, intent, initiatingUserId] of [
-      ["rejected", "d", "login", trialUserId],
-      ["server_error", "e", "reauthenticate", userId],
-      ["oversize", "f", "login", null],
+    for (const [mode, stateCharacter, intent, initiatingUserId, expectedHttpStatus, expectedStatus, expectedCategory] of [
+      ["rejected", "d", "login", trialUserId, 502, 502, "upstream"],
+      ["server_error", "e", "reauthenticate", userId, 303, 503, "upstream"],
+      ["oversize", "f", "login", null, 503, 503, "upstream"],
     ]) {
       await t.test(`LINE ${mode} deauthorization leaves identity and sessions unchanged`, async () => {
         const failedState = stateCharacter.repeat(43);
@@ -350,8 +354,8 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
               state_hash, provider, nonce, pkce_verifier, intent,
               initiating_user_id, expected_origin, return_to, network_hash,
               created_at, expires_at, consumed_at
-            ) VALUES (?, 'line', ?, ?, ?, ?, ?,
-              '/account?auth_popup=pending', 'network-hash', ?, ?, NULL)
+            ) VALUES (?, 'line', ?, ?, ?, ?, ?, ?,
+              'network-hash', ?, ?, NULL)
           `)
           .run(
             await sha256Hex(failedState),
@@ -360,6 +364,9 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
             intent,
             initiatingUserId,
             canonicalOrigin,
+            mode === "server_error"
+              ? "/account?checkout=pro"
+              : "/account?auth_popup=pending",
             now,
             now + 600,
           );
@@ -428,7 +435,25 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
           deauthorizationMode = "success";
         }
 
-        assert.equal(failedResponse.status, 400);
+        assert.equal(failedResponse.status, expectedHttpStatus);
+        assert.equal(
+          failedResponse.headers.get("x-torudake-auth-status"),
+          String(expectedStatus),
+        );
+        assert.equal(
+          failedResponse.headers.get("x-torudake-auth-category"),
+          expectedCategory,
+        );
+        assert.equal(
+          failedResponse.headers.get("x-torudake-auth-trust"),
+          "challenge",
+        );
+        if (mode === "server_error") {
+          assert.equal(
+            failedResponse.headers.get("location"),
+            `${canonicalOrigin}/account?checkout=pro&auth_error=failed`,
+          );
+        }
         assert.doesNotMatch(
           failedResponse.headers.getSetCookie().join("\n"),
           /__Host-torudake_account=/,
@@ -883,6 +908,264 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
         previousLastUsedAt,
         "the identity mutation must also be conditional on the initiating session",
       );
+    });
+
+    await t.test("successful direct completion replaces attacker auth markers with a trusted result", async () => {
+      const directState = "m".repeat(43);
+      database.sqlite
+        .prepare(`
+          INSERT INTO account_oauth_challenges (
+            state_hash, provider, nonce, pkce_verifier, intent,
+            initiating_user_id, expected_origin, return_to, network_hash,
+            created_at, expires_at, consumed_at
+          ) VALUES (?, 'line', ?, ?, 'login', NULL, ?, ?,
+            'network-hash', ?, ?, NULL)
+        `)
+        .run(
+          await sha256Hex(directState),
+          nonce,
+          "v".repeat(64),
+          canonicalOrigin,
+          "/account?checkout=pro&auth_error=cancelled&auth_result=reauthenticated&popup=1",
+          now,
+          now + 600,
+        );
+      providerSubject = subject;
+      const directResponse = await completeOidcAuthorization(
+        finalizeRequest(canonicalOrigin, {
+          code: "trusted-direct-code",
+          state: directState,
+          cookie: `__Host-torudake_oidc_line=${directState}`,
+        }),
+        "line",
+      );
+      assert.equal(directResponse.status, 303);
+      assert.equal(
+        directResponse.headers.get("location"),
+        `${canonicalOrigin}/account?checkout=pro&auth_result=authenticated`,
+      );
+      assert.equal(
+        directResponse.headers.get("x-torudake-auth-outcome"),
+        "succeeded",
+      );
+      assert.equal(
+        directResponse.headers.get("x-torudake-auth-category"),
+        "success",
+      );
+      assert.equal(directResponse.headers.get("x-torudake-auth-status"), "200");
+      assert.equal(
+        directResponse.headers.get("x-torudake-auth-trust"),
+        "challenge",
+      );
+      assert.match(
+        directResponse.headers.getSetCookie().join("\n"),
+        /__Host-torudake_account=/,
+      );
+    });
+
+    await t.test("cookie mismatch recovers trusted popup flow without consuming or authenticating", async () => {
+      const mismatchState = "w".repeat(43);
+      const popupFlowId = "11111111-1111-4111-8111-111111111111";
+      database.sqlite
+        .prepare(`
+          INSERT INTO account_oauth_challenges (
+            state_hash, provider, nonce, pkce_verifier, intent,
+            initiating_user_id, expected_origin, return_to, network_hash,
+            created_at, expires_at, consumed_at
+          ) VALUES (?, 'line', ?, ?, 'login', NULL, ?, ?,
+            'network-hash', ?, ?, NULL)
+        `)
+        .run(
+          await sha256Hex(mismatchState),
+          nonce,
+          "v".repeat(64),
+          canonicalOrigin,
+          `oidc-popup:${popupFlowId}`,
+          now,
+          now + 600,
+        );
+      const activeStart = await beginOidcAuthorization(
+        new Request(`${canonicalOrigin}/api/account/oauth/line/start`, {
+          headers: { "CF-Connecting-IP": "203.0.113.41" },
+        }),
+        "line",
+      );
+      const activeState = new URL(activeStart.headers.get("location"))
+        .searchParams.get("state");
+      assert.ok(activeState);
+      const activeStateCookie = activeStart.headers
+        .getSetCookie()
+        .find((value) => value.startsWith("__Host-torudake_oidc_line="))
+        ?.split(";", 1)[0];
+      assert.ok(activeStateCookie);
+      const providerCallsBefore = providerCalls;
+      const sessionsBefore = database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM account_sessions")
+        .get().count;
+      const mismatchResponse = await completeOidcAuthorization(
+        finalizeRequest(canonicalOrigin, {
+          code: "must-not-reach-line",
+          state: mismatchState,
+          cookie: `${activeStateCookie}; __Host-torudake_oidc_line_session_proof=${"0".repeat(64)}.${"p".repeat(43)}`,
+        }),
+        "line",
+      );
+      assert.equal(mismatchResponse.status, 400);
+      assert.equal(
+        mismatchResponse.headers.get("x-torudake-auth-outcome"),
+        "failed",
+      );
+      assert.equal(
+        mismatchResponse.headers.get("x-torudake-auth-trust"),
+        "untrusted",
+        "an unconsumed recovery response is not a durable terminal milestone",
+      );
+      assert.equal(
+        mismatchResponse.headers.get("x-torudake-auth-code"),
+        "oidc_state_mismatch",
+      );
+      const popupHtml = await mismatchResponse.text();
+      assert.match(popupHtml, new RegExp(popupFlowId));
+      assert.match(popupHtml, /"outcome":"failed"/);
+      assert.doesNotMatch(popupHtml, new RegExp(mismatchState));
+      assert.doesNotMatch(popupHtml, /must-not-reach-line/);
+      assert.deepEqual(
+        mismatchResponse.headers.getSetCookie(),
+        [],
+        "a callback that does not own the current state must not clear another transaction's cookies",
+      );
+      assert.equal(providerCalls, providerCallsBefore);
+      assert.equal(
+        database.sqlite
+          .prepare("SELECT COUNT(*) AS count FROM account_sessions")
+          .get().count,
+        sessionsBefore,
+      );
+      assert.equal(
+        database.sqlite
+          .prepare(
+            "SELECT consumed_at FROM account_oauth_challenges WHERE state_hash = ?",
+          )
+          .get(await sha256Hex(mismatchState)).consumed_at,
+        null,
+        "cookie mismatch must not let an attacker consume the transaction",
+      );
+      assert.equal(
+        database.sqlite
+          .prepare(
+            "SELECT consumed_at FROM account_oauth_challenges WHERE state_hash = ?",
+          )
+          .get(await sha256Hex(activeState)).consumed_at,
+        null,
+        "the victim's active transaction must remain usable",
+      );
+    });
+
+    await t.test("a consume race loser clears only its matching cookie and is not a trusted terminal event", async () => {
+      const racingState = "c".repeat(43);
+      database.sqlite
+        .prepare(`
+          INSERT INTO account_oauth_challenges (
+            state_hash, provider, nonce, pkce_verifier, intent,
+            initiating_user_id, expected_origin, return_to, network_hash,
+            created_at, expires_at, consumed_at
+          ) VALUES (?, 'line', ?, ?, 'login', NULL, ?, '/account',
+            'network-hash', ?, ?, NULL)
+        `)
+        .run(
+          await sha256Hex(racingState),
+          nonce,
+          "v".repeat(64),
+          canonicalOrigin,
+          now,
+          now + 600,
+        );
+      const originalPrepare = database.prepare.bind(database);
+      database.prepare = (query) => {
+        if (/UPDATE\s+account_oauth_challenges[\s\S]*RETURNING/iu.test(query)) {
+          return {
+            bind() {
+              return {
+                async first() {
+                  database.sqlite
+                    .prepare(
+                      "UPDATE account_oauth_challenges SET consumed_at = ? WHERE state_hash = ?",
+                    )
+                    .run(now, await sha256Hex(racingState));
+                  return null;
+                },
+              };
+            },
+          };
+        }
+        return originalPrepare(query);
+      };
+      let racingResponse;
+      try {
+        racingResponse = await completeOidcAuthorization(
+          finalizeRequest(canonicalOrigin, {
+            code: "must-not-reach-line",
+            state: racingState,
+            cookie: `__Host-torudake_oidc_line=${racingState}`,
+          }),
+          "line",
+        );
+      } finally {
+        database.prepare = originalPrepare;
+      }
+      assert.equal(racingResponse.status, 303);
+      assert.equal(
+        racingResponse.headers.get("x-torudake-auth-trust"),
+        "untrusted",
+      );
+      assert.match(
+        racingResponse.headers.getSetCookie().join("\n"),
+        /__Host-torudake_oidc_line=; Path=\/; Max-Age=0/,
+        "cookie ownership was established before the atomic consume race",
+      );
+    });
+
+    await t.test("unexpected link-session errors are fixed 500 responses without message disclosure", async () => {
+      Object.assign(globalThis.__cloudflareEnv, {
+        GOOGLE_OIDC_ENABLED: "true",
+        GOOGLE_OIDC_CLIENT_ID: "client.apps.googleusercontent.com",
+        GOOGLE_OIDC_CLIENT_SECRET: "google-client-secret",
+      });
+      const originalPrepare = database.prepare.bind(database);
+      database.prepare = (query) => {
+        if (/SELECT\s+user_id, created_at\s+FROM account_sessions/iu.test(query)) {
+          throw new Error("D1 internal endpoint=db-prod-secret");
+        }
+        return originalPrepare(query);
+      };
+      let thrown;
+      try {
+        await beginOidcAuthorization(
+          new Request(
+            `${canonicalOrigin}/api/account/oauth/google/start?link=1`,
+            {
+              headers: {
+                Cookie: `__Host-torudake_account=${accountToken}`,
+                "CF-Connecting-IP": "203.0.113.30",
+              },
+            },
+          ),
+          "google",
+        );
+      } catch (error) {
+        thrown = error;
+      } finally {
+        database.prepare = originalPrepare;
+      }
+      const errorResponse = oidcAuthErrorResponse(thrown);
+      assert.equal(errorResponse.status, 500);
+      assert.equal(
+        errorResponse.headers.get("x-torudake-auth-category"),
+        "server",
+      );
+      const serialized = JSON.stringify(await errorResponse.json());
+      assert.doesNotMatch(serialized, /db-prod-secret|D1 internal endpoint/u);
+      assert.match(serialized, /oidc_authentication_failed/u);
     });
   } finally {
     globalThis.fetch = originalFetch;

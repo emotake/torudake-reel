@@ -1,9 +1,31 @@
 "use client";
 
-import { startAuthentication } from "@simplewebauthn/browser";
+import {
+  startAuthentication,
+  WebAuthnAbortService,
+} from "@simplewebauthn/browser";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+import {
+  claimAuthenticationBusy,
+  createLineSameTabNavigationEpoch,
+  isActiveAbortableAuthenticationAttempt,
+  isActiveLineAuthenticationAttempt,
+  isPendingLineSameTabNavigation,
+  markLineSameTabNavigationCommitted,
+  runAbortableAuthenticationRequest,
+  runGuardedAuthenticationSequence,
+  scheduleLineAuthenticationRecovery,
+  shouldInitializeAuthenticationGate,
+} from "../lib/client-line-auth-lifecycle";
+import type { LineSameTabNavigationEpoch } from "../lib/client-line-auth-lifecycle";
 import lineButtonStyles from "./line-login-button.module.css";
 
 type AuthenticationReason = "billing" | "account" | "ai";
@@ -36,6 +58,12 @@ const LINE_POPUP_CHANNEL = "torudake-oidc-results";
 const LINE_POPUP_CHECK_INTERVAL_MS = 500;
 const LINE_POPUP_CLOSE_GRACE_MS = 2_500;
 const LINE_POPUP_MAX_WAIT_MS = 10 * 60 * 1_000;
+const LINE_SAME_TAB_START_RECOVERY_MS = 10_000;
+const LINE_SAME_TAB_UNLOAD_RECOVERY_MS = 1_000;
+const AUTHENTICATION_REQUEST_TIMEOUT_MS = 12_000;
+const PASSKEY_CEREMONY_TIMEOUT_MS = 5 * 60 * 1_000;
+const AUTHENTICATION_REQUEST_TIMEOUT_MESSAGE =
+  "認証サーバーから応答がありません。通信状態を確認して、もう一度お試しください。";
 const AUTHENTICATION_FOCUSABLE_SELECTOR = [
   "button:not([disabled])",
   "a[href]",
@@ -57,14 +85,10 @@ function isLinePopupResult(value: unknown): value is LinePopupResult {
   );
 }
 
-function currentAuthenticationReturnTo(mode: AuthenticationMode) {
+function currentAuthenticationReturnTo() {
   const target = new URL(window.location.href);
   target.searchParams.delete("auth_error");
   target.searchParams.delete("auth_result");
-  target.searchParams.set(
-    "auth_result",
-    mode === "reauthenticate" ? "reauthenticated" : "authenticated",
-  );
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
@@ -119,14 +143,36 @@ async function readPayload<T>(response: Response, fallback: string) {
   return payload as AuthPayload<T>;
 }
 
-async function postJson<T>(path: string, body?: Record<string, unknown>) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+async function runAuthenticationRequest<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  signal?: AbortSignal,
+) {
+  return await runAbortableAuthenticationRequest({
+    timeoutMs: AUTHENTICATION_REQUEST_TIMEOUT_MS,
+    timeoutMessage: AUTHENTICATION_REQUEST_TIMEOUT_MESSAGE,
+    signal,
+    run,
   });
-  return readPayload<T>(response, "本人確認を完了できませんでした。");
+}
+
+async function postJson<T>(
+  path: string,
+  body?: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
+  return await runAuthenticationRequest(async (requestSignal) => {
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: requestSignal,
+    });
+    return await readPayload<T>(
+      response,
+      "本人確認を完了できませんでした。",
+    );
+  }, signal);
 }
 
 export default function AuthenticationGate({
@@ -156,50 +202,99 @@ export default function AuthenticationGate({
   const linePopupOutcomeRef = useRef<LinePopupOutcome | null>(null);
   const linePopupStartedAtRef = useRef(0);
   const linePopupClosedAtRef = useRef<number | null>(null);
+  const lineAttemptGenerationRef = useRef(0);
+  const cancelSameTabRecoveryRef = useRef<(() => void) | null>(null);
+  const cancelSameTabBeforeUnloadRef = useRef<(() => void) | null>(null);
+  const lineSameTabNavigationEpochRef = useRef(0);
+  const lineSameTabNavigationRef = useRef<LineSameTabNavigationEpoch | null>(
+    null,
+  );
+  const passkeyAttemptGenerationRef = useRef(0);
+  const passkeyAbortControllerRef = useRef<AbortController | null>(null);
+  const passkeyAttemptTimeoutRef = useRef<number | null>(null);
+  const authenticationInitializationModeRef = useRef<
+    AuthenticationMode | null
+  >(null);
+  const mountedRef = useRef(false);
+  const openRef = useRef(open);
   const busyRef = useRef<typeof busy>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onAuthenticatedRef = useRef(onAuthenticated);
   const onCloseRef = useRef(onClose);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      openRef.current = false;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    onAuthenticatedRef.current = onAuthenticated;
+  }, [onAuthenticated]);
+
+  useLayoutEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  const ensureAuthenticationContext = useCallback(async () => {
+  const ensureAuthenticationContext = useCallback(async (signal?: AbortSignal) => {
     if (mode === "reauthenticate" || trialReadyRef.current) return;
-    const response = await fetch("/api/session/trial", {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    await readPayload<{ ready: boolean }>(
-      response,
-      "ログインを開始できませんでした。ページを再読み込みしてお試しください。",
-    );
+    await runAuthenticationRequest(async (requestSignal) => {
+      const response = await fetch("/api/session/trial", {
+        method: "POST",
+        credentials: "same-origin",
+        signal: requestSignal,
+      });
+      await readPayload<{ ready: boolean }>(
+        response,
+        "ログインを開始できませんでした。ページを再読み込みしてお試しください。",
+      );
+    }, signal);
+    if (signal?.aborted) throw signal.reason;
     trialReadyRef.current = true;
   }, [mode]);
 
-  const refreshAuthentication = useCallback(async () => {
-    const response = await fetch("/api/account/auth/methods", {
-      cache: "no-store",
-      credentials: "same-origin",
+  const refreshAuthentication = useCallback(async (
+    stillCurrent?: () => boolean,
+  ) => {
+    const payload = await runAuthenticationRequest(async (requestSignal) => {
+      const response = await fetch("/api/account/auth/methods", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: requestSignal,
+      });
+      return await readPayload<AuthenticationMethods>(
+        response,
+        "ログイン状態を確認できませんでした。",
+      );
     });
-    const payload = await readPayload<AuthenticationMethods>(
-      response,
-      "ログイン状態を確認できませんでした。",
-    );
+    if (
+      !mountedRef.current ||
+      !openRef.current ||
+      (stillCurrent && !stillCurrent())
+    ) {
+      return false;
+    }
     setMethods(payload);
     const complete =
       mode === "reauthenticate"
         ? payload.authenticated && payload.recentlyAuthenticated
         : payload.authenticated;
-    if (!complete || settledRef.current) return false;
+    if (!complete) return false;
+    if (settledRef.current) return true;
     settledRef.current = true;
-    await onAuthenticated();
+    await onAuthenticatedRef.current();
     return true;
-  }, [mode, onAuthenticated]);
+  }, [mode]);
 
   const resetLinePopup = useCallback((closePopup: boolean) => {
     const popup = linePopupRef.current;
@@ -211,6 +306,172 @@ export default function AuthenticationGate({
     linePopupClosedAtRef.current = null;
   }, []);
 
+  const cancelSameTabRecovery = useCallback(() => {
+    cancelSameTabRecoveryRef.current?.();
+    cancelSameTabRecoveryRef.current = null;
+  }, []);
+
+  const cancelSameTabBeforeUnload = useCallback(() => {
+    cancelSameTabBeforeUnloadRef.current?.();
+    cancelSameTabBeforeUnloadRef.current = null;
+  }, []);
+
+  const invalidateLineAttempt = useCallback(
+    (closePopup: boolean) => {
+      lineAttemptGenerationRef.current += 1;
+      cancelSameTabRecovery();
+      cancelSameTabBeforeUnload();
+      lineSameTabNavigationRef.current = null;
+      resetLinePopup(closePopup);
+    },
+    [cancelSameTabBeforeUnload, cancelSameTabRecovery, resetLinePopup],
+  );
+
+  const isCurrentLineAttempt = useCallback((generation: number) =>
+    isActiveLineAuthenticationAttempt(
+      {
+        mounted: mountedRef.current,
+        open: openRef.current,
+        generation: lineAttemptGenerationRef.current,
+      },
+      generation,
+    ), []);
+
+  const beginLineAttempt = useCallback(
+    (popup: Window | null) => {
+      invalidateLineAttempt(true);
+      const generation = lineAttemptGenerationRef.current;
+      linePopupRef.current = popup;
+      linePopupFlowRef.current = null;
+      linePopupOutcomeRef.current = null;
+      linePopupStartedAtRef.current = Date.now();
+      linePopupClosedAtRef.current = null;
+      return generation;
+    },
+    [invalidateLineAttempt],
+  );
+
+  const invalidatePasskeyAttempt = useCallback(() => {
+    passkeyAttemptGenerationRef.current += 1;
+    if (passkeyAttemptTimeoutRef.current !== null) {
+      window.clearTimeout(passkeyAttemptTimeoutRef.current);
+      passkeyAttemptTimeoutRef.current = null;
+    }
+    passkeyAbortControllerRef.current?.abort();
+    passkeyAbortControllerRef.current = null;
+    WebAuthnAbortService.cancelCeremony();
+  }, []);
+
+  const beginPasskeyAttempt = useCallback(() => {
+    invalidatePasskeyAttempt();
+    const controller = new AbortController();
+    passkeyAbortControllerRef.current = controller;
+    passkeyAttemptTimeoutRef.current = window.setTimeout(() => {
+      if (
+        passkeyAbortControllerRef.current !== controller ||
+        !mountedRef.current ||
+        !openRef.current
+      ) {
+        return;
+      }
+      invalidatePasskeyAttempt();
+      if (!mountedRef.current || !openRef.current) return;
+      setError("本人確認の有効時間が切れました。もう一度お試しください。");
+      busyRef.current = null;
+      setBusy(null);
+    }, PASSKEY_CEREMONY_TIMEOUT_MS);
+    return {
+      controller,
+      generation: passkeyAttemptGenerationRef.current,
+    };
+  }, [invalidatePasskeyAttempt]);
+
+  const cancelPasskeyAttempt = useCallback(() => {
+    if (busyRef.current !== "passkey") return;
+    invalidatePasskeyAttempt();
+    if (!mountedRef.current || !openRef.current) return;
+    setError("パスキーによる本人確認を中止しました。");
+    busyRef.current = null;
+    setBusy(null);
+  }, [invalidatePasskeyAttempt]);
+
+  const isCurrentPasskeyAttempt = useCallback(
+    (generation: number, controller: AbortController) =>
+      passkeyAbortControllerRef.current === controller &&
+      isActiveAbortableAuthenticationAttempt(
+        {
+          mounted: mountedRef.current,
+          open: openRef.current,
+          generation: passkeyAttemptGenerationRef.current,
+        },
+        generation,
+        controller.signal,
+      ),
+    [],
+  );
+
+  const recoverSameTabAttempt = useCallback(
+    (
+      generation: number,
+      message = "LINEログイン画面へ移動しませんでした。もう一度お試しください。",
+    ) => {
+      if (!isCurrentLineAttempt(generation)) return;
+      invalidateLineAttempt(false);
+      if (!mountedRef.current || !openRef.current) return;
+      setError(message);
+      setLineSameTabFallback(reason === "ai");
+      busyRef.current = null;
+      setBusy(null);
+    },
+    [invalidateLineAttempt, isCurrentLineAttempt, reason],
+  );
+
+  const armSameTabRecovery = useCallback(
+    (navigation: LineSameTabNavigationEpoch, delayMs: number) => {
+      cancelSameTabRecovery();
+      cancelSameTabRecoveryRef.current = scheduleLineAuthenticationRecovery({
+        delayMs,
+        isCurrent: () =>
+          isCurrentLineAttempt(navigation.generation) &&
+          isPendingLineSameTabNavigation(
+            lineSameTabNavigationRef.current,
+            navigation.epoch,
+            navigation.generation,
+          ),
+        recover: () => recoverSameTabAttempt(navigation.generation),
+      });
+    },
+    [cancelSameTabRecovery, isCurrentLineAttempt, recoverSameTabAttempt],
+  );
+
+  const attachSameTabBeforeUnloadRecovery = useCallback(
+    (navigation: LineSameTabNavigationEpoch) => {
+      cancelSameTabBeforeUnload();
+      const onBeforeUnload = () => {
+        cancelSameTabBeforeUnloadRef.current = null;
+        if (
+          !isCurrentLineAttempt(navigation.generation) ||
+          navigation.committed
+        ) {
+          return;
+        }
+        armSameTabRecovery(
+          navigation,
+          LINE_SAME_TAB_UNLOAD_RECOVERY_MS,
+        );
+      };
+      window.addEventListener("beforeunload", onBeforeUnload, { once: true });
+      cancelSameTabBeforeUnloadRef.current = () => {
+        window.removeEventListener("beforeunload", onBeforeUnload);
+      };
+    },
+    [
+      armSameTabRecovery,
+      cancelSameTabBeforeUnload,
+      isCurrentLineAttempt,
+    ],
+  );
+
   const handleLinePopupResult = useCallback(
     (result: LinePopupResult) => {
       if (
@@ -219,32 +480,61 @@ export default function AuthenticationGate({
       ) {
         return;
       }
+      const generation = lineAttemptGenerationRef.current;
+      if (!isCurrentLineAttempt(generation)) return;
       linePopupOutcomeRef.current = result.outcome;
       if (result.outcome === "succeeded") {
-        void refreshAuthentication().catch(() => undefined);
+        void refreshAuthentication(() => isCurrentLineAttempt(generation))
+          .then((complete) => {
+            if (complete && isCurrentLineAttempt(generation)) {
+              invalidateLineAttempt(false);
+            }
+          })
+          .catch(() => undefined);
         return;
       }
+      invalidateLineAttempt(true);
       setError(
         result.outcome === "cancelled"
           ? "LINEログインをキャンセルしました。料金は発生していません。"
           : "LINEログインを完了できませんでした。もう一度お試しください。",
       );
+      busyRef.current = null;
       setBusy(null);
-      resetLinePopup(true);
     },
-    [refreshAuthentication, resetLinePopup],
+    [
+      invalidateLineAttempt,
+      isCurrentLineAttempt,
+      refreshAuthentication,
+    ],
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      authenticationInitializationModeRef.current = null;
+      return;
+    }
+    if (
+      !shouldInitializeAuthenticationGate(
+        authenticationInitializationModeRef.current,
+        open,
+        mode,
+      )
+    ) {
+      return;
+    }
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
+      authenticationInitializationModeRef.current = mode;
+      invalidateLineAttempt(true);
+      invalidatePasskeyAttempt();
       settledRef.current = false;
       trialReadyRef.current = false;
       setMethods(null);
       setError("");
       setLineSameTabFallback(false);
+      busyRef.current = null;
       setBusy(null);
       void refreshAuthentication().catch((cause) => {
         if (!active) return;
@@ -255,6 +545,19 @@ export default function AuthenticationGate({
         );
       });
     });
+    return () => {
+      active = false;
+    };
+  }, [
+    invalidateLineAttempt,
+    invalidatePasskeyAttempt,
+    mode,
+    open,
+    refreshAuthentication,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
     const refresh = () => {
       void refreshAuthentication().catch(() => undefined);
     };
@@ -278,7 +581,6 @@ export default function AuthenticationGate({
     window.addEventListener("message", onMessage);
     channel?.addEventListener("message", onChannelMessage);
     return () => {
-      active = false;
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("message", onMessage);
@@ -287,23 +589,98 @@ export default function AuthenticationGate({
     };
   }, [handleLinePopupResult, open, refreshAuthentication]);
 
-  useEffect(() => {
-    if (!open) resetLinePopup(true);
-  }, [open, resetLinePopup]);
+  useLayoutEffect(() => {
+    if (!open) {
+      invalidateLineAttempt(true);
+      invalidatePasskeyAttempt();
+    }
+  }, [invalidateLineAttempt, invalidatePasskeyAttempt, open]);
 
-  useEffect(
+  useLayoutEffect(
     () => () => {
-      resetLinePopup(true);
+      invalidateLineAttempt(true);
+      invalidatePasskeyAttempt();
     },
-    [resetLinePopup],
+    [invalidateLineAttempt, invalidatePasskeyAttempt],
   );
 
   useEffect(() => {
+    const onPageHide = () => {
+      const navigation = lineSameTabNavigationRef.current;
+      if (
+        navigation &&
+        isCurrentLineAttempt(navigation.generation) &&
+        markLineSameTabNavigationCommitted(
+          navigation,
+          lineSameTabNavigationEpochRef.current,
+        )
+      ) {
+        cancelSameTabRecovery();
+        cancelSameTabBeforeUnload();
+      }
+      if (passkeyAbortControllerRef.current) {
+        invalidatePasskeyAttempt();
+        busyRef.current = null;
+      }
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      if (busyRef.current === null && mountedRef.current && openRef.current) {
+        setBusy(null);
+      }
+      const navigation = lineSameTabNavigationRef.current;
+      if (
+        !navigation?.committed ||
+        navigation.epoch !== lineSameTabNavigationEpochRef.current ||
+        !isCurrentLineAttempt(navigation.generation)
+      ) {
+        return;
+      }
+      const generation = navigation.generation;
+      lineSameTabNavigationRef.current = null;
+      cancelSameTabRecovery();
+      void refreshAuthentication(() => isCurrentLineAttempt(generation))
+        .then((complete) => {
+          if (!isCurrentLineAttempt(generation)) return;
+          if (complete) {
+            invalidateLineAttempt(false);
+            return;
+          }
+          recoverSameTabAttempt(
+            generation,
+            "LINEログインが完了していません。もう一度お試しください。",
+          );
+        })
+        .catch(() => {
+          recoverSameTabAttempt(
+            generation,
+            "ログイン状態を確認できませんでした。もう一度お試しください。",
+          );
+        });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [
+    cancelSameTabBeforeUnload,
+    cancelSameTabRecovery,
+    invalidateLineAttempt,
+    invalidatePasskeyAttempt,
+    isCurrentLineAttempt,
+    recoverSameTabAttempt,
+    refreshAuthentication,
+  ]);
+
+  useEffect(() => {
     if (!open || busy !== "line" || !linePopupRef.current) return;
+    const generation = lineAttemptGenerationRef.current;
     let active = true;
     let checking = false;
     const checkPopup = async () => {
-      if (!active || checking) return;
+      if (!active || checking || !isCurrentLineAttempt(generation)) return;
       checking = true;
       try {
         const popup = linePopupRef.current;
@@ -314,9 +691,26 @@ export default function AuthenticationGate({
           linePopupClosedAtRef.current = now;
         }
         if (closed || linePopupOutcomeRef.current === "succeeded") {
-          const complete = await refreshAuthentication().catch(() => false);
+          let refreshFailed = false;
+          const complete = await refreshAuthentication(
+            () => isCurrentLineAttempt(generation),
+          ).catch(() => {
+            refreshFailed = true;
+            return false;
+          });
+          if (!isCurrentLineAttempt(generation)) return;
           if (complete) {
-            resetLinePopup(false);
+            invalidateLineAttempt(false);
+            return;
+          }
+          if (refreshFailed) {
+            invalidateLineAttempt(true);
+            if (!mountedRef.current || !openRef.current) return;
+            setError(
+              "ログイン状態を確認できませんでした。通信状態を確認して、もう一度お試しください。",
+            );
+            busyRef.current = null;
+            setBusy(null);
             return;
           }
         }
@@ -328,13 +722,14 @@ export default function AuthenticationGate({
           (closed && closedFor >= LINE_POPUP_CLOSE_GRACE_MS) ||
           waitingFor >= LINE_POPUP_MAX_WAIT_MS
         ) {
+          invalidateLineAttempt(true);
           setError(
             waitingFor >= LINE_POPUP_MAX_WAIT_MS
               ? "LINEログインの有効時間が切れました。もう一度お試しください。"
               : "LINEログインが完了していません。もう一度お試しください。",
           );
+          busyRef.current = null;
           setBusy(null);
-          resetLinePopup(true);
         }
       } finally {
         checking = false;
@@ -349,7 +744,13 @@ export default function AuthenticationGate({
       active = false;
       window.clearInterval(timer);
     };
-  }, [busy, open, refreshAuthentication, resetLinePopup]);
+  }, [
+    busy,
+    invalidateLineAttempt,
+    isCurrentLineAttempt,
+    open,
+    refreshAuthentication,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -386,10 +787,17 @@ export default function AuthenticationGate({
       ) ?? elements[0] ?? dialog).focus();
     });
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && busyRef.current === null) {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
+      if (event.key === "Escape") {
+        if (busyRef.current === "passkey") {
+          event.preventDefault();
+          cancelPasskeyAttempt();
+          return;
+        }
+        if (busyRef.current === null) {
+          event.preventDefault();
+          onCloseRef.current();
+          return;
+        }
       }
       if (event.key !== "Tab") return;
       const elements = focusable();
@@ -425,45 +833,62 @@ export default function AuthenticationGate({
       if (previous?.isConnected) previousFocusRef.current?.focus?.();
       previousFocusRef.current = null;
     };
-  }, [open, portalTarget]);
+  }, [cancelPasskeyAttempt, open, portalTarget]);
 
   if (!open || !portalTarget) return null;
 
   const authenticateWithPasskey = async () => {
+    if (!claimAuthenticationBusy(busyRef, "passkey")) return;
     setError("");
     setBusy("passkey");
+    const { controller, generation } = beginPasskeyAttempt();
+    const stillCurrent = () =>
+      isCurrentPasskeyAttempt(generation, controller);
     try {
-      await ensureAuthenticationContext();
       const path =
         mode === "reauthenticate"
           ? "/api/account/passkey/reauth/options"
           : "/api/account/passkey/login/options";
-      const prepared = await postJson<{
-        options?: PublicKeyCredentialRequestOptionsJSON;
-      }>(path);
-      if (!prepared.options) {
-        throw new Error("本人確認を開始できませんでした。");
-      }
-      const credential = await startAuthentication({
-        optionsJSON: prepared.options,
+      await runGuardedAuthenticationSequence({
+        isCurrent: stillCurrent,
+        ensureContext: () => ensureAuthenticationContext(controller.signal),
+        loadOptions: async () => {
+          const prepared = await postJson<{
+            options?: PublicKeyCredentialRequestOptionsJSON;
+          }>(path, undefined, controller.signal);
+          if (!prepared.options) {
+            throw new Error("本人確認を開始できませんでした。");
+          }
+          return prepared.options;
+        },
+        requestCredential: (options) =>
+          startAuthentication({ optionsJSON: options }),
+        verifyCredential: async (credential) => {
+          await postJson<{ authenticated: boolean }>(
+            "/api/account/passkey/login/verify",
+            credential as unknown as Record<string, unknown>,
+            controller.signal,
+          );
+        },
+        refreshAuthentication: () => refreshAuthentication(stillCurrent),
       });
-      await postJson<{ authenticated: boolean }>(
-        "/api/account/passkey/login/verify",
-        credential as unknown as Record<string, unknown>,
-      );
-      await refreshAuthentication();
     } catch (cause) {
+      if (!stillCurrent()) return;
       setError(
         cause instanceof Error
           ? cause.message
           : "本人確認を完了できませんでした。",
       );
     } finally {
+      if (!stillCurrent()) return;
+      invalidatePasskeyAttempt();
+      busyRef.current = null;
       setBusy(null);
     }
   };
 
   const authenticateWithLine = async (sameTabOnly = false) => {
+    if (!claimAuthenticationBusy(busyRef, "line")) return;
     setError("");
     setLineSameTabFallback(false);
     setBusy("line");
@@ -475,36 +900,61 @@ export default function AuthenticationGate({
       startUrl.searchParams.set("reauthenticate", "1");
     }
 
-    const navigateLineSameTab = async () => {
+    const navigateLineSameTab = async (
+      generation = lineAttemptGenerationRef.current,
+    ) => {
+      const navigation = createLineSameTabNavigationEpoch(
+        lineSameTabNavigationEpochRef.current + 1,
+        generation,
+      );
+      lineSameTabNavigationEpochRef.current = navigation.epoch;
+      lineSameTabNavigationRef.current = navigation;
+      armSameTabRecovery(navigation, LINE_SAME_TAB_START_RECOVERY_MS);
       try {
         await ensureAuthenticationContext();
+        if (!isCurrentLineAttempt(generation)) return;
         startUrl.searchParams.delete("popup");
         startUrl.searchParams.delete("popupFlow");
         startUrl.searchParams.set(
           "returnTo",
-          currentAuthenticationReturnTo(mode),
+          currentAuthenticationReturnTo(),
         );
-        window.location.assign(startUrl.toString());
+        attachSameTabBeforeUnloadRecovery(navigation);
+        try {
+          window.location.assign(startUrl.toString());
+        } catch {
+          recoverSameTabAttempt(generation);
+        }
       } catch (cause) {
+        if (!isCurrentLineAttempt(generation)) return;
+        invalidateLineAttempt(false);
+        if (!mountedRef.current || !openRef.current) return;
         setError(
           cause instanceof Error
             ? cause.message
             : "LINEログインを開始できませんでした。",
         );
+        setLineSameTabFallback(reason === "ai");
+        busyRef.current = null;
         setBusy(null);
       }
     };
 
     if (sameTabOnly) {
+      beginLineAttempt(null);
       await navigateLineSameTab();
       return;
     }
 
-    const offerEditorSameTabFallback = () => {
+    const offerEditorSameTabFallback = (generation: number) => {
+      if (!isCurrentLineAttempt(generation)) return;
+      invalidateLineAttempt(true);
+      if (!mountedRef.current || !openRef.current) return;
       setError(
         "ポップアップを開けませんでした。このタブで続ける場合、素材の再選択が必要になることがあります。",
       );
       setLineSameTabFallback(true);
+      busyRef.current = null;
       setBusy(null);
     };
 
@@ -516,12 +966,13 @@ export default function AuthenticationGate({
       "torudake-line-login",
       "popup=yes,width=520,height=720",
     );
+    const generation = beginLineAttempt(popup);
     if (!popup) {
       if (reason === "ai") {
-        offerEditorSameTabFallback();
+        offerEditorSameTabFallback(generation);
         return;
       }
-      await navigateLineSameTab();
+      await navigateLineSameTab(generation);
       return;
     }
     try {
@@ -530,37 +981,50 @@ export default function AuthenticationGate({
       // The result channel and final session check do not rely on opener.
     }
 
+    const flowId = crypto.randomUUID();
+    startUrl.searchParams.set("popup", "1");
+    startUrl.searchParams.set("popupFlow", flowId);
+    linePopupFlowRef.current = flowId;
+
     try {
       await ensureAuthenticationContext();
     } catch (cause) {
-      closePopupWindow(popup);
+      if (!isCurrentLineAttempt(generation)) return;
+      invalidateLineAttempt(true);
+      if (!mountedRef.current || !openRef.current) return;
       setError(
         cause instanceof Error
           ? cause.message
           : "LINEログインを開始できませんでした。",
       );
+      busyRef.current = null;
       setBusy(null);
       return;
     }
-
-    const flowId = crypto.randomUUID();
-    startUrl.searchParams.set("popup", "1");
-    startUrl.searchParams.set("popupFlow", flowId);
-    linePopupRef.current = popup;
-    linePopupFlowRef.current = flowId;
-    linePopupOutcomeRef.current = null;
-    linePopupStartedAtRef.current = Date.now();
-    linePopupClosedAtRef.current = null;
+    if (!isCurrentLineAttempt(generation)) return;
+    if (isPopupClosed(popup)) {
+      invalidateLineAttempt(false);
+      if (!mountedRef.current || !openRef.current) return;
+      setError("LINEログイン画面が閉じられました。もう一度お試しください。");
+      setLineSameTabFallback(reason === "ai");
+      busyRef.current = null;
+      setBusy(null);
+      return;
+    }
     try {
       popup.location.replace(startUrl.toString());
     } catch {
-      closePopupWindow(popup);
-      resetLinePopup(false);
+      if (!isCurrentLineAttempt(generation)) return;
       if (reason === "ai") {
-        offerEditorSameTabFallback();
+        offerEditorSameTabFallback(generation);
         return;
       }
-      await navigateLineSameTab();
+      invalidateLineAttempt(true);
+      if (!mountedRef.current || !openRef.current) return;
+      busyRef.current = "line";
+      setBusy("line");
+      const fallbackGeneration = beginLineAttempt(null);
+      await navigateLineSameTab(fallbackGeneration);
     }
   };
 
@@ -661,6 +1125,15 @@ export default function AuthenticationGate({
         ) : null}
         {error ? (
           <p className="authenticationGateError" role="alert">{error}</p>
+        ) : null}
+        {busy === "passkey" ? (
+          <button
+            type="button"
+            className="authenticationSameTabFallback"
+            onClick={cancelPasskeyAttempt}
+          >
+            パスキーによる本人確認を中止
+          </button>
         ) : null}
         {lineSameTabFallback ? (
           <button

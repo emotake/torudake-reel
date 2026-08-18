@@ -93,7 +93,15 @@ test("the authentication-method response hides passkey while disabled", async ()
     new Request(`${origin}/api/account/auth/methods`),
   );
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).passkey, false);
+  const body = await response.json();
+  assert.equal(body.passkey, false);
+  assert.deepEqual(body.authenticationFlags, {
+    OIDC_AUTH_ENABLED: false,
+    LINE_LOGIN_ENABLED: false,
+    GOOGLE_OIDC_ENABLED: false,
+    EMAIL_AUTH_ENABLED: false,
+    PASSKEY_AUTH_ENABLED: false,
+  });
 });
 
 test("every public passkey endpoint returns a private 503 while disabled", async () => {

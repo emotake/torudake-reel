@@ -1,5 +1,6 @@
 {
   "hosting": "cloudflare-pages-direct-upload",
+  "cloudflareAccountId": "e7572bf15e2fc4346e54f72ed7cb3ff0",
   "pagesProject": "torudake-reel",
   "productionBranch": "main",
   "productionUrl": "https://torudake-reel.pages.dev",
@@ -10,5 +11,42 @@
   "d1MigrationsTable": "d1_migrations",
   "authObservabilityBinding": "AUTH_OBSERVABILITY",
   "authObservabilityDataset": "torudake_line_auth_events",
-  "observabilityContract": "config/observability.json"
+  "observabilityContract": "config/observability.json",
+  "pagesArtifact": {
+    "root": "dist/cloudflare-pages",
+    "releaseMessagePrefix": "torudake-pages-v1",
+    "manifestEnvironmentVariable": "TORUDAKE_PAGES_ARTIFACT_MANIFEST",
+    "manifestSchemaVersion": 1,
+    "deployConfirmation": "deploy-cloudflare-pages"
+  },
+  "accountDeletionScheduler": {
+    "workerName": "torudake-reel-account-deletion-scheduler",
+    "config": "wrangler.account-deletion-scheduler.jsonc",
+    "source": "workers/account-deletion-scheduler.mjs",
+    "compatibilityDate": "2026-08-13",
+    "cronSchedule": "15 18 * * *",
+    "releaseMessagePrefix": "torudake-release-v1",
+    "provisioningConfirmation": "deploy-account-deletion-scheduler",
+    "bootstrapProvenanceConfirmation": "bootstrap-account-deletion-scheduler-provenance",
+    "manifestEnvironmentVariable": "TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST",
+    "manifestSchemaVersion": 2
+  },
+  "rollbackPolicy": {
+    "manifestEnvironmentVariable": "TORUDAKE_ROLLBACK_MANIFEST",
+    "manifestSchemaVersion": 2,
+    "provisioningConfirmation": "provision-disabled-line-rollback",
+    "requiredDisabledAuthenticationFlags": {
+      "OIDC_AUTH_ENABLED": "false",
+      "LINE_LOGIN_ENABLED": "false",
+      "GOOGLE_OIDC_ENABLED": "false",
+      "EMAIL_AUTH_ENABLED": "false",
+      "PASSKEY_AUTH_ENABLED": "false"
+    },
+    "telemetryDegradedEmergencyDeployment": {
+      "deploymentId": "04519766-9146-440a-9467-57e9ac56e4a5",
+      "sourceCommit": "38f8a256c58362862b96d8437c49f0556c6d0dc6",
+      "classification": "emergency_only",
+      "degradation": "auth_observability_binding_absent"
+    }
+  }
 }

@@ -1,12 +1,19 @@
 # LINE authentication observability
 
-LINE authentication emits two privacy-safe telemetry copies:
+LINE authentication emits two privacy-safe telemetry layers:
 
-1. Structured `console` events for real-time Pages deployment tails.
-2. One data point per lifecycle event in the Workers Analytics Engine dataset
-   `torudake_line_auth_events`. This is the durable source of truth for LINE
-   authentication history because legacy Pages Functions tail logs are not
-   stored. Analytics Engine retains data for three months.
+1. Structured `console` events for every lifecycle request in real-time Pages
+   deployment tails. These tails are not stored.
+2. A bounded operational subset in the Workers Analytics Engine dataset
+   `torudake_line_auth_events`. It is the durable source for successful starts,
+   trusted terminal completions, and all server/upstream failures. Analytics
+   Engine retains that admitted subset for three months.
+
+The Analytics Engine admission filter is deliberate abuse resistance, not
+sampling. It does not persist `line_oidc_callback_received`, untrusted or
+invalid-origin 4xx traffic, or start rate-limit 429 responses. Those requests
+remain visible only in the live structured console stream. Do not diagnose
+their absence from Analytics Engine as a missing binding or failed write.
 
 Production Pages settings remain dashboard-managed. Before deploying this
 feature, add an Analytics Engine binding named `AUTH_OBSERVABILITY` to the
@@ -50,10 +57,14 @@ three and completing a privacy review.
 | `blob10` | Correlation ID |
 | `double1` | HTTP status |
 
-Lifecycle events are `line_oidc_start_succeeded`,
+The console lifecycle events are `line_oidc_start_succeeded`,
 `line_oidc_start_rejected`, `line_oidc_callback_received`,
 `line_oidc_callback_rejected`, `line_oidc_completion_succeeded`,
 `line_oidc_completion_cancelled`, and `line_oidc_completion_failed`.
+Analytics Engine admits `line_oidc_start_succeeded`, trusted
+`line_oidc_completion_succeeded|cancelled|failed`, and any event whose terminal
+status is 5xx. Consequently, some event values listed in the schema appear only
+when they represent an admitted operational failure.
 
 ## Queries
 
@@ -121,6 +132,16 @@ written yet. A `line_auth_analytics_write_failed` console event means durable
 telemetry degraded while the authentication response continued. A
 `line_auth_analytics_binding_missing` event means the production binding is
 absent; stop the release, add the binding, and redeploy.
+
+Do not normally roll back to a deployment whose snapshot predates the
+`AUTH_OBSERVABILITY` binding. The externally pinned disabled rollback target
+must contain this binding and the same reviewed artifact while all public auth
+flags—including `EMAIL_AUTH_ENABLED`—are false. Dashboard variable changes do
+not alter an existing Pages
+deployment snapshot, so both disabling and restoring the flags require a
+redeploy. See `production-operations.md` for the provisioning gate and manifest
+contract. Deployment `04519766-9146-440a-9467-57e9ac56e4a5` is
+telemetry-degraded emergency-only, not a normal rollback target.
 
 Official references:
 

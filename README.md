@@ -124,6 +124,7 @@ Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
 - `pnpm run db:generate`: Drizzleマイグレーション生成
 - `pnpm run release:preflight`: 公開先・Git・本番D1を読み取り専用で事前確認
 - `pnpm run release:preflight:offline`: ローカル項目だけ確認（公開許可には使用不可）
+- `pnpm release:pages`: clean HEADからPages成果物manifestを作成し、同一成果物だけを検証付きで公開
 
 ## リリース安全手順（Dドライブのみ）
 
@@ -137,12 +138,20 @@ PowerShellでは、Node、pnpm、一時ファイル、Wrangler認証情報とロ
 Dドライブへ固定してから作業します。
 
 ```powershell
-$releaseRoot = 'D:\CodexTemp\torudake-release-src-20260810'
-$runtimeRoot = 'D:\CodexTemp\torudake-node-runtime'
-$releaseTemp = 'D:\CodexTemp\torudake-runtime-temp'
-$wranglerState = 'D:\CodexTemp\wrangler-auth'
+$releaseRoot = 'D:\path\to\reviewed-clean-release-worktree'
+$runtimeRoot = 'D:\path\to\pinned-node-runtime'
+$releaseTemp = 'D:\path\to\release-temp'
+$wranglerState = 'D:\path\to\wrangler-auth-state'
+$pagesReleaseRoot = 'D:\path\to\private\pages-release-<commit>'
+$pagesArtifactManifest = "$pagesReleaseRoot\pages-artifact.json"
+$disabledPagesDeploymentRecord = "$pagesReleaseRoot\disabled.deployment.json"
+$productionPagesDeploymentRecord = "$pagesReleaseRoot\production.deployment.json"
+$rollbackManifest = $disabledPagesDeploymentRecord
+$previousSchedulerManifest = 'D:\path\to\private\account-deletion-worker-<previous-commit>.json'
+$newSchedulerManifest = 'D:\path\to\private\account-deletion-worker-<commit>.json'
 
 New-Item -ItemType Directory -Force $releaseTemp | Out-Null
+New-Item -ItemType Directory -Force $pagesReleaseRoot | Out-Null
 New-Item -ItemType Directory -Force "$wranglerState\config" | Out-Null
 New-Item -ItemType Directory -Force "$wranglerState\cache" | Out-Null
 $env:TEMP = $releaseTemp
@@ -150,10 +159,17 @@ $env:TMP = $releaseTemp
 $env:XDG_CONFIG_HOME = "$wranglerState\config"
 $env:XDG_CACHE_HOME = "$wranglerState\cache"
 $env:WRANGLER_LOG_PATH = "$wranglerState\wrangler.log"
+$env:TORUDAKE_PAGES_ARTIFACT_MANIFEST = $pagesArtifactManifest
+# $rollbackManifest はwrapperが排他的に作る出力先なので、disabled deployment検証後まで設定しない。
+# 通常releaseでは既存activeを証明する、直前releaseの実在manifestを入力にする。
+# $newSchedulerManifest はまだ存在しない出力先なので、ここには設定しない。
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $previousSchedulerManifest
 $env:PATH = "$runtimeRoot\bin;$env:PATH"
 Set-Location -LiteralPath $releaseRoot
 
-& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run release:preflight
+# 必ずreview済みclean HEADであること。出力が1行でもあれば中止する。
+git status --porcelain
+git rev-parse HEAD
 ```
 
 事前確認は次の状態を1つでも検出すると終了コード1で停止します。
@@ -162,21 +178,117 @@ Set-Location -LiteralPath $releaseRoot
 - OpenAI Sites用metadataの再混入、Pages/D1対象IDの変更、R2の再宣言
 - 設定済みの `origin` がCドライブや `file://` などのローカルコピーを指している
 - 未コミット変更
+- Pages公開用directoryの追加・削除・置換、外部artifact manifestのcommit・全file SHA-256・
+  aggregate SHA-256・deployment messageの不一致
 - `drizzle/` と本番 `d1_migrations` の不一致
 - D1の `quick_check` または外部キー検査の異常
+- 外部rollback manifestのdeploymentをCloudflare ID直指定detail APIで確認できない、
+  commit・branch・成功status・D1/Analytics Engine bindingが一致しない
+- rollback deployment固有URLのhealthがreadyでない、または5つの認証flagが
+  すべてfalseではない
+- Analytics Engine SQL APIで `torudake_line_auth_events` を一意に照会できない
+- 定期退会Workerのlocal Wrangler dry-run bundle、外部manifestの
+  deployment/version/Cloudflare ETag、live Workerのannotation/binding、Cron
+  `15 18 * * *` が一致しない
 
 正式な共有リポジトリURLが未確定の場合は `origin` を設定せず、レビュー済みcommitを
 Cloudflare PagesへDirect Uploadします。旧Cドライブなどローカルコピーをremoteへ
 設定してはいけません。正式URLが確定した後だけ `git remote add origin` を行います。
 
-事前確認、全テスト、Pages用ビルドがすべて成功し、差分とcommit SHAを確認した後だけ、
-固定したプロジェクト名とproduction branchを明示して公開します。
+外部変更より先に、同じclean commitで全test、lint、TypeScriptを含むbuild、Pages bundle、
+Worker dry-runを完了します。
 
 ```powershell
 & "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run test
 & "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run lint
-& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run build:cloudflare-pages
-& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" exec wrangler pages deploy dist/cloudflare-pages --project-name torudake-reel --branch main
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" exec tsc --noEmit
+pnpm release:pages -- --prepare `
+  --manifest $pagesArtifactManifest `
+  --external-root $pagesReleaseRoot `
+  --execute --confirm prepare-pages-release
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run ops:dry-run-account-deletion-scheduler
+```
+
+初回または定期退会Workerを変更したreleaseでは、Pagesより先に同じclean commitの
+Worker versionを準備します。通常の `release:preflight` は古いWorkerのままPagesだけを
+公開することを許可しません。
+
+```powershell
+# まずlocal artifactだけをdry-runし、commitとbundle SHAを確認する（外部変更なし）
+pnpm ops:deploy-account-deletion-scheduler
+
+# 通常release: 直前の外部manifestとlive activeが完全一致する場合だけpreviousに採用する。
+# 新versionをuploadし、Cronを反映・live再照合してから100%へ切り替え、
+# read-backを別の新規D外部manifestへatomicに保存する。
+pnpm ops:deploy-account-deletion-scheduler -- --execute `
+  --confirm deploy-account-deletion-scheduler `
+  --manifest $newSchedulerManifest
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $newSchedulerManifest
+```
+
+初回に限り、既存manifestがないlegacy Workerを採用する場合は、上記環境変数を外して
+別confirmationを明示します。これはmessage/tagがないlegacy activeだけに使え、通常releaseの
+manifest不一致を迂回できません。
+
+```powershell
+Remove-Item Env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST -ErrorAction SilentlyContinue
+pnpm ops:deploy-account-deletion-scheduler -- --execute `
+  --bootstrap-previous-provenance `
+  --confirm bootstrap-account-deletion-scheduler-provenance `
+  --manifest $newSchedulerManifest
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $newSchedulerManifest
+```
+
+実行wrapperは、既存Workerが単一version 100%でない場合、または直前manifestとliveの
+deployment/version/ETag/message/tag/time/binding/Cronが一致しない場合はupload前に停止します。
+順序は確定dry-run bundleのprivate snapshot、`versions upload <snapshot> --no-bundle`、
+`wrangler triggers deploy`、Schedules APIでexact Cron再照合、
+100% activation、再read-back、manifest確定前後の再照合です。trigger操作後の失敗では、live
+active setが記録済みpreviousだけならCronを復旧し、自分がuploadしたversionだけを含む場合に限り
+previous versionを100%へ戻してETag/provenance/Cronを再検証します。foreign versionまたは不明な
+状態を検出した場合は第三者のreleaseを上書きせず重大エラーで停止します。外部manifestはrelease
+ごとに新しいpathを使います。
+`15 18 * * *` はUTCで、日本時間では毎日03:15です。Cloudflare全拠点へのtrigger変更伝播は
+最大15分かかる場合があり、manifestの `liveVerified` はcontrol-plane設定の一致を表します。
+緊急rollbackはmanifestの `previousVersionId` をレビューしてから
+`wrangler versions deploy <version-id>@100% --name
+torudake-reel-account-deletion-scheduler --config
+wrangler.account-deletion-scheduler.jsonc --yes` を実行し、続けて同configの
+`wrangler triggers deploy` とSchedules APIでCronも再確認します。
+
+次に `docs/operations/production-operations.md` の専用modeで、同じcommit・required
+bindings・5認証flag=falseのPages rollback deploymentを作成します。wrapperは固有URLの
+health/methods、Analytics Engine SQL、Cloudflare metadataを検証し、そのdeployment自体を
+D外部rollback manifestへ排他的に記録した直後、元のLINE有効Productionへ自動で戻して
+read-backします。`TORUDAKE_ROLLBACK_MANIFEST` をそのwrapper生成recordへ向けた後にだけ通常の
+`pnpm release:preflight` を実行します。offline modeや2つのprovisioning modeは
+Pages本番activationを許可しません。
+
+```powershell
+$env:TORUDAKE_ROLLBACK_MANIFEST = $rollbackManifest
+```
+
+Pagesの直接公開は必ず `release:pages` wrapperを使います。wrapperは外部artifact manifestを
+安全に再読込し、全fileをrepo外のprivate snapshotへ固定して再照合します。Wranglerは生成済み
+`.wrangler/deploy/config.json` を探索できない隔離cwdから、そのsnapshotだけを読みます。固定project・
+branch・commit SHA・`commit_dirty=false`・artifact SHA入りmessageを渡し、公開後もProduction
+全履歴・canonical project・detail APIで並行deployment、新規deployment、binding、status、
+commit/message、mode別health/認証flag、Analytics Engine SQLを照合してD外部recordへ排他的に
+保存します。失敗時は直前の検証済みProductionへAPI rollbackし、復旧を再確認します。raw
+`wrangler pages deploy` は正式手順ではありません。
+WranglerのCloudflare credentialには `Account Analytics: Read` が必要ですが、token値は
+引数・manifest・ログ・チャットへ出してはいけません。
+
+通常のonline preflight、全テスト、Pages用ビルドがすべて成功し、差分とcommit SHAを
+確認した後だけ、固定したproject名とproduction branchを明示して公開します。
+
+```powershell
+& "$runtimeRoot\bin\node.exe" "$runtimeRoot\node_modules\pnpm\bin\pnpm.cjs" run release:preflight
+pnpm release:pages -- --deploy `
+  --manifest $pagesArtifactManifest `
+  --external-root $pagesReleaseRoot `
+  --deployment-record $productionPagesDeploymentRecord `
+  --execute --confirm deploy-cloudflare-pages
 ```
 
 ### D1 migration ledgerの整合

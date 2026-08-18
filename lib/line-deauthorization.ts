@@ -52,13 +52,18 @@ export async function deauthorizeLineAuthorization(
     },
     "line_channel_token_unavailable",
   );
+  if (!channelTokenResponse.ok) {
+    await rejectLineProviderResponse(
+      channelTokenResponse,
+      "line_channel_token_rejected",
+      "line_channel_token_unavailable",
+      { status: 500, category: "server" },
+    );
+  }
   const channelTokenPayload = await readBoundedJsonObject(
     channelTokenResponse,
     LINE_CHANNEL_TOKEN_RESPONSE_LIMIT_BYTES,
   );
-  if (!channelTokenResponse.ok) {
-    throw new OidcProtocolError("line_channel_token_rejected");
-  }
   const channelAccessToken = boundedString(
     channelTokenPayload.access_token,
     8,
@@ -73,7 +78,11 @@ export async function deauthorizeLineAuthorization(
     (expiresIn as number) < 1 ||
     (expiresIn as number) > 3_600
   ) {
-    throw new OidcProtocolError("invalid_line_channel_token_response");
+    throw new OidcProtocolError(
+      "invalid_line_channel_token_response",
+      502,
+      "upstream",
+    );
   }
 
   const deauthorizationResponse = await lineFetch(
@@ -92,13 +101,18 @@ export async function deauthorizeLineAuthorization(
     },
     "line_deauthorization_unavailable",
   );
+  if (deauthorizationResponse.status !== 204) {
+    await rejectLineProviderResponse(
+      deauthorizationResponse,
+      "line_deauthorization_rejected",
+      "line_deauthorization_unavailable",
+      { status: 502, category: "upstream" },
+    );
+  }
   await readBoundedBytes(
     deauthorizationResponse,
     LINE_DEAUTHORIZATION_RESPONSE_LIMIT_BYTES,
   );
-  if (deauthorizationResponse.status !== 204) {
-    throw new OidcProtocolError("line_deauthorization_rejected");
-  }
 }
 
 async function lineFetch(
@@ -110,8 +124,37 @@ async function lineFetch(
   try {
     return await fetcher(endpoint, init);
   } catch {
-    throw new OidcProtocolError(unavailableCode);
+    throw new OidcProtocolError(unavailableCode, 503, "upstream");
   }
+}
+
+async function rejectLineProviderResponse(
+  response: Response,
+  rejectedCode: string,
+  unavailableCode: string,
+  rejection: {
+    status: 500 | 502;
+    category: "server" | "upstream";
+  },
+): Promise<never> {
+  await response.body?.cancel("line_provider_response_rejected").catch(
+    () => undefined,
+  );
+  if (
+    response.status >= 400 &&
+    response.status < 500 &&
+    response.status !== 429
+  ) {
+    throw new OidcProtocolError(
+      rejectedCode,
+      rejection.status,
+      rejection.category,
+    );
+  }
+  if (response.status === 429 || response.status >= 500) {
+    throw new OidcProtocolError(unavailableCode, 503, "upstream");
+  }
+  throw new OidcProtocolError(unavailableCode, 502, "upstream");
 }
 
 async function readBoundedJsonObject(response: Response, maximumBytes: number) {
@@ -120,7 +163,11 @@ async function readBoundedJsonObject(response: Response, maximumBytes: number) {
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new OidcProtocolError("invalid_line_provider_response");
+    throw new OidcProtocolError(
+      "invalid_line_provider_response",
+      502,
+      "upstream",
+    );
   }
   try {
     const value: unknown = JSON.parse(text);
@@ -129,7 +176,11 @@ async function readBoundedJsonObject(response: Response, maximumBytes: number) {
     }
     return value as JsonObject;
   } catch {
-    throw new OidcProtocolError("invalid_line_provider_response");
+    throw new OidcProtocolError(
+      "invalid_line_provider_response",
+      502,
+      "upstream",
+    );
   }
 }
 
@@ -145,7 +196,11 @@ async function readBoundedBytes(response: Response, maximumBytes: number) {
       await response.body?.cancel("line_provider_response_too_large").catch(
         () => undefined,
       );
-      throw new OidcProtocolError("line_provider_response_too_large");
+      throw new OidcProtocolError(
+        "line_provider_response_too_large",
+        502,
+        "upstream",
+      );
     }
   }
   if (!response.body) return new Uint8Array();
@@ -162,7 +217,11 @@ async function readBoundedBytes(response: Response, maximumBytes: number) {
         await reader.cancel("line_provider_response_too_large").catch(
           () => undefined,
         );
-        throw new OidcProtocolError("line_provider_response_too_large");
+        throw new OidcProtocolError(
+          "line_provider_response_too_large",
+          502,
+          "upstream",
+        );
       }
       chunks.push(value);
     }
@@ -181,7 +240,11 @@ async function readBoundedBytes(response: Response, maximumBytes: number) {
 
 function assertCredential(value: string, minimum: number, maximum: number) {
   if (!boundedString(value, minimum, maximum)) {
-    throw new OidcProtocolError("invalid_line_deauthorization_input");
+    throw new OidcProtocolError(
+      "invalid_line_deauthorization_input",
+      500,
+      "server",
+    );
   }
 }
 

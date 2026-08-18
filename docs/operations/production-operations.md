@@ -15,6 +15,21 @@ not authorize a deployment, a D1 mutation, or a real payment.
   the routine `OPS_HEALTH_SECRET` must not authorize it. See
   `account-recovery.md` before enabling execution.
   Configure the secret with `wrangler pages secret put`; never commit it.
+  Each confirmed non-dry-run also deletes strictly expired rows from
+  `account_auth_challenges`, `account_email_challenges`,
+  `account_oauth_challenges`, and `account_recovery_challenges`. A row whose
+  `expires_at` equals the current second is retained. Each table is deleted in
+  batches of 100 for at most four rounds per run; each round groups the four
+  bounded deletes in one D1 batch. The response and scheduler log contain
+  counts only—never a state hash, nonce, PKCE verifier, email, contact hash, or
+  user ID. The
+  `batches` and `hasMore` fields make a remaining backlog explicit without
+  exposing row data. The scheduler reports a non-successful invocation when
+  `hasMore=true`, so the next invocation drains another bounded window.
+  Retention and account deletion are independent: either operation is still
+  attempted when the other fails. A retention failure is returned as
+  `challengeRetention.status = failed`; the scheduler treats it as a failed
+  run and retries on the next invocation.
 - Every Pages response carries `X-Request-Id` and `X-Correlation-Id`. Only
   bounded safe identifiers are accepted from clients; otherwise the entry point
   creates a UUID. Use that same ID to search structured error logs.
@@ -100,10 +115,20 @@ session or charge a card.
 
 Before a production release:
 
-1. Run `pnpm release:preflight` from drive D. It must confirm the exact D1
-   migration ledger, `quick_check`, and foreign keys.
-2. Run tests, lint, TypeScript and the Cloudflare Pages build.
-3. Deploy the reviewed commit only.
+1. Point `TORUDAKE_PAGES_ARTIFACT_MANIFEST` at the external full-tree manifest
+   created from the clean reviewed HEAD. Point
+   `TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST` at the external
+   manifest created by the safe Worker release wrapper, and point
+   `TORUDAKE_ROLLBACK_MANIFEST` at the externally verified disabled Pages
+   rollback manifest. Run `pnpm release:preflight` from drive D. It must verify
+   the live Worker version/ETag/bindings, the live Pages rollback deployment,
+   exact D1 migration ledger, `quick_check`, and foreign keys. Provisioning
+   modes are documented below; offline mode never authorizes activation.
+2. Run tests, lint and TypeScript, then use `pnpm release:pages -- --prepare`
+   to build and record every Pages input file. Do not deploy a directory made
+   by a different build or commit.
+3. Deploy only through `pnpm release:pages -- --deploy`; raw
+   `wrangler pages deploy` is not an approved production path.
 4. Run `pnpm ops:health:detailed` and `pnpm ops:payment-smoke`.
 5. In a browser, confirm plan labels and that Checkout opens. Stop before
    confirming payment. A controlled real transaction requires separate written
@@ -152,3 +177,277 @@ backup. Once per month, from drive D:
 The production migration ledger is append-only. A restore is not complete
 unless `PRAGMA quick_check` is `ok`, foreign-key violations are zero, and the
 ledger contains every reviewed migration.
+
+## Pages artifact preparation and verified deploy
+
+`dist/cloudflare-pages` is ignored by Git, so a clean worktree alone does not
+prove which bytes will be uploaded. From a clean reviewed HEAD, create one new
+external directory and manifest on drive D:
+
+```powershell
+$pagesReleaseRoot = 'D:\private\torudake-pages-<commit>'
+$pagesArtifactManifest = "$pagesReleaseRoot\pages-artifact.json"
+New-Item -ItemType Directory -Force $pagesReleaseRoot | Out-Null
+pnpm release:pages -- --prepare `
+  --manifest $pagesArtifactManifest `
+  --external-root $pagesReleaseRoot `
+  --execute --confirm prepare-pages-release
+$env:TORUDAKE_PAGES_ARTIFACT_MANIFEST = $pagesArtifactManifest
+```
+
+The manifest records the clean source commit, sorted relative paths, size and
+SHA-256 of every regular file, total bytes, an aggregate SHA-256, and the exact
+deployment message. Links, traversal, case-insensitive collisions, added,
+removed, replaced, oversized, or concurrently changed files fail closed.
+
+The same manifest is used for both the disabled rollback snapshot and the
+restored Production deployment. Immediately before upload, the wrapper copies
+every reviewed file into a new private snapshot outside the repository and
+verifies that snapshot against the manifest. Wrangler runs from a separate
+empty directory, so Vinext's generated `.wrangler/deploy/config.json` cannot
+replace the Dashboard-managed Pages configuration. The wrapper pins
+project/branch/commit/message/`commit_dirty=false`, uses `--no-bundle` so the
+reviewed `_worker.js` bytes are not transformed again, and does not use
+`--skip-caching`.
+The exact deployment message is
+`torudake-pages-v1 commit=<40-hex-commit> artifactSha256=<64-hex-sha256>`.
+
+After upload, the wrapper rejects any concurrent Production deployment, checks
+the Pages project canonical deployment plus list/detail metadata and both
+required bindings, probes the deployment-specific health and authentication
+method endpoints for the requested mode, and queries Analytics Engine with
+`SHOW TABLES FORMAT JSON`. It then writes a new external deployment record
+exclusively. Any post-upload failure triggers the Pages rollback API and a full
+read-back of the previously verified canonical Production deployment.
+The authenticated Cloudflare credential must include `Account Analytics: Read`;
+the token value must remain in Wrangler's credential store and must never be
+placed in a command argument, manifest, log, or chat.
+
+## Account-deletion Worker release and rollback
+
+Pages and `torudake-reel-account-deletion-scheduler` are one release unit. A
+normal online preflight blocks Pages activation unless the active Worker is the
+same clean Git commit and exact local Wrangler dry-run bundle. The release
+wrapper uploads the fixed private bundle snapshot as a positional entry with
+`--no-bundle`, and hashes it immediately before and after upload. The proof does not
+trust a deployment message by itself: the release wrapper records the
+Cloudflare-generated active deployment ID, version ID, script ETag, and live
+bindings in a new external manifest after read-back. It also reads the
+Cloudflare Workers Schedules API and requires exactly one Cron,
+`15 18 * * *` (UTC; 03:15 JST).
+
+For every normal release, keep the prior manifest as an immutable input and use
+a different nonexistent path for the new output:
+
+```powershell
+$previousSchedulerManifest = 'D:\private\torudake-account-deletion-worker-<previous-commit>.json'
+$newSchedulerManifest = 'D:\private\torudake-account-deletion-worker-<commit>.json'
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $previousSchedulerManifest
+pnpm ops:deploy-account-deletion-scheduler -- --execute `
+  --confirm deploy-account-deletion-scheduler `
+  --manifest $newSchedulerManifest
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $newSchedulerManifest
+```
+
+Before upload, the wrapper reads the prior manifest through a bounded,
+no-follow, descriptor-stable reader, validates its schema and exact-file
+SHA-256, then compares its deployment ID, version ID, ETag, message, tag,
+timestamp, runtime, bindings, and Cron with Cloudflare live state. A merely
+single 100% active version is not an approved rollback point.
+
+The wrapper then performs a local Wrangler dry-run, uses `wrangler versions upload`
+to create an inactive version, and reads it back. Before activation it
+runs `wrangler triggers deploy` from the pinned config and requires the
+Schedules API to return exactly `15 18 * * *`. It rechecks that the approved
+old version is still active, activates the verified new version at 100%, and
+rechecks version, ETag, tag, and Cron immediately before and after exclusively
+hard-linking the new manifest into its previously absent destination and
+verifying its exact bytes. Trigger deployment is intentionally before activation.
+Because the old Cron must already be exact before upload, this operation is
+idempotent for the approved old version.
+
+After any trigger attempt, recovery first reads the live active version set.
+If only the approved previous version is active, the wrapper reapplies and
+verifies the pinned Cron. It restores `previousVersionId` to 100% only when the
+active set contains no version other than that previous version and the version
+uploaded by the current release; it then re-verifies the previous ETag,
+provenance, and Cron. A foreign, mixed-unknown, or unreadable active state
+prohibits automatic version and Cron mutation so a concurrent release is never
+overwritten. An unverified recovery is a critical failure. Cloudflare documents
+that global Cron propagation may take up to 15 minutes; `liveVerified` records
+the control-plane Schedules API state, not proof that every location has
+propagated. No token or secret value is written to the manifest.
+
+The currently deployed legacy Worker predates this manifest chain and has no
+message/tag. Exactly once, with no scheduler manifest environment variable set,
+use the isolated bootstrap confirmation:
+
+```powershell
+$newSchedulerManifest = 'D:\private\torudake-account-deletion-worker-<commit>.json'
+Remove-Item Env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST -ErrorAction SilentlyContinue
+pnpm ops:deploy-account-deletion-scheduler -- --execute `
+  --bootstrap-previous-provenance `
+  --confirm bootstrap-account-deletion-scheduler-provenance `
+  --manifest $newSchedulerManifest
+$env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $newSchedulerManifest
+```
+
+Bootstrap still requires a single 100% active Wrangler version, safe runtime
+and bindings, exact live Cron, and null message/tag. It is rejected if an
+external manifest is supplied or the active Worker is already annotated, so it
+cannot bypass a normal provenance mismatch.
+
+Manifest schema v2 is:
+
+```json
+{
+  "schemaVersion": 2,
+  "workerName": "torudake-reel-account-deletion-scheduler",
+  "sourceCommit": "<40-character reviewed commit>",
+  "bundleSha256": "<64-character local Wrangler dry-run SHA-256>",
+  "deploymentMessage": "torudake-release-v1 commit=<commit> bundleSha256=<sha256>",
+  "uploadTag": "torudake-<12 commit>-<12 bundle>-<8 random>",
+  "activeDeploymentId": "<Cloudflare deployment UUID>",
+  "activeVersionId": "<Cloudflare version UUID>",
+  "previousVersionId": "<rollback version UUID>",
+  "scriptEtag": "<64-character Cloudflare script ETag>",
+  "deployedAt": "<ISO-8601 UTC timestamp>",
+  "schedule": {
+    "cron": "15 18 * * *",
+    "liveVerified": true
+  },
+  "approvedPrevious": {
+    "provenance": "external_manifest",
+    "manifestSchemaVersion": 2,
+    "manifestSha256": "<SHA-256 of exact prior manifest bytes>",
+    "deploymentId": "<prior Cloudflare deployment UUID>",
+    "versionId": "<prior Cloudflare version UUID>",
+    "scriptEtag": "<prior Cloudflare script ETag>",
+    "sourceCommit": "<prior reviewed commit>",
+    "bundleSha256": "<prior local dry-run SHA-256>",
+    "deploymentMessage": "<prior release annotation>",
+    "uploadTag": "<prior upload tag>",
+    "deployedAt": "<prior version timestamp>",
+    "schedule": {
+      "cron": "15 18 * * *",
+      "liveVerified": true
+    }
+  },
+  "verification": {
+    "wranglerDryRunPassed": true,
+    "activeTrafficPercentage": 100,
+    "liveVersionReadBack": true
+  }
+}
+```
+
+For the one-time bootstrap manifest, `approvedPrevious.provenance` is
+`bootstrap_confirmation`; `manifestSchemaVersion`, `manifestSha256`,
+`sourceCommit`, `bundleSha256`, `deploymentMessage`, and `uploadTag` are all
+`null`. The live deployment/version/ETag/timestamp/Cron identity remains
+recorded.
+
+For an emergency Worker-only rollback, review `previousVersionId`, then run:
+
+```powershell
+pnpm exec wrangler versions deploy <previous-version-id>@100% `
+  --name torudake-reel-account-deletion-scheduler `
+  --config wrangler.account-deletion-scheduler.jsonc --yes `
+  --message "approved account-deletion Worker rollback"
+pnpm exec wrangler triggers deploy `
+  --name torudake-reel-account-deletion-scheduler `
+  --config wrangler.account-deletion-scheduler.jsonc
+```
+
+Confirm `wrangler deployments status --json` reports only that version at
+100%, and read the Workers Schedules API to confirm the only Cron is
+`15 18 * * *`. The normal Pages preflight intentionally remains blocked after
+an emergency Worker rollback until a new same-commit Worker manifest is
+produced.
+
+## Telemetry-preserving rollback target
+
+A normal rollback target must be a successful Production deployment of the
+same reviewed artifact with both `DB` and `AUTH_OBSERVABILITY` in its deployment
+snapshot and all public authentication methods disabled. Pages deployment
+bindings and variables are snapshots: changing a Dashboard variable does not
+retroactively change an existing deployment. You must redeploy after disabling
+the flags, and redeploy again after restoring the live flags.
+
+The historical deployment
+`04519766-9146-440a-9467-57e9ac56e4a5` lacks `AUTH_OBSERVABILITY`. It is
+classified as `telemetry_degraded emergency_only` and must not be selected for
+a normal rollback. If it is ever used to recover basic availability, record
+the durable LINE-authentication telemetry gap as an incident.
+
+The standard disabled deployment ID is stored in the wrapper-generated external
+record on drive D rather than committed as a permanently stale live resource
+ID. The record is created exclusively after artifact, deployment, mode and
+telemetry verification; do not hand-author or edit it. Normal online preflight
+reads that exact deployment through the ID-addressed detail API, proves it is a
+successful deployment of the pinned Production project/branch, probes the
+deployment-specific URL and queries Analytics Engine. This avoids a deployment
+history window that could silently exclude an older valid rollback target. First
+release the same-commit account-deletion Worker and set
+`TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST` as described above, then
+provision Pages as follows:
+
+1. Commit and review the exact release artifact. In the Pages Production
+   Dashboard, confirm the `DB` and `AUTH_OBSERVABILITY` bindings, then set
+   `OIDC_AUTH_ENABLED`, `LINE_LOGIN_ENABLED`, `GOOGLE_OIDC_ENABLED`,
+   `EMAIL_AUTH_ENABLED`, and `PASSKEY_AUTH_ENABLED` to `false`.
+2. Use the reviewed Pages artifact manifest and the wrapper's isolated
+   rollback-provisioning mode. First run it without `--execute`, then execute
+   only after reviewing the dry-run:
+
+   ```powershell
+   $disabledPagesDeploymentRecord = "$pagesReleaseRoot\disabled.deployment.json"
+   pnpm release:pages -- --deploy `
+     --manifest $pagesArtifactManifest `
+     --external-root $pagesReleaseRoot `
+     --deployment-record $disabledPagesDeploymentRecord `
+     --provision-disabled-rollback
+   pnpm release:pages -- --deploy `
+     --manifest $pagesArtifactManifest `
+     --external-root $pagesReleaseRoot `
+     --deployment-record $disabledPagesDeploymentRecord `
+     --provision-disabled-rollback `
+     --execute --confirm deploy-cloudflare-pages
+   ```
+
+   This mode can authorize only creation of the disabled snapshot. It cannot
+   authorize a normal production activation. It also fails unless the live
+   account-deletion Worker matches its external manifest and the current commit.
+3. The wrapper itself requires `/api/health` to be `ready`, all four public
+   methods and five raw flags to be disabled, both required bindings to match,
+   and `torudake_line_auth_events` to appear exactly once in the Analytics
+   Engine SQL response. The generated `$disabledPagesDeploymentRecord` is the
+   schema-v2 rollback manifest; do not copy it into a hand-authored file.
+4. After recording the disabled deployment, the wrapper automatically calls the
+   Pages rollback API to restore the previously verified LINE-enabled canonical
+   Production deployment. It then rechecks canonical identity, readiness,
+   LINE-first methods and raw flags. A disabled deployment must never remain
+   active while the operator performs the remaining steps.
+5. Restore the intended live Production flags in the Dashboard. Before the
+   restoring redeploy, point `TORUDAKE_ROLLBACK_MANIFEST` at the wrapper record
+   and keep both `TORUDAKE_PAGES_ARTIFACT_MANIFEST` and
+   `TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST` pointed at their reviewed
+   files. Run the normal online preflight. It blocks activation if either
+   manifest refers to another artifact; if the Pages deployment cannot be read
+   by its exact ID; if live project/status/branch/full commit, binding,
+   readiness or five-flag checks fail; if the active Worker ID/ETag/annotation
+   or bindings differ; or if either Cloudflare inspection is unavailable.
+6. Redeploy the exact same reviewed artifact through the wrapper so the restored
+   live variables become a new deployment snapshot:
+
+   ```powershell
+   $productionPagesDeploymentRecord = "$pagesReleaseRoot\production.deployment.json"
+   pnpm release:pages -- --deploy `
+     --manifest $pagesArtifactManifest `
+     --external-root $pagesReleaseRoot `
+     --deployment-record $productionPagesDeploymentRecord `
+     --execute --confirm deploy-cloudflare-pages
+   ```
+
+   Repeat readiness and authentication-method checks. Keep Pages configuration
+   Dashboard-authoritative; do not introduce a partial root `wrangler.jsonc`.

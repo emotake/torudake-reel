@@ -33,6 +33,7 @@ import {
   type OidcProviderConfig,
   verifyGoogleIdToken,
   verifyLineIdToken,
+  type OidcErrorCategory,
 } from "./oidc-core";
 import {
   readRequestBodyWithLimit,
@@ -49,6 +50,8 @@ const OIDC_LEGACY_POPUP_RETURN_TO = "/account?auth_popup=pending";
 const OIDC_POPUP_RETURN_TO_PREFIX = "oidc-popup:";
 const OIDC_POPUP_FLOW_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const OIDC_GENERIC_PUBLIC_MESSAGE =
+  "ログインを完了できませんでした。時間をおいて、もう一度お試しください。";
 
 type D1Database = ExternalAccountDatabase;
 
@@ -68,17 +71,26 @@ type OidcTransaction = {
   return_to: string;
 };
 
+type OidcTerminalCategory = OidcErrorCategory | "cancelled" | "success";
+
 export class OidcAuthError extends Error {
   readonly code: string;
   readonly status: number;
   readonly publicMessage: string;
   readonly callbackCode: string;
+  readonly category: Exclude<OidcTerminalCategory, "success">;
 
   constructor(
     code: string,
     status: number,
     publicMessage: string,
     callbackCode = "failed",
+    category: Exclude<OidcTerminalCategory, "success"> =
+      callbackCode === "cancelled"
+        ? "cancelled"
+        : status >= 500
+          ? "server"
+          : "request",
   ) {
     super(publicMessage);
     this.name = "OidcAuthError";
@@ -86,6 +98,7 @@ export class OidcAuthError extends Error {
     this.status = status;
     this.publicMessage = publicMessage;
     this.callbackCode = callbackCode;
+    this.category = category;
   }
 }
 
@@ -145,18 +158,20 @@ export async function beginOidcAuthorization(
   if (authenticatedAccount && link) {
     const recentSession = await requireRecentAccountSession(request).catch(
       (error: unknown) => {
-        const status = error && typeof error === "object" &&
-            "status" in error && typeof error.status === "number"
-          ? error.status
-          : 401;
-        const code = error && typeof error === "object" &&
-            "code" in error && typeof error.code === "string"
+        const status = error instanceof AccountAuthError ? error.status : 500;
+        const code = error instanceof AccountAuthError
           ? error.code
-          : "reauthentication_required";
-        const message = error instanceof Error
-          ? error.message
-          : "ログイン方法を追加する前に、本人確認をやり直してください。";
-        throw new OidcAuthError(code, status, message);
+          : "oidc_authentication_failed";
+        const message = error instanceof AccountAuthError
+          ? error.publicMessage
+          : OIDC_GENERIC_PUBLIC_MESSAGE;
+        throw new OidcAuthError(
+          code,
+          status,
+          message,
+          "failed",
+          error instanceof AccountAuthError ? "identity" : "server",
+        );
       },
     );
     if (recentSession.userId !== authenticatedAccount.id) {
@@ -406,16 +421,15 @@ export async function completeOidcAuthorization(
     0,
   );
   let transaction: OidcTransaction | null = null;
+  let stateCookieMatched = false;
+  let transactionConsumed = false;
 
   try {
     const callbackUrl = await oidcCallbackUrlFromForm(request);
     const returnedState = singleQueryParameter(callbackUrl, "state");
-    const cookieState = getOidcStateCookie(request, provider, secure);
     if (
       !returnedState ||
-      !cookieState ||
-      !isStateToken(returnedState) ||
-      !(await constantTimeStringEqual(returnedState, cookieState))
+      !isStateToken(returnedState)
     ) {
       throw callbackError(
         "oidc_state_mismatch",
@@ -425,28 +439,64 @@ export async function completeOidcAuthorization(
     }
 
     const now = Math.floor(Date.now() / 1_000);
-    transaction = await config.database
+    const stateHash = await hashAccountToken(returnedState);
+    const storedTransaction = await config.database
       .prepare(`
-        UPDATE account_oauth_challenges
-        SET consumed_at = ?
+        SELECT intent, nonce, pkce_verifier, initiating_user_id,
+          expected_origin, return_to
+        FROM account_oauth_challenges
         WHERE state_hash = ?
           AND provider = ?
-        AND intent IN ('login', 'link', 'reauthenticate')
+          AND intent IN ('login', 'link', 'reauthenticate')
           AND consumed_at IS NULL
           AND expires_at >= ?
-        RETURNING intent, nonce, pkce_verifier, initiating_user_id,
-          expected_origin, return_to
+        LIMIT 1
       `)
-      .bind(now, await hashAccountToken(returnedState), provider, now)
+      .bind(stateHash, provider, now)
       .first<OidcTransaction>();
-    if (!transaction) {
+    if (!storedTransaction) {
       throw callbackError(
         "oidc_transaction_expired",
         "ログインの有効時間が切れました。もう一度お試しください。",
         "expired",
       );
     }
-    validateStoredTransaction(transaction, config);
+    transaction = validateStoredTransaction(storedTransaction, config);
+    const cookieState = getOidcStateCookie(request, provider, secure);
+    if (
+      !cookieState ||
+      !(await constantTimeStringEqual(returnedState, cookieState))
+    ) {
+      throw callbackError(
+        "oidc_state_mismatch",
+        "ログインの有効時間が切れました。もう一度お試しください。",
+        "expired",
+      );
+    }
+    stateCookieMatched = true;
+    const consumedTransaction = await config.database
+      .prepare(`
+        UPDATE account_oauth_challenges
+        SET consumed_at = ?
+        WHERE state_hash = ?
+          AND provider = ?
+          AND intent IN ('login', 'link', 'reauthenticate')
+          AND consumed_at IS NULL
+          AND expires_at >= ?
+        RETURNING intent, nonce, pkce_verifier, initiating_user_id,
+          expected_origin, return_to
+      `)
+      .bind(now, stateHash, provider, now)
+      .first<OidcTransaction>();
+    if (!consumedTransaction) {
+      throw callbackError(
+        "oidc_transaction_expired",
+        "ログインの有効時間が切れました。もう一度お試しください。",
+        "expired",
+      );
+    }
+    transactionConsumed = true;
+    transaction = validateStoredTransaction(consumedTransaction, config);
     if (provider === "line" && transaction.intent === "link") {
       throw lineLinkUnavailableError();
     }
@@ -619,9 +669,15 @@ export async function completeOidcAuthorization(
     const response = callbackResponse(
       config.canonicalOrigin,
       transaction.return_to,
-      undefined,
-      undefined,
-      transaction.intent === "link",
+      {
+        status: 200,
+        category: "success",
+        trustedChallenge: true,
+        resultCode: transaction.intent === "reauthenticate"
+          ? "reauthenticated"
+          : "authenticated",
+        linked: transaction.intent === "link",
+      },
     );
     if (transaction.intent !== "link") {
       const session = await createAccountSession(
@@ -655,12 +711,22 @@ export async function completeOidcAuthorization(
     const response = callbackResponse(
       config.canonicalOrigin,
       transaction?.return_to ?? "/account",
-      normalizedError.callbackCode,
-      normalizedError.status,
-      transaction?.intent === "link",
+      {
+        errorCode: normalizedError.callbackCode,
+        machineCode: normalizedError.code,
+        status: normalizedError.status,
+        category: normalizedError.category,
+        // A stored return target can safely recover a popup before cookie
+        // ownership is established, but only an atomically consumed challenge
+        // is a terminal milestone eligible for durable telemetry.
+        trustedChallenge: transactionConsumed,
+        linked: transaction?.intent === "link",
+      },
     );
-    response.headers.append("Set-Cookie", clearStateCookie);
-    response.headers.append("Set-Cookie", clearSessionProofCookie);
+    if (stateCookieMatched) {
+      response.headers.append("Set-Cookie", clearStateCookie);
+      response.headers.append("Set-Cookie", clearSessionProofCookie);
+    }
     return response;
   }
 }
@@ -669,6 +735,14 @@ export function oidcAuthErrorResponse(error: unknown) {
   const normalized =
     error instanceof OidcAuthError
       ? error
+      : error instanceof AccountAuthError
+        ? new OidcAuthError(
+            error.code,
+            error.status,
+            error.publicMessage,
+            "failed",
+            "identity",
+          )
       : new OidcAuthError(
           "oidc_authentication_failed",
           500,
@@ -682,6 +756,13 @@ export function oidcAuthErrorResponse(error: unknown) {
     { status: normalized.status },
   );
   applyPrivateResponseHeaders(response.headers);
+  applyOidcTerminalResponseHeaders(response, {
+    errorCode: normalized.callbackCode,
+    machineCode: normalized.code,
+    status: normalized.status,
+    category: normalized.category,
+    trustedChallenge: false,
+  });
   return response;
 }
 
@@ -887,6 +968,10 @@ function validateStoredTransaction(
       "failed",
     );
   }
+  return {
+    ...transaction,
+    return_to: trustedStoredReturnTo(transaction.return_to),
+  };
 }
 
 function getOidcStateCookie(
@@ -1050,6 +1135,16 @@ function strictStartFlag(url: URL, name: string, errorCode: string) {
   return values[0] === "1";
 }
 
+function trustedStoredReturnTo(returnTo: unknown) {
+  if (
+    typeof returnTo === "string" &&
+    popupFlowFromReturnTo(returnTo) !== undefined
+  ) {
+    return returnTo;
+  }
+  return normalizeOidcReturnTo(returnTo);
+}
+
 function lineLinkUnavailableError() {
   return new OidcAuthError(
     "authentication_method_unavailable",
@@ -1064,8 +1159,15 @@ function callbackError(
   publicMessage: string,
   callbackCode: string,
   status = 400,
+  category?: Exclude<OidcTerminalCategory, "success">,
 ) {
-  return new OidcAuthError(code, status, publicMessage, callbackCode);
+  return new OidcAuthError(
+    code,
+    status,
+    publicMessage,
+    callbackCode,
+    category,
+  );
 }
 
 function normalizeCallbackError(error: unknown) {
@@ -1076,6 +1178,7 @@ function normalizeCallbackError(error: unknown) {
       error.publicMessage,
       "account_changed",
       error.status,
+      "identity",
     );
   }
   if (error instanceof ExternalAccountAuthError) {
@@ -1094,28 +1197,39 @@ function normalizeCallbackError(error: unknown) {
     }
     return callbackError(
       error.code,
-      error.message,
+      OIDC_GENERIC_PUBLIC_MESSAGE,
       callbackCode,
       error.status,
+      "identity",
     );
   }
   if (error instanceof OidcProtocolError) {
     return callbackError(
       error.code,
-      "ログインを確認できませんでした。もう一度お試しください。",
+      OIDC_GENERIC_PUBLIC_MESSAGE,
       "failed",
+      error.status,
+      error.category,
     );
   }
   return callbackError(
     "oidc_callback_failed",
-    "ログインを完了できませんでした。時間をおいてもう一度お試しください。",
+    OIDC_GENERIC_PUBLIC_MESSAGE,
     "failed",
+    500,
+    "server",
   );
 }
 
 function externalErrorAsOidc(error: unknown) {
   if (error instanceof ExternalAccountAuthError) {
-    return new OidcAuthError(error.code, error.status, error.message, "failed");
+    return new OidcAuthError(
+      error.code,
+      error.status,
+      OIDC_GENERIC_PUBLIC_MESSAGE,
+      "failed",
+      "identity",
+    );
   }
   return new OidcAuthError(
     "trial_context_unavailable",
@@ -1127,29 +1241,48 @@ function externalErrorAsOidc(error: unknown) {
 function callbackResponse(
   canonicalOrigin: string,
   returnTo: string,
-  errorCode?: string,
-  errorStatus?: number,
-  linked = false,
+  metadata: {
+    errorCode?: string;
+    machineCode?: string;
+    resultCode?: "authenticated" | "reauthenticated";
+    status: number;
+    category: OidcTerminalCategory;
+    trustedChallenge: boolean;
+    linked?: boolean;
+  },
 ) {
   const popupFlow = popupFlowFromReturnTo(returnTo);
   if (popupFlow !== undefined) {
-    return popupCallbackResponse(errorCode, errorStatus, linked, popupFlow);
+    return popupCallbackResponse(metadata, popupFlow);
   }
   const location = new URL(normalizeOidcReturnTo(returnTo), canonicalOrigin);
-  if (errorCode) location.searchParams.set("auth_error", errorCode);
-  return redirectResponse(location.toString(), 303);
+  if (metadata.errorCode) {
+    location.searchParams.set("auth_error", metadata.errorCode);
+  } else if (metadata.resultCode) {
+    location.searchParams.set("auth_result", metadata.resultCode);
+  }
+  const response = redirectResponse(location.toString(), 303);
+  applyOidcTerminalResponseHeaders(response, metadata);
+  return response;
 }
 
 function popupCallbackResponse(
-  errorCode?: string,
-  errorStatus?: number,
-  linked = false,
+  metadata: {
+    errorCode?: string;
+    machineCode?: string;
+    resultCode?: "authenticated" | "reauthenticated";
+    status: number;
+    category: OidcTerminalCategory;
+    trustedChallenge: boolean;
+    linked?: boolean;
+  },
   flowId: string | null = null,
 ) {
+  const { errorCode, linked = false } = metadata;
   const nonceBytes = new Uint8Array(16);
   crypto.getRandomValues(nonceBytes);
   const nonce = bytesToBase64Url(nonceBytes);
-  const succeeded = !errorCode;
+  const succeeded = metadata.category === "success";
   const title = succeeded
     ? linked
       ? "ログイン方法を追加しました"
@@ -1166,7 +1299,7 @@ function popupCallbackResponse(
       : "ログインを完了できませんでした。この画面を閉じて、もう一度お試しください。";
   const outcome = succeeded
     ? "succeeded"
-    : errorCode === "cancelled"
+    : metadata.category === "cancelled"
       ? "cancelled"
       : "failed";
   const popupResult = JSON.stringify({
@@ -1181,7 +1314,7 @@ function popupCallbackResponse(
 <body><main class="panel"><h1>${title}</h1><p>${message}</p><button id="close" type="button">この画面を閉じる</button></main>
 <script nonce="${nonce}">const result=${popupResult};try{const channel=new BroadcastChannel("${OIDC_POPUP_CHANNEL}");channel.postMessage(result);channel.close()}catch{}if(window.opener){window.opener.postMessage(result,window.location.origin)}document.getElementById("close").addEventListener("click",()=>window.close());${autoClose}</script></body></html>`;
   const response = new Response(html, {
-    status: succeeded ? 200 : (errorStatus ?? 400),
+    status: succeeded ? 200 : metadata.status,
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
   applyPrivateResponseHeaders(response.headers);
@@ -1192,8 +1325,36 @@ function popupCallbackResponse(
   response.headers.set("Referrer-Policy", "no-referrer");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("X-Torudake-Auth-Outcome", outcome);
+  applyOidcTerminalResponseHeaders(response, metadata);
   return response;
+}
+
+export function applyOidcTerminalResponseHeaders(
+  response: Response,
+  metadata: {
+    errorCode?: string;
+    machineCode?: string;
+    status: number;
+    category: OidcTerminalCategory;
+    trustedChallenge: boolean;
+  },
+) {
+  const outcome = metadata.category === "success"
+    ? "succeeded"
+    : metadata.category === "cancelled"
+      ? "cancelled"
+      : "failed";
+  response.headers.set("X-Torudake-Auth-Outcome", outcome);
+  response.headers.set("X-Torudake-Auth-Category", metadata.category);
+  response.headers.set("X-Torudake-Auth-Status", String(metadata.status));
+  response.headers.set(
+    "X-Torudake-Auth-Trust",
+    metadata.trustedChallenge ? "challenge" : "untrusted",
+  );
+  const machineCode = metadata.machineCode ?? metadata.errorCode;
+  if (machineCode && /^[a-z][a-z0-9_]{0,63}$/u.test(machineCode)) {
+    response.headers.set("X-Torudake-Auth-Code", machineCode);
+  }
 }
 
 function popupFlowFromReturnTo(returnTo: string) {
@@ -1219,11 +1380,14 @@ function applyPrivateResponseHeaders(headers: Headers) {
   headers.set("Vary", "Cookie");
 }
 
-async function oidcNetworkHash(request: Request, secret: string) {
+export async function oidcNetworkHash(request: Request, secret: string) {
   const url = new URL(request.url);
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  const connectingIp = request.headers.get("cf-connecting-ip")?.trim() ?? "";
-  if (!local && !/^[0-9a-f:.]{3,64}$/i.test(connectingIp)) {
+  const connectingIp = request.headers.get("cf-connecting-ip") ?? "";
+  const networkAddress = connectingIp === "" && local
+    ? "local"
+    : normalizeOidcNetworkAddress(connectingIp);
+  if (!networkAddress) {
     throw new OidcAuthError(
       "oidc_context_unavailable",
       503,
@@ -1232,8 +1396,86 @@ async function oidcNetworkHash(request: Request, secret: string) {
   }
   return await hmacBase64Url(
     secret,
-    `torudake-oidc-network-v1\n${connectingIp || "local"}`,
+    `torudake-oidc-network-v2\n${networkAddress}`,
   );
+}
+
+export function normalizeOidcNetworkAddress(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    value.length < 2 ||
+    value.length > 45 ||
+    value !== value.trim()
+  ) {
+    return null;
+  }
+  const ipv4 = normalizeIpv4Address(value);
+  if (ipv4) return `ipv4:${ipv4}`;
+  return normalizeIpv6Network(value);
+}
+
+function normalizeIpv4Address(value: string) {
+  const octets = value.split(".");
+  if (octets.length !== 4) return null;
+  const canonical: string[] = [];
+  for (const octet of octets) {
+    if (!/^(?:0|[1-9][0-9]{0,2})$/u.test(octet)) return null;
+    const numeric = Number(octet);
+    if (numeric > 255 || String(numeric) !== octet) return null;
+    canonical.push(String(numeric));
+  }
+  return canonical.join(".");
+}
+
+function normalizeIpv6Network(value: string) {
+  if (!value.includes(":") || /[^0-9a-f:.]/iu.test(value)) return null;
+  let candidate = value.toLowerCase();
+  if (candidate.includes(".")) {
+    const tailSeparator = candidate.lastIndexOf(":");
+    if (tailSeparator < 0) return null;
+    const ipv4 = normalizeIpv4Address(candidate.slice(tailSeparator + 1));
+    if (!ipv4) return null;
+    const octets = ipv4.split(".").map(Number);
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    candidate = `${candidate.slice(0, tailSeparator)}:${high}:${low}`;
+  }
+
+  const compressed = candidate.split("::");
+  if (compressed.length > 2) return null;
+  const left = compressed[0] === "" ? [] : compressed[0].split(":");
+  const right = compressed.length === 1 || compressed[1] === ""
+    ? []
+    : compressed[1].split(":");
+  const groups = [...left, ...right];
+  if (
+    groups.some((group) => !/^[0-9a-f]{1,4}$/u.test(group)) ||
+    (compressed.length === 1 && groups.length !== 8)
+  ) {
+    return null;
+  }
+  const omitted = 8 - groups.length;
+  if (compressed.length === 2 && omitted < 1) return null;
+  const expanded = compressed.length === 2
+    ? [...left, ...Array<string>(omitted).fill("0"), ...right]
+    : groups;
+  if (expanded.length !== 8) return null;
+  const numericGroups = expanded.map((group) => Number.parseInt(group, 16));
+  if (
+    numericGroups.slice(0, 5).every((group) => group === 0) &&
+    numericGroups[5] === 0xffff
+  ) {
+    return `ipv4:${[
+      numericGroups[6] >>> 8,
+      numericGroups[6] & 0xff,
+      numericGroups[7] >>> 8,
+      numericGroups[7] & 0xff,
+    ].join(".")}`;
+  }
+  return `ipv6:${numericGroups
+    .slice(0, 4)
+    .map((group) => group.toString(16).padStart(4, "0"))
+    .join(":")}::/64`;
 }
 
 async function oidcSubjectHash(

@@ -14,6 +14,8 @@ import {
 } from "../lib/oidc-core.ts";
 import {
   isOidcProviderConfigured,
+  normalizeOidcNetworkAddress,
+  oidcNetworkHash,
   oidcRedirectUri,
   oidcStateCookie,
 } from "../lib/oidc-auth.ts";
@@ -23,6 +25,12 @@ const canonicalOrigin = "https://torudake-reel.pages.dev";
 test("returnTo accepts only explicitly allowlisted same-site pages", () => {
   assert.equal(normalizeOidcReturnTo("/video-mix?draft=abc#ignored"), "/video-mix?draft=abc");
   assert.equal(normalizeOidcReturnTo("/account?tab=security"), "/account?tab=security");
+  assert.equal(
+    normalizeOidcReturnTo(
+      "/account?checkout=pro&auth_error=cancelled&auth_result=authenticated&popup=1&popupFlow=bad",
+    ),
+    "/account?checkout=pro",
+  );
   assert.equal(normalizeOidcReturnTo("https://evil.example/"), "/account");
   assert.equal(normalizeOidcReturnTo("//evil.example/"), "/account");
   assert.equal(normalizeOidcReturnTo("/\\evil.example/"), "/account");
@@ -138,9 +146,49 @@ test("authorization code exchange rejects a manual redirect without following it
       },
       fetcher,
     ),
-    (error) => error?.code === "authorization_code_rejected",
+    (error) =>
+      error?.code === "token_endpoint_unavailable" &&
+      error?.status === 502 &&
+      error?.category === "upstream",
   );
   assert.equal(calls, 1);
+});
+
+test("provider grant 4xx stays distinct from network and 5xx failures", async () => {
+  const config = {
+    provider: "line",
+    clientId: "1234567890",
+    clientSecret: "line-client-secret",
+    canonicalOrigin,
+  };
+  await assert.rejects(
+    exchangeOidcAuthorizationCode(
+      config,
+      {
+        code: "authorization-code-value",
+        pkceVerifier: "v".repeat(64),
+      },
+      async () => Response.json({ error: "invalid_grant" }, { status: 400 }),
+    ),
+    (error) =>
+      error?.code === "authorization_code_rejected" &&
+      error?.status === 400 &&
+      error?.category === "request",
+  );
+  await assert.rejects(
+    exchangeOidcAuthorizationCode(
+      config,
+      {
+        code: "authorization-code-value",
+        pkceVerifier: "v".repeat(64),
+      },
+      async () => Response.json({ error: "unavailable" }, { status: 503 }),
+    ),
+    (error) =>
+      error?.code === "token_endpoint_unavailable" &&
+      error?.status === 503 &&
+      error?.category === "upstream",
+  );
 });
 
 test("chunked provider responses are cancelled at the byte limit", async () => {
@@ -340,6 +388,81 @@ test("OIDC remains disabled until every feature gate and credential exists", () 
   assert.equal(
     isOidcProviderConfigured("google", { ...complete, OIDC_CANONICAL_ORIGIN: "https://evil.test/path" }),
     false,
+  );
+});
+
+test("network rate-limit keys canonicalize IPv4 exactly and IPv6 to /64 in v2", async () => {
+  assert.equal(normalizeOidcNetworkAddress("203.0.113.9"), "ipv4:203.0.113.9");
+  assert.equal(
+    normalizeOidcNetworkAddress("::ffff:203.0.113.9"),
+    "ipv4:203.0.113.9",
+  );
+  assert.equal(
+    normalizeOidcNetworkAddress("0:0:0:0:0:ffff:cb00:7109"),
+    "ipv4:203.0.113.9",
+  );
+  assert.equal(
+    normalizeOidcNetworkAddress("2001:db8:1234:5678::1"),
+    "ipv6:2001:0db8:1234:5678::/64",
+  );
+  assert.equal(
+    normalizeOidcNetworkAddress("2001:0DB8:1234:5678:ffff::abcd"),
+    "ipv6:2001:0db8:1234:5678::/64",
+  );
+  for (const malformed of [
+    "203.0.113.009",
+    "256.0.0.1",
+    " 203.0.113.9",
+    "2001:db8::1::2",
+    "2001:db8:12345::1",
+    "fe80::1%eth0",
+    "203.0.113.9, 198.51.100.1",
+  ]) {
+    assert.equal(normalizeOidcNetworkAddress(malformed), null, malformed);
+  }
+
+  const secret = "network-test-secret-with-at-least-thirty-two-characters";
+  const first = await oidcNetworkHash(
+    new Request(`${canonicalOrigin}/api/account/oauth/line/start`, {
+      headers: { "CF-Connecting-IP": "2001:db8:1234:5678::1" },
+    }),
+    secret,
+  );
+  const second = await oidcNetworkHash(
+    new Request(`${canonicalOrigin}/api/account/oauth/line/start`, {
+      headers: { "CF-Connecting-IP": "2001:db8:1234:5678::ffff" },
+    }),
+    secret,
+  );
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const expected = base64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        new TextEncoder().encode(
+          "torudake-oidc-network-v2\nipv6:2001:0db8:1234:5678::/64",
+        ),
+      ),
+    ),
+  );
+  assert.equal(first, second);
+  assert.equal(first, expected);
+  await assert.rejects(
+    oidcNetworkHash(
+      new Request(`${canonicalOrigin}/api/account/oauth/line/start`, {
+        headers: { "CF-Connecting-IP": "203.0.113.009" },
+      }),
+      secret,
+    ),
+    (error) =>
+      error?.code === "oidc_context_unavailable" && error?.status === 503,
   );
 });
 

@@ -1,4 +1,5 @@
 import {
+  applyOidcTerminalResponseHeaders,
   completeOidcAuthorization,
   oidcAuthErrorResponse,
 } from "../../../../../../../lib/oidc-auth";
@@ -19,6 +20,12 @@ export async function POST(request: Request) {
       },
       { status: 403 },
     );
+    applyOidcTerminalResponseHeaders(response, {
+      errorCode: "invalid_request_origin",
+      status: 403,
+      category: "request",
+      trustedChallenge: false,
+    });
     logLineAuthenticationEvent(request, {
       event: "line_oidc_callback_rejected",
       operation: "finalize",
@@ -26,6 +33,8 @@ export async function POST(request: Request) {
       outcome: "rejected",
       status: response.status,
       errorCode: "invalid_request_origin",
+      category: "request",
+      trustedChallenge: false,
     });
     return response;
   }
@@ -35,12 +44,11 @@ export async function POST(request: Request) {
     logLineAuthenticationEvent(request, {
       ...completion,
       operation: "finalize",
-      status: response.status,
     });
     return response;
   } catch (error) {
-    const normalized = lineAuthenticationError(error);
     const response = oidcAuthErrorResponse(error);
+    const normalized = lineAuthenticationError(response);
     logLineAuthenticationEvent(request, {
       event: "line_oidc_completion_failed",
       operation: "finalize",
@@ -48,6 +56,8 @@ export async function POST(request: Request) {
       outcome: "failed",
       status: response.status,
       errorCode: normalized.errorCode,
+      category: normalized.category,
+      trustedChallenge: false,
     });
     return response;
   }

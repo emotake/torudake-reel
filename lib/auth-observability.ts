@@ -7,6 +7,22 @@ import {
 
 const SAFE_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const AUTH_ANALYTICS_INDEX = "line";
+const AUTH_TERMINAL_CATEGORIES = new Set([
+  "success",
+  "cancelled",
+  "request",
+  "identity",
+  "upstream",
+  "server",
+] as const);
+
+type AuthenticationTerminalCategory =
+  | "success"
+  | "cancelled"
+  | "request"
+  | "identity"
+  | "upstream"
+  | "server";
 
 type AuthAnalyticsDataset = {
   writeDataPoint: (event: {
@@ -32,6 +48,8 @@ export type LineAuthenticationLogFields = {
   outcome: "succeeded" | "received" | "cancelled" | "rejected" | "failed";
   status: number;
   errorCode?: string | null;
+  category?: AuthenticationTerminalCategory;
+  trustedChallenge?: boolean;
 };
 
 export function safeAuthenticationErrorCode(value: unknown) {
@@ -40,58 +58,105 @@ export function safeAuthenticationErrorCode(value: unknown) {
     : undefined;
 }
 
-export function lineAuthenticationError(error: unknown) {
-  const candidate =
-    error && typeof error === "object"
-      ? (error as { code?: unknown; status?: unknown })
-      : null;
-  const status =
-    Number.isInteger(candidate?.status) &&
-      (candidate?.status as number) >= 400 &&
-      (candidate?.status as number) <= 599
-      ? (candidate?.status as number)
-      : 500;
+export function lineAuthenticationError(response: Response) {
+  const statusHeader = response.headers.get("x-torudake-auth-status") ?? "";
+  const status = /^(?:[4-5][0-9]{2})$/u.test(statusHeader)
+    ? Number(statusHeader)
+    : 500;
+  const reportedCategory = response.headers.get("x-torudake-auth-category");
+  const category = isAuthenticationTerminalCategory(reportedCategory) &&
+      reportedCategory !== "success" && reportedCategory !== "cancelled"
+    ? reportedCategory
+    : status >= 500
+      ? ("server" as const)
+      : ("request" as const);
   return {
-    errorCode:
-      safeAuthenticationErrorCode(candidate?.code) ?? "oidc_unexpected_error",
+    errorCode: safeAuthenticationErrorCode(
+      response.headers.get("x-torudake-auth-code"),
+    ) ?? "oidc_unexpected_error",
     status,
+    category,
   };
 }
 
 export function classifyLineAuthenticationCompletion(response: Response) {
   const reportedOutcome = response.headers.get("x-torudake-auth-outcome");
+  const categoryHeader = response.headers.get("x-torudake-auth-category");
+  const category = isAuthenticationTerminalCategory(categoryHeader)
+    ? categoryHeader
+    : undefined;
+  const statusHeader = response.headers.get("x-torudake-auth-status") ?? "";
+  const terminalStatus = /^(?:[2-5][0-9]{2})$/u.test(statusHeader)
+    ? Number(statusHeader)
+    : undefined;
+  const trustedChallenge =
+    response.headers.get("x-torudake-auth-trust") === "challenge";
+  const machineCode = safeAuthenticationErrorCode(
+    response.headers.get("x-torudake-auth-code"),
+  );
   const outcome =
     reportedOutcome === "succeeded" ||
       reportedOutcome === "cancelled" ||
       reportedOutcome === "failed"
       ? reportedOutcome
       : undefined;
-  let errorCode: string | undefined;
-  const location = response.headers.get("location");
-  if (location) {
-    try {
-      errorCode = safeAuthenticationErrorCode(
-        new URL(location, "https://invalid.local").searchParams.get("auth_error"),
-      );
-    } catch {
-      // A malformed Location is classified only by status. Never log it.
-    }
-  }
 
-  if (outcome === "cancelled" || errorCode === "cancelled") {
+  const validTerminalMetadata = Boolean(
+    outcome &&
+      category &&
+      terminalStatus &&
+      ((outcome === "succeeded" &&
+          category === "success" &&
+          terminalStatus >= 200 && terminalStatus < 300) ||
+        (outcome === "cancelled" &&
+          category === "cancelled" && terminalStatus >= 400) ||
+        (outcome === "failed" &&
+          category !== "success" &&
+          category !== "cancelled" &&
+          terminalStatus >= 400)),
+  );
+  if (!validTerminalMetadata) {
+    const status = response.status >= 400 ? response.status : 500;
+    return {
+      event: "line_oidc_completion_failed" as const,
+      severity: status >= 500 ? ("error" as const) : ("warn" as const),
+      outcome: "failed" as const,
+      errorCode: "oidc_untrusted_terminal_response",
+      status,
+      category: status >= 500 ? ("server" as const) : ("request" as const),
+      trustedChallenge: false,
+    };
+  }
+  if (outcome === "cancelled") {
     return {
       event: "line_oidc_completion_cancelled" as const,
       severity: "info" as const,
       outcome: "cancelled" as const,
-      errorCode: "cancelled",
+      errorCode: machineCode ?? "oidc_authorization_cancelled",
+      status: terminalStatus as number,
+      category: "cancelled" as const,
+      trustedChallenge,
     };
   }
-  if (outcome === "failed" || errorCode || response.status >= 400) {
+  if (outcome === "failed") {
+    const failureCategory = category as Exclude<
+      AuthenticationTerminalCategory,
+      "success" | "cancelled"
+    >;
+    const status = terminalStatus as number;
     return {
       event: "line_oidc_completion_failed" as const,
-      severity: response.status >= 500 ? ("error" as const) : ("warn" as const),
+      severity:
+        failureCategory === "upstream" ||
+          failureCategory === "server" ||
+          status >= 500
+          ? ("error" as const)
+          : ("warn" as const),
       outcome: "failed" as const,
-      errorCode: errorCode ?? "oidc_callback_failed",
+      errorCode: machineCode ?? `oidc_${failureCategory}_failed`,
+      status,
+      category: failureCategory,
+      trustedChallenge,
     };
   }
   return {
@@ -99,7 +164,21 @@ export function classifyLineAuthenticationCompletion(response: Response) {
     severity: "info" as const,
     outcome: "succeeded" as const,
     errorCode: undefined,
+    status: terminalStatus as number,
+    category: "success" as const,
+    trustedChallenge,
   };
+}
+
+export function shouldWriteLineAuthenticationAnalytics(
+  fields: LineAuthenticationLogFields,
+) {
+  if (fields.status >= 500) return true;
+  if (fields.event === "line_oidc_start_succeeded") return true;
+  return fields.trustedChallenge === true &&
+    (fields.event === "line_oidc_completion_succeeded" ||
+      fields.event === "line_oidc_completion_cancelled" ||
+      fields.event === "line_oidc_completion_failed");
 }
 
 export function logLineAuthenticationEvent(
@@ -127,6 +206,8 @@ export function logLineAuthenticationEvent(
     requestId: context.requestId,
     correlationId: context.correlationId,
   });
+
+  if (!shouldWriteLineAuthenticationAnalytics(fields)) return;
 
   if (!analytics) {
     console.warn({
@@ -180,4 +261,11 @@ export function logLineAuthenticationEvent(
       path: context.path,
     });
   }
+}
+
+function isAuthenticationTerminalCategory(
+  value: unknown,
+): value is AuthenticationTerminalCategory {
+  return typeof value === "string" &&
+    AUTH_TERMINAL_CATEGORIES.has(value as AuthenticationTerminalCategory);
 }

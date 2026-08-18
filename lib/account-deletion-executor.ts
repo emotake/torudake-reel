@@ -11,6 +11,8 @@ const DEFAULT_EXECUTION_BATCH = 5;
 const EXECUTION_LEASE_SECONDS = 30 * 60;
 const MAX_MEDIA_TRANSFERS_PER_ACCOUNT = 500;
 const MAX_DISPUTED_CHARGES_PER_ACCOUNT = 20;
+const CHALLENGE_RETENTION_BATCH_LIMIT = 100;
+const CHALLENGE_RETENTION_MAX_BATCHES = 4;
 const TERMINAL_SUBSCRIPTION_STATUSES = new Set([
   "canceled",
   "incomplete_expired",
@@ -98,6 +100,16 @@ export type AccountDeletionRunResult = {
   }>;
 };
 
+export type ExpiredAccountChallengePurgeResult = {
+  accountAuthChallenges: number;
+  accountEmailChallenges: number;
+  accountOauthChallenges: number;
+  accountRecoveryChallenges: number;
+  total: number;
+  batches: number;
+  hasMore: boolean;
+};
+
 export class AccountDeletionExecutionError extends Error {
   readonly code: string;
 
@@ -106,6 +118,133 @@ export class AccountDeletionExecutionError extends Error {
     this.name = "AccountDeletionExecutionError";
     this.code = code;
   }
+}
+
+/**
+ * Removes authentication transactions that can no longer be consumed. The
+ * strict `< cutoff` predicate mirrors the callback validity check, which still
+ * accepts a transaction whose expiry is exactly the current second.
+ */
+export async function purgeExpiredAccountChallenges(options: {
+  nowSeconds?: number;
+} = {}): Promise<ExpiredAccountChallengePurgeResult> {
+  const cutoff = normalizeChallengeRetentionCutoff(
+    options.nowSeconds ?? Math.floor(Date.now() / 1_000),
+  );
+  const database = databaseOrThrow();
+  const counts = [0, 0, 0, 0];
+  let batches = 0;
+  for (; batches < CHALLENGE_RETENTION_MAX_BATCHES; batches += 1) {
+    const results = await database.batch([
+      database
+        .prepare(`
+          DELETE FROM account_auth_challenges
+          WHERE token_hash IN (
+            SELECT token_hash FROM account_auth_challenges
+            WHERE expires_at < ?
+            ORDER BY expires_at ASC, token_hash ASC
+            LIMIT ?
+          )
+        `)
+        .bind(cutoff, CHALLENGE_RETENTION_BATCH_LIMIT),
+      database
+        .prepare(`
+          DELETE FROM account_email_challenges
+          WHERE challenge_hash IN (
+            SELECT challenge_hash FROM account_email_challenges
+            WHERE expires_at < ?
+            ORDER BY expires_at ASC, challenge_hash ASC
+            LIMIT ?
+          )
+        `)
+        .bind(cutoff, CHALLENGE_RETENTION_BATCH_LIMIT),
+      database
+        .prepare(`
+          DELETE FROM account_oauth_challenges
+          WHERE state_hash IN (
+            SELECT state_hash FROM account_oauth_challenges
+            WHERE expires_at < ?
+            ORDER BY expires_at ASC, state_hash ASC
+            LIMIT ?
+          )
+        `)
+        .bind(cutoff, CHALLENGE_RETENTION_BATCH_LIMIT),
+      database
+        .prepare(`
+          DELETE FROM account_recovery_challenges
+          WHERE id IN (
+            SELECT id FROM account_recovery_challenges
+            WHERE expires_at < ?
+            ORDER BY expires_at ASC, id ASC
+            LIMIT ?
+          )
+        `)
+        .bind(cutoff, CHALLENGE_RETENTION_BATCH_LIMIT),
+    ]);
+    if (results.length !== 4) {
+      throw new AccountDeletionExecutionError(
+        "challenge_retention_result_invalid",
+      );
+    }
+    const changes = results.map(challengeRetentionChanges);
+    changes.forEach((value, index) => {
+      counts[index] += value;
+    });
+    if (changes.every((value) => value < CHALLENGE_RETENTION_BATCH_LIMIT)) {
+      batches += 1;
+      break;
+    }
+  }
+  const [
+    accountAuthChallenges,
+    accountEmailChallenges,
+    accountOauthChallenges,
+    accountRecoveryChallenges,
+  ] = counts;
+  const hasMore =
+    batches === CHALLENGE_RETENTION_MAX_BATCHES
+      ? await expiredChallengeRowsRemain(database, cutoff)
+      : false;
+  return {
+    accountAuthChallenges,
+    accountEmailChallenges,
+    accountOauthChallenges,
+    accountRecoveryChallenges,
+    total:
+      accountAuthChallenges +
+      accountEmailChallenges +
+      accountOauthChallenges +
+      accountRecoveryChallenges,
+    batches,
+    hasMore,
+  };
+}
+
+async function expiredChallengeRowsRemain(
+  database: D1Database,
+  cutoff: number,
+) {
+  const result = await database
+    .prepare(`
+      SELECT
+        EXISTS(SELECT 1 FROM account_auth_challenges WHERE expires_at < ?) AS auth,
+        EXISTS(SELECT 1 FROM account_email_challenges WHERE expires_at < ?) AS email,
+        EXISTS(SELECT 1 FROM account_oauth_challenges WHERE expires_at < ?) AS oauth,
+        EXISTS(SELECT 1 FROM account_recovery_challenges WHERE expires_at < ?) AS recovery
+    `)
+    .bind(cutoff, cutoff, cutoff, cutoff)
+    .first<{ auth: number; email: number; oauth: number; recovery: number }>();
+  if (
+    !result ||
+    ![result.auth, result.email, result.oauth, result.recovery].every(
+      (value) => value === 0 || value === 1,
+    )
+  ) {
+    throw new AccountDeletionExecutionError(
+      "challenge_retention_result_invalid",
+    );
+  }
+  return Boolean(result.auth || result.email || result.oauth || result.recovery);
 }
 
 /**
@@ -1000,6 +1139,29 @@ function normalizeRequestId(value: string) {
     throw new AccountDeletionExecutionError("invalid_request_id");
   }
   return normalized;
+}
+
+function normalizeChallengeRetentionCutoff(value: number) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new AccountDeletionExecutionError(
+      "invalid_challenge_retention_cutoff",
+    );
+  }
+  return value;
+}
+
+function challengeRetentionChanges(result: D1Result) {
+  const changes = result.meta?.changes;
+  if (
+    typeof changes !== "number" ||
+    !Number.isSafeInteger(changes) ||
+    changes < 0
+  ) {
+    throw new AccountDeletionExecutionError(
+      "challenge_retention_result_invalid",
+    );
+  }
+  return changes;
 }
 
 function databaseOrThrow() {

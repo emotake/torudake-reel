@@ -16,10 +16,12 @@
     "db:generate": "drizzle-kit generate",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:preflight:offline": "node scripts/release-preflight.mjs --offline",
+    "release:pages": "node scripts/operations/deploy-pages-release.mjs",
     "ops:health": "node scripts/operations/synthetic-readiness.mjs",
     "ops:health:detailed": "node scripts/operations/synthetic-readiness.mjs --detailed",
     "ops:account-deletions": "node scripts/operations/account-deletions.mjs",
-    "ops:deploy-account-deletion-scheduler": "wrangler deploy --config wrangler.account-deletion-scheduler.jsonc",
+    "ops:dry-run-account-deletion-scheduler": "wrangler deploy --config wrangler.account-deletion-scheduler.jsonc --dry-run",
+    "ops:deploy-account-deletion-scheduler": "node scripts/operations/deploy-account-deletion-scheduler.mjs",
     "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
     "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs"
   },

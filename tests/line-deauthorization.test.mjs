@@ -72,7 +72,10 @@ test("LINE deauthorization rejects a manual redirect without following it", asyn
 
   await assert.rejects(
     deauthorizeLineAuthorization(credentials, fetcher),
-    (error) => error?.code === "line_channel_token_rejected",
+    (error) =>
+      error?.code === "line_channel_token_unavailable" &&
+      error?.status === 502 &&
+      error?.category === "upstream",
   );
   assert.equal(calls, 1);
 });
@@ -93,6 +96,8 @@ test("LINE deauthorization fails closed without exposing credentials", async () 
     deauthorizeLineAuthorization(credentials, fetcher),
     (error) => {
       assert.equal(error?.code, "line_deauthorization_rejected");
+      assert.equal(error?.status, 502);
+      assert.equal(error?.category, "upstream");
       assert.equal(error?.message.includes(credentials.userAccessToken), false);
       assert.equal(error?.message.includes(credentials.channelSecret), false);
       return true;
@@ -121,9 +126,50 @@ test("LINE provider responses are read with a hard byte limit", async () => {
 
   await assert.rejects(
     deauthorizeLineAuthorization(credentials, fetcher),
-    (error) => error?.code === "line_provider_response_too_large",
+    (error) =>
+      error?.code === "line_provider_response_too_large" &&
+      error?.status === 502 &&
+      error?.category === "upstream",
   );
   assert.equal(cancelled, true);
+});
+
+test("LINE network and 5xx failures are upstream errors, not user rejections", async () => {
+  await assert.rejects(
+    deauthorizeLineAuthorization(credentials, async () => {
+      throw new Error("network detail must-not-escape");
+    }),
+    (error) =>
+      error?.code === "line_channel_token_unavailable" &&
+      error?.status === 503 &&
+      error?.category === "upstream" &&
+      !error.message.includes("must-not-escape"),
+  );
+
+  await assert.rejects(
+    deauthorizeLineAuthorization(credentials, async () =>
+      Response.json({ secret: "must-not-escape" }, { status: 503 })),
+    (error) =>
+      error?.code === "line_channel_token_unavailable" &&
+      error?.status === 503 &&
+      error?.category === "upstream" &&
+      !error.message.includes("must-not-escape"),
+  );
+});
+
+test("LINE channel credential rejection is an observable server failure", async () => {
+  await assert.rejects(
+    deauthorizeLineAuthorization(credentials, async () =>
+      Response.json(
+        { error: "invalid_client", detail: credentials.channelSecret },
+        { status: 401 },
+      )),
+    (error) =>
+      error?.code === "line_channel_token_rejected" &&
+      error?.status === 500 &&
+      error?.category === "server" &&
+      !error.message.includes(credentials.channelSecret),
+  );
 });
 
 test("LINE is deauthorized after ID-token verification but before local mutation", async () => {

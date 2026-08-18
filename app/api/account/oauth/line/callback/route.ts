@@ -19,8 +19,8 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const normalized = lineAuthenticationError(error);
     const response = oidcAuthErrorResponse(error);
+    const normalized = lineAuthenticationError(response);
     logLineAuthenticationEvent(request, {
       event: "line_oidc_callback_rejected",
       operation: "callback",
@@ -28,6 +28,8 @@ export async function GET(request: Request) {
       outcome: "rejected",
       status: response.status,
       errorCode: normalized.errorCode,
+      category: normalized.category,
+      trustedChallenge: false,
     });
     return response;
   }

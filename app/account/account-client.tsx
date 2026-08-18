@@ -18,6 +18,10 @@ import {
 } from "../monthly-first-purchase";
 import { trackClientEvent } from "../../lib/client-analytics";
 import {
+  isAuthenticationReturnVerified,
+  normalizeAuthenticationReturnResult,
+} from "../../lib/client-authentication-return";
+import {
   FREE_SECONDS_LIMIT,
   FREE_VIDEO_LIMIT,
   monthlyVideoAllowanceLabel,
@@ -684,7 +688,9 @@ export default function AccountClient() {
         : null;
       const authErrorIsNotice =
         authErrorCode === "cancelled" || authErrorCode === "already_authenticated";
-      const authResult = query.get("auth_result");
+      const authResult = normalizeAuthenticationReturnResult(
+        query.getAll("auth_result"),
+      );
       const authResultMessage =
         authResult === "reauthenticated"
           ? "本人確認が完了しました。安全のため、操作をもう一度実行してください。"
@@ -701,11 +707,16 @@ export default function AccountClient() {
           `${window.location.pathname}${cleanedSearch ? `?${cleanedSearch}` : ""}${window.location.hash}`,
         );
       }
-      const showAuthReturnFeedback = () => {
+      const showAuthReturnFeedback = (
+        methods: AccountAuthenticationState | null,
+      ) => {
         if (authErrorMessage) {
           if (authErrorIsNotice) setNotice(authErrorMessage);
           else setError(authErrorMessage);
-        } else if (authResultMessage) {
+        } else if (
+          authResultMessage &&
+          isAuthenticationReturnVerified(authResult, methods)
+        ) {
           setNotice(authResultMessage);
         }
       };
@@ -742,8 +753,10 @@ export default function AccountClient() {
 
       void (async () => {
         try {
+          let loadedAuthenticationMethods: AccountAuthenticationState | null =
+            null;
           try {
-            await loadAuthenticationMethods();
+            loadedAuthenticationMethods = await loadAuthenticationMethods();
           } catch {
             // Fail closed: unavailable feature flags must not expose a
             // Passkey action that will be rejected by the server.
@@ -751,7 +764,9 @@ export default function AccountClient() {
           }
           if (checkout !== "success") {
             await loadStatus();
-            if (!cancelled) showAuthReturnFeedback();
+            if (!cancelled) {
+              showAuthReturnFeedback(loadedAuthenticationMethods);
+            }
             return;
           }
           let reflected = false;

@@ -1,4 +1,7 @@
-import { runDueAccountDeletions } from "../../../../lib/account-deletion-executor";
+import {
+  purgeExpiredAccountChallenges,
+  runDueAccountDeletions,
+} from "../../../../lib/account-deletion-executor";
 import {
   authorizeAccountDeletionOperations,
   isAccountDeletionOperationsConfigured,
@@ -102,6 +105,58 @@ export async function POST(request: Request) {
   }
 
   try {
+    let challengeRetention:
+      | {
+          status: "purged";
+          accountAuthChallenges: number;
+          accountEmailChallenges: number;
+          accountOauthChallenges: number;
+          accountRecoveryChallenges: number;
+          total: number;
+          batches: number;
+          hasMore: boolean;
+        }
+      | { status: "failed"; reason: "challenge_retention_failed" }
+      | { status: "skipped"; reason: "dry_run" };
+    if (dryRun) {
+      challengeRetention = { status: "skipped", reason: "dry_run" };
+    } else {
+      try {
+        const purge = await purgeExpiredAccountChallenges();
+        challengeRetention = {
+          status: "purged",
+          ...purge,
+        };
+        logOperationalEvent(purge.hasMore ? "warn" : "info", request, {
+          event: "expired_account_challenges_purged",
+          component: "account_deletion",
+          operation: "purge_expired_account_challenges",
+          outcome: purge.hasMore ? "partial_failure" : "completed",
+          status: 200,
+          errorCode: purge.hasMore
+            ? "challenge_retention_backlog_remaining"
+            : null,
+          requestId,
+          correlationId,
+        });
+      } catch (error) {
+        challengeRetention = {
+          status: "failed",
+          reason: "challenge_retention_failed",
+        };
+        logOperationalEvent("error", request, {
+          event: "expired_account_challenge_purge_failed",
+          component: "account_deletion",
+          operation: "purge_expired_account_challenges",
+          outcome: "failed",
+          status: 500,
+          errorCode: "challenge_retention_failed",
+          error,
+          requestId,
+          correlationId,
+        });
+      }
+    }
     const result = await runDueAccountDeletions({
       dryRun,
       limit,
@@ -119,7 +174,12 @@ export async function POST(request: Request) {
       requestId,
       correlationId,
     });
-    return response(request, { ...result, requestId }, 200, requestId);
+    return response(
+      request,
+      { ...result, challengeRetention, requestId },
+      200,
+      requestId,
+    );
   } catch (error) {
     logOperationalEvent("error", request, {
       event: "account_deletion_run_failed",

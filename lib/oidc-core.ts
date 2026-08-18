@@ -19,6 +19,12 @@ export type OidcTokenSet = {
   idToken: string;
 };
 
+export type OidcErrorCategory =
+  | "request"
+  | "identity"
+  | "upstream"
+  | "server";
+
 type FetchLike = (
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -29,6 +35,16 @@ type GoogleJsonWebKey = JsonWebKey & { kid?: string };
 
 const RETURN_TO_BASE = "https://return-to.invalid";
 const DEFAULT_RETURN_TO = "/account";
+const RESERVED_RETURN_TO_QUERY_KEYS = new Set([
+  "auth_error",
+  "auth_result",
+  "auth_popup",
+  "returnto",
+  "popup",
+  "popupflow",
+  "link",
+  "reauthenticate",
+]);
 const ALLOWED_RETURN_PATHS = new Set([
   "/",
   "/account",
@@ -59,11 +75,19 @@ export const OIDC_ENDPOINTS = {
 
 export class OidcProtocolError extends Error {
   readonly code: string;
+  readonly status: number;
+  readonly category: OidcErrorCategory;
 
-  constructor(code: string) {
+  constructor(
+    code: string,
+    status = 400,
+    category: OidcErrorCategory = "identity",
+  ) {
     super(code);
     this.name = "OidcProtocolError";
     this.code = code;
+    this.status = status;
+    this.category = category;
   }
 }
 
@@ -98,6 +122,14 @@ export function normalizeOidcReturnTo(value: unknown) {
       !ALLOWED_RETURN_PATHS.has(parsed.pathname)
     ) {
       return DEFAULT_RETURN_TO;
+    }
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (
+        /^auth_/iu.test(key) ||
+        RESERVED_RETURN_TO_QUERY_KEYS.has(key.toLowerCase())
+      ) {
+        parsed.searchParams.delete(key);
+      }
     }
     return `${parsed.pathname}${parsed.search}`;
   } catch {
@@ -188,15 +220,32 @@ export async function exchangeOidcAuthorizationCode(
       signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new OidcProtocolError("token_endpoint_unavailable");
+    throw upstreamProtocolError("token_endpoint_unavailable", 503);
+  }
+  if (!response.ok) {
+    await response.body?.cancel("provider_response_rejected").catch(
+      () => undefined,
+    );
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 429
+    ) {
+      throw new OidcProtocolError(
+        "authorization_code_rejected",
+        400,
+        "request",
+      );
+    }
+    throw upstreamProtocolError(
+      "token_endpoint_unavailable",
+      response.status === 429 || response.status >= 500 ? 503 : 502,
+    );
   }
   const payload = await readBoundedJsonObject(
     response,
     TOKEN_RESPONSE_LIMIT_BYTES,
   );
-  if (!response.ok) {
-    throw new OidcProtocolError("authorization_code_rejected");
-  }
 
   const accessToken = boundedString(payload.access_token, 8, 8_192);
   const idToken = boundedString(payload.id_token, 64, 32_768);
@@ -208,7 +257,7 @@ export async function exchangeOidcAuthorizationCode(
     tokenType.toLowerCase() !== "bearer" ||
     !isCompactJwt(idToken)
   ) {
-    throw new OidcProtocolError("invalid_token_response");
+    throw upstreamProtocolError("invalid_token_response", 502);
   }
   return { accessToken, idToken };
 }
@@ -248,15 +297,28 @@ export async function verifyLineIdToken(
       signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new OidcProtocolError("line_verification_unavailable");
+    throw upstreamProtocolError("line_verification_unavailable", 503);
+  }
+  if (!response.ok) {
+    await response.body?.cancel("provider_response_rejected").catch(
+      () => undefined,
+    );
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 429
+    ) {
+      throw new OidcProtocolError("line_id_token_rejected", 400, "identity");
+    }
+    throw upstreamProtocolError(
+      "line_verification_unavailable",
+      response.status === 429 || response.status >= 500 ? 503 : 502,
+    );
   }
   const claims = await readBoundedJsonObject(
     response,
     TOKEN_RESPONSE_LIMIT_BYTES,
   );
-  if (!response.ok) {
-    throw new OidcProtocolError("line_id_token_rejected");
-  }
   return await validateIdentityClaims(claims, {
     issuers: [OIDC_ENDPOINTS.line.issuer],
     audience: values.clientId,
@@ -461,14 +523,23 @@ async function findGoogleVerificationKey(
         signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
       });
     } catch {
-      throw new OidcProtocolError("google_jwks_unavailable");
+      throw upstreamProtocolError("google_jwks_unavailable", 503);
+    }
+    if (!response.ok) {
+      await response.body?.cancel("provider_response_rejected").catch(
+        () => undefined,
+      );
+      throw upstreamProtocolError(
+        "google_jwks_unavailable",
+        response.status === 429 || response.status >= 500 ? 503 : 502,
+      );
     }
     const payload = await readBoundedJsonObject(
       response,
       JWKS_RESPONSE_LIMIT_BYTES,
     );
-    if (!response.ok || !Array.isArray(payload.keys) || payload.keys.length > 20) {
-      throw new OidcProtocolError("invalid_google_jwks");
+    if (!Array.isArray(payload.keys) || payload.keys.length > 20) {
+      throw upstreamProtocolError("invalid_google_jwks", 502);
     }
     keys = payload.keys.filter(isJsonWebKey);
     if (canUseSharedCache) {
@@ -563,7 +634,7 @@ async function readBoundedJsonObject(response: Response, limit: number) {
       await response.body?.cancel("provider_response_too_large").catch(
         () => undefined,
       );
-      throw new OidcProtocolError("provider_response_too_large");
+      throw upstreamProtocolError("provider_response_too_large", 502);
     }
   }
 
@@ -580,7 +651,7 @@ async function readBoundedJsonObject(response: Response, limit: number) {
           await reader.cancel("provider_response_too_large").catch(
             () => undefined,
           );
-          throw new OidcProtocolError("provider_response_too_large");
+          throw upstreamProtocolError("provider_response_too_large", 502);
         }
         chunks.push(value);
       }
@@ -599,7 +670,7 @@ async function readBoundedJsonObject(response: Response, limit: number) {
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new OidcProtocolError("invalid_provider_response");
+    throw upstreamProtocolError("invalid_provider_response", 502);
   }
   try {
     const value: unknown = JSON.parse(text);
@@ -608,8 +679,12 @@ async function readBoundedJsonObject(response: Response, limit: number) {
     }
     return value as JsonObject;
   } catch {
-    throw new OidcProtocolError("invalid_provider_response");
+    throw upstreamProtocolError("invalid_provider_response", 502);
   }
+}
+
+function upstreamProtocolError(code: string, status: 502 | 503) {
+  return new OidcProtocolError(code, status, "upstream");
 }
 
 function normalizeAudience(value: unknown) {

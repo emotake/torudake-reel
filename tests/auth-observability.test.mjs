@@ -6,6 +6,7 @@ import {
   lineAuthenticationError,
   logLineAuthenticationEvent,
   safeAuthenticationErrorCode,
+  shouldWriteLineAuthenticationAnalytics,
 } from "../lib/auth-observability.ts";
 
 test("LINE authentication events are structured, correlated and privacy safe", () => {
@@ -36,6 +37,8 @@ test("LINE authentication events are structured, correlated and privacy safe", (
         outcome: "failed",
         status: 400,
         errorCode: "oidc_state_mismatch",
+        category: "request",
+        trustedChallenge: true,
       },
       { writeDataPoint: (event) => analyticsEvents.push(event) },
     );
@@ -104,7 +107,7 @@ test("LINE authentication events are structured, correlated and privacy safe", (
 });
 
 test("LINE callback completion classification never copies arbitrary locations", () => {
-  const cancelled = classifyLineAuthenticationCompletion(
+  const untrustedLocation = classifyLineAuthenticationCompletion(
     new Response(null, {
       status: 303,
       headers: {
@@ -112,25 +115,37 @@ test("LINE callback completion classification never copies arbitrary locations",
       },
     }),
   );
-  assert.deepEqual(cancelled, {
-    event: "line_oidc_completion_cancelled",
-    severity: "info",
-    outcome: "cancelled",
-    errorCode: "cancelled",
+  assert.deepEqual(untrustedLocation, {
+    event: "line_oidc_completion_failed",
+    severity: "error",
+    outcome: "failed",
+    errorCode: "oidc_untrusted_terminal_response",
+    status: 500,
+    category: "server",
+    trustedChallenge: false,
   });
 
   assert.deepEqual(
     classifyLineAuthenticationCompletion(
       new Response(null, {
         status: 400,
-        headers: { "x-torudake-auth-outcome": "cancelled" },
+        headers: {
+          "x-torudake-auth-outcome": "cancelled",
+          "x-torudake-auth-category": "cancelled",
+          "x-torudake-auth-status": "400",
+          "x-torudake-auth-trust": "challenge",
+          "x-torudake-auth-code": "oidc_authorization_cancelled",
+        },
       }),
     ),
     {
       event: "line_oidc_completion_cancelled",
       severity: "info",
       outcome: "cancelled",
-      errorCode: "cancelled",
+      errorCode: "oidc_authorization_cancelled",
+      status: 400,
+      category: "cancelled",
+      trustedChallenge: true,
     },
   );
 
@@ -140,16 +155,22 @@ test("LINE callback completion classification never copies arbitrary locations",
       event: "line_oidc_completion_failed",
       severity: "error",
       outcome: "failed",
-      errorCode: "oidc_callback_failed",
+      errorCode: "oidc_untrusted_terminal_response",
+      status: 502,
+      category: "server",
+      trustedChallenge: false,
     },
   );
   assert.deepEqual(
     classifyLineAuthenticationCompletion(new Response(null, { status: 200 })),
     {
-      event: "line_oidc_completion_succeeded",
-      severity: "info",
-      outcome: "succeeded",
-      errorCode: undefined,
+      event: "line_oidc_completion_failed",
+      severity: "error",
+      outcome: "failed",
+      errorCode: "oidc_untrusted_terminal_response",
+      status: 500,
+      category: "server",
+      trustedChallenge: false,
     },
   );
   assert.deepEqual(
@@ -160,10 +181,61 @@ test("LINE callback completion classification never copies arbitrary locations",
       }),
     ),
     {
+      event: "line_oidc_completion_failed",
+      severity: "error",
+      outcome: "failed",
+      errorCode: "oidc_untrusted_terminal_response",
+      status: 500,
+      category: "server",
+      trustedChallenge: false,
+    },
+  );
+
+  assert.deepEqual(
+    classifyLineAuthenticationCompletion(
+      new Response(null, {
+        status: 303,
+        headers: {
+          location: "/account?auth_error=cancelled",
+          "x-torudake-auth-outcome": "succeeded",
+          "x-torudake-auth-category": "success",
+          "x-torudake-auth-status": "200",
+          "x-torudake-auth-trust": "challenge",
+        },
+      }),
+    ),
+    {
       event: "line_oidc_completion_succeeded",
       severity: "info",
       outcome: "succeeded",
       errorCode: undefined,
+      status: 200,
+      category: "success",
+      trustedChallenge: true,
+    },
+  );
+
+  assert.deepEqual(
+    classifyLineAuthenticationCompletion(
+      new Response(null, {
+        status: 503,
+        headers: {
+          "x-torudake-auth-outcome": "failed",
+          "x-torudake-auth-category": "upstream",
+          "x-torudake-auth-status": "503",
+          "x-torudake-auth-trust": "challenge",
+          "x-torudake-auth-code": "line_deauthorization_unavailable",
+        },
+      }),
+    ),
+    {
+      event: "line_oidc_completion_failed",
+      severity: "error",
+      outcome: "failed",
+      errorCode: "line_deauthorization_unavailable",
+      status: 503,
+      category: "upstream",
+      trustedChallenge: true,
     },
   );
 });
@@ -171,14 +243,120 @@ test("LINE callback completion classification never copies arbitrary locations",
 test("authentication error normalization accepts only bounded machine codes", () => {
   assert.equal(safeAuthenticationErrorCode("oidc_state_mismatch"), "oidc_state_mismatch");
   assert.equal(safeAuthenticationErrorCode("TOKEN=secret"), undefined);
-  assert.deepEqual(lineAuthenticationError({ code: "known_failure", status: 429 }), {
-    errorCode: "known_failure",
-    status: 429,
-  });
   assert.deepEqual(
-    lineAuthenticationError({ code: "TOKEN=secret", status: 200 }),
-    { errorCode: "oidc_unexpected_error", status: 500 },
+    lineAuthenticationError(
+      new Response(null, {
+        status: 429,
+        headers: {
+          "x-torudake-auth-status": "429",
+          "x-torudake-auth-category": "request",
+          "x-torudake-auth-code": "known_failure",
+        },
+      }),
+    ),
+    {
+      errorCode: "known_failure",
+      status: 429,
+      category: "request",
+    },
   );
+  assert.deepEqual(
+    lineAuthenticationError(
+      new Response(null, {
+        status: 200,
+        headers: {
+          "x-torudake-auth-status": "TOKEN=secret",
+          "x-torudake-auth-code": "TOKEN=secret",
+        },
+      }),
+    ),
+    { errorCode: "oidc_unexpected_error", status: 500, category: "server" },
+  );
+});
+
+test("durable auth telemetry admits milestones and operational failures only", () => {
+  const base = {
+    operation: "finalize",
+    severity: "warn",
+    outcome: "failed",
+    status: 400,
+  };
+  assert.equal(
+    shouldWriteLineAuthenticationAnalytics({
+      ...base,
+      event: "line_oidc_callback_received",
+      operation: "callback",
+      outcome: "received",
+      status: 200,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldWriteLineAuthenticationAnalytics({
+      ...base,
+      event: "line_oidc_callback_rejected",
+      errorCode: "invalid_request_origin",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldWriteLineAuthenticationAnalytics({
+      ...base,
+      event: "line_oidc_start_rejected",
+      operation: "start",
+      outcome: "rejected",
+      status: 429,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldWriteLineAuthenticationAnalytics({
+      ...base,
+      event: "line_oidc_completion_failed",
+      trustedChallenge: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldWriteLineAuthenticationAnalytics({
+      ...base,
+      event: "line_oidc_completion_failed",
+      status: 503,
+    }),
+    true,
+  );
+});
+
+test("cheap invalid traffic keeps one safe console event and creates no AE point", () => {
+  const consoleEvents = [];
+  const analyticsEvents = [];
+  const originalWarn = console.warn;
+  console.warn = (event) => consoleEvents.push(event);
+  try {
+    logLineAuthenticationEvent(
+      new Request(
+        "https://example.test/api/account/oauth/line/callback/finalize?state=secret-state",
+        { method: "POST" },
+      ),
+      {
+        event: "line_oidc_callback_rejected",
+        operation: "finalize",
+        severity: "warn",
+        outcome: "rejected",
+        status: 403,
+        errorCode: "invalid_request_origin",
+        category: "request",
+        trustedChallenge: false,
+      },
+      { writeDataPoint: (event) => analyticsEvents.push(event) },
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(consoleEvents.length, 1);
+  assert.equal(consoleEvents[0].event, "line_oidc_callback_rejected");
+  assert.doesNotMatch(JSON.stringify(consoleEvents), /secret-state/u);
+  assert.deepEqual(analyticsEvents, []);
 });
 
 test("Analytics Engine write failure degrades to a safe warning", () => {

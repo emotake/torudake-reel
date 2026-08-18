@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readBoundedJsonResponse } from "../../lib/bounded-json-response.mjs";
+import { isValidAccountDeletionExecutionResult } from "../../workers/account-deletion-scheduler.mjs";
+
 const EXECUTION_CONFIRMATION = "execute-due-account-deletions";
 const args = new Set(process.argv.slice(2));
 const execute = args.has("--execute");
@@ -9,6 +12,7 @@ const origin = safeOrigin(
   process.env.TORUDAKE_SITE_ORIGIN ?? "https://torudake-reel.pages.dev",
 );
 const secret = process.env.ACCOUNT_DELETION_OPERATIONS_SECRET?.trim() ?? "";
+const MAX_RESPONSE_BYTES = 64 * 1024;
 
 if (secret.length < 32) {
   throw new Error(
@@ -36,8 +40,16 @@ const response = await fetch(`${origin}/api/internal/account-deletions`, {
     ...(execute ? { confirmation: EXECUTION_CONFIRMATION } : {}),
   }),
 });
-const body = await response.json().catch(() => null);
-if (!response.ok || !body) {
+const body = await readBoundedJsonResponse(response, {
+  maxBytes: MAX_RESPONSE_BYTES,
+}).catch(() => null);
+if (
+  !response.ok ||
+  !isValidAccountDeletionExecutionResult(body, {
+    expectedDryRun: !execute,
+    expectedLimit: limit,
+  })
+) {
   throw new Error(
     `Account deletion operation failed (${response.status}, request ${response.headers.get("x-request-id") ?? "unknown"}).`,
   );
@@ -54,13 +66,20 @@ console.log(
       blocked: body.blocked,
       failed: body.failed,
       skipped: body.skipped,
+      challengeRetention: body.challengeRetention,
       results: body.results,
     },
     null,
     2,
   ),
 );
-if (body.failed > 0) process.exitCode = 2;
+if (
+  body.failed > 0 ||
+  body.challengeRetention?.status === "failed" ||
+  body.challengeRetention?.hasMore === true
+) {
+  process.exitCode = 2;
+}
 
 function valueAfter(name) {
   const index = process.argv.indexOf(name);

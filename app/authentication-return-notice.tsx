@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  normalizeAuthenticationReturnResult,
+  verifyAuthenticationReturn,
+} from "../lib/client-authentication-return";
 
 type AuthenticationReturnFeedback = {
   kind: "notice" | "error";
@@ -50,27 +54,14 @@ export default function AuthenticationReturnNotice() {
   useEffect(() => {
     if (window.location.pathname === "/account") return;
     let active = true;
+    const controller = new AbortController();
     const currentUrl = new URL(window.location.href);
     const authErrors = currentUrl.searchParams.getAll("auth_error");
     const authError =
       authErrors.length === 1 ? currentUrl.searchParams.get("auth_error") : null;
-    const authResult = currentUrl.searchParams.get("auth_result");
-    const nextFeedback =
-      authErrors.length > 0
-        ? (authError ? AUTHENTICATION_ERROR_MESSAGES[authError] : undefined) ??
-          UNKNOWN_AUTHENTICATION_ERROR
-        : authResult === "authenticated"
-          ? {
-              kind: "notice" as const,
-              message:
-                "LINEログインが完了しました。素材の再選択が必要な場合は、選び直して操作を続けてください。",
-            }
-          : authResult === "reauthenticated"
-            ? {
-                kind: "notice" as const,
-                message: "本人確認が完了しました。操作をもう一度実行してください。",
-              }
-            : null;
+    const authResult = normalizeAuthenticationReturnResult(
+      currentUrl.searchParams.getAll("auth_result"),
+    );
 
     if (
       currentUrl.searchParams.has("auth_error") ||
@@ -85,11 +76,34 @@ export default function AuthenticationReturnNotice() {
         `${currentUrl.pathname}${cleanedSearch ? `?${cleanedSearch}` : ""}${currentUrl.hash}`,
       );
     }
-    queueMicrotask(() => {
+    void (async () => {
+      let nextFeedback: AuthenticationReturnFeedback | null = null;
+      if (authErrors.length > 0) {
+        nextFeedback =
+          (authError ? AUTHENTICATION_ERROR_MESSAGES[authError] : undefined) ??
+          UNKNOWN_AUTHENTICATION_ERROR;
+      } else if (
+        authResult &&
+        await verifyAuthenticationReturn(authResult, {
+          signal: controller.signal,
+        })
+      ) {
+        nextFeedback = authResult === "authenticated"
+          ? {
+              kind: "notice",
+              message:
+                "LINEログインが完了しました。素材の再選択が必要な場合は、選び直して操作を続けてください。",
+            }
+          : {
+              kind: "notice",
+              message: "本人確認が完了しました。操作をもう一度実行してください。",
+            };
+      }
       if (active) setFeedback(nextFeedback);
-    });
+    })();
     return () => {
       active = false;
+      controller.abort();
     };
   }, []);
 
