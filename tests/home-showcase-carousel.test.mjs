@@ -9,11 +9,12 @@ import {
   nearestHomeShowcaseIndex,
 } from "../lib/home-showcase-carousel.ts";
 
-const [landingSource, carouselSource, carouselCss, pageSource] = await Promise.all([
+const [landingSource, carouselSource, carouselCss, pageSource, globalCss] = await Promise.all([
   readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-showcase-carousel.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/home-showcase-carousel.module.css", import.meta.url), "utf8"),
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
 ]);
 
 const APPROVED_CAROUSEL_ASSETS = [
@@ -237,7 +238,11 @@ test("uses only the approved lightweight media without Canva runtime assets", as
 test("provides peek, snap, touch, focus and reduced-motion styling", () => {
   assert.match(
     carouselCss,
-    /\.viewport\s*\{[\s\S]*?grid-auto-columns:\s*calc\(100% - 52px\)[\s\S]*?overflow-x:\s*auto[\s\S]*?scroll-snap-type:\s*x mandatory/,
+    /\.viewport\s*\{[\s\S]*?grid-auto-columns:\s*100%[\s\S]*?padding-right:\s*52px[\s\S]*?overflow-x:\s*auto[\s\S]*?scroll-snap-type:\s*x mandatory/,
+  );
+  assert.doesNotMatch(
+    carouselCss,
+    /grid-auto-columns:\s*calc\(100%\s*-\s*(?:52|24)px\)/,
   );
   assert.match(carouselCss, /touch-action:\s*pan-x pan-y pinch-zoom/);
   assert.match(
@@ -254,7 +259,35 @@ test("provides peek, snap, touch, focus and reduced-motion styling", () => {
   );
   assert.match(carouselCss, /:focus-visible/);
   assert.match(carouselCss, /@media \(max-width:\s*760px\)/);
-  assert.match(carouselCss, /grid-auto-columns:\s*calc\(100% - 24px\)/);
+  assert.match(
+    carouselCss,
+    /@media \(max-width:\s*760px\)[\s\S]*?\.viewport\s*\{[\s\S]*?grid-auto-columns:\s*100%[\s\S]*?padding-right:\s*24px/,
+  );
+  assert.match(
+    carouselCss,
+    /\.demoShell\s+:global\(\.realDemoPlayer\)\s*\{[\s\S]*?width:\s*min\(100%,\s*256px\)/,
+  );
   assert.match(carouselCss, /@media \(prefers-reduced-motion:\s*reduce\)/);
   assert.doesNotMatch(carouselCss, /@keyframes\b|\banimation(?:-[a-z-]+)?\s*:/i);
+});
+
+test("allocates a larger editorial hero column without a desktop breakpoint collapse", () => {
+  const editorialCss = globalCss.slice(globalCss.indexOf("/* Editorial home"));
+  assert.match(
+    editorialCss,
+    /\.homeEditorialLanding \.landingIntro\s*\{[\s\S]*?width:\s*min\(1280px,\s*calc\(100% - 48px\)\)/,
+  );
+  assert.match(
+    editorialCss,
+    /\.landingHeroStage\s*\{[\s\S]*?grid-template-columns:\s*minmax\(320px,\s*0\.72fr\) minmax\(640px,\s*1\.28fr\)[\s\S]*?gap:\s*clamp\(36px,\s*4vw,\s*52px\)/,
+  );
+  assert.match(
+    editorialCss,
+    /@media \(max-width:\s*1320px\)[\s\S]*?\.landingHeroStage\s*\{[\s\S]*?grid-template-columns:\s*1fr[\s\S]*?\.landingHeroResult\s*\{[\s\S]*?width:\s*min\(100%,\s*840px\)/,
+  );
+  assert.match(
+    editorialCss,
+    /@media \(max-width:\s*760px\)[\s\S]*?\.homeEditorialLanding \.landingIntro\s*\{[\s\S]*?width:\s*min\(100% - 28px,\s*680px\)/,
+  );
+  assert.doesNotMatch(editorialCss, /@media \(max-width:\s*1160px\)/);
 });

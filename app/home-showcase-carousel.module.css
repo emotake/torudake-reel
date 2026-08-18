@@ -56,7 +56,7 @@
 .viewport {
   display: grid;
   min-width: 0;
-  grid-auto-columns: calc(100% - 52px);
+  grid-auto-columns: 100%;
   grid-auto-flow: column;
   gap: 12px;
   padding-right: 52px;
@@ -134,7 +134,7 @@
 }
 
 .demoShell :global(.realDemoPlayer) {
-  width: min(100%, 232px);
+  width: min(100%, 256px);
   height: auto;
   aspect-ratio: 9 / 16;
   border: 4px solid rgba(255, 255, 255, 0.94);
@@ -569,7 +569,7 @@
   }
 
   .viewport {
-    grid-auto-columns: calc(100% - 24px);
+    grid-auto-columns: 100%;
     gap: 9px;
     padding-right: 24px;
     border-radius: 16px;
