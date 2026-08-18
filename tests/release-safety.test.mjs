@@ -20,6 +20,7 @@ import {
   classifySchedulerRecoveryState,
   compareMigrationLedger,
   discoverMigrationNames,
+  extractSchedulerModuleFromWranglerDryRun,
   extractRowsFromWranglerJson,
   isDDrivePath,
   isUnsafeGitRemote,
@@ -188,6 +189,13 @@ test("release targets are pinned to the reviewed Cloudflare Pages and D1 resourc
     GOOGLE_OIDC_ENABLED: "false",
     EMAIL_AUTH_ENABLED: "false",
     PASSKEY_AUTH_ENABLED: "false",
+  });
+  assert.deepEqual(targets.rollbackPolicy.legacyPreviousProduction, {
+    deploymentId: "f8bee356-6458-4c91-9e29-b3febcd5e4fc",
+    sourceCommit: "35abc4dde3d45a48b2d422da8f37a3b314e036ee",
+    commitMessage: "fix: harden LINE login lifecycle and observability",
+    createdOn: "2026-08-18T08:51:43.113033Z",
+    methodsSchema: "line_only_without_authentication_flags",
   });
   assert.deepEqual(targets.rollbackPolicy.telemetryDegradedEmergencyDeployment, {
     deploymentId: "04519766-9146-440a-9467-57e9ac56e4a5",
@@ -619,7 +627,7 @@ test("online rollback verification uses live Pages metadata, bindings, and five 
   );
 });
 
-test("scheduler release hashes and verifies the exact upload bytes", () => {
+test("scheduler release hashes and verifies the exact Worker module bytes", () => {
   const bundleBytes = Buffer.from(
     "export default { async scheduled() { return undefined; } };\n",
   );
@@ -640,6 +648,139 @@ test("scheduler release hashes and verifies the exact upload bytes", () => {
   assert.throws(
     () => schedulerBundleSha256(new Uint8Array()),
     /bundle bytes are unavailable/,
+  );
+});
+
+test("scheduler dry-run extraction ignores multipart boundaries and hashes only the module", () => {
+  const moduleBytes = Buffer.from(
+    "export default { async scheduled() { return undefined; } };\n",
+    "utf8",
+  );
+  const metadata = JSON.stringify({
+    main_module: "account-deletion-scheduler.js",
+    bindings: [
+      {
+        name: "TORUDAKE_SITE_ORIGIN",
+        type: "plain_text",
+        text: "https://torudake-reel.pages.dev",
+      },
+      {
+        name: "ACCOUNT_DELETION_BATCH_LIMIT",
+        type: "plain_text",
+        text: "5",
+      },
+    ],
+    compatibility_date: "2026-08-13",
+    compatibility_flags: [],
+    observability: {
+      enabled: true,
+      logs: {
+        enabled: true,
+        head_sampling_rate: 1,
+        invocation_logs: true,
+        persist: true,
+      },
+    },
+    package_dependencies: [
+      {
+        name: "wrangler",
+        packageJsonVersion: "4.118.0",
+        installedVersion: "4.118.0",
+      },
+    ],
+  });
+  const multipart = (
+    boundary,
+    {
+      moduleName = "account-deletion-scheduler.js",
+      metadataPayload = metadata,
+    } = {},
+  ) =>
+    Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\n` +
+          'Content-Disposition: form-data; name="metadata"\r\n\r\n' +
+          `${metadataPayload}\r\n` +
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="${moduleName}"; ` +
+          `filename="${moduleName}"\r\n` +
+          "Content-Type: application/javascript+module\r\n\r\n",
+        "utf8",
+      ),
+      moduleBytes,
+      Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
+    ]);
+
+  const first = extractSchedulerModuleFromWranglerDryRun(
+    multipart("----formdata-undici-012345678901"),
+    {
+      expectedCompatibilityDate: "2026-08-13",
+      expectedProductionUrl: "https://torudake-reel.pages.dev",
+    },
+  );
+  const second = extractSchedulerModuleFromWranglerDryRun(
+    multipart("----formdata-undici-987654321098"),
+    {
+      expectedCompatibilityDate: "2026-08-13",
+      expectedProductionUrl: "https://torudake-reel.pages.dev",
+    },
+  );
+  assert.deepEqual(first.bundleBytes, moduleBytes);
+  assert.deepEqual(second.bundleBytes, moduleBytes);
+  assert.equal(
+    schedulerBundleSha256(first.bundleBytes),
+    schedulerBundleSha256(second.bundleBytes),
+  );
+  assert.equal(first.metadata.main_module, "account-deletion-scheduler.js");
+
+  assert.throws(
+    () =>
+      extractSchedulerModuleFromWranglerDryRun(
+        multipart("----formdata-undici-111111111111", {
+          moduleName: "other-worker.js",
+        }),
+        {
+          expectedCompatibilityDate: "2026-08-13",
+          expectedProductionUrl: "https://torudake-reel.pages.dev",
+        },
+      ),
+    /module part is invalid/,
+  );
+  assert.throws(
+    () =>
+      extractSchedulerModuleFromWranglerDryRun(
+        multipart("----formdata-undici-222222222222"),
+        {
+          expectedCompatibilityDate: "2026-08-14",
+          expectedProductionUrl: "https://torudake-reel.pages.dev",
+        },
+      ),
+    /metadata does not match/,
+  );
+  const wrongBindings = JSON.parse(metadata);
+  wrongBindings.bindings[0].text = "https://example.invalid";
+  assert.throws(
+    () =>
+      extractSchedulerModuleFromWranglerDryRun(
+        multipart("----formdata-undici-222222222223", {
+          metadataPayload: JSON.stringify(wrongBindings),
+        }),
+        {
+          expectedCompatibilityDate: "2026-08-13",
+          expectedProductionUrl: "https://torudake-reel.pages.dev",
+        },
+      ),
+    /metadata projection is invalid/,
+  );
+  assert.throws(
+    () =>
+      extractSchedulerModuleFromWranglerDryRun(
+        Buffer.concat([
+          multipart("----formdata-undici-333333333333"),
+          Buffer.from("trailing"),
+        ]),
+      ),
+    /trailing data/,
   );
 });
 

@@ -66,6 +66,13 @@ const PINNED_TARGET = Object.freeze({
   authObservabilityBinding: "AUTH_OBSERVABILITY",
   authObservabilityDataset: "torudake_line_auth_events",
 });
+const PINNED_LEGACY_PREVIOUS_PRODUCTION = Object.freeze({
+  deploymentId: "f8bee356-6458-4c91-9e29-b3febcd5e4fc",
+  sourceCommit: "35abc4dde3d45a48b2d422da8f37a3b314e036ee",
+  commitMessage: "fix: harden LINE login lifecycle and observability",
+  createdOn: "2026-08-18T08:51:43.113033Z",
+  methodsSchema: "line_only_without_authentication_flags",
+});
 
 function exactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -212,6 +219,19 @@ async function loadPinnedTargets(projectRoot) {
     )
   ) {
     throw new Error("Disabled authentication flag contract is invalid.");
+  }
+  const legacyPrevious = targets.rollbackPolicy.legacyPreviousProduction;
+  if (
+    !exactKeys(legacyPrevious, [
+      "deploymentId",
+      "sourceCommit",
+      "commitMessage",
+      "createdOn",
+      "methodsSchema",
+    ]) ||
+    !isDeepStrictEqual(legacyPrevious, PINNED_LEGACY_PREVIOUS_PRODUCTION)
+  ) {
+    throw new Error("Legacy previous-production adoption contract is invalid.");
   }
   const pagesArtifact = targets?.pagesArtifact;
   if (
@@ -634,11 +654,12 @@ function validDeploymentUrl(value, targets, deploymentId) {
 }
 
 function validCanonicalTimestamp(value) {
-  return (
-    typeof value === "string" &&
-    Number.isFinite(Date.parse(value)) &&
-    new Date(value).toISOString() === value
+  if (typeof value !== "string") return false;
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{3})(\d{0,6})Z$/,
   );
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  return new Date(value).toISOString() === `${match[1]}.${match[2]}Z`;
 }
 
 export function validateLivePagesDeployment(
@@ -780,10 +801,34 @@ function authenticationProbeContract(targets, mode) {
   };
 }
 
+export function isPinnedLegacyPreviousProduction(
+  deployment,
+  { targets, releaseMode },
+) {
+  const legacy = targets?.rollbackPolicy?.legacyPreviousProduction;
+  return (
+    ["disabled_rollback_provisioning", "production"].includes(releaseMode) &&
+    legacy?.methodsSchema === "line_only_without_authentication_flags" &&
+    UUID_PATTERN.test(legacy?.deploymentId ?? "") &&
+    COMMIT_PATTERN.test(legacy?.sourceCommit ?? "") &&
+    deployment?.id?.toLowerCase() === legacy.deploymentId.toLowerCase() &&
+    deployment?.deployment_trigger?.metadata?.commit_hash ===
+      legacy.sourceCommit &&
+    deployment?.deployment_trigger?.metadata?.commit_message ===
+      legacy.commitMessage &&
+    deployment?.created_on === legacy.createdOn
+  );
+}
+
 export function validateDeploymentProbePayloads(
   health,
   methods,
-  { targets, mode, checkedAt = new Date() },
+  {
+    targets,
+    mode,
+    checkedAt = new Date(),
+    allowLegacyMethodsWithoutAuthenticationFlags = false,
+  },
 ) {
   const errors = [];
   const checkedTime = new Date(checkedAt).getTime();
@@ -806,17 +851,25 @@ export function validateDeploymentProbePayloads(
     google: false,
     email: false,
   };
+  const legacyMethodsShape =
+    allowLegacyMethodsWithoutAuthenticationFlags === true &&
+    mode === "normal" &&
+    methods &&
+    typeof methods === "object" &&
+    !Array.isArray(methods) &&
+    !Object.hasOwn(methods, "authenticationFlags");
+  const expectedMethodKeys = [
+    "authenticated",
+    "recentlyAuthenticated",
+    "accountMethods",
+    "passkey",
+    "line",
+    "google",
+    "email",
+    ...(legacyMethodsShape ? [] : ["authenticationFlags"]),
+  ];
   if (
-    !exactKeys(methods, [
-      "authenticated",
-      "recentlyAuthenticated",
-      "accountMethods",
-      "passkey",
-      "line",
-      "google",
-      "email",
-      "authenticationFlags",
-    ]) ||
+    !exactKeys(methods, expectedMethodKeys) ||
     methods.authenticated !== false ||
     methods.recentlyAuthenticated !== false ||
     !exactKeys(methods.accountMethods, Object.keys(expectedAccountMethods)) ||
@@ -826,10 +879,11 @@ export function validateDeploymentProbePayloads(
     Object.keys(expected.methods).some(
       (name) => methods[name] !== expected.methods[name],
     ) ||
-    !exactKeys(methods.authenticationFlags, AUTH_FLAG_NAMES) ||
-    AUTH_FLAG_NAMES.some(
-      (name) => methods.authenticationFlags[name] !== expected.flags[name],
-    )
+    (!legacyMethodsShape &&
+      (!exactKeys(methods.authenticationFlags, AUTH_FLAG_NAMES) ||
+        AUTH_FLAG_NAMES.some(
+          (name) => methods.authenticationFlags[name] !== expected.flags[name],
+        )))
   ) {
     errors.push("Deployment authentication methods and raw flags do not match mode.");
   }
@@ -842,6 +896,7 @@ async function probeDeployment({
   fetchImpl,
   targets,
   now,
+  allowLegacyMethodsWithoutAuthenticationFlags = false,
 }) {
   const origin = new URL(deployment.url).origin;
   const probe = async (path) => {
@@ -864,6 +919,7 @@ async function probeDeployment({
     targets,
     mode,
     checkedAt: now(),
+    allowLegacyMethodsWithoutAuthenticationFlags,
   });
   if (errors.length > 0) {
     throw new Error(errors.join(" "));
@@ -922,6 +978,7 @@ async function capturePreviousProduction({
   token,
   targets,
   now,
+  releaseMode,
 }) {
   const inventory = await listAllProductionDeployments({
     fetchImpl,
@@ -947,12 +1004,15 @@ async function capturePreviousProduction({
     expectedDeploymentId: canonicalId,
   });
   if (errors.length > 0) throw new Error(errors.join(" "));
+  const allowLegacyMethodsWithoutAuthenticationFlags =
+    isPinnedLegacyPreviousProduction(detail, { targets, releaseMode });
   await probeDeployment({
     deployment: detail,
     mode: "normal",
     fetchImpl,
     targets,
     now,
+    allowLegacyMethodsWithoutAuthenticationFlags,
   });
   return {
     inventoryIds: new Set(
@@ -960,6 +1020,8 @@ async function capturePreviousProduction({
     ),
     deployment: detail,
     mode: "normal",
+    releaseMode,
+    allowLegacyMethodsWithoutAuthenticationFlags,
   };
 }
 
@@ -1159,12 +1221,27 @@ async function verifyPreviousCanonicalReadback({
         expectedManifest: previous.expectedManifest,
       });
       if (errors.length > 0) throw new Error(errors.join(" "));
+      const allowLegacyMethodsWithoutAuthenticationFlags =
+        previous.allowLegacyMethodsWithoutAuthenticationFlags === true &&
+        isPinnedLegacyPreviousProduction(detail, {
+          targets,
+          releaseMode: previous.releaseMode,
+        });
+      if (
+        previous.allowLegacyMethodsWithoutAuthenticationFlags === true &&
+        !allowLegacyMethodsWithoutAuthenticationFlags
+      ) {
+        throw new Error(
+          "Restored legacy previous Production no longer matches its immutable pin.",
+        );
+      }
       await probeDeployment({
         deployment: detail,
         mode: previous.mode,
         fetchImpl,
         targets,
         now,
+        allowLegacyMethodsWithoutAuthenticationFlags,
       });
       const finalState = await readRollbackControlState({
         fetchImpl,
@@ -1807,6 +1884,7 @@ export async function runPagesReleaseCommand({
       token,
       targets,
       now,
+      releaseMode,
     });
     await operations.verifyArtifactDirectory(manifest, {
       directory: snapshotDirectory,

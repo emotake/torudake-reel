@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -31,6 +32,10 @@ const MAX_CLOUDFLARE_API_BYTES = 2 * 1024 * 1024;
 const MAX_READINESS_BYTES = 32 * 1024;
 const MAX_ANALYTICS_ENGINE_BYTES = 64 * 1024;
 const MAX_SCHEDULER_MANIFEST_BYTES = 1024 * 1024;
+const MAX_SCHEDULER_DRY_RUN_BYTES = 20 * 1024 * 1024;
+const MAX_SCHEDULER_MULTIPART_HEADER_BYTES = 8 * 1024;
+const MAX_SCHEDULER_METADATA_BYTES = 512 * 1024;
+const SCHEDULER_MODULE_NAME = "account-deletion-scheduler.js";
 const WRANGLER_BIN = resolve(
   PROJECT_ROOT,
   "node_modules",
@@ -1115,6 +1120,13 @@ export function runLocalChecks({
         EMAIL_AUTH_ENABLED: "false",
         PASSKEY_AUTH_ENABLED: "false",
       },
+      legacyPreviousProduction: {
+        deploymentId: "f8bee356-6458-4c91-9e29-b3febcd5e4fc",
+        sourceCommit: "35abc4dde3d45a48b2d422da8f37a3b314e036ee",
+        commitMessage: "fix: harden LINE login lifecycle and observability",
+        createdOn: "2026-08-18T08:51:43.113033Z",
+        methodsSchema: "line_only_without_authentication_flags",
+      },
       telemetryDegradedEmergencyDeployment: {
         deploymentId: "04519766-9146-440a-9467-57e9ac56e4a5",
         sourceCommit: "38f8a256c58362862b96d8437c49f0556c6d0dc6",
@@ -1474,13 +1486,240 @@ export function assertSchedulerBundleIntegrity(bundleBytes, expectedSha256) {
   return actualSha256;
 }
 
+function parseSchedulerMultipartHeaders(headerBytes) {
+  if (
+    headerBytes.byteLength === 0 ||
+    headerBytes.byteLength > MAX_SCHEDULER_MULTIPART_HEADER_BYTES
+  ) {
+    throw new Error("Scheduler dry-run multipart headers are invalid.");
+  }
+  for (const byte of headerBytes) {
+    if (byte !== 0x0d && byte !== 0x0a && (byte < 0x20 || byte > 0x7e)) {
+      throw new Error("Scheduler dry-run multipart headers are not ASCII.");
+    }
+  }
+  const headers = new Map();
+  for (const line of headerBytes.toString("ascii").split("\r\n")) {
+    const separator = line.indexOf(":");
+    if (separator < 1 || line[separator + 1] !== " ") {
+      throw new Error("Scheduler dry-run multipart header syntax is invalid.");
+    }
+    const name = line.slice(0, separator).toLowerCase();
+    const value = line.slice(separator + 2);
+    if (!/^[a-z0-9-]+$/.test(name) || !value || headers.has(name)) {
+      throw new Error("Scheduler dry-run multipart headers are ambiguous.");
+    }
+    headers.set(name, value);
+  }
+  return headers;
+}
+
+export function extractSchedulerModuleFromWranglerDryRun(
+  dryRunBytes,
+  {
+    expectedModuleName = SCHEDULER_MODULE_NAME,
+    expectedCompatibilityDate,
+    expectedProductionUrl,
+  } = {},
+) {
+  if (
+    !(dryRunBytes instanceof Uint8Array) ||
+    dryRunBytes.byteLength === 0 ||
+    dryRunBytes.byteLength > MAX_SCHEDULER_DRY_RUN_BYTES
+  ) {
+    throw new Error("Scheduler dry-run multipart bytes are unavailable or oversized.");
+  }
+  if (!/^[a-z0-9._-]+$/i.test(expectedModuleName)) {
+    throw new Error("Scheduler dry-run expected module name is invalid.");
+  }
+  const bytes = Buffer.from(
+    dryRunBytes.buffer,
+    dryRunBytes.byteOffset,
+    dryRunBytes.byteLength,
+  );
+  const firstLineEnd = bytes.indexOf("\r\n");
+  if (firstLineEnd < 3 || firstLineEnd > 72) {
+    throw new Error("Scheduler dry-run multipart boundary is invalid.");
+  }
+  if (
+    bytes.subarray(0, firstLineEnd).some((byte) => byte < 0x21 || byte > 0x7e)
+  ) {
+    throw new Error("Scheduler dry-run multipart boundary is not ASCII.");
+  }
+  const delimiter = bytes.subarray(0, firstLineEnd).toString("ascii");
+  if (!/^--[-a-z0-9'()+_,.\/:=?]{1,70}$/i.test(delimiter)) {
+    throw new Error("Scheduler dry-run multipart boundary is invalid.");
+  }
+  const boundaryNeedle = Buffer.from(`\r\n${delimiter}`, "ascii");
+  const headerTerminator = Buffer.from("\r\n\r\n", "ascii");
+  const parts = [];
+  let cursor = firstLineEnd + 2;
+  let closed = false;
+  while (!closed) {
+    if (parts.length >= 3) {
+      throw new Error("Scheduler dry-run multipart contains unexpected parts.");
+    }
+    const headerEnd = bytes.indexOf(headerTerminator, cursor);
+    if (
+      headerEnd < cursor ||
+      headerEnd - cursor > MAX_SCHEDULER_MULTIPART_HEADER_BYTES
+    ) {
+      throw new Error("Scheduler dry-run multipart headers are invalid.");
+    }
+    const headers = parseSchedulerMultipartHeaders(
+      bytes.subarray(cursor, headerEnd),
+    );
+    const bodyStart = headerEnd + headerTerminator.byteLength;
+    const bodyEnd = bytes.indexOf(boundaryNeedle, bodyStart);
+    if (bodyEnd < bodyStart) {
+      throw new Error("Scheduler dry-run multipart body is incomplete.");
+    }
+    parts.push({ headers, body: bytes.subarray(bodyStart, bodyEnd) });
+    cursor = bodyEnd + boundaryNeedle.byteLength;
+    if (bytes.subarray(cursor, cursor + 2).equals(Buffer.from("--"))) {
+      cursor += 2;
+      if (!bytes.subarray(cursor, cursor + 2).equals(Buffer.from("\r\n"))) {
+        throw new Error("Scheduler dry-run multipart closing boundary is invalid.");
+      }
+      cursor += 2;
+      closed = true;
+    } else if (bytes.subarray(cursor, cursor + 2).equals(Buffer.from("\r\n"))) {
+      cursor += 2;
+    } else {
+      throw new Error("Scheduler dry-run multipart boundary delimiter is invalid.");
+    }
+  }
+  if (cursor !== bytes.byteLength || parts.length !== 2) {
+    throw new Error("Scheduler dry-run multipart contains unexpected trailing data.");
+  }
+
+  const [metadataPart, modulePart] = parts;
+  if (
+    metadataPart.headers.size !== 1 ||
+    metadataPart.headers.get("content-disposition") !==
+      'form-data; name="metadata"' ||
+    metadataPart.body.byteLength === 0 ||
+    metadataPart.body.byteLength > MAX_SCHEDULER_METADATA_BYTES
+  ) {
+    throw new Error("Scheduler dry-run metadata part is invalid.");
+  }
+  let metadata;
+  try {
+    if (
+      metadataPart.body.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
+    ) {
+      throw new Error("BOM is not permitted.");
+    }
+    metadata = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(metadataPart.body),
+    );
+  } catch {
+    throw new Error("Scheduler dry-run metadata is not valid UTF-8 JSON.");
+  }
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    !isDeepStrictEqual(Object.keys(metadata).sort(), [
+      "bindings",
+      "compatibility_date",
+      "compatibility_flags",
+      "main_module",
+      "observability",
+      "package_dependencies",
+    ]) ||
+    metadata.main_module !== expectedModuleName ||
+    (expectedCompatibilityDate !== undefined &&
+      metadata.compatibility_date !== expectedCompatibilityDate) ||
+    !isDeepStrictEqual(metadata.compatibility_flags, []) ||
+    !isDeepStrictEqual(metadata.observability, {
+      enabled: true,
+      logs: {
+        enabled: true,
+        head_sampling_rate: 1,
+        invocation_logs: true,
+        persist: true,
+      },
+    })
+  ) {
+    throw new Error("Scheduler dry-run metadata does not match the release target.");
+  }
+  const expectedBindings = [
+    {
+      name: "TORUDAKE_SITE_ORIGIN",
+      type: "plain_text",
+      text: expectedProductionUrl,
+    },
+    {
+      name: "ACCOUNT_DELETION_BATCH_LIMIT",
+      type: "plain_text",
+      text: "5",
+    },
+  ];
+  if (
+    typeof expectedProductionUrl !== "string" ||
+    !isDeepStrictEqual(metadata.bindings, expectedBindings) ||
+    !Array.isArray(metadata.package_dependencies) ||
+    metadata.package_dependencies.length > 128 ||
+    new Set(metadata.package_dependencies.map((entry) => entry?.name)).size !==
+      metadata.package_dependencies.length ||
+    metadata.package_dependencies.some(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        !isDeepStrictEqual(Object.keys(entry).sort(), [
+          "installedVersion",
+          "name",
+          "packageJsonVersion",
+        ]) ||
+        [entry.name, entry.packageJsonVersion, entry.installedVersion].some(
+          (value) =>
+            typeof value !== "string" ||
+            value.length < 1 ||
+            value.length > 256 ||
+            /[^\x20-\x7e]/.test(value),
+        ),
+    )
+  ) {
+    throw new Error("Scheduler dry-run metadata projection is invalid.");
+  }
+
+  const expectedDisposition =
+    `form-data; name="${expectedModuleName}"; ` +
+    `filename="${expectedModuleName}"`;
+  if (
+    modulePart.headers.size !== 2 ||
+    modulePart.headers.get("content-disposition") !== expectedDisposition ||
+    modulePart.headers.get("content-type") !==
+      "application/javascript+module" ||
+    modulePart.body.byteLength === 0
+  ) {
+    throw new Error("Scheduler dry-run module part is invalid.");
+  }
+  try {
+    if (
+      modulePart.body.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
+    ) {
+      throw new Error("BOM is not permitted.");
+    }
+    new TextDecoder("utf-8", { fatal: true }).decode(modulePart.body);
+  } catch {
+    throw new Error("Scheduler dry-run module is not valid UTF-8.");
+  }
+  return {
+    bundleBytes: Buffer.from(modulePart.body),
+    metadata,
+  };
+}
+
 export function buildSchedulerDryRun(targets, sourceCommit) {
   const tempRoot = resolve(process.env.TEMP ?? "");
   if (!isDDrivePath(tempRoot) || !existsSync(tempRoot)) {
     throw new Error("Scheduler dry-run requires an existing D-drive TEMP directory.");
   }
   const directory = mkdtempSync(join(tempRoot, "torudake-scheduler-preflight-"));
-  const outfile = resolve(directory, "account-deletion-scheduler.mjs");
+  const outfile = resolve(directory, "account-deletion-scheduler.multipart");
   try {
     const result = run(process.execPath, [
       WRANGLER_BIN,
@@ -1494,7 +1733,15 @@ export function buildSchedulerDryRun(targets, sourceCommit) {
     if (result.status !== 0 || !existsSync(outfile)) {
       throw new Error("Account-deletion Worker Wrangler dry-run failed.");
     }
-    const bundleBytes = readFileSync(outfile);
+    const dryRunBytes = readFileSync(outfile);
+    const { bundleBytes } = extractSchedulerModuleFromWranglerDryRun(
+      dryRunBytes,
+      {
+        expectedCompatibilityDate:
+          targets.accountDeletionScheduler.compatibilityDate,
+        expectedProductionUrl: targets.productionUrl,
+      },
+    );
     const bundleSha256 = schedulerBundleSha256(bundleBytes);
     return {
       bundleBytes,

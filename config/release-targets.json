@@ -42,6 +42,13 @@
       "EMAIL_AUTH_ENABLED": "false",
       "PASSKEY_AUTH_ENABLED": "false"
     },
+    "legacyPreviousProduction": {
+      "deploymentId": "f8bee356-6458-4c91-9e29-b3febcd5e4fc",
+      "sourceCommit": "35abc4dde3d45a48b2d422da8f37a3b314e036ee",
+      "commitMessage": "fix: harden LINE login lifecycle and observability",
+      "createdOn": "2026-08-18T08:51:43.113033Z",
+      "methodsSchema": "line_only_without_authentication_flags"
+    },
     "telemetryDegradedEmergencyDeployment": {
       "deploymentId": "04519766-9146-440a-9467-57e9ac56e4a5",
       "sourceCommit": "38f8a256c58362862b96d8437c49f0556c6d0dc6",

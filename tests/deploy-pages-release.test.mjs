@@ -8,6 +8,7 @@ import {
   DEPLOY_CONFIRMATION,
   PREPARE_CONFIRMATION,
   assertWranglerCwdHasNoConfig,
+  isPinnedLegacyPreviousProduction,
   pagesBuildCommands,
   pagesDeployArguments,
   parsePagesReleaseArguments,
@@ -26,7 +27,12 @@ import {
 const SOURCE_COMMIT = "a".repeat(40);
 const FILE_HASH = "b".repeat(64);
 const DEPLOYMENT_ID = "11111111-2222-4333-8444-555555555555";
-const OLD_DEPLOYMENT_ID = "22222222-3333-4444-8555-666666666666";
+const OLD_DEPLOYMENT_ID = "f8bee356-6458-4c91-9e29-b3febcd5e4fc";
+const LEGACY_SOURCE_COMMIT =
+  "35abc4dde3d45a48b2d422da8f37a3b314e036ee";
+const LEGACY_COMMIT_MESSAGE =
+  "fix: harden LINE login lifecycle and observability";
+const LEGACY_CREATED_ON = "2026-08-18T08:51:43.113033Z";
 const FOREIGN_DEPLOYMENT_ID = "33333333-4444-4555-8666-777777777777";
 const ALTERNATE_DEPLOYMENT_ID = "44444444-5555-4666-8777-888888888888";
 const NOW = "2026-08-18T12:00:00.000Z";
@@ -58,6 +64,13 @@ function targetsFixture() {
         GOOGLE_OIDC_ENABLED: "false",
         EMAIL_AUTH_ENABLED: "false",
         PASSKEY_AUTH_ENABLED: "false",
+      },
+      legacyPreviousProduction: {
+        deploymentId: OLD_DEPLOYMENT_ID,
+        sourceCommit: LEGACY_SOURCE_COMMIT,
+        commitMessage: LEGACY_COMMIT_MESSAGE,
+        createdOn: LEGACY_CREATED_ON,
+        methodsSchema: "line_only_without_authentication_flags",
       },
     },
   };
@@ -290,18 +303,23 @@ function pagesApiBehavior({
   failAnalytics = false,
   failRollback = false,
   flipCanonicalBeforeDeploy = false,
+  legacyPreviousMethods = false,
+  legacyPreviousSourceMismatch = false,
+  newMethodsWithoutFlags = false,
 } = {}) {
   const newDeployment = deploymentFixture(manifest);
   const oldDeployment = {
     ...deploymentFixture(manifest),
     id: OLD_DEPLOYMENT_ID,
-    url: "https://22222222.torudake-reel.pages.dev/",
-    created_on: "2026-08-18T11:00:00.000Z",
+    url: "https://f8bee356.torudake-reel.pages.dev/",
+    created_on: LEGACY_CREATED_ON,
     deployment_trigger: {
       metadata: {
         branch: "main",
-        commit_hash: "b".repeat(40),
-        commit_message: "previous normal production",
+        commit_hash: legacyPreviousSourceMismatch
+          ? "c".repeat(40)
+          : LEGACY_SOURCE_COMMIT,
+        commit_message: LEGACY_COMMIT_MESSAGE,
         commit_dirty: false,
       },
     },
@@ -349,7 +367,14 @@ function pagesApiBehavior({
         return jsonResponse(health, { noStore: true });
       }
       if (url.pathname === "/api/account/auth/methods") {
-        return jsonResponse(methodsFixture(mode), { noStore: true });
+        const methods = methodsFixture(mode);
+        if (
+          (!isNew && legacyPreviousMethods) ||
+          (isNew && newMethodsWithoutFlags)
+        ) {
+          delete methods.authenticationFlags;
+        }
+        return jsonResponse(methods, { noStore: true });
       }
       assert.fail(`unexpected deployment probe ${url.href}`);
     }
@@ -617,6 +642,31 @@ test("live deployment validation binds commit, message, branch, status, and bind
     }).join(" "),
     /creation time/,
   );
+  const cloudflareMicrosecondTime = structuredClone(deployment);
+  cloudflareMicrosecondTime.created_on = "2026-08-18T08:51:43.113033Z";
+  assert.deepEqual(
+    validatePreviousPagesDeployment(cloudflareMicrosecondTime, {
+      targets,
+      expectedDeploymentId: DEPLOYMENT_ID,
+    }),
+    [],
+  );
+  for (const createdOn of [
+    "2026-08-18T08:51:43.1130331234Z",
+    "2026-08-18T08:51:43.113033+00:00",
+    "2026-02-30T08:51:43.113033Z",
+    "2026-08-18T08:51:43.113033Z trailing",
+  ]) {
+    const invalidTimestamp = structuredClone(deployment);
+    invalidTimestamp.created_on = createdOn;
+    assert.match(
+      validatePreviousPagesDeployment(invalidTimestamp, {
+        targets,
+        expectedDeploymentId: DEPLOYMENT_ID,
+      }).join(" "),
+      /creation time/,
+    );
+  }
   assert.deepEqual(
     validatePreviousPagesDeployment(deployment, {
       targets,
@@ -654,6 +704,60 @@ test("mode probes require exact methods, raw flags, health, and Analytics Engine
       { targets, mode: "normal", checkedAt: new Date(NOW) },
     ),
     [],
+  );
+  const legacyMethods = methodsFixture("normal");
+  delete legacyMethods.authenticationFlags;
+  assert.match(
+    validateDeploymentProbePayloads(healthFixture(), legacyMethods, {
+      targets,
+      mode: "normal",
+      checkedAt: new Date(NOW),
+    }).join(" "),
+    /raw flags/,
+  );
+  assert.deepEqual(
+    validateDeploymentProbePayloads(healthFixture(), legacyMethods, {
+      targets,
+      mode: "normal",
+      checkedAt: new Date(NOW),
+      allowLegacyMethodsWithoutAuthenticationFlags: true,
+    }),
+    [],
+  );
+  for (const mutate of [
+    (methods) => {
+      methods.unexpected = true;
+    },
+    (methods) => {
+      methods.line = false;
+    },
+    (methods) => {
+      methods.authenticated = true;
+    },
+    (methods) => {
+      methods.accountMethods.line = true;
+    },
+  ]) {
+    const invalidLegacyMethods = structuredClone(legacyMethods);
+    mutate(invalidLegacyMethods);
+    assert.match(
+      validateDeploymentProbePayloads(healthFixture(), invalidLegacyMethods, {
+        targets,
+        mode: "normal",
+        checkedAt: new Date(NOW),
+        allowLegacyMethodsWithoutAuthenticationFlags: true,
+      }).join(" "),
+      /raw flags/,
+    );
+  }
+  assert.match(
+    validateDeploymentProbePayloads(healthFixture(), legacyMethods, {
+      targets,
+      mode: "disabled",
+      checkedAt: new Date(NOW),
+      allowLegacyMethodsWithoutAuthenticationFlags: true,
+    }).join(" "),
+    /raw flags/,
   );
   assert.deepEqual(
     validateDeploymentProbePayloads(
@@ -717,6 +821,59 @@ test("mode probes require exact methods, raw flags, health, and Analytics Engine
         "torudake_line_auth_events",
       ),
     /malformed/,
+  );
+});
+
+test("legacy previous-production adoption is pinned to one immutable deployment", () => {
+  const targets = targetsFixture();
+  const legacy = deploymentFixture();
+  legacy.id = OLD_DEPLOYMENT_ID;
+  legacy.created_on = LEGACY_CREATED_ON;
+  legacy.deployment_trigger.metadata.commit_hash = LEGACY_SOURCE_COMMIT;
+  legacy.deployment_trigger.metadata.commit_message = LEGACY_COMMIT_MESSAGE;
+  assert.equal(
+    isPinnedLegacyPreviousProduction(legacy, {
+      targets,
+      releaseMode: "disabled_rollback_provisioning",
+    }),
+    true,
+  );
+  assert.equal(
+    isPinnedLegacyPreviousProduction(legacy, {
+      targets,
+      releaseMode: "production",
+    }),
+    true,
+  );
+  assert.equal(
+    isPinnedLegacyPreviousProduction(
+      { ...legacy, id: FOREIGN_DEPLOYMENT_ID },
+      { targets, releaseMode: "production" },
+    ),
+    false,
+  );
+  const wrongMessage = structuredClone(legacy);
+  wrongMessage.deployment_trigger.metadata.commit_message = "different";
+  assert.equal(
+    isPinnedLegacyPreviousProduction(wrongMessage, {
+      targets,
+      releaseMode: "production",
+    }),
+    false,
+  );
+  assert.equal(
+    isPinnedLegacyPreviousProduction(
+      { ...legacy, created_on: "2026-08-18T08:51:43.113034Z" },
+      { targets, releaseMode: "production" },
+    ),
+    false,
+  );
+  assert.equal(
+    isPinnedLegacyPreviousProduction(legacy, {
+      targets,
+      releaseMode: "preview",
+    }),
+    false,
   );
 });
 
@@ -822,7 +979,7 @@ test("deploy dry-run verifies and preflights but never deploys or writes a recor
 test("normal deploy uses isolated cwd and snapshot, probes, AE, and exact record", async (t) => {
   const fixture = await createProject(t);
   const manifest = manifestFixture();
-  const behavior = pagesApiBehavior({ manifest });
+  const behavior = pagesApiBehavior({ manifest, legacyPreviousMethods: true });
   const spawns = [];
   const operations = [];
   const result = await runPagesReleaseCommand({
@@ -900,6 +1057,7 @@ test("disabled rollback provisioning records rollback schema then restores prior
   const behavior = pagesApiBehavior({
     manifest,
     releaseMode: "disabled_rollback_provisioning",
+    legacyPreviousMethods: true,
   });
   const spawns = [];
   const operations = [];
@@ -955,6 +1113,82 @@ test("disabled rollback provisioning records rollback schema then restores prior
   assert.equal(record.verification.methodsCheckedAt, NOW);
   assert.equal(record.verification.analyticsEngineCheckedAt, NOW);
   assert.equal(record.verification.verifiedAt, NOW);
+});
+
+test("an unpinned legacy methods payload is rejected before Pages upload", async (t) => {
+  const fixture = await createProject(t);
+  const manifest = manifestFixture();
+  const behavior = pagesApiBehavior({
+    manifest,
+    legacyPreviousMethods: true,
+    legacyPreviousSourceMismatch: true,
+  });
+  const spawns = [];
+  await assert.rejects(
+    runPagesReleaseCommand({
+      argv: [
+        "--deploy",
+        "--manifest",
+        fixture.manifestPath,
+        "--external-root",
+        fixture.externalRoot,
+        "--execute",
+        "--confirm",
+        DEPLOY_CONFIRMATION,
+      ],
+      projectRoot: fixture.projectRoot,
+      spawnCommand: spawnHarness(fixture.projectRoot, spawns),
+      fetchImpl: behavior.fetchImpl,
+      artifactOperations: stubArtifactOperations(manifest, []),
+      output: outputCollector().output,
+      now: () => new Date(NOW),
+    }),
+    /raw flags/,
+  );
+  assert.equal(
+    spawns.some(
+      (call) => call.args.includes("pages") && call.args.includes("deploy"),
+    ),
+    false,
+  );
+  assert.equal(behavior.state.rollbackCalls, 0);
+});
+
+test("a new candidate without raw authentication flags is rolled back", async (t) => {
+  const fixture = await createProject(t);
+  const manifest = manifestFixture();
+  const behavior = pagesApiBehavior({
+    manifest,
+    legacyPreviousMethods: true,
+    newMethodsWithoutFlags: true,
+  });
+  await assert.rejects(
+    runPagesReleaseCommand({
+      argv: [
+        "--deploy",
+        "--manifest",
+        fixture.manifestPath,
+        "--external-root",
+        fixture.externalRoot,
+        "--execute",
+        "--confirm",
+        DEPLOY_CONFIRMATION,
+      ],
+      projectRoot: fixture.projectRoot,
+      spawnCommand: spawnHarness(fixture.projectRoot, [], {
+        onDeploy: () => {
+          behavior.state.deployed = true;
+        },
+      }),
+      fetchImpl: behavior.fetchImpl,
+      artifactOperations: stubArtifactOperations(manifest, []),
+      output: outputCollector().output,
+      now: () => new Date(NOW),
+    }),
+    /raw flags/,
+  );
+  assert.equal(behavior.state.rollbackCalls, 1);
+  assert.equal(behavior.state.rolledBack, true);
 });
 
 test("foreign canonical deployment is rejected without rollback mutation", async (t) => {

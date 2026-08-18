@@ -392,6 +392,18 @@ release the same-commit account-deletion Worker and set
 `TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST` as described above, then
 provision Pages as follows:
 
+The first hardened release has one narrowly pinned compatibility rule for the
+current immutable Production deployment
+`f8bee356-6458-4c91-9e29-b3febcd5e4fc` at commit
+`35abc4dde3d45a48b2d422da8f37a3b314e036ee`. That deployment predates the
+`authenticationFlags` response field. During capture and automatic restoration
+only, the wrapper may accept its exact seven-key anonymous LINE-only methods
+payload without the five raw flags. The deployment ID, full commit, successful
+Production metadata, D1 and Analytics Engine bindings, health response and
+LINE-only method values must all match. No other deployment or response shape
+uses this compatibility path, and every newly uploaded disabled or normal
+deployment still requires all five raw flags.
+
 1. Commit and review the exact release artifact. In the Pages Production
    Dashboard, confirm the `DB` and `AUTH_OBSERVABILITY` bindings, then set
    `OIDC_AUTH_ENABLED`, `LINE_LOGIN_ENABLED`, `GOOGLE_OIDC_ENABLED`,
@@ -426,8 +438,10 @@ provision Pages as follows:
 4. After recording the disabled deployment, the wrapper automatically calls the
    Pages rollback API to restore the previously verified LINE-enabled canonical
    Production deployment. It then rechecks canonical identity, readiness,
-   LINE-first methods and raw flags. A disabled deployment must never remain
-   active while the operator performs the remaining steps.
+   LINE-first methods and raw flags. The one pinned legacy deployment described
+   above is rechecked with its exact pre-flag schema instead. A disabled
+   deployment must never remain active while the operator performs the remaining
+   steps.
 5. Restore the intended live Production flags in the Dashboard. Before the
    restoring redeploy, point `TORUDAKE_ROLLBACK_MANIFEST` at the wrapper record
    and keep both `TORUDAKE_PAGES_ARTIFACT_MANIFEST` and
