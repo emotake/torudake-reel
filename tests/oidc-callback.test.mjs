@@ -193,7 +193,7 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
     providerCalls += 1;
     const endpoint = String(input);
     if (endpoint === "https://api.line.me/oauth2/v2.1/token") {
-      assert.equal(init.redirect, "error");
+      assert.equal(init.redirect, "manual");
       assert.match(
         init.body.get("code_verifier"),
         /^[A-Za-z0-9._~-]{43,128}$/,
@@ -220,7 +220,7 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
       });
     }
     if (endpoint === "https://api.line.me/oauth2/v3/token") {
-      assert.equal(init.redirect, "error");
+      assert.equal(init.redirect, "manual");
       assert.equal(init.body.get("grant_type"), "client_credentials");
       assert.equal(init.body.get("client_id"), clientId);
       assert.equal(init.body.get("client_secret"), "line-client-secret");
@@ -231,7 +231,7 @@ test("direct existing LINE login consumes its challenge once and sets a bound ac
       });
     }
     if (endpoint === "https://api.line.me/user/v1/deauthorize") {
-      assert.equal(init.redirect, "error");
+      assert.equal(init.redirect, "manual");
       assert.equal(
         init.headers.Authorization,
         "Bearer line-stateless-channel-token",

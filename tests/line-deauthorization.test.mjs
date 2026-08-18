@@ -18,7 +18,7 @@ test("LINE authorization is removed with ephemeral tokens and fixed endpoints", 
   const fetcher = async (input, init) => {
     calls.push({ input: String(input), init });
     assert.equal(init.method, "POST");
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     assert.equal(init.signal instanceof AbortSignal, true);
     if (calls.length === 1) {
       assert.equal(String(input), LINE_DEAUTHORIZATION_ENDPOINTS.channelToken);
@@ -49,6 +49,32 @@ test("LINE authorization is removed with ephemeral tokens and fixed endpoints", 
 
   await deauthorizeLineAuthorization(credentials, fetcher);
   assert.equal(calls.length, 2);
+});
+
+test("LINE deauthorization rejects a manual redirect without following it", async () => {
+  let calls = 0;
+  const fetcher = async (input, init) => {
+    calls += 1;
+    assert.equal(String(input), LINE_DEAUTHORIZATION_ENDPOINTS.channelToken);
+    assert.equal(init.redirect, "manual");
+    return Response.json(
+      {
+        access_token: "redirected-channel-access-token",
+        token_type: "Bearer",
+        expires_in: 900,
+      },
+      {
+        status: 302,
+        headers: { Location: "https://attacker.example/line" },
+      },
+    );
+  };
+
+  await assert.rejects(
+    deauthorizeLineAuthorization(credentials, fetcher),
+    (error) => error?.code === "line_channel_token_rejected",
+  );
+  assert.equal(calls, 1);
 });
 
 test("LINE deauthorization fails closed without exposing credentials", async () => {

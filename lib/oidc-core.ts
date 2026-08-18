@@ -181,7 +181,10 @@ export async function exchangeOidcAuthorizationCode(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body,
-      redirect: "error",
+      // Cloudflare Workers does not implement Request.redirect="error".
+      // "manual" preserves the same fail-closed contract because provider
+      // redirects are returned to us and rejected by the status/body checks.
+      redirect: "manual",
       signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
   } catch {
@@ -241,7 +244,7 @@ export async function verifyLineIdToken(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body,
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
   } catch {
@@ -454,7 +457,7 @@ async function findGoogleVerificationKey(
     try {
       response = await fetcher(jwksUri, {
         headers: { Accept: "application/json" },
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
       });
     } catch {

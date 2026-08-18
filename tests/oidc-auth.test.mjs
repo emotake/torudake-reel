@@ -96,12 +96,51 @@ test("authorization code exchange sends PKCE verifier only to the fixed token en
   );
   assert.equal(captured.input, OIDC_ENDPOINTS.google.token);
   assert.equal(captured.init.method, "POST");
-  assert.equal(captured.init.redirect, "error");
+  assert.equal(captured.init.redirect, "manual");
   const body = captured.init.body;
   assert.equal(body.get("code_verifier"), verifier);
   assert.equal(body.get("redirect_uri"), oidcRedirectUri("google", canonicalOrigin));
   assert.equal(body.get("client_secret"), config.clientSecret);
   assert.equal(result.accessToken, "access-token-value");
+});
+
+test("authorization code exchange rejects a manual redirect without following it", async () => {
+  const config = {
+    provider: "line",
+    clientId: "1234567890",
+    clientSecret: "line-client-secret",
+    canonicalOrigin,
+  };
+  let calls = 0;
+  const fetcher = async (input, init) => {
+    calls += 1;
+    assert.equal(String(input), OIDC_ENDPOINTS.line.token);
+    assert.equal(init.redirect, "manual");
+    return Response.json(
+      {
+        access_token: "redirected-access-token",
+        id_token: `${"a".repeat(24)}.${"b".repeat(24)}.${"c".repeat(24)}`,
+        token_type: "Bearer",
+      },
+      {
+        status: 302,
+        headers: { Location: "https://attacker.example/token" },
+      },
+    );
+  };
+
+  await assert.rejects(
+    exchangeOidcAuthorizationCode(
+      config,
+      {
+        code: "authorization-code-value",
+        pkceVerifier: "v".repeat(64),
+      },
+      fetcher,
+    ),
+    (error) => error?.code === "authorization_code_rejected",
+  );
+  assert.equal(calls, 1);
 });
 
 test("chunked provider responses are cancelled at the byte limit", async () => {
