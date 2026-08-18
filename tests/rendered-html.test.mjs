@@ -148,9 +148,9 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /<track default="" kind="captions"/);
   assert.doesNotMatch(html, /autoplay=""|muted=""|loop=""/);
   assert.match(html, /約10秒・音声付き/);
-  assert.match(html, /作れるリール/);
-  assert.match(html, /素材に合う作り方を、見比べられます/);
-  assert.match(html, /実際の完成動画と、複数動画・写真リールのイメージ/);
+  assert.match(html, /作り方の例/);
+  assert.match(html, /手元の素材に合う作り方を、3つから/);
+  assert.match(html, /実際の完成動画と、複数動画・写真から作る場合のイメージ/);
   const showcaseDataIndex = html.indexOf("data-home-showcase-carousel");
   const showcaseStart = html.lastIndexOf("<section", showcaseDataIndex);
   const showcaseEnd = html.indexOf('id="create"', showcaseStart);
@@ -159,7 +159,7 @@ test("renders the Torudake Reel product experience", async () => {
     showcaseDataIndex >= 0 && showcaseStart >= 0 && showcaseEnd > showcaseStart,
   );
   assert.match(showcaseHtml, /aria-roledescription="カルーセル"/);
-  assert.match(showcaseHtml, /aria-label="作れるリールの例"/);
+  assert.match(showcaseHtml, /aria-label="作り方の例"/);
   const renderedSlides =
     showcaseHtml.match(
       /<article\b[^>]*aria-roledescription="スライド"[^>]*>/g,
@@ -170,8 +170,14 @@ test("renders the Torudake Reel product experience", async () => {
     renderedSlides.filter((slide) => /aria-hidden="true"/.test(slide)).length,
     2,
   );
-  assert.match(showcaseHtml, /aria-label="前の仕上がり例を表示"/);
-  assert.match(showcaseHtml, /aria-label="次の仕上がり例を表示"/);
+  assert.match(showcaseHtml, /aria-label="前の作り方を表示"/);
+  assert.match(showcaseHtml, /aria-label="次の作り方を表示"/);
+  assert.match(showcaseHtml, /02 \/ 動画2〜5本・構成イメージ/);
+  assert.match(showcaseHtml, /03 \/ 写真2〜10枚・構成イメージ/);
+  assert.match(showcaseHtml, /音声・テロップ付き、約10秒の完成動画です/);
+  assert.match(showcaseHtml, /各動画から使う場面を1〜2か所選び/);
+  assert.match(showcaseHtml, /5つの仕上がりから選べます/);
+  assert.doesNotMatch(showcaseHtml, /撮った順番|選ぶだけ|完全自動|プロ級|必ず/);
   assert.match(showcaseHtml, /aria-live="polite"/);
   assert.doesNotMatch(html, /先に見てから、作り始められます/);
   assert.doesNotMatch(html, /AIナレーションの仕上がりを、先に聴けます/);

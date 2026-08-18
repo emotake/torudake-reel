@@ -18,7 +18,11 @@ import {
 } from "../lib/home-showcase-carousel";
 import styles from "./home-showcase-carousel.module.css";
 
-const SLIDE_LABELS = ["実際の完成動画", "動画2〜5本", "写真2〜10枚"] as const;
+const SLIDE_LABELS = [
+  "実際の完成動画",
+  "動画2〜5本・構成イメージ",
+  "写真2〜10枚・構成イメージ",
+] as const;
 
 type HomeShowcaseCarouselProps = {
   demo: ReactNode;
@@ -205,7 +209,7 @@ export function HomeShowcaseCarousel({
   return (
     <section
       className={styles.carousel}
-      aria-label="作れるリールの例"
+      aria-label="作り方の例"
       aria-roledescription="カルーセル"
       data-home-showcase-carousel
     >
@@ -223,7 +227,7 @@ export function HomeShowcaseCarousel({
         ref={viewportRef}
         role="group"
         tabIndex={0}
-        aria-label="仕上がり例。左右の矢印キーでも切り替えられます。"
+        aria-label="作り方の例。左右の矢印キーでも切り替えられます。"
         onKeyDown={handleKeyDown}
         onPointerDown={(event) => {
           if (event.pointerType !== "mouse") {
@@ -251,7 +255,7 @@ export function HomeShowcaseCarousel({
           <span className={styles.slideBadge}>01 / 実際の完成動画</span>
           <div className={styles.demoShell}>{demo}</div>
           <div className={styles.demoCtaRow}>
-            <span>仕上がりを見てから、無料で編集できます。</span>
+            <span>音声・テロップ付き、約10秒の完成動画です。</span>
             <button type="button" onClick={openPicker}>
               動画を1本選ぶ <i aria-hidden="true">→</i>
             </button>
@@ -265,15 +269,23 @@ export function HomeShowcaseCarousel({
           }}
           role="group"
           aria-roledescription="スライド"
-          aria-label="2 / 3：動画2〜5本"
+          aria-label="2 / 3：動画2〜5本・構成イメージ"
           aria-hidden={activeIndex === 1 ? undefined : true}
           inert={activeIndex !== 1}
         >
           <VideoSequenceVisual />
           <div className={styles.slideCopy}>
-            <span className={styles.slideBadge}>02 / 動画2〜5本</span>
-            <h3>撮った順番を保って、<br />1本のリールへ。</h3>
-            <p>使いたい場面を選ぶだけ。雨の日も、海辺も、夕暮れも、ひと続きの物語にまとめます。</p>
+            <span className={styles.slideBadge}>
+              02 / 動画2〜5本・構成イメージ
+            </span>
+            <h3>
+              選んだ順番のまま、
+              <br />
+              使う場面をつなぐ。
+            </h3>
+            <p>
+              各動画から使う場面を1〜2か所選び、つなぎ方も調整できます。
+            </p>
             <Link href="/video-mix">
               複数の動画から作る <i aria-hidden="true">→</i>
             </Link>
@@ -287,15 +299,23 @@ export function HomeShowcaseCarousel({
           }}
           role="group"
           aria-roledescription="スライド"
-          aria-label="3 / 3：写真2〜10枚"
+          aria-label="3 / 3：写真2〜10枚・構成イメージ"
           aria-hidden={activeIndex === 2 ? undefined : true}
           inert={activeIndex !== 2}
         >
           <PhotoReelVisual />
           <div className={styles.slideCopy}>
-            <span className={styles.slideBadge}>03 / 写真2〜10枚</span>
-            <h3>写真だけでも、<br />動きのある縦型リールに。</h3>
-            <p>お気に入りを選べば、切り替えと動きを自動で整えます。人物のいない日常写真にも合います。</p>
+            <span className={styles.slideBadge}>
+              03 / 写真2〜10枚・構成イメージ
+            </span>
+            <h3>
+              写真を選んで、
+              <br />
+              動きのあるリールに。
+            </h3>
+            <p>
+              5つの仕上がりから選べます。写真ごとの表示時間を自動で整えます。
+            </p>
             <Link href="/photo-reel">
               写真から作る <i aria-hidden="true">→</i>
             </Link>
@@ -307,7 +327,7 @@ export function HomeShowcaseCarousel({
         <div className={styles.arrowButtons}>
           <button
             type="button"
-            aria-label="前の仕上がり例を表示"
+            aria-label="前の作り方を表示"
             disabled={activeIndex === 0}
             onClick={() => showSlide(activeIndex - 1)}
           >
@@ -315,7 +335,7 @@ export function HomeShowcaseCarousel({
           </button>
           <button
             type="button"
-            aria-label="次の仕上がり例を表示"
+            aria-label="次の作り方を表示"
             disabled={activeIndex === HOME_SHOWCASE_SLIDE_COUNT - 1}
             onClick={() => showSlide(activeIndex + 1)}
           >
@@ -326,7 +346,7 @@ export function HomeShowcaseCarousel({
         <div
           className={styles.indicators}
           role="group"
-          aria-label="仕上がり例を選ぶ"
+          aria-label="作り方を選ぶ"
         >
           {SLIDE_LABELS.map((label, index) => (
             <button

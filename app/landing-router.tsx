@@ -316,11 +316,13 @@ export function HomeLanding(props: LandingSharedProps) {
             aria-labelledby="landingHeroResultTitle"
           >
             <div className="landingHeroResultHeading">
-              <p className="eyebrow">作れるリール</p>
+              <p className="eyebrow">作り方の例</p>
               <h2 id="landingHeroResultTitle">
-                素材に合う作り方を、見比べられます。
+                手元の素材に合う作り方を、3つから。
               </h2>
-              <p>実際の完成動画と、複数動画・写真リールのイメージを切り替えて見られます。</p>
+              <p>
+                実際の完成動画と、複数動画・写真から作る場合のイメージを切り替えて見られます。
+              </p>
             </div>
             <HomeShowcaseCarousel demo={props.demo} openPicker={props.openPicker} />
           </div>

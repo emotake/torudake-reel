@@ -168,9 +168,12 @@ test("labels the permanent hero value instead of presenting it as news", () => {
 });
 
 test("describes the three showcase paths without an ambiguous start-work claim", () => {
-  assert.match(landingSource, /作れるリール/);
-  assert.match(landingSource, /素材に合う作り方を、見比べられます。/);
-  assert.match(landingSource, /実際の完成動画と、複数動画・写真リールのイメージを切り替えて見られます。/);
+  assert.match(landingSource, /作り方の例/);
+  assert.match(landingSource, /手元の素材に合う作り方を、3つから。/);
+  assert.match(
+    landingSource,
+    /実際の完成動画と、複数動画・写真から作る場合のイメージを切り替えて見られます。/,
+  );
   assert.match(landingSource, /<HomeShowcaseCarousel demo=\{props\.demo\} openPicker=\{props\.openPicker\} \/>/);
   assert.doesNotMatch(landingSource, /先に見てから、作り始められます。/);
 });
