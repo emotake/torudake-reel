@@ -1,31 +1,26 @@
 import {
-  applyOidcTerminalResponseHeaders,
   completeOidcAuthorization,
-  oidcAuthErrorResponse,
+  OidcAuthError,
+  oidcBrowserErrorResponse,
 } from "../../../../../../../lib/oidc-auth";
 import {
   classifyLineAuthenticationCompletion,
   lineAuthenticationError,
   logLineAuthenticationEvent,
 } from "../../../../../../../lib/auth-observability";
-import { privateJson } from "../../../../../../../lib/account-auth-http";
 import { isSameOriginMutation } from "../../../../../../../lib/operator-session";
 
 export async function POST(request: Request) {
   if (!isSameOriginMutation(request)) {
-    const response = privateJson(
-      {
-        error: "この画面からもう一度お試しください。",
-        code: "invalid_request_origin",
-      },
-      { status: 403 },
+    const response = oidcBrowserErrorResponse(
+      request,
+      new OidcAuthError(
+        "invalid_request_origin",
+        403,
+        "この画面からもう一度お試しください。",
+      ),
+      "complete",
     );
-    applyOidcTerminalResponseHeaders(response, {
-      errorCode: "invalid_request_origin",
-      status: 403,
-      category: "request",
-      trustedChallenge: false,
-    });
     logLineAuthenticationEvent(request, {
       event: "line_oidc_callback_rejected",
       operation: "finalize",
@@ -47,7 +42,7 @@ export async function POST(request: Request) {
     });
     return response;
   } catch (error) {
-    const response = oidcAuthErrorResponse(error);
+    const response = oidcBrowserErrorResponse(request, error, "complete");
     const normalized = lineAuthenticationError(response);
     logLineAuthenticationEvent(request, {
       event: "line_oidc_completion_failed",

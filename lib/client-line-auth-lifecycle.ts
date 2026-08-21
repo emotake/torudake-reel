@@ -43,6 +43,21 @@ export function shouldInitializeAuthenticationGate<TMode>(
   return open && initializedMode !== mode;
 }
 
+export async function prepareLineAuthenticationContext(
+  prepare: () => Promise<void>,
+  canContinue: (cause: unknown) => boolean,
+) {
+  try {
+    await prepare();
+    return true;
+  } catch (cause) {
+    if (!canContinue(cause)) throw cause;
+    // Existing accounts must still reach LINE when only duplicate trial
+    // issuance was rejected. All other failures retain the safe stop.
+    return false;
+  }
+}
+
 export type LineSameTabNavigationEpoch = {
   epoch: number;
   generation: number;

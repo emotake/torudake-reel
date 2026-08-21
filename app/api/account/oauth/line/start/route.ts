@@ -1,6 +1,6 @@
 import {
   beginOidcAuthorization,
-  oidcAuthErrorResponse,
+  oidcBrowserErrorResponse,
 } from "../../../../../../lib/oidc-auth";
 import {
   lineAuthenticationError,
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const response = oidcAuthErrorResponse(error);
+    const response = oidcBrowserErrorResponse(request, error, "start");
     const normalized = lineAuthenticationError(response);
     logLineAuthenticationEvent(request, {
       event: "line_oidc_start_rejected",

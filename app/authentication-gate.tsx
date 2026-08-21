@@ -20,12 +20,18 @@ import {
   isActiveLineAuthenticationAttempt,
   isPendingLineSameTabNavigation,
   markLineSameTabNavigationCommitted,
+  prepareLineAuthenticationContext,
   runAbortableAuthenticationRequest,
   runGuardedAuthenticationSequence,
   scheduleLineAuthenticationRecovery,
   shouldInitializeAuthenticationGate,
 } from "../lib/client-line-auth-lifecycle";
 import type { LineSameTabNavigationEpoch } from "../lib/client-line-auth-lifecycle";
+import {
+  AuthenticationApiError,
+  authenticationErrorMessage,
+  isTrialAlreadyIssuedAuthenticationError,
+} from "../lib/client-authentication-error";
 import lineButtonStyles from "./line-login-button.module.css";
 
 type AuthenticationReason = "billing" | "account" | "ai";
@@ -139,7 +145,15 @@ async function readPayload<T>(response: Response, fallback: string) {
   const payload = (await response.json().catch(() => null)) as
     | AuthPayload<T>
     | null;
-  if (!response.ok) throw new Error(payload?.error || fallback);
+  if (!response.ok) {
+    throw new AuthenticationApiError(
+      authenticationErrorMessage(payload?.error, fallback),
+      {
+        status: response.status,
+        code: typeof payload?.code === "string" ? payload.code : undefined,
+      },
+    );
+  }
   return payload as AuthPayload<T>;
 }
 
@@ -538,11 +552,10 @@ export default function AuthenticationGate({
       setBusy(null);
       void refreshAuthentication().catch((cause) => {
         if (!active) return;
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "ログイン方法を確認できませんでした。",
-        );
+        setError(authenticationErrorMessage(
+          cause,
+          "ログイン方法を確認できませんでした。",
+        ));
       });
     });
     return () => {
@@ -874,11 +887,10 @@ export default function AuthenticationGate({
       });
     } catch (cause) {
       if (!stillCurrent()) return;
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "本人確認を完了できませんでした。",
-      );
+      setError(authenticationErrorMessage(
+        cause,
+        "本人確認を完了できませんでした。",
+      ));
     } finally {
       if (!stillCurrent()) return;
       invalidatePasskeyAttempt();
@@ -900,6 +912,31 @@ export default function AuthenticationGate({
       startUrl.searchParams.set("reauthenticate", "1");
     }
 
+    const prepareLineContext = async (
+      generation: number,
+      closePopup: boolean,
+    ) => {
+      try {
+        await prepareLineAuthenticationContext(
+          ensureAuthenticationContext,
+          isTrialAlreadyIssuedAuthenticationError,
+        );
+      } catch (cause) {
+        if (!isCurrentLineAttempt(generation)) return false;
+        invalidateLineAttempt(closePopup);
+        if (!mountedRef.current || !openRef.current) return false;
+        setError(authenticationErrorMessage(
+          cause,
+          "LINEログインを開始できませんでした。",
+        ));
+        if (!closePopup) setLineSameTabFallback(reason === "ai");
+        busyRef.current = null;
+        setBusy(null);
+        return false;
+      }
+      return isCurrentLineAttempt(generation);
+    };
+
     const navigateLineSameTab = async (
       generation = lineAttemptGenerationRef.current,
     ) => {
@@ -910,33 +947,18 @@ export default function AuthenticationGate({
       lineSameTabNavigationEpochRef.current = navigation.epoch;
       lineSameTabNavigationRef.current = navigation;
       armSameTabRecovery(navigation, LINE_SAME_TAB_START_RECOVERY_MS);
+      if (!(await prepareLineContext(generation, false))) return;
+      startUrl.searchParams.delete("popup");
+      startUrl.searchParams.delete("popupFlow");
+      startUrl.searchParams.set(
+        "returnTo",
+        currentAuthenticationReturnTo(),
+      );
+      attachSameTabBeforeUnloadRecovery(navigation);
       try {
-        await ensureAuthenticationContext();
-        if (!isCurrentLineAttempt(generation)) return;
-        startUrl.searchParams.delete("popup");
-        startUrl.searchParams.delete("popupFlow");
-        startUrl.searchParams.set(
-          "returnTo",
-          currentAuthenticationReturnTo(),
-        );
-        attachSameTabBeforeUnloadRecovery(navigation);
-        try {
-          window.location.assign(startUrl.toString());
-        } catch {
-          recoverSameTabAttempt(generation);
-        }
-      } catch (cause) {
-        if (!isCurrentLineAttempt(generation)) return;
-        invalidateLineAttempt(false);
-        if (!mountedRef.current || !openRef.current) return;
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "LINEログインを開始できませんでした。",
-        );
-        setLineSameTabFallback(reason === "ai");
-        busyRef.current = null;
-        setBusy(null);
+        window.location.assign(startUrl.toString());
+      } catch {
+        recoverSameTabAttempt(generation);
       }
     };
 
@@ -986,22 +1008,7 @@ export default function AuthenticationGate({
     startUrl.searchParams.set("popupFlow", flowId);
     linePopupFlowRef.current = flowId;
 
-    try {
-      await ensureAuthenticationContext();
-    } catch (cause) {
-      if (!isCurrentLineAttempt(generation)) return;
-      invalidateLineAttempt(true);
-      if (!mountedRef.current || !openRef.current) return;
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "LINEログインを開始できませんでした。",
-      );
-      busyRef.current = null;
-      setBusy(null);
-      return;
-    }
-    if (!isCurrentLineAttempt(generation)) return;
+    if (!(await prepareLineContext(generation, true))) return;
     if (isPopupClosed(popup)) {
       invalidateLineAttempt(false);
       if (!mountedRef.current || !openRef.current) return;

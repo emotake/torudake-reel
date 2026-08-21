@@ -732,6 +732,94 @@ export async function completeOidcAuthorization(
 }
 
 export function oidcAuthErrorResponse(error: unknown) {
+  const normalized = normalizeOidcRouteError(error);
+  const response = Response.json(
+    { error: normalized.publicMessage, code: normalized.code },
+    { status: normalized.status },
+  );
+  applyPrivateResponseHeaders(response.headers);
+  applyOidcTerminalResponseHeaders(response, {
+    errorCode: normalized.callbackCode,
+    machineCode: normalized.code,
+    status: normalized.status,
+    category: normalized.category,
+    trustedChallenge: false,
+  });
+  return response;
+}
+
+/**
+ * OAuth start and callback routes are browser navigation endpoints, not JSON
+ * APIs. Keep their exceptional path in a controlled first-party document so
+ * provider reason phrases, response bodies and internal error details can
+ * never become the page shown to the user.
+ */
+export function oidcBrowserErrorResponse(
+  request: Request,
+  error: unknown,
+  phase: "start" | "complete",
+) {
+  if (!isBrowserNavigationRequest(request)) {
+    return oidcAuthErrorResponse(error);
+  }
+  const normalized = normalizeOidcRouteError(error);
+  const popupFlow = phase === "start"
+    ? popupFlowFromStartRequest(request)
+    : undefined;
+  if (popupFlow !== undefined) {
+    return popupCallbackResponse(
+      {
+        errorCode: normalized.callbackCode,
+        machineCode: normalized.code,
+        status: normalized.status,
+        category: normalized.category,
+        trustedChallenge: false,
+      },
+      popupFlow,
+    );
+  }
+
+  const title = phase === "start"
+    ? "LINEログインを開始できませんでした"
+    : "LINEログインを完了できませんでした";
+  const message = phase === "start"
+    ? "時間をおいて、アカウント画面からもう一度お試しください。"
+    : "アカウント画面へ戻り、もう一度お試しください。";
+  const html = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title></head><body><main><h1>${title}</h1><p>${message}</p><p><a href="/account">アカウント画面へ戻る</a></p></main></body></html>`;
+  const response = new Response(html, {
+    status: normalized.status,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+  applyPrivateResponseHeaders(response.headers);
+  response.headers.set(
+    "Content-Security-Policy",
+    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  );
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  applyOidcTerminalResponseHeaders(response, {
+    errorCode: normalized.callbackCode,
+    machineCode: normalized.code,
+    status: normalized.status,
+    category: normalized.category,
+    trustedChallenge: false,
+  });
+  return response;
+}
+
+function isBrowserNavigationRequest(request: Request) {
+  const accept = request.headers.get("accept") ?? "";
+  return request.headers.get("sec-fetch-mode") === "navigate" ||
+    request.headers.get("sec-fetch-dest") === "document" ||
+    accept.split(",").some((value) =>
+      value.trim().toLowerCase().startsWith("text/html")
+    );
+}
+
+function normalizeOidcRouteError(error: unknown) {
   const normalized =
     error instanceof OidcAuthError
       ? error
@@ -751,19 +839,21 @@ export function oidcAuthErrorResponse(error: unknown) {
   if (!(error instanceof OidcAuthError)) {
     console.error("OIDC authorization failed", { code: normalized.code });
   }
-  const response = Response.json(
-    { error: normalized.publicMessage, code: normalized.code },
-    { status: normalized.status },
-  );
-  applyPrivateResponseHeaders(response.headers);
-  applyOidcTerminalResponseHeaders(response, {
-    errorCode: normalized.callbackCode,
-    machineCode: normalized.code,
-    status: normalized.status,
-    category: normalized.category,
-    trustedChallenge: false,
-  });
-  return response;
+  return normalized;
+}
+
+function popupFlowFromStartRequest(request: Request) {
+  const requestUrl = new URL(request.url);
+  const popupValues = requestUrl.searchParams.getAll("popup");
+  if (popupValues.length !== 1 || popupValues[0] !== "1") return undefined;
+  const flowValues = requestUrl.searchParams.getAll("popupFlow");
+  if (
+    flowValues.length === 1 &&
+    OIDC_POPUP_FLOW_PATTERN.test(flowValues[0])
+  ) {
+    return flowValues[0];
+  }
+  return null;
 }
 
 export function oidcStateCookie(

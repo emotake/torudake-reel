@@ -38,10 +38,14 @@ const [
   ]);
 
 function sourceSection(source, start, end) {
-  const startIndex = source.indexOf(start);
+  const normalizedSource = source.replaceAll("\r\n", "\n");
+  const startIndex = normalizedSource.indexOf(start);
   assert.notEqual(startIndex, -1, `missing source section: ${start}`);
-  const endIndex = source.indexOf(end, startIndex + start.length);
-  return source.slice(startIndex, endIndex === -1 ? undefined : endIndex);
+  const endIndex = normalizedSource.indexOf(end, startIndex + start.length);
+  return normalizedSource.slice(
+    startIndex,
+    endIndex === -1 ? undefined : endIndex,
+  );
 }
 
 test("blocked or unusable LINE popups fall back to the same tab and retain the checkout return target", () => {
@@ -90,8 +94,8 @@ test("blocked or unusable LINE popups fall back to the same tab and retain the c
   );
   assert.ok(
     sameTabNavigation.indexOf("armSameTabRecovery(") <
-      sameTabNavigation.indexOf("await ensureAuthenticationContext()"),
-    "same-tab recovery must cover a stalled authentication preflight",
+      sameTabNavigation.indexOf("await prepareLineContext("),
+    "same-tab recovery must cover the best-effort trial preparation",
   );
   assert.match(authenticationGateSource, /scheduleLineAuthenticationRecovery\(/);
   assert.match(
@@ -437,7 +441,7 @@ test("passkey flow stops dynamically after close or unmount boundaries", async (
   assert.match(authenticationGateSource, /AUTHENTICATION_REQUEST_TIMEOUT_MS/);
 });
 
-test("popup preflight is registered before awaiting and stops after close or unmount", () => {
+test("popup best-effort preflight is registered before awaiting and stops after close or unmount", () => {
   const lineAuthentication = sourceSection(
     authenticationGateSource,
     "const authenticateWithLine",
@@ -446,17 +450,28 @@ test("popup preflight is registered before awaiting and stops after close or unm
   const openIndex = lineAuthentication.indexOf("window.open(");
   const registerIndex = lineAuthentication.indexOf("beginLineAttempt(popup)");
   const awaitIndex = lineAuthentication.indexOf(
-    "await ensureAuthenticationContext()",
+    "await prepareLineContext(",
     registerIndex,
+  );
+  const navigationIndex = lineAuthentication.indexOf(
+    "popup.location.replace(startUrl.toString())",
+    awaitIndex,
   );
   assert.ok(openIndex >= 0 && registerIndex > openIndex);
   assert.ok(
-    awaitIndex > registerIndex,
-    "the blank popup must be registered before preflight awaits",
+    awaitIndex > registerIndex &&
+      navigationIndex > awaitIndex,
+    "the blank popup must be registered before guarded preflight and LINE navigation",
+  );
+  const lineContextPreparation = sourceSection(
+    lineAuthentication,
+    "const prepareLineContext",
+    "const navigateLineSameTab",
   );
   assert.match(
-    lineAuthentication.slice(awaitIndex),
-    /if \(!isCurrentLineAttempt\(generation\)\) return/,
+    lineContextPreparation,
+    /return isCurrentLineAttempt\(generation\)/,
+    "the preflight guard must stop navigation after close or unmount",
   );
   assert.match(authenticationGateSource, /mountedRef\.current\s*=\s*false/);
   assert.match(authenticationGateSource, /invalidateLineAttempt\(true\)/);
