@@ -5,6 +5,7 @@ import {
   createInitialNarrationToken,
   verifyInitialNarrationToken,
 } from "../lib/narration-initial.ts";
+import { applyNarrationPronunciationGuide } from "../lib/narration.ts";
 
 const secret = "test-only-initial-narration-secret";
 const now = 2_000_000_000;
@@ -102,4 +103,37 @@ test("binds the initial narration token to reservation, action, script, style, a
       `must reject a mismatched ${Object.keys(mismatch)[0]}`,
     );
   }
+});
+
+test("binds a saved pronunciation bundle to the exact speech script, not display captions", async () => {
+  const displayScript = "御厨さんが撮るだけリールを紹介します。";
+  const guide = "御厨 → みくりや\n撮るだけリール → とるだけりーる";
+  const speechScript = applyNarrationPronunciationGuide(displayScript, guide);
+  const speechExpectation = { ...expectation, script: speechScript };
+  const token = await createInitialNarrationToken(
+    secret,
+    speechExpectation,
+    1,
+    now,
+  );
+
+  assert.ok(
+    await verifyInitialNarrationToken(
+      secret,
+      token,
+      speechExpectation,
+      now + 1,
+    ),
+  );
+  assert.equal(
+    await verifyInitialNarrationToken(
+      secret,
+      token,
+      { ...expectation, script: displayScript },
+      now + 1,
+    ),
+    null,
+    "the display script must not authorize a different synthesized reading",
+  );
+  assert.equal(displayScript, "御厨さんが撮るだけリールを紹介します。");
 });

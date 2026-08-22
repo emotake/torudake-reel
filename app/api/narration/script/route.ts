@@ -19,8 +19,10 @@ import {
   verifyInitialNarrationToken,
 } from "../../../../lib/narration-initial";
 import {
+  applyNarrationPronunciationGuide,
   normalizeNarrationStyle,
   normalizeNarrationPlan,
+  validateNarrationPronunciationGuide,
   type NarrationStyle,
 } from "../../../../lib/narration";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
@@ -53,6 +55,7 @@ import { recordProviderUsageBestEffort } from "../../../../lib/provider-usage";
 const MAX_FRAME_COUNT = 8;
 const MAX_FRAME_LENGTH = 700_000;
 const MAX_SCRIPT_REQUEST_BYTES = 6_500_000;
+const MAX_PRONUNCIATION_GUIDE_LENGTH = 4_000;
 const SCRIPT_REQUEST_TIMEOUT_MS = 45_000;
 const NARRATION_SCRIPT_MODEL = "gpt-5.6-luna";
 export const NARRATION_RESERVATION_HEADER = "X-Usage-Reservation-Id";
@@ -250,6 +253,7 @@ export async function POST(request: Request) {
       narrationBundleToken?: unknown;
       timingScale?: unknown;
       previousScript?: unknown;
+      pronunciationGuide?: unknown;
       sceneTimeline?: unknown;
     };
   try {
@@ -300,6 +304,34 @@ export async function POST(request: Request) {
     typeof payload.previousScript === "string"
       ? payload.previousScript.replace(/\s+/g, " ").trim().slice(0, 2_000)
       : "";
+  if (
+    payload.pronunciationGuide !== undefined &&
+    typeof payload.pronunciationGuide !== "string"
+  ) {
+    return Response.json(
+      { error: "読み方の指定を確認できませんでした。" },
+      { status: 400 },
+    );
+  }
+  const pronunciationGuide =
+    typeof payload.pronunciationGuide === "string"
+      ? payload.pronunciationGuide.trim()
+      : "";
+  if (pronunciationGuide.length > MAX_PRONUNCIATION_GUIDE_LENGTH) {
+    return Response.json(
+      { error: "読み方は20件まで指定できます。" },
+      { status: 400 },
+    );
+  }
+  const pronunciationValidation = validateNarrationPronunciationGuide(
+    pronunciationGuide,
+  );
+  if (pronunciationValidation.error) {
+    return Response.json(
+      { error: pronunciationValidation.error },
+      { status: 400 },
+    );
+  }
   const initialNarration = payload.initialNarration === true;
   providerOperation = initialNarration ? "narration_initial" : "narration_script";
   const suppliedNarrationBundleToken =
@@ -377,7 +409,10 @@ export async function POST(request: Request) {
         {
           reservationId,
           actionId: aiOperationId,
-          script: previousScript,
+          script: applyNarrationPronunciationGuide(
+            previousScript,
+            pronunciationGuide,
+          ),
           style,
           targetDurationSeconds: bundleTargetDuration,
         },
@@ -744,7 +779,10 @@ export async function POST(request: Request) {
           {
             reservationId: meteredAuthorization.reservation.id,
             actionId: meteredAuthorization.action.actionId,
-            script: plan.script,
+            script: applyNarrationPronunciationGuide(
+              plan.script,
+              pronunciationGuide,
+            ),
             style,
             targetDurationSeconds: Math.max(
               1,

@@ -179,12 +179,12 @@ test("public policy pages describe the LINE-first behavior", async () => {
   assert.match(support, /LINEログインで困った/);
 });
 
-test("the release stops at migration 0026 and contains no first-free runtime", () => {
+test("the release includes personalization migration and no first-free runtime", () => {
   const migrations = readdirSync(new URL("drizzle/", root))
     .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
     .sort();
-  assert.equal(migrations.at(-1), "0026_odd_blob.sql");
-  assert.equal(migrations.length, 27);
+  assert.equal(migrations.at(-1), "0027_personal_edit_preferences.sql");
+  assert.equal(migrations.length, 28);
   for (const path of [
     "app/api/save-entitlement",
     "lib/first-free-save.ts",

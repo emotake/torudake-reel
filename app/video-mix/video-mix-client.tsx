@@ -50,6 +50,7 @@ import {
 import {
   buildVideoMixNarrationDuckingMetadata,
   computeVideoMixFrameLayout,
+  createVideoMixTranscriptionAudio,
   exportVideoMixMp4,
   getVideoMixDuckingGainAtTime,
   getVideoMixTransitionAudioGains,
@@ -111,6 +112,12 @@ import {
   createVideoMixNarrationSceneTimeline,
   type VideoMixNarrationScene,
 } from "../../lib/video-mix-scene-timeline";
+import {
+  getEnabledVideoMixOriginalCaptions,
+  normalizeVideoMixOriginalCaptions,
+  updateVideoMixOriginalCaption,
+} from "../../lib/video-mix-original-captions";
+import originalCaptionStyles from "./original-captions.module.css";
 
 const ACCEPTED_VIDEO_TYPES = new Set([
   "video/mp4",
@@ -585,6 +592,67 @@ function readAiQuota(response: Response) {
   };
 }
 
+async function requestVideoMixTranscription(options: Readonly<{
+  audioFile: File;
+  reservationId: string | null;
+  operationId: string;
+  signal: AbortSignal;
+}>) {
+  const formData = new FormData();
+  formData.set("file", options.audioFile, options.audioFile.name);
+  if (options.reservationId) {
+    formData.set("usageReservationId", options.reservationId);
+  }
+  formData.set("aiOperationId", options.operationId);
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    body: formData,
+    credentials: "same-origin",
+    signal: options.signal,
+  });
+  const quota = readAiQuota(response);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    await response.text().catch(() => "");
+    throw new VideoMixRequestError(
+      response.status === 413
+        ? "字幕用の音声サイズが上限を超えました。カットを短くしてお試しください。"
+        : response.status === 429
+          ? "音声認識が混み合っています。少し待ってからもう一度お試しください。"
+          : "元音声からテロップを作成できませんでした。",
+      response.status,
+    );
+  }
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        segments?: CaptionSegment[];
+        silent?: boolean;
+        refined?: boolean;
+        error?: string;
+        code?: string;
+      }
+    | null;
+  if (!response.ok || !payload) {
+    throw new VideoMixRequestError(
+      response.status === 413
+        ? "字幕用の音声サイズが上限を超えました。カットを短くしてお試しください。"
+        : response.status === 429
+          ? "音声認識が混み合っています。少し待ってからもう一度お試しください。"
+          : response.status === 402
+            ? "利用できる動画作成枠がありません。料金プランまたは1動画作成を選んでください。"
+            : "元音声からテロップを作成できませんでした。",
+      response.status,
+      typeof payload?.code === "string" ? payload.code : null,
+    );
+  }
+  return {
+    captions: payload.segments ?? [],
+    silent: payload.silent === true,
+    refined: payload.refined === true,
+    quota,
+  };
+}
+
 async function requestMixNarrationPlan(options: Readonly<{
   frames: readonly string[];
   sceneTimeline: readonly VideoMixNarrationScene[];
@@ -804,7 +872,7 @@ async function inspectMixOutput(
   blob: Blob,
   plan: VideoCompositionPlan,
   audioMetadata: VideoMixAudioExportMetadata,
-  narrationCaptions: readonly CaptionSegment[] = [],
+  renderedCaptions: readonly CaptionSegment[] = [],
   captionsEnabled = false,
 ) {
   const { assessExportedVideoQuality, inspectExportedVideoQuality } = await import("../../lib/video-export-quality");
@@ -820,15 +888,19 @@ async function inspectMixOutput(
   if (audioMetadata.requireAudio && !audioMetadata.outputHasAudioTrack) {
     throw new Error("選んだ場面の元音声を完成動画へ入れられませんでした。もう一度書き出してください。");
   }
-  const expectedNarrationRanges = audioMetadata.narration.requested
-    ? narrationCaptions.flatMap((caption) => {
+  const renderedCaptionRanges = captionsEnabled
+    ? renderedCaptions.flatMap((caption) => {
+        if (caption.removed || !caption.text.trim()) return [];
         const range = getCaptionDisplayRange(caption);
         const start = Math.max(0, Math.min(plan.duration, range.start));
         const end = Math.max(start, Math.min(plan.duration, range.end));
         return end - start >= 0.02 ? [{ start, end }] : [];
       })
     : [];
-  const captionRanges = captionsEnabled ? expectedNarrationRanges : [];
+  const expectedNarrationRanges = audioMetadata.narration.requested
+    ? renderedCaptionRanges
+    : [];
+  const captionRanges = renderedCaptionRanges;
   const inspection = await inspectExportedVideoQuality(blob, {
     packetSampleCount: 360,
     inspectAudioActivity: audioMetadata.inspectAudioActivity,
@@ -942,6 +1014,7 @@ export default function VideoMixClient() {
   const activeClipRef = useRef(-1);
   const exportAbortRef = useRef<AbortController | null>(null);
   const narrationAbortRef = useRef<AbortController | null>(null);
+  const originalCaptionAbortRef = useRef<AbortController | null>(null);
   const thumbnailAbortRef = useRef<AbortController | null>(null);
   const audioNormalizationAbortRef = useRef<AbortController | null>(null);
   const audioNormalizationCacheRef = useRef(new Map<string, number>());
@@ -951,6 +1024,7 @@ export default function VideoMixClient() {
   const sourcesRef = useRef<MixSource[]>([]);
   const preparingRef = useRef(false);
   const narrationGeneratingRef = useRef(false);
+  const originalCaptionsGeneratingRef = useRef(false);
   const exportRunningRef = useRef(false);
   const finalizingUsageRef = useRef(false);
   const finalizeActionRef = useRef(false);
@@ -967,6 +1041,7 @@ export default function VideoMixClient() {
   const billingSyncRef = useRef<Promise<void> | null>(null);
   const lastBillingSyncAtRef = useRef(0);
   const narrationRef = useRef<MixNarration | null>(null);
+  const originalCaptionsRef = useRef<CaptionSegment[]>([]);
   const previousNarrationRef = useRef<MixNarration | null>(null);
   const removedSourceRef = useRef<RemovedMixSource | null>(null);
   const pageHidingRef = useRef(false);
@@ -981,6 +1056,10 @@ export default function VideoMixClient() {
     useState<VideoMixBoundaryTransitionPreferences>({});
   const [narrationEnabled, setNarrationEnabled] = useState(false);
   const [narrationCaptionsEnabled, setNarrationCaptionsEnabled] = useState(true);
+  const [originalCaptionsEnabled, setOriginalCaptionsEnabled] = useState(false);
+  const [originalCaptions, setOriginalCaptions] = useState<CaptionSegment[]>([]);
+  const [originalCaptionsStale, setOriginalCaptionsStale] = useState(false);
+  const [originalCaptionsGenerating, setOriginalCaptionsGenerating] = useState(false);
   const [narrationCaptionStyle, setNarrationCaptionStyle] =
     useState<VideoMixCaptionStyle>(DEFAULT_VIDEO_MIX_CAPTION_STYLE);
   const [narrationStyle, setNarrationStyle] = useState<NarrationStyle>("bright");
@@ -1100,13 +1179,33 @@ export default function VideoMixClient() {
     ? activeTrimDraft
     : null;
   const editingLocked =
-    preparing || exporting || narrationGenerating || discardingPending || Boolean(pendingFinalize);
+    preparing ||
+    exporting ||
+    narrationGenerating ||
+    originalCaptionsGenerating ||
+    discardingPending ||
+    Boolean(pendingFinalize);
   const narrationSourceAudioGain =
     narrationEnabled
       ? narrationSourceAudioMode === "mute"
         ? 0
         : VIDEO_MIX_AMBIENT_AUDIO_GAIN
       : 1;
+  const activeCaptionsEnabled = narrationEnabled
+    ? narrationCaptionsEnabled
+    : originalCaptionsEnabled;
+  const activeCaptions = useMemo(
+    () =>
+      narrationEnabled
+        ? narration?.captions ?? []
+        : originalCaptionsStale
+          ? []
+          : originalCaptions,
+    [narration, narrationEnabled, originalCaptions, originalCaptionsStale],
+  );
+  const activeCaptionGoal: CaptionGoal = narrationEnabled
+    ? narrationGoal
+    : "follow";
   const previewDuckingMetadata = useMemo(() =>
     plan
       ? buildVideoMixNarrationDuckingMetadata({
@@ -1700,6 +1799,10 @@ export default function VideoMixClient() {
   }, [narration]);
 
   useEffect(() => {
+    originalCaptionsRef.current = originalCaptions;
+  }, [originalCaptions]);
+
+  useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
 
@@ -1941,6 +2044,7 @@ export default function VideoMixClient() {
       previewNarrationGainRef.current = null;
       exportAbortRef.current?.abort();
       narrationAbortRef.current?.abort();
+      originalCaptionAbortRef.current?.abort();
       thumbnailAbortRef.current?.abort();
       audioNormalizationAbortRef.current?.abort();
       if (!pageHidingRef.current) {
@@ -2140,6 +2244,7 @@ export default function VideoMixClient() {
       if (
         preparingRef.current ||
         narrationGeneratingRef.current ||
+        originalCaptionsGeneratingRef.current ||
         exportRunningRef.current ||
         finalizeActionRef.current
       ) {
@@ -2325,12 +2430,25 @@ export default function VideoMixClient() {
     }
   }, [clearResult, releaseActiveReservationForeground, stopPreview]);
 
+  const invalidateOriginalCaptions = useCallback(() => {
+    if (originalCaptionsRef.current.length === 0) return;
+    setOriginalCaptionsStale(true);
+    const canvas = previewCaptionRef.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    if (!narrationRef.current) {
+      setMessage(
+        "動画の並び・カット・つなぎ方が変わりました。元音声のテロップを作り直すと、現在の映像へ正しく合います。",
+      );
+    }
+  }, []);
+
   const selectGlobalTransition = useCallback(
     (nextTransition: VideoCompositionTransitionType) => {
       if (editingLocked) return;
       stopPreview();
       clearResult();
       invalidateGeneratedNarration();
+      invalidateOriginalCaptions();
       setTransition(nextTransition);
       setBoundaryTransitionPreferences({});
       trackClientEvent("video_mix_transition_changed", {
@@ -2338,7 +2456,7 @@ export default function VideoMixClient() {
         transition: nextTransition,
       });
     },
-    [clearResult, editingLocked, invalidateGeneratedNarration, stopPreview],
+    [clearResult, editingLocked, invalidateGeneratedNarration, invalidateOriginalCaptions, stopPreview],
   );
 
   const handleTransitionKeyDown = (
@@ -2391,7 +2509,7 @@ export default function VideoMixClient() {
     finishModeButtonRefs.current[nextIndex]?.focus();
   };
 
-  const updateNarrationOverlay = useCallback(
+  const updateCaptionOverlay = useCallback(
     (time: number, style: VideoMixCaptionStyle = narrationCaptionStyle) => {
       const canvas = previewCaptionRef.current;
       if (!canvas) return;
@@ -2400,26 +2518,29 @@ export default function VideoMixClient() {
       const context = canvas.getContext("2d");
       if (!context) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
-      if (narrationEnabled && narrationCaptionsEnabled && narration) {
+      if (activeCaptionsEnabled && activeCaptions.length > 0) {
         drawVideoMixNarrationCaption(
           context,
           canvas.width,
           canvas.height,
           time,
-          narration.captions,
+          activeCaptions,
           style,
-          narrationGoal,
+          activeCaptionGoal,
         );
       }
     },
     [
-      narration,
+      activeCaptionGoal,
+      activeCaptions,
+      activeCaptionsEnabled,
       narrationCaptionStyle,
-      narrationCaptionsEnabled,
-      narrationEnabled,
-      narrationGoal,
     ],
   );
+
+  useEffect(() => {
+    updateCaptionOverlay(previewTimeRef.current);
+  }, [updateCaptionOverlay]);
 
   const previewBackgroundForVideo = useCallback((video: HTMLVideoElement) =>
     video === previewPrimaryRef.current
@@ -3021,7 +3142,7 @@ export default function VideoMixClient() {
           return;
         }
         updatePreviewTransition(loop.start);
-        updateNarrationOverlay(loop.start);
+        updateCaptionOverlay(loop.start);
         if (narrationPlayer && narration) {
           narrationPlayer.currentTime = Math.min(loop.start, narration.audioDuration);
           setPreviewNarrationGain(narrationPlayer, narration.normalizationGain);
@@ -3034,7 +3155,7 @@ export default function VideoMixClient() {
         setPreviewTime(plan.duration);
         configurePreviewAt(plan.duration - 0.001, false);
         updatePreviewTransition(plan.duration - 0.001);
-        updateNarrationOverlay(plan.duration - 0.001);
+        updateCaptionOverlay(plan.duration - 0.001);
         stopPreview();
         return;
       }
@@ -3057,7 +3178,7 @@ export default function VideoMixClient() {
         return;
       }
       updatePreviewTransition(next);
-      updateNarrationOverlay(next);
+      updateCaptionOverlay(next);
       if (
         narrationEnabled &&
         narration &&
@@ -3096,7 +3217,7 @@ export default function VideoMixClient() {
       // promise on Safari/WebKit.
       configurePreviewAt(startAt, true);
       updatePreviewTransition(startAt);
-      updateNarrationOverlay(startAt);
+      updateCaptionOverlay(startAt);
       previewStartedAtRef.current = 0;
       if (loopRange && selectionTarget) {
         previewSelectionClipRef.current = {
@@ -3142,6 +3263,7 @@ export default function VideoMixClient() {
       picked.length === 0 ||
       preparingRef.current ||
       sceneSelectionBusy ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3227,6 +3349,7 @@ export default function VideoMixClient() {
       stopPreview();
       clearResult();
       invalidateGeneratedNarration();
+      invalidateOriginalCaptions();
       const combined = [...currentSources, ...added].map((source) => ({
         ...source,
         clips: source.clips.length > 0 ? source.clips : [createInitialClip(source.duration)],
@@ -3360,6 +3483,7 @@ export default function VideoMixClient() {
       sceneSelectionBusy ||
       preparingRef.current ||
       narrationGeneratingRef.current ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3390,6 +3514,7 @@ export default function VideoMixClient() {
     }
     clearResult();
     invalidateGeneratedNarration();
+    invalidateOriginalCaptions();
     const next = current.filter((source) => source.id !== sourceId);
     sourcesRef.current = next;
     setSources(next);
@@ -3412,6 +3537,7 @@ export default function VideoMixClient() {
     setBoundaryTransitionPreferences(
       pruneVideoMixBoundaryTransitionPreferences(next, entry.boundaryTransitions),
     );
+    invalidateOriginalCaptions();
     removedSourceRef.current = null;
     setRemovedSource(null);
     setSourceFeedback({ kind: "message", text: "削除した動画を元の位置へ戻しました。" });
@@ -3421,6 +3547,7 @@ export default function VideoMixClient() {
     if (
       preparingRef.current ||
       narrationGeneratingRef.current ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3461,6 +3588,7 @@ export default function VideoMixClient() {
     }
     clearResult();
     invalidateGeneratedNarration();
+    invalidateOriginalCaptions();
     sourcesRef.current = next;
     setSources(next);
     setBoundaryTransitionPreferences((currentPreferences) =>
@@ -3496,6 +3624,7 @@ export default function VideoMixClient() {
     if (
       preparingRef.current ||
       narrationGeneratingRef.current ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3543,6 +3672,7 @@ export default function VideoMixClient() {
     stopPreview();
     clearResult();
     invalidateGeneratedNarration();
+    invalidateOriginalCaptions();
     sourcesRef.current = next;
     setSources(next);
     return appliedRange;
@@ -3668,12 +3798,137 @@ export default function VideoMixClient() {
     });
   };
 
+  const editOriginalCaption = (
+    id: number,
+    patch: Readonly<Partial<Pick<CaptionSegment, "text" | "removed">>>,
+  ) => {
+    if (editingLocked) return;
+    stopPreview();
+    clearResult();
+    const next = updateVideoMixOriginalCaption(
+      originalCaptionsRef.current,
+      id,
+      patch,
+    );
+    originalCaptionsRef.current = next;
+    setOriginalCaptions(next);
+  };
+
+  const generateOriginalCaptions = async () => {
+    if (
+      !plan ||
+      narrationEnabled ||
+      !originalCaptionsEnabled ||
+      sceneSelectionBusy ||
+      originalCaptionsGeneratingRef.current ||
+      narrationGeneratingRef.current ||
+      exportRunningRef.current ||
+      finalizeActionRef.current ||
+      pendingFinalizeRef.current
+    ) {
+      return;
+    }
+    if (plan.duration < 0.4) {
+      setError("テロップを作るには、完成動画を0.4秒以上にしてください。");
+      return;
+    }
+    closeSourcePlayers();
+    stopPreview();
+    clearResult();
+    setError("");
+    setMessage("選んだ場面の元音声を端末内で準備しています…");
+    originalCaptionsGeneratingRef.current = true;
+    setOriginalCaptionsGenerating(true);
+    const controller = new AbortController();
+    originalCaptionAbortRef.current = controller;
+    try {
+      const reservation = await ensureMixUsageReservation(
+        controller.signal,
+        true,
+      );
+      ensureVideoMixActionActive(controller.signal, mountedRef.current);
+      const operationId = crypto.randomUUID();
+      const preparedAudio = await createVideoMixTranscriptionAudio({
+        sources: sources.map((source) => ({
+          id: source.id,
+          file: source.file,
+          clips: source.clips,
+          audioNormalizationGain: previewSourceNormalizationGain(source),
+        })),
+        transition,
+        boundaryTransitions: resolvedBoundaryTransitions,
+        signal: controller.signal,
+      });
+      ensureVideoMixActionActive(controller.signal, mountedRef.current);
+      setMessage("元音声を日本語のテロップにしています…");
+      const transcription = await requestVideoMixTranscription({
+        audioFile: preparedAudio.file,
+        reservationId: reservation.reservationId,
+        operationId,
+        signal: controller.signal,
+      });
+      rememberAiQuota(
+        transcription.quota.limit,
+        transcription.quota.remaining,
+      );
+      ensureVideoMixActionActive(controller.signal, mountedRef.current);
+      const next = normalizeVideoMixOriginalCaptions(
+        transcription.captions,
+        preparedAudio.plan.duration,
+      );
+      if (transcription.silent || next.length === 0) {
+        throw new Error(
+          "選んだ場面から話し声を認識できませんでした。元音声を確認するか、AIナレーションをお試しください。",
+        );
+      }
+      originalCaptionsRef.current = next;
+      setOriginalCaptions(next);
+      setOriginalCaptionsStale(false);
+      setMessage(
+        `元音声のテロップを${next.length}件作成しました。文字を直してもAI処理は増えません。AI処理はあと${transcription.quota.remaining ?? aiOperationsRemaining}回です。`,
+      );
+    } catch (caught) {
+      reservationInvalidatedRef.current = true;
+      void releaseActiveReservationForeground().catch(() => undefined);
+      if (caught instanceof DOMException && caught.name === "AbortError") {
+        setMessage("テロップの作成を中止しました。");
+        setError("");
+        return;
+      }
+      if (isAuthenticationRequiredError(caught)) {
+        setShowPurchase(false);
+        setError(
+          "元音声の自動テロップを使うにはログインが必要です。素材と編集設定はこの画面に残っています。ログイン後、もう一度作成してください。",
+        );
+        setMessage("");
+        setAuthenticationGateOpen(true);
+        return;
+      }
+      setShowPurchase(
+        caught instanceof VideoMixRequestError && caught.status === 402,
+      );
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "元音声からテロップを作成できませんでした。",
+      );
+      setMessage("");
+    } finally {
+      if (originalCaptionAbortRef.current === controller) {
+        originalCaptionAbortRef.current = null;
+      }
+      originalCaptionsGeneratingRef.current = false;
+      setOriginalCaptionsGenerating(false);
+    }
+  };
+
   const generateMixNarration = async () => {
     if (
       !plan ||
       !narrationEnabled ||
       sceneSelectionBusy ||
       narrationGeneratingRef.current ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3811,7 +4066,7 @@ export default function VideoMixClient() {
       previousNarrationRef.current = previous;
       setPreviousNarration(previous);
       setDisclosureConfirmed(false);
-      updateNarrationOverlay(0);
+      updateCaptionOverlay(0);
       setMessage(
         `${narrationCaptionsEnabled ? "AIナレーションとテロップ" : "AIナレーション"}を作成しました。AI処理はあと${speechResult.quota.remaining ?? aiOperationsRemaining}回です。`,
       );
@@ -3869,6 +4124,7 @@ export default function VideoMixClient() {
       !plan ||
       sceneSelectionBusy ||
       narrationGeneratingRef.current ||
+      originalCaptionsGeneratingRef.current ||
       exportRunningRef.current ||
       finalizeActionRef.current ||
       pendingFinalizeRef.current
@@ -3883,6 +4139,22 @@ export default function VideoMixClient() {
     }
     if (narrationEnabled && !disclosureConfirmed) {
       setError("AIナレーションを使う場合は、投稿時の表示を確認してください。");
+      return;
+    }
+    if (!narrationEnabled && originalCaptionsEnabled && originalCaptions.length === 0) {
+      setError("元音声のテロップを作成してから書き出してください。");
+      return;
+    }
+    if (!narrationEnabled && originalCaptionsEnabled && originalCaptionsStale) {
+      setError("映像の編集後にテロップの時刻が変わっています。元音声のテロップを作り直してください。");
+      return;
+    }
+    if (
+      !narrationEnabled &&
+      originalCaptionsEnabled &&
+      getEnabledVideoMixOriginalCaptions(originalCaptions).length === 0
+    ) {
+      setError("表示するテロップを1件以上選ぶか、テロップをオフにしてください。");
       return;
     }
     thumbnailAbortRef.current?.abort();
@@ -3950,16 +4222,16 @@ export default function VideoMixClient() {
           exportedPlan = actualPlan;
         },
         drawOverlay:
-          narrationEnabled && narrationCaptionsEnabled && narration
+          activeCaptionsEnabled && activeCaptions.length > 0
             ? ({ context, canvas, editedTime }) => {
                 drawVideoMixNarrationCaption(
                   context,
                   canvas.width,
                   canvas.height,
                   editedTime,
-                  narration.captions,
+                  activeCaptions,
                   narrationCaptionStyle,
-                  narrationGoal,
+                  activeCaptionGoal,
                 );
               }
             : undefined,
@@ -3975,8 +4247,8 @@ export default function VideoMixClient() {
         blob,
         exportedPlan,
         audioMetadata,
-        narrationEnabled ? narration?.captions : [],
-        narrationEnabled && narrationCaptionsEnabled,
+        activeCaptions,
+        activeCaptionsEnabled,
       );
       ensureMixExportActive(controller.signal, mountedRef.current);
       preparedResult = {
@@ -4316,7 +4588,7 @@ export default function VideoMixClient() {
                  setPreviewTime(next);
                 configurePreviewAt(next, false);
                 updatePreviewTransition(next);
-                updateNarrationOverlay(next);
+                updateCaptionOverlay(next);
                 if (narrationAudioRef.current && narration) {
                   narrationAudioRef.current.currentTime = Math.min(
                     next,
@@ -4429,7 +4701,7 @@ export default function VideoMixClient() {
             <span><strong>1080 × 1920</strong>完成動画</span>
             <span><strong>素材順を固定</strong>前後・逆再生なし</span>
           </div>
-          <p className="videoMixPreviewNote">プレビューでは映像とつなぎ目を確認でき、AIナレーションを選んだ場合は音声とテロップも確認できます。素材ごとの音量は選んだ場面を端末内で短く解析し、プレビューと書き出しへ同じ調整を反映します。解析中に再生した場合は、完了後に自動で音量が整います。</p>
+          <p className="videoMixPreviewNote">プレビューでは映像とつなぎ目を確認でき、元音声テロップまたはAIナレーションを選んだ場合は、音声と実際に表示するテロップも確認できます。素材ごとの音量は選んだ場面を端末内で短く解析し、プレビューと書き出しへ同じ調整を反映します。解析中に再生した場合は、完了後に自動で音量が整います。</p>
         </div>
 
         <div className="videoMixControls">
@@ -4719,6 +4991,7 @@ export default function VideoMixClient() {
                               stopPreview();
                               clearResult();
                               invalidateGeneratedNarration();
+                              invalidateOriginalCaptions();
                               setBoundaryTransitionPreferences((current) => {
                                 const active =
                                   pruneVideoMixBoundaryTransitionPreferences(
@@ -4754,7 +5027,7 @@ export default function VideoMixClient() {
               <span>03</span>
               <div>
                 <h2>音声の仕上げを選ぶ</h2>
-                <p>「元音声のまま」ではテロップを追加しません。AI音声へ置き換える場合や話し声のない素材では、AIナレーションとテロップ表示を選べます。</p>
+                <p>元音声を活かす場合も、テロップを付けるか付けないか選べます。話し声のない素材や声を置き換えたい場合は、AIナレーションを選べます。</p>
               </div>
             </div>
             <div className="videoMixFinishMode" role="radiogroup" aria-label="完成動画の音声">
@@ -4770,7 +5043,7 @@ export default function VideoMixClient() {
                 onClick={() => selectFinishMode(false)}
               >
                 <strong>元音声のまま</strong>
-                <small>会話・解説など元の話し声を、テロップなしで活かしたいときにおすすめ</small>
+                <small>元の話し声を保ち、自動テロップは必要に応じて追加できます</small>
               </button>
               <button
                 ref={(element) => { finishModeButtonRefs.current[1] = element; }}
@@ -4939,7 +5212,7 @@ export default function VideoMixClient() {
                               clearResult();
                               setNarrationCaptionStyle(option.id);
                               window.requestAnimationFrame(() =>
-                                updateNarrationOverlay(previewTime, option.id),
+                                updateCaptionOverlay(previewTime, option.id),
                               );
                             }}
                           >
@@ -4962,7 +5235,7 @@ export default function VideoMixClient() {
                   <button
                     type="button"
                     onClick={generateMixNarration}
-                    disabled={!plan || sceneSelectionBusy || narrationGenerating || exporting || aiOperationsRemaining <= 0}
+                    disabled={!plan || sceneSelectionBusy || narrationGenerating || originalCaptionsGenerating || exporting || aiOperationsRemaining <= 0}
                   >
                     {narrationGenerating
                       ? "台本と音声を作成中…"
@@ -5058,7 +5331,121 @@ export default function VideoMixClient() {
                   </div>
                 ) : null}
               </div>
-            ) : null}
+            ) : (
+              <div className="videoMixNarrationSettings">
+                <label className="videoMixCaptionToggle">
+                  <input
+                    type="checkbox"
+                    checked={originalCaptionsEnabled}
+                    disabled={editingLocked}
+                    onChange={(event) => {
+                      stopPreview();
+                      clearResult();
+                      setOriginalCaptionsEnabled(event.target.checked);
+                      if (!event.target.checked) {
+                        const canvas = previewCaptionRef.current;
+                        canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+                      }
+                    }}
+                  />
+                  <span>
+                    <strong>元音声のテロップを付ける</strong>
+                    <small>オンにして作成ボタンを押したときだけ、AI処理を1回使います</small>
+                  </span>
+                </label>
+                {originalCaptionsEnabled ? (
+                  <>
+                    <label className="videoMixBoundaryChoice">
+                      <span>テロップの見た目</span>
+                      <select
+                        value={narrationCaptionStyle}
+                        disabled={editingLocked}
+                        onChange={(event) => {
+                          stopPreview();
+                          clearResult();
+                          setNarrationCaptionStyle(event.target.value as VideoMixCaptionStyle);
+                        }}
+                      >
+                        {VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label} — {option.note}
+                          </option>
+                        ))}
+                      </select>
+                      <small>見た目・文字修正・表示切替ではAI処理を使いません。</small>
+                    </label>
+                    <div className="videoMixNarrationAction">
+                      <button
+                        type="button"
+                        onClick={generateOriginalCaptions}
+                        disabled={!plan || sceneSelectionBusy || originalCaptionsGenerating || exporting || aiOperationsRemaining <= 0}
+                      >
+                        {originalCaptionsGenerating
+                          ? "元音声を文字起こし中…"
+                          : originalCaptions.length > 0
+                            ? "元音声のテロップを作り直す"
+                            : "元音声からテロップを作る"}
+                      </button>
+                      <span>
+                        選んだ場面だけを1回で文字起こし
+                        <small>AI処理 残り{aiOperationsRemaining} / {aiOperationLimit}回</small>
+                      </span>
+                      {originalCaptionsGenerating ? (
+                        <button
+                          type="button"
+                          className="videoMixNarrationCancel"
+                          onClick={() => originalCaptionAbortRef.current?.abort()}
+                        >
+                          作成を中止
+                        </button>
+                      ) : null}
+                    </div>
+                    {originalCaptions.length > 0 ? (
+                      <div className={originalCaptionStyles.editor}>
+                        <div className={originalCaptionStyles.editorHeader}>
+                          <strong>実際に表示する文字を確認</strong>
+                          <p>{getEnabledVideoMixOriginalCaptions(originalCaptions).length}件を表示</p>
+                        </div>
+                        {originalCaptionsStale ? (
+                          <p className={originalCaptionStyles.notice} role="status">
+                            映像の並び・カット・つなぎ方が変わりました。現在の映像へ合わせて作り直してください。
+                          </p>
+                        ) : null}
+                        <ol className={originalCaptionStyles.list}>
+                          {originalCaptions.map((caption) => (
+                            <li key={caption.id} className={originalCaptionStyles.item} data-removed={caption.removed ? "true" : "false"}>
+                              <span className={originalCaptionStyles.time}>
+                                {formatSeconds(caption.start)}–{formatSeconds(caption.end)}
+                              </span>
+                              <textarea
+                                className={originalCaptionStyles.text}
+                                value={caption.text}
+                                maxLength={160}
+                                rows={2}
+                                disabled={editingLocked || caption.removed}
+                                aria-label={`${caption.id}件目のテロップ文字`}
+                                onChange={(event) => editOriginalCaption(caption.id, { text: event.target.value })}
+                              />
+                              <button
+                                type="button"
+                                className={originalCaptionStyles.toggle}
+                                disabled={editingLocked}
+                                aria-pressed={!caption.removed}
+                                onClick={() => editOriginalCaption(caption.id, { removed: !caption.removed })}
+                              >
+                                {caption.removed ? "表示する" : "使わない"}
+                              </button>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="videoMixNarrationStale">テロップなしで、元動画の音だけを活かします。</p>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="videoMixExportCard">
@@ -5066,7 +5453,7 @@ export default function VideoMixClient() {
             <ul><li>素材は選んだ順、各素材内は時間順を維持</li><li>{narrationEnabled ? narrationSourceAudioMode === "mute" ? "元動画の音を消し、AI音声を主役にします" : "AI音声を主役にし、環境音を薄く残します" : "素材ごとの音量差を自動で調整"}</li><li>つなぎ方とテロップ表示の変更は追加料金なし</li><li>有料枠は品質確認済みの書き出し成功時だけ使用</li></ul>
             <p className="videoMixAlwaysPrice">編集・プレビュー無料　<span>保存は1本¥{ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}／月額¥{STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}から</span></p>
             {planResult.error ? <p className="videoMixError" role="alert">{planResult.error}</p> : null}
-            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || sceneSelectionBusy || narrationGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed))}>
+            <button type="button" className="videoMixExportButton" onClick={startExport} disabled={!plan || preparing || sceneSelectionBusy || narrationGenerating || originalCaptionsGenerating || exporting || Boolean(pendingFinalize) || (narrationEnabled && (!narration || narrationStale || !disclosureConfirmed)) || (!narrationEnabled && originalCaptionsEnabled && (originalCaptions.length === 0 || originalCaptionsStale || getEnabledVideoMixOriginalCaptions(originalCaptions).length === 0))}>
               {finalizingUsage
                 ? "保存枠を確定中…"
                 : exporting
@@ -5144,7 +5531,7 @@ export default function VideoMixClient() {
           setAuthenticationGateOpen(false);
           setError("");
           setMessage(
-            "ログインが完了しました。素材と編集内容は保持されています。AIナレーションの作成をもう一度押してください。",
+            "ログインが完了しました。素材と編集内容は保持されています。元音声テロップまたはAIナレーションの作成ボタンをもう一度押してください。",
           );
         }}
       />

@@ -405,6 +405,14 @@ test("inspects the completed file from both export paths before offering it", ()
   assert.match(exportFlow, /expectedDurationSeconds: editedDurationSeconds/);
   assert.match(exportFlow, /expectedNarrationRanges/);
   assert.match(exportFlow, /captionRanges/);
+  assert.match(
+    exportFlow,
+    /playableRanges\s*\.slice\(0, -1\)[\s\S]*elapsedBoundarySeconds \+= range\.end - range\.start[\s\S]*videoContentBoundarySeconds/,
+  );
+  assert.match(
+    pageSource,
+    /videoContentInspection:\s*\{\s*boundarySeconds: validation\.videoContentBoundarySeconds/,
+  );
   assert.match(exportFlow, /setExportedVideoQualityMessage/);
   assert.match(pageSource, /exportedVideoQualityMessage \?\?/);
 });

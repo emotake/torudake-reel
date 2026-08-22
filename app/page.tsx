@@ -9,6 +9,7 @@ import {
 } from "./monthly-first-purchase";
 import SiteFooter from "./site-footer";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -27,14 +28,26 @@ import {
   buildSpokenEditRanges,
   createNaturalEdit,
   editedTimeToSourceTime,
+  explainCaptionCut,
   getEditedDuration,
   isIncludedCaption,
   remapCaptionsToEditedTimeline,
   setCaptionCut,
   sourceTimeToEditedTime,
+  summarizeAutomaticSilenceCuts,
   type SpokenCutMode,
   type EditPlanVisualEvidence,
 } from "../lib/edit-plan";
+import { buildPostingReadinessChecklist } from "../lib/posting-readiness";
+import {
+  DEFAULT_PERSONAL_EDIT_RECIPE,
+  PERSONAL_EDIT_PREFERENCE_LIMITS,
+  dictionaryMatchKey,
+  normalizePersonalEditRecipe,
+  normalizePronunciationDictionary,
+  type PersonalEditRecipe,
+  type PronunciationDictionaryEntry,
+} from "../lib/personal-edit-preferences";
 import {
   buildPreviewRanges,
   decideNarrationPreviewAction,
@@ -105,6 +118,7 @@ import {
 } from "../lib/video-frame-analysis";
 import {
   applyNarrationPronunciationGuide,
+  attachNarrationPronunciationReadings,
   buildDisclosedPostCaption,
   buildNarrationEditRanges,
   buildNarrationTimeline,
@@ -230,6 +244,31 @@ type NarrationPronunciationRow = {
   surface: string;
   reading: string;
 };
+
+function buildSavedNarrationPronunciationGuide(
+  dictionary: readonly PronunciationDictionaryEntry[],
+) {
+  const validRows: string[] = [];
+  for (const entry of dictionary) {
+    if (validRows.length >= 20) break;
+    const display = entry.display.replace(/\s+/g, " ").trim();
+    const reading = entry.reading.replace(/\s+/g, " ").trim();
+    if (!display || !reading || display === reading) continue;
+    const row = `${display} → ${reading}`;
+    const validation = validateNarrationPronunciationGuide(row);
+    const parsed = validation.entries[0];
+    if (
+      validation.error ||
+      validation.entries.length !== 1 ||
+      parsed?.surface !== display ||
+      parsed.reading !== reading
+    ) {
+      continue;
+    }
+    validRows.push(row);
+  }
+  return canonicalizeNarrationPronunciationGuide(validRows.join("\n"));
+}
 
 type ApiPayload = {
   error?: string;
@@ -370,6 +409,7 @@ async function inspectCompletedVideoQuality(
     requireAudibleAudio: boolean;
     expectedNarrationRanges: ReadonlyArray<{ start: number; end: number }>;
     captionRanges: ReadonlyArray<{ start: number; end: number }>;
+    videoContentBoundarySeconds: readonly number[];
   },
 ): Promise<CompletedVideoQuality> {
   try {
@@ -381,6 +421,9 @@ async function inspectCompletedVideoQuality(
       packetSampleCount: 360,
       inspectAudioActivity: validation.requireAudibleAudio,
       expectedNarrationRanges: validation.expectedNarrationRanges,
+      videoContentInspection: {
+        boundarySeconds: validation.videoContentBoundarySeconds,
+      },
     });
     const assessment = assessExportedVideoQuality(
       inspection,
@@ -1402,6 +1445,7 @@ async function requestNarrationPlan({
   narrationBundleToken,
   timingScale,
   previousScript,
+  pronunciationGuide,
   signal,
 }: {
   frames: string[];
@@ -1416,6 +1460,7 @@ async function requestNarrationPlan({
   narrationBundleToken?: string;
   timingScale?: number;
   previousScript?: string;
+  pronunciationGuide?: string;
   signal?: AbortSignal;
 }) {
   const response = await fetch("/api/narration/script", {
@@ -1438,6 +1483,7 @@ async function requestNarrationPlan({
       narrationBundleToken,
       timingScale,
       previousScript,
+      pronunciationGuide,
     }),
     signal,
   });
@@ -1874,14 +1920,99 @@ const initialTranscript: TranscriptLine[] = [
 ];
 
 const CAPTION_PROFILE_STORAGE_KEY = "torudake-caption-profile";
+const PERSONAL_EDIT_PREFERENCES_STORAGE_KEY =
+  "torudake-personal-edit-preferences";
+const ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY =
+  `${PERSONAL_EDIT_PREFERENCES_STORAGE_KEY}:anonymous`;
+const ACCOUNT_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY_PREFIX =
+  `${PERSONAL_EDIT_PREFERENCES_STORAGE_KEY}:account:`;
 const ACCOUNT_AUTHENTICATED_STORAGE_KEY = "torudake-account-authenticated";
 const CAPTION_PROFILE_SAVE_DELAY_MS = 500;
+const PERSONAL_EDIT_PREFERENCES_SAVE_DELAY_MS = 650;
 
 type CaptionProfileSyncStatus =
   | "checking"
   | "local-only"
   | "authenticated"
   | "unavailable";
+
+type PersonalEditPreferencesSyncStatus =
+  | "checking"
+  | "local-only"
+  | "authenticated"
+  | "unavailable";
+
+type PersonalEditPreferencesPayload = Readonly<{
+  recipe: PersonalEditRecipe;
+  dictionary: PronunciationDictionaryEntry[];
+}>;
+
+function normalizePersonalEditPreferencesPayload(
+  value: unknown,
+): PersonalEditPreferencesPayload {
+  const candidate =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  return {
+    recipe: normalizePersonalEditRecipe(candidate?.recipe),
+    dictionary: normalizePronunciationDictionary(candidate?.dictionary).map(
+      ({ display, reading }) => ({ display, reading }),
+    ),
+  };
+}
+
+function defaultPersonalEditPreferences(): PersonalEditPreferencesPayload {
+  return {
+    recipe: { ...DEFAULT_PERSONAL_EDIT_RECIPE },
+    dictionary: [],
+  };
+}
+
+function readLocalPersonalEditPreferences(
+  storageKey: string,
+  options: { migrateLegacyAnonymous?: boolean } = {},
+) {
+  if (typeof window === "undefined") {
+    return defaultPersonalEditPreferences();
+  }
+  try {
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved) {
+      return normalizePersonalEditPreferencesPayload(JSON.parse(saved));
+    }
+    if (options.migrateLegacyAnonymous) {
+      const legacy = window.localStorage.getItem(
+        PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+      );
+      if (legacy) {
+        const preferences = normalizePersonalEditPreferencesPayload(
+          JSON.parse(legacy),
+        );
+        window.localStorage.setItem(storageKey, JSON.stringify(preferences));
+        window.localStorage.removeItem(PERSONAL_EDIT_PREFERENCES_STORAGE_KEY);
+        return preferences;
+      }
+    }
+    return defaultPersonalEditPreferences();
+  } catch {
+    return defaultPersonalEditPreferences();
+  }
+}
+
+function authenticatedPersonalPreferencesStorageKey(value: unknown) {
+  const accountStorageId =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>).accountStorageId
+      : null;
+  if (
+    typeof accountStorageId !== "string" ||
+    !/^[a-zA-Z0-9_-]{43}$/.test(accountStorageId)
+  ) {
+    throw new Error("Authenticated account identifier is unavailable.");
+  }
+  return `${ACCOUNT_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY_PREFIX}${accountStorageId}`;
+}
 
 function readLocalCaptionProfile() {
   if (typeof window === "undefined") return DEFAULT_CAPTION_PROFILE;
@@ -2043,6 +2174,21 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
   const [captionProfile, setCaptionProfile] = useCaptionProfileSync();
+  const [personalDictionary, setPersonalDictionaryState] = useState<
+    PronunciationDictionaryEntry[]
+  >([]);
+  const [personalPreferencesSyncStatus, setPersonalPreferencesSyncStatus] =
+    useState<PersonalEditPreferencesSyncStatus>("checking");
+  const [personalPreferencesHydrated, setPersonalPreferencesHydrated] =
+    useState(false);
+  const [personalPreferencesStorageKey, setPersonalPreferencesStorageKey] =
+    useState<string | null>(null);
+  const [personalPreferencesEditRevision, setPersonalPreferencesEditRevision] =
+    useState(0);
+  const personalPreferencesEditedRef = useRef(false);
+  const personalPreferencesMountedRef = useRef(true);
+  const personalPreferencesSyncStartedRef = useRef(false);
+  const preDemoPersonalRecipeRef = useRef<PersonalEditRecipe | null>(null);
   const [length, setLength] = useState(60);
   const [audioMode, setAudioMode] = useState<VideoAudioMode>("spoken");
   const [spokenCaptionsEnabled, setSpokenCaptionsEnabled] = useState(false);
@@ -2050,8 +2196,14 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     useState<SpokenCutMode>("auto");
   const [asrDictionaryInput, setAsrDictionaryInput] = useState("");
   const asrDictionary = useMemo(
-    () => sanitizeAsrUserDictionary(asrDictionaryInput),
-    [asrDictionaryInput],
+    () =>
+      sanitizeAsrUserDictionary(
+        [
+          ...sanitizeAsrUserDictionary(asrDictionaryInput),
+          ...personalDictionary.map((entry) => entry.display),
+        ].join("、"),
+      ),
+    [asrDictionaryInput, personalDictionary],
   );
   const [narrationStyle, setNarrationStyle] =
     useState<NarrationStyle>("calm");
@@ -2064,9 +2216,36 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     useState(true);
   const [narrationAutoCutEnabled, setNarrationAutoCutEnabled] =
     useState(false);
+  const personalEditRecipe = useMemo(
+    () =>
+      normalizePersonalEditRecipe({
+        version: 1,
+        audioMode,
+        targetDurationSeconds: length,
+        editingPace: "balanced",
+        spokenCaptionsEnabled,
+        spokenCutMode,
+        narrationStyle,
+        narrationCaptionsEnabled,
+        narrationAutoCutEnabled,
+        narrationOriginalAudioPercent: narrationOriginalAudio,
+      }),
+    [
+      audioMode,
+      length,
+      narrationAutoCutEnabled,
+      narrationCaptionsEnabled,
+      narrationOriginalAudio,
+      narrationStyle,
+      spokenCaptionsEnabled,
+      spokenCutMode,
+    ],
+  );
   const [narrationPlan, setNarrationPlan] = useState<NarrationPlan | null>(
     null,
   );
+  const [initialNarrationPronunciationGuide, setInitialNarrationPronunciationGuide] =
+    useState("");
   const [narrationAudioUrl, setNarrationAudioUrlState] = useState("");
   const narrationAudioUrlRef = useRef("");
   const narrationAudioRevisionRef = useRef(0);
@@ -2112,6 +2291,267 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
   const [recoverableDraft, setRecoverableDraft] =
     useState<LocalEditDraft | null>(null);
   const pendingDraftRestoreRef = useRef<LocalEditDraft | null>(null);
+
+  const applyPersonalEditPreferences = useCallback(
+    (preferences: PersonalEditPreferencesPayload) => {
+      const recipe = normalizePersonalEditRecipe(preferences.recipe);
+      setAudioMode(recipe.audioMode);
+      setLength(recipe.targetDurationSeconds);
+      setSpokenCaptionsEnabled(recipe.spokenCaptionsEnabled);
+      setSpokenCutMode(recipe.spokenCutMode);
+      setNarrationStyle(recipe.narrationStyle);
+      setNarrationCaptionsEnabled(recipe.narrationCaptionsEnabled);
+      setNarrationAutoCutEnabled(recipe.narrationAutoCutEnabled);
+      setNarrationOriginalAudio(
+        recipe.narrationOriginalAudioPercent as NarrationOriginalAudioLevel,
+      );
+      setPersonalDictionaryState(
+        normalizePronunciationDictionary(preferences.dictionary).map(
+          ({ display, reading }) => ({ display, reading }),
+        ),
+      );
+    },
+    [],
+  );
+
+  function markPersonalPreferenceEdited() {
+    personalPreferencesEditedRef.current = true;
+    setPersonalPreferencesEditRevision((revision) => revision + 1);
+  }
+
+  function setPersonalDictionary(entries: PronunciationDictionaryEntry[]) {
+    markPersonalPreferenceEdited();
+    setPersonalDictionaryState(
+      normalizePronunciationDictionary(entries).map(({ display, reading }) => ({
+        display,
+        reading,
+      })),
+    );
+  }
+
+  function rememberPronunciationEntries(
+    entries: PronunciationDictionaryEntry[],
+  ) {
+    if (entries.length === 0) return;
+    markPersonalPreferenceEdited();
+    setPersonalDictionaryState((current) =>
+      normalizePronunciationDictionary([...entries, ...current]).map(
+        ({ display, reading }) => ({ display, reading }),
+      ),
+    );
+  }
+
+  function setPersonalLength(nextLength: number) {
+    markPersonalPreferenceEdited();
+    setLength(nextLength);
+  }
+
+  function setPersonalAudioMode(nextMode: VideoAudioMode) {
+    markPersonalPreferenceEdited();
+    setAudioMode(nextMode);
+  }
+
+  function setPersonalSpokenCaptionsEnabled(enabled: boolean) {
+    markPersonalPreferenceEdited();
+    setSpokenCaptionsEnabled(enabled);
+  }
+
+  function setPersonalSpokenCutMode(nextMode: SpokenCutMode) {
+    markPersonalPreferenceEdited();
+    setSpokenCutMode(nextMode);
+  }
+
+  function setPersonalNarrationStyle(nextStyle: NarrationStyle) {
+    markPersonalPreferenceEdited();
+    setNarrationStyle(nextStyle);
+  }
+
+  function setPersonalNarrationCaptionsEnabled(enabled: boolean) {
+    markPersonalPreferenceEdited();
+    setNarrationCaptionsEnabled(enabled);
+  }
+
+  function setPersonalNarrationAutoCutEnabled(enabled: boolean) {
+    markPersonalPreferenceEdited();
+    setNarrationAutoCutEnabled(enabled);
+  }
+
+  function setPersonalNarrationOriginalAudio(
+    percent: NarrationOriginalAudioLevel,
+  ) {
+    markPersonalPreferenceEdited();
+    setNarrationOriginalAudio(percent);
+  }
+
+  useEffect(() => {
+    personalPreferencesMountedRef.current = true;
+    if (personalPreferencesSyncStartedRef.current) {
+      return () => {
+        personalPreferencesMountedRef.current = false;
+      };
+    }
+    personalPreferencesSyncStartedRef.current = true;
+
+    let hasAuthenticationHint = false;
+    try {
+      hasAuthenticationHint =
+        window.localStorage.getItem(ACCOUNT_AUTHENTICATED_STORAGE_KEY) === "1";
+    } catch {
+      // Local personalization remains available when storage access is blocked.
+    }
+    if (!hasAuthenticationHint) {
+      const localPreferences = readLocalPersonalEditPreferences(
+        ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+        { migrateLegacyAnonymous: true },
+      );
+      applyPersonalEditPreferences(localPreferences);
+      setPersonalPreferencesStorageKey(
+        ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+      );
+      setPersonalPreferencesHydrated(true);
+      setPersonalPreferencesSyncStatus("local-only");
+      return () => {
+        personalPreferencesMountedRef.current = false;
+      };
+    }
+
+    void fetch("/api/personal-edit-preferences", {
+      cache: "no-store",
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        if (!personalPreferencesMountedRef.current) return;
+        if (response.status === 401) {
+          removeAccountAuthenticationHint();
+          const localPreferences = readLocalPersonalEditPreferences(
+            ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+            { migrateLegacyAnonymous: true },
+          );
+          if (!personalPreferencesEditedRef.current) {
+            applyPersonalEditPreferences(localPreferences);
+          }
+          setPersonalPreferencesStorageKey(
+            ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+          );
+          setPersonalPreferencesHydrated(true);
+          setPersonalPreferencesSyncStatus("local-only");
+          return;
+        }
+        if (!response.ok) {
+          setPersonalPreferencesHydrated(true);
+          setPersonalPreferencesSyncStatus("unavailable");
+          return;
+        }
+        const responsePayload: unknown = await response.json();
+        const preferences =
+          normalizePersonalEditPreferencesPayload(responsePayload);
+        const accountStorageKey =
+          authenticatedPersonalPreferencesStorageKey(responsePayload);
+        if (!personalPreferencesMountedRef.current) return;
+        if (!personalPreferencesEditedRef.current) {
+          applyPersonalEditPreferences(preferences);
+        }
+        setPersonalPreferencesStorageKey(accountStorageKey);
+        setPersonalPreferencesHydrated(true);
+        setPersonalPreferencesSyncStatus("authenticated");
+      })
+      .catch(() => {
+        if (personalPreferencesMountedRef.current) {
+          setPersonalPreferencesStorageKey(null);
+          setPersonalPreferencesHydrated(true);
+          setPersonalPreferencesSyncStatus("unavailable");
+        }
+      });
+
+    return () => {
+      personalPreferencesMountedRef.current = false;
+    };
+  }, [applyPersonalEditPreferences]);
+
+  useEffect(() => {
+    if (!personalPreferencesHydrated || isDemoSample) return;
+    const payload = {
+      recipe: personalEditRecipe,
+      dictionary: personalDictionary,
+    };
+    if (personalPreferencesStorageKey) {
+      try {
+        window.localStorage.setItem(
+          personalPreferencesStorageKey,
+          JSON.stringify(payload),
+        );
+      } catch {
+        // Settings continue to work for the current page session.
+      }
+    }
+    if (
+      personalPreferencesSyncStatus !== "authenticated" ||
+      !personalPreferencesEditedRef.current
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void fetch("/api/personal-edit-preferences", {
+        method: "PUT",
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then((response) => {
+          if (
+            controller.signal.aborted ||
+            !personalPreferencesMountedRef.current
+          ) {
+            return;
+          }
+          if (response.status === 401 && personalPreferencesMountedRef.current) {
+            removeAccountAuthenticationHint();
+            personalPreferencesEditedRef.current = false;
+            applyPersonalEditPreferences(
+              readLocalPersonalEditPreferences(
+                ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+                { migrateLegacyAnonymous: true },
+              ),
+            );
+            setPersonalPreferencesStorageKey(
+              ANONYMOUS_PERSONAL_EDIT_PREFERENCES_STORAGE_KEY,
+            );
+            setPersonalPreferencesSyncStatus("local-only");
+            return;
+          }
+          if (!response.ok) {
+            setPersonalPreferencesSyncStatus("unavailable");
+          }
+        })
+        .catch((error: unknown) => {
+          if (
+            controller.signal.aborted ||
+            (error instanceof DOMException && error.name === "AbortError")
+          ) {
+            return;
+          }
+          if (personalPreferencesMountedRef.current) {
+            setPersonalPreferencesSyncStatus("unavailable");
+          }
+        });
+    }, PERSONAL_EDIT_PREFERENCES_SAVE_DELAY_MS);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    applyPersonalEditPreferences,
+    personalDictionary,
+    personalEditRecipe,
+    personalPreferencesEditRevision,
+    personalPreferencesHydrated,
+    personalPreferencesStorageKey,
+    personalPreferencesSyncStatus,
+    isDemoSample,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -2435,18 +2875,28 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
             format: analyticsVideoFormat(selected),
           }),
     });
+    const restoringAfterDemo =
+      !options.demo && isDemoSample ? preDemoPersonalRecipeRef.current : null;
+    if (options.demo && !isDemoSample) {
+      preDemoPersonalRecipeRef.current = personalEditRecipe;
+    }
     setIsDemoSample(Boolean(options.demo));
     if (options.demo) {
       setAudioMode("spoken");
       setSpokenCaptionsEnabled(true);
-    } else if (!matchingDraft) {
-      setSpokenCaptionsEnabled(false);
+    } else if (restoringAfterDemo && !matchingDraft) {
+      applyPersonalEditPreferences({
+        recipe: restoringAfterDemo,
+        dictionary: personalDictionary,
+      });
+      preDemoPersonalRecipeRef.current = null;
     }
     setEditError("");
     setSilentFallback(false);
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
     setNarrationPlan(null);
+    setInitialNarrationPronunciationGuide("");
     setNarrationAudioUrl("");
     setNarrationAudioModel("");
     setNarrationAudioVoice("");
@@ -2784,10 +3234,10 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     rememberUsageReservation(null);
     setSilentFallback(false);
     setEditError("");
-    setAudioMode("narration");
-    setNarrationOriginalAudio(0);
-    setNarrationAutoCutEnabled(false);
-    setNarrationCaptionsEnabled(true);
+    setPersonalAudioMode("narration");
+    setPersonalNarrationOriginalAudio(0);
+    setPersonalNarrationAutoCutEnabled(false);
+    setPersonalNarrationCaptionsEnabled(true);
   }
 
   async function finishSilentVideoWithoutCaptions() {
@@ -2797,9 +3247,9 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     }
     setSilentFallback(false);
     setEditError("");
-    setAudioMode("spoken");
-    setSpokenCaptionsEnabled(false);
-    setSpokenCutMode("none");
+    setPersonalAudioMode("spoken");
+    setPersonalSpokenCaptionsEnabled(false);
+    setPersonalSpokenCutMode("none");
     setTranscript([]);
     setPreviewMode("before");
     setStage("result");
@@ -2842,6 +3292,10 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     let newlyReservedUsage: string | null = null;
     let newlyReservedBucket: BillingBucket | null = null;
     const initialNarrationOperationId = crypto.randomUUID();
+    const initialPronunciationGuide = buildSavedNarrationPronunciationGuide(
+      personalDictionary,
+    );
+    setInitialNarrationPronunciationGuide(initialPronunciationGuide);
 
     try {
       const reservation = await reserveVideoUsage(file, controller.signal);
@@ -2870,14 +3324,23 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
         usageReservationId: newlyReservedUsage,
         aiOperationId: initialNarrationOperationId,
         initialNarration: true,
+        pronunciationGuide: initialPronunciationGuide,
         signal: controller.signal,
       });
       recordAiOperationResult(nextPlan);
       throwIfProcessingAborted(controller.signal);
       updateProgress(68);
       const maximumDuration = narrationTargetDuration;
-      let speechResult = await requestNarrationSpeech(
+      let speechReadyPlan = attachNarrationPronunciationReadings(
+        nextPlan,
+        initialPronunciationGuide,
+      );
+      let speechScript = applyNarrationPronunciationGuide(
         nextPlan.script,
+        initialPronunciationGuide,
+      );
+      let speechResult = await requestNarrationSpeech(
+        speechScript,
         narrationStyle,
         newlyReservedUsage,
         maximumDuration,
@@ -2912,11 +3375,20 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           aiOperationId: initialNarrationOperationId,
           initialNarration: true,
           narrationBundleToken: nextPlan.narrationBundleToken,
+          pronunciationGuide: initialPronunciationGuide,
           signal: controller.signal,
         });
         recordAiOperationResult(nextPlan);
-        speechResult = await requestNarrationSpeech(
+        speechReadyPlan = attachNarrationPronunciationReadings(
+          nextPlan,
+          initialPronunciationGuide,
+        );
+        speechScript = applyNarrationPronunciationGuide(
           nextPlan.script,
+          initialPronunciationGuide,
+        );
+        speechResult = await requestNarrationSpeech(
+          speechScript,
           narrationStyle,
           newlyReservedUsage,
           maximumDuration,
@@ -2940,7 +3412,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
       throwIfProcessingAborted(controller.signal);
       updateProgress(90);
       let timeline = buildNarrationTimeline(
-        nextPlan.segments,
+        speechReadyPlan.segments,
         extracted.duration,
         narrationTargetDuration,
         audioDuration,
@@ -2948,7 +3420,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
       );
       timeline = await snapNarrationTimelineToAudioSilence(
         audio,
-        nextPlan.segments,
+        speechReadyPlan.segments,
         timeline,
         extracted.duration,
         narrationAutoCutEnabled,
@@ -2959,7 +3431,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
       }
 
       setTranscript(timeline);
-      setNarrationPlan(nextPlan);
+      setNarrationPlan(speechReadyPlan);
       setNarrationAudioUrl(URL.createObjectURL(audio));
       setNarrationAudioModel(speechResult.model);
       setNarrationAudioVoice(speechResult.voice);
@@ -3104,7 +3576,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
       if (editGenerationRef.current !== generation) {
         throw new DOMException("処理を中止しました。", "AbortError");
       }
-      setNarrationStyle(style);
+      setPersonalNarrationStyle(style);
       setNarrationPlan({ ...narrationPlan, script: cleanScript, segments });
       const baseTimeline = buildNarrationTimeline(
         segments,
@@ -3399,6 +3871,13 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     narrationRegenerationAbortRef.current = null;
     editGenerationRef.current += 1;
     releasePendingExportReservation();
+    if (isDemoSample && preDemoPersonalRecipeRef.current) {
+      applyPersonalEditPreferences({
+        recipe: preDemoPersonalRecipeRef.current,
+        dictionary: personalDictionary,
+      });
+    }
+    preDemoPersonalRecipeRef.current = null;
     setFile(null);
     setSelectedVideoDuration(0);
     setIsDemoSample(false);
@@ -3410,14 +3889,9 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     setSilentFallback(false);
     setUsedHighAccuracy(false);
     setIsHighAccuracyRun(false);
-    setAudioMode("spoken");
-    setSpokenCaptionsEnabled(false);
-    setSpokenCutMode("auto");
     setAsrDictionaryInput("");
-    setNarrationOriginalAudio(DEFAULT_NARRATION_ORIGINAL_AUDIO_PERCENT);
-    setNarrationCaptionsEnabled(true);
-    setNarrationAutoCutEnabled(false);
     setNarrationPlan(null);
+    setInitialNarrationPronunciationGuide("");
     setNarrationAudioUrl("");
     setNarrationAudioModel("");
     setNarrationAudioVoice("");
@@ -3700,28 +4174,31 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           setGoal={setGoal}
           captionProfile={captionProfile}
           length={length}
-          setLength={setLength}
+          setLength={setPersonalLength}
           audioMode={audioMode}
-          setAudioMode={setAudioMode}
+          setAudioMode={setPersonalAudioMode}
           spokenCaptionsEnabled={spokenCaptionsEnabled}
           setSpokenCaptionsEnabled={(enabled) => {
-            setSpokenCaptionsEnabled(enabled);
+            setPersonalSpokenCaptionsEnabled(enabled);
             setPreviewMode(enabled ? "after" : "before");
           }}
           spokenCutMode={spokenCutMode}
-          setSpokenCutMode={setSpokenCutMode}
+          setSpokenCutMode={setPersonalSpokenCutMode}
           asrDictionaryInput={asrDictionaryInput}
           setAsrDictionaryInput={setAsrDictionaryInput}
           narrationStyle={narrationStyle}
-          setNarrationStyle={setNarrationStyle}
+          setNarrationStyle={setPersonalNarrationStyle}
           narrationOriginalAudio={narrationOriginalAudio}
-          setNarrationOriginalAudio={setNarrationOriginalAudio}
+          setNarrationOriginalAudio={setPersonalNarrationOriginalAudio}
           narrationBrief={narrationBrief}
           setNarrationBrief={setNarrationBrief}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
-          setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
+          setNarrationCaptionsEnabled={setPersonalNarrationCaptionsEnabled}
           narrationAutoCutEnabled={narrationAutoCutEnabled}
-          setNarrationAutoCutEnabled={setNarrationAutoCutEnabled}
+          setNarrationAutoCutEnabled={setPersonalNarrationAutoCutEnabled}
+          personalPreferencesSyncStatus={personalPreferencesSyncStatus}
+          personalDictionary={personalDictionary}
+          setPersonalDictionary={setPersonalDictionary}
           silentFallback={silentFallback}
           chooseSilentNarration={() => void chooseSilentNarrationMode()}
           finishSilentWithoutCaptions={() =>
@@ -3767,7 +4244,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
               void startEditing(false, true);
               return;
             }
-            setSpokenCaptionsEnabled(enabled);
+            setPersonalSpokenCaptionsEnabled(enabled);
             setPreviewMode(enabled ? "after" : "before");
           }}
           spokenCutMode={spokenCutMode}
@@ -3786,18 +4263,25 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           narrationPlan={narrationPlan}
           setNarrationPlan={setNarrationPlan}
           narrationAudioUrl={narrationAudioUrl}
+          initialNarrationPronunciationGuide={
+            initialNarrationPronunciationGuide
+          }
           narrationStyle={narrationStyle}
           narrationGenerationsRemaining={aiOperationsRemaining}
           narrationGenerationLimit={aiOperationLimit}
           narrationOriginalAudio={narrationOriginalAudio}
           narrationCaptionsEnabled={narrationCaptionsEnabled}
-          setNarrationCaptionsEnabled={setNarrationCaptionsEnabled}
+          setNarrationCaptionsEnabled={setPersonalNarrationCaptionsEnabled}
           narrationAutoCutEnabled={narrationAutoCutEnabled}
-          setNarrationAutoCutEnabled={updateNarrationCutMode}
+          setNarrationAutoCutEnabled={async (enabled) => {
+            markPersonalPreferenceEdited();
+            await updateNarrationCutMode(enabled);
+          }}
           usageReservationId={usageReservationId}
           usageBucket={usageBucket}
           usageReservationPendingExport={usageReservationPendingExport}
-          setNarrationOriginalAudio={setNarrationOriginalAudio}
+          setNarrationOriginalAudio={setPersonalNarrationOriginalAudio}
+          rememberPronunciationEntries={rememberPronunciationEntries}
           regenerateNarration={regenerateNarration}
           regenerateNarrationSegment={regenerateNarrationSegment}
           applyNarrationSegmentCorrection={applyNarrationSegmentCorrection}
@@ -4066,7 +4550,7 @@ function Landing({
             </span>
             <span>
               <strong>動画をつないで作る</strong>
-              <small>最大5本・素材の順番を保って1本に合成</small>
+              <small>最大5本・順番を保って合成・元音声テロップも選べる</small>
             </span>
             <i aria-hidden="true">→</i>
           </Link>
@@ -4562,6 +5046,145 @@ function CaptionStylePicker({
   );
 }
 
+function personalPreferenceStorageLabel(
+  status: PersonalEditPreferencesSyncStatus,
+) {
+  switch (status) {
+    case "authenticated":
+      return "アカウントに保存";
+    case "checking":
+      return "保存先を確認中";
+    case "unavailable":
+      return "この端末に保存（同期は一時停止）";
+    default:
+      return "この端末に保存";
+  }
+}
+
+function PersonalDictionaryEditor({
+  entries,
+  onChange,
+  syncStatus,
+}: {
+  entries: PronunciationDictionaryEntry[];
+  onChange: (entries: PronunciationDictionaryEntry[]) => void;
+  syncStatus: PersonalEditPreferencesSyncStatus;
+}) {
+  const [display, setDisplay] = useState("");
+  const [reading, setReading] = useState("");
+  const normalizedCandidate = normalizePronunciationDictionary([
+    { display, reading },
+  ])[0];
+  const duplicate = Boolean(
+    normalizedCandidate &&
+      entries.some(
+        (entry) =>
+          dictionaryMatchKey(entry.display) === normalizedCandidate.matchKey,
+      ),
+  );
+  const atLimit =
+    entries.length >= PERSONAL_EDIT_PREFERENCE_LIMITS.dictionaryEntries;
+  const canAdd = Boolean(normalizedCandidate && !duplicate && !atLimit);
+
+  function addEntry() {
+    if (!canAdd || !normalizedCandidate) return;
+    onChange([
+      { display: normalizedCandidate.display, reading: normalizedCandidate.reading },
+      ...entries,
+    ]);
+    setDisplay("");
+    setReading("");
+  }
+
+  return (
+    <details className="personalDictionaryPanel">
+      <summary>
+        <span aria-hidden="true">読</span>
+        <div>
+          <strong>名前や商品名の読み方を記憶</strong>
+          <small>一度直した言葉を、次の動画でも自動で使います</small>
+        </div>
+        <b>{entries.length}件</b>
+      </summary>
+      <div className="personalDictionaryBody">
+        <p className="personalDictionaryIntro">
+          元音声の文字起こしでは正しい表記の参考にし、AIナレーションでは台本内の同じ言葉へ読み方を反映します。登録・削除だけではAI処理回数や料金は増えません。
+        </p>
+        {entries.length > 0 && (
+          <ul className="personalDictionaryEntries" aria-label="記憶した読み方">
+            {entries.map((entry) => (
+              <li key={dictionaryMatchKey(entry.display)}>
+                <span>
+                  <strong>{entry.display}</strong>
+                  <small>読み：{entry.reading}</small>
+                </span>
+                <button
+                  type="button"
+                  aria-label={`${entry.display}の読み方を削除`}
+                  onClick={() =>
+                    onChange(
+                      entries.filter(
+                        (candidate) =>
+                          dictionaryMatchKey(candidate.display) !==
+                          dictionaryMatchKey(entry.display),
+                      ),
+                    )
+                  }
+                >
+                  削除
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="personalDictionaryForm">
+          <label>
+            <span>動画に表示する言葉</span>
+            <input
+              value={display}
+              maxLength={PERSONAL_EDIT_PREFERENCE_LIMITS.dictionaryDisplayCharacters}
+              placeholder="例：撮るだけリール"
+              onChange={(event) => setDisplay(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>AI音声での読み方</span>
+            <input
+              value={reading}
+              maxLength={PERSONAL_EDIT_PREFERENCE_LIMITS.dictionaryReadingCharacters}
+              placeholder="例：とるだけりーる"
+              onChange={(event) => setReading(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && canAdd) {
+                  event.preventDefault();
+                  addEntry();
+                }
+              }}
+            />
+          </label>
+          <button type="button" disabled={!canAdd} onClick={addEntry}>
+            読み方を記憶
+          </button>
+        </div>
+        {duplicate && (
+          <small className="personalDictionaryFeedback" role="status">
+            この言葉は登録済みです。いったん削除して登録し直してください。
+          </small>
+        )}
+        {atLimit && (
+          <small className="personalDictionaryFeedback" role="status">
+            読み方は{PERSONAL_EDIT_PREFERENCE_LIMITS.dictionaryEntries}件まで記憶できます。
+          </small>
+        )}
+        <p className="personalDictionaryStorage">
+          <span aria-hidden="true">✓</span>
+          {personalPreferenceStorageLabel(syncStatus)}
+        </p>
+      </div>
+    </details>
+  );
+}
+
 function SetupWorkspace({
   file,
   isDemoSample,
@@ -4590,6 +5213,9 @@ function SetupWorkspace({
   setNarrationCaptionsEnabled,
   narrationAutoCutEnabled,
   setNarrationAutoCutEnabled,
+  personalPreferencesSyncStatus,
+  personalDictionary,
+  setPersonalDictionary,
   silentFallback,
   chooseSilentNarration,
   finishSilentWithoutCaptions,
@@ -4626,6 +5252,9 @@ function SetupWorkspace({
   setNarrationCaptionsEnabled: (enabled: boolean) => void;
   narrationAutoCutEnabled: boolean;
   setNarrationAutoCutEnabled: (enabled: boolean) => void;
+  personalPreferencesSyncStatus: PersonalEditPreferencesSyncStatus;
+  personalDictionary: PronunciationDictionaryEntry[];
+  setPersonalDictionary: (entries: PronunciationDictionaryEntry[]) => void;
   silentFallback: boolean;
   chooseSilentNarration: () => void;
   finishSilentWithoutCaptions: () => void;
@@ -5145,6 +5774,23 @@ function SetupWorkspace({
             </fieldset>
           )}
 
+          <div className="personalRecipeNotice" role="status">
+            <span aria-hidden="true">✓</span>
+            <div>
+              <strong>この設定を「いつもの仕上がり」として記憶</strong>
+              <small>
+                次の動画では、音声モード・長さ・テロップ・カット・元音量を自動で呼び戻します。
+              </small>
+            </div>
+            <b>{personalPreferenceStorageLabel(personalPreferencesSyncStatus)}</b>
+          </div>
+
+          <PersonalDictionaryEditor
+            entries={personalDictionary}
+            onChange={setPersonalDictionary}
+            syncStatus={personalPreferencesSyncStatus}
+          />
+
           <div className="autoTelopNote">
             <span aria-hidden="true">Aa</span>
             <div>
@@ -5431,6 +6077,7 @@ function ResultWorkspace({
   narrationPlan,
   setNarrationPlan,
   narrationAudioUrl,
+  initialNarrationPronunciationGuide,
   narrationStyle,
   narrationGenerationsRemaining,
   narrationGenerationLimit,
@@ -5443,6 +6090,7 @@ function ResultWorkspace({
   usageBucket,
   usageReservationPendingExport,
   setNarrationOriginalAudio,
+  rememberPronunciationEntries,
   regenerateNarration,
   regenerateNarrationSegment,
   applyNarrationSegmentCorrection,
@@ -5476,6 +6124,7 @@ function ResultWorkspace({
   narrationPlan: NarrationPlan | null;
   setNarrationPlan: (plan: NarrationPlan | null) => void;
   narrationAudioUrl: string;
+  initialNarrationPronunciationGuide: string;
   narrationStyle: NarrationStyle;
   narrationGenerationsRemaining: number;
   narrationGenerationLimit: number;
@@ -5489,6 +6138,9 @@ function ResultWorkspace({
   usageReservationPendingExport: boolean;
   setNarrationOriginalAudio: (
     percent: NarrationOriginalAudioLevel,
+  ) => void;
+  rememberPronunciationEntries: (
+    entries: PronunciationDictionaryEntry[],
   ) => void;
   regenerateNarration: (
     script: string,
@@ -5612,12 +6264,46 @@ function ResultWorkspace({
   const [narrationDraft, setNarrationDraft] = useState(
     narrationPlan?.script ?? "",
   );
-  const pronunciationRowSequenceRef = useRef(1);
+  const initialPersonalPronunciationEntries = useMemo(
+    () => {
+      const validation = validateNarrationPronunciationGuide(
+        initialNarrationPronunciationGuide,
+      );
+      if (validation.error) return [];
+      return validation.entries
+        .filter((entry) =>
+          Boolean(narrationPlan?.script.includes(entry.surface)),
+        )
+        .map((entry) => ({
+          display: entry.surface,
+          reading: entry.reading,
+        }));
+    },
+    [initialNarrationPronunciationGuide, narrationPlan?.script],
+  );
+  const initialPersonalPronunciationGuide = useMemo(
+    () =>
+      initialPersonalPronunciationEntries
+        .map((entry) => `${entry.display} → ${entry.reading}`)
+        .join("\n"),
+    [initialPersonalPronunciationEntries],
+  );
+  const pronunciationRowSequenceRef = useRef(
+    Math.max(1, initialPersonalPronunciationEntries.length),
+  );
   const [narrationPronunciationRows, setNarrationPronunciationRows] = useState<
     NarrationPronunciationRow[]
-  >([{ id: 0, surface: "", reading: "" }]);
+  >(() =>
+    initialPersonalPronunciationEntries.length
+      ? initialPersonalPronunciationEntries.map((entry, index) => ({
+          id: index,
+          surface: entry.display,
+          reading: entry.reading,
+        }))
+      : [{ id: 0, surface: "", reading: "" }],
+  );
   const [usePronunciationCorrections, setUsePronunciationCorrections] =
-    useState(false);
+    useState(initialPersonalPronunciationEntries.length > 0);
   const narrationPronunciationGuide = useMemo(
     () =>
       narrationPronunciationRows
@@ -5631,11 +6317,20 @@ function ResultWorkspace({
     [narrationPronunciationGuide],
   );
   const [lastAppliedPronunciationGuide, setLastAppliedPronunciationGuide] =
-    useState("");
+    useState(() =>
+      canonicalizeNarrationPronunciationGuide(
+        initialPersonalPronunciationGuide,
+      ),
+    );
   const [draftNarrationStyle, setDraftNarrationStyle] =
     useState<NarrationStyle>(narrationStyle);
   const [lastNarrationGenerationKey, setLastNarrationGenerationKey] = useState(
-    () => narrationGenerationKey(narrationPlan?.script ?? "", narrationStyle, ""),
+    () =>
+      narrationGenerationKey(
+        narrationPlan?.script ?? "",
+        narrationStyle,
+        initialPersonalPronunciationGuide,
+      ),
   );
   const [isRegeneratingNarration, setIsRegeneratingNarration] =
     useState(false);
@@ -5884,6 +6579,9 @@ function ResultWorkspace({
       new Map(
         transcript.map((line) => [line.id, line.removed] as const),
       ),
+  );
+  const [manuallyChangedCutIds, setManuallyChangedCutIds] = useState(
+    () => new Set<number>(),
   );
   const captionDesign = useMemo(
     () => resolveCaptionDesign(captionProfile, goal),
@@ -6206,6 +6904,62 @@ function ResultWorkspace({
     [thumbnailPreviewUrl],
   );
   const removedCount = transcript.filter((line) => line.removed).length;
+  const cutReasonById = useMemo(() => {
+    if (narrationPlan || spokenCutMode === "none") {
+      return new Map<number, ReturnType<typeof explainCaptionCut>>();
+    }
+    return new Map(
+      transcript
+        .filter((line) => line.removed)
+        .map(
+          (line) =>
+            [
+              line.id,
+              explainCaptionCut(
+                transcript,
+                line.id,
+                manuallyChangedCutIds.has(line.id) ? "manual" : spokenCutMode,
+                length,
+              ),
+            ] as const,
+        ),
+    );
+  }, [
+    length,
+    manuallyChangedCutIds,
+    narrationPlan,
+    spokenCutMode,
+    transcript,
+  ]);
+  const automaticSilenceSummary = useMemo(
+    () =>
+      narrationPlan
+        ? { count: 0, totalSeconds: 0 }
+        : summarizeAutomaticSilenceCuts(transcript, spokenCutMode),
+    [narrationPlan, spokenCutMode, transcript],
+  );
+  const postingReadinessChecks = useMemo(
+    () =>
+      buildPostingReadinessChecklist({
+        durationSeconds: editDuration,
+        captionsEnabled: captionsVisible,
+        unreadableCaptionCount,
+        outputWidth: plannedExportDimensions?.width,
+        outputHeight: plannedExportDimensions?.height,
+        exportVerified: Boolean(
+          readyExportedVideoFile && exportedVideoQualityMessage,
+        ),
+        exportQualityMessage: exportedVideoQualityMessage,
+      }),
+    [
+      captionsVisible,
+      editDuration,
+      exportedVideoQualityMessage,
+      plannedExportDimensions,
+      readyExportedVideoFile,
+      unreadableCaptionCount,
+    ],
+  );
   const hasCutChanges = transcript.some(
     (line) =>
       initialCutState.get(line.id) !== undefined &&
@@ -6602,6 +7356,11 @@ function ResultWorkspace({
     }
     if (!result.changed) return;
 
+    setManuallyChangedCutIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
     setTranscript(result.captions);
     if (shouldCut) {
       movePreviewOutOfCut(result.captions, line);
@@ -6617,6 +7376,7 @@ function ResultWorkspace({
       ...line,
       removed: initialCutState.get(line.id) ?? line.removed,
     }));
+    setManuallyChangedCutIds(new Set());
     setTranscript(restored);
     const video = videoRef.current;
     if (video) {
@@ -7514,6 +8274,12 @@ function ResultWorkspace({
       setLastAppliedPronunciationGuide(
         normalizedNarrationPronunciationGuide,
       );
+      rememberPronunciationEntries(
+        pronunciationValidation.entries.map((entry) => ({
+          display: entry.surface,
+          reading: entry.reading,
+        })),
+      );
       setSelectedNarrationSegmentIndex(0);
       setNarrationEmphasisText("");
       notify(
@@ -8314,6 +9080,13 @@ function ResultWorkspace({
       (total, range) => total + (range.end - range.start),
       0,
     );
+    let elapsedBoundarySeconds = 0;
+    const videoContentBoundarySeconds = playableRanges
+      .slice(0, -1)
+      .map((range) => {
+        elapsedBoundarySeconds += range.end - range.start;
+        return elapsedBoundarySeconds;
+      });
     const memoryPreflight = getPortableExportMemoryPreflight({
       editedDurationSeconds,
       userAgent: navigator.userAgent,
@@ -8459,6 +9232,7 @@ function ResultWorkspace({
             end: line.end,
           }))
         : [],
+      videoContentBoundarySeconds,
     };
 
     let portableColorConversionMessage = "";
@@ -10117,6 +10891,36 @@ function ResultWorkspace({
             <span>仕上がりプレビュー</span>
           </div>
 
+          <section
+            className="postingReadinessPanel"
+            aria-labelledby="posting-readiness-heading"
+          >
+            <div className="postingReadinessHeading">
+              <span aria-hidden="true">✓</span>
+              <div>
+                <strong id="posting-readiness-heading">投稿前チェック</strong>
+                <small>追加のAI処理なしで確認します</small>
+              </div>
+            </div>
+            <ul>
+              {postingReadinessChecks.map((check) => (
+                <li className={check.status} key={check.id}>
+                  <span aria-hidden="true">
+                    {check.status === "pass"
+                      ? "✓"
+                      : check.status === "warning"
+                        ? "!"
+                        : "…"}
+                  </span>
+                  <div>
+                    <strong>{check.label}</strong>
+                    <small>{check.detail}</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           {captionsVisible && (
           <>
           <CaptionStylePicker
@@ -10499,26 +11303,52 @@ function ResultWorkspace({
                   : "元動画はカットせず、テロップも重ねません。文字起こしデータは字幕ファイルとして保存できます。"}
           </p>
           {!narrationPlan && spokenCutMode !== "none" && (
-            <div className="captionCutToolbar">
-              <span aria-live="polite">
-                <strong>{keptLines.length}</strong>区間を残す
-                <i aria-hidden="true">/</i>
-                <strong>{removedCount}</strong>区間をカット
-                <i aria-hidden="true">/</i>
-                仕上がり <strong>{formatCaptionClock(editDuration)}</strong>
-                {spokenCutMode === "manual" && <em>目安 {length}秒</em>}
-              </span>
-              <button
-                type="button"
-                onClick={resetCaptionCuts}
-                disabled={!hasCutChanges || isMediaBusy}
-              >
-                最初の編集に戻す
-              </button>
-            </div>
+            <>
+              <div className="captionCutToolbar">
+                <span aria-live="polite">
+                  <strong>{keptLines.length}</strong>区間を残す
+                  <i aria-hidden="true">/</i>
+                  <strong>{removedCount}</strong>区間をカット
+                  <i aria-hidden="true">/</i>
+                  仕上がり <strong>{formatCaptionClock(editDuration)}</strong>
+                  {spokenCutMode === "manual" && <em>目安 {length}秒</em>}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetCaptionCuts}
+                  disabled={!hasCutChanges || isMediaBusy}
+                >
+                  最初の編集に戻す
+                </button>
+              </div>
+              {spokenCutMode === "auto" && (
+                <div className="automaticEditSummary" role="status">
+                  <div>
+                    <strong>おまかせ編集の判断</strong>
+                    <span>すべて後から変更できます</span>
+                  </div>
+                  <ul>
+                    {automaticSilenceSummary.count > 0 && (
+                      <li>
+                        長い無音を{automaticSilenceSummary.count}か所、約
+                        {Math.round(automaticSilenceSummary.totalSeconds * 10) / 10}
+                        秒分整えています
+                      </li>
+                    )}
+                    {removedCount > 0 ? (
+                      <li>各カットの理由を下の区間ごとに表示しています</li>
+                    ) : (
+                      <li>話の内容はカットせず、そのまま残しています</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
           <div className="transcriptList">
-            {transcript.map((line) => (
+            {transcript.map((line) => {
+              const cutReason = cutReasonById.get(line.id);
+              return (
               <div
                 className={`transcriptLine ${line.removed ? "removed" : ""} ${line.accent ? "accent" : ""}`}
                 key={line.id}
@@ -10585,8 +11415,15 @@ function ResultWorkspace({
                     </button>
                   )}
                 </div>
+                {line.removed && cutReason && (
+                  <div className={`captionCutReason ${cutReason.code}`}>
+                    <strong>{cutReason.label}</strong>
+                    <small>{cutReason.detail}</small>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="cutSummary">
             <div>

@@ -332,10 +332,12 @@ test("defaults voiced videos to no burned-in telops while keeping them optional"
     pageSource,
     /setAudioMode\("spoken"\);\s*setSpokenCaptionsEnabled\(true\);/,
   );
-  assert.match(
-    pageSource,
-    /setAudioMode\("spoken"\);\s*setSpokenCaptionsEnabled\(false\);\s*setSpokenCutMode\("auto"\)/,
+  const resetSource = pageSource.slice(
+    pageSource.indexOf("function reset()"),
+    pageSource.indexOf("function explainAuthenticationRequired()"),
   );
+  assert.doesNotMatch(resetSource, /setSpokenCaptionsEnabled\(false\)/);
+  assert.match(pageSource, /この設定を「いつもの仕上がり」として記憶/);
   assert.match(pageSource, /テロップを付けない[\s\S]*?元の話し声をそのまま聞かせる[\s\S]*?<b>おすすめ<\/b>/);
   assert.match(pageSource, /自動テロップを付ける/);
   assert.match(pageSource, /テロップは必要なときだけ追加/);
@@ -382,7 +384,7 @@ test("shows photo-reel preview and save pricing before editing", () => {
 test("publishes an explicit landing entry for the five-video editor", () => {
   assert.match(pageSource, /href="\/video-mix"/);
   assert.match(pageSource, /動画をつないで作る/);
-  assert.match(pageSource, /最大5本・素材の順番を保って1本に合成/);
+  assert.match(pageSource, /最大5本・順番を保って合成・元音声テロップも選べる/);
 });
 
 test("wires local visual scoring into narration and cover selection", () => {

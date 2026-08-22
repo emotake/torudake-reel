@@ -4,6 +4,23 @@ export type EditGoal = "follow" | "sales" | "reach";
 
 export type SpokenCutMode = "auto" | "manual" | "none";
 
+export type CaptionCutReasonCode =
+  | "manual"
+  | "filler"
+  | "duplicate"
+  | "duration";
+
+export type CaptionCutReason = Readonly<{
+  code: CaptionCutReasonCode;
+  label: string;
+  detail: string;
+}>;
+
+export type AutomaticSilenceSummary = Readonly<{
+  count: number;
+  totalSeconds: number;
+}>;
+
 export type EditRange = {
   start: number;
   end: number;
@@ -89,6 +106,106 @@ function isNearDuplicate(
       longer.includes(shorter)
     );
   });
+}
+
+/**
+ * Explains an already-decided caption cut without invoking another model.
+ * The classification intentionally mirrors createNaturalEdit's deterministic
+ * filler/duplicate rules; remaining automatic cuts are attributed to fitting
+ * the requested duration instead of exposing an opaque AI score.
+ */
+export function explainCaptionCut(
+  captions: readonly CaptionSegment[],
+  captionId: number,
+  cutMode: SpokenCutMode,
+  targetDurationSeconds: number,
+): CaptionCutReason | null {
+  const sorted = captions
+    .filter(
+      (caption) =>
+        Number.isFinite(caption.start) &&
+        Number.isFinite(caption.end) &&
+        caption.end > caption.start &&
+        caption.text.trim(),
+    )
+    .sort((left, right) => left.start - right.start);
+  const target = sorted.find((caption) => caption.id === captionId);
+  if (!target?.removed) return null;
+
+  if (cutMode === "manual") {
+    return {
+      code: "manual",
+      label: "自分でカット",
+      detail: "あなたが使わないと選んだ区間です。いつでも元に戻せます。",
+    };
+  }
+
+  const recentNormalized: string[] = [];
+  for (const caption of sorted) {
+    const normalized = normalizeForComparison(
+      caption.text.replace(FILLER_EXPRESSION, ""),
+    );
+    const filler = isLowValueFiller(caption);
+    const duplicate = !filler && isNearDuplicate(normalized, recentNormalized);
+    if (caption.id === captionId) {
+      if (filler) {
+        return {
+          code: "filler",
+          label: "言いよどみを整理",
+          detail: "短い相づちや言い直しを省き、話の流れを整えています。",
+        };
+      }
+      if (duplicate) {
+        return {
+          code: "duplicate",
+          label: "重複を整理",
+          detail: "直前と近い内容が続くため、片方を残しています。",
+        };
+      }
+      const safeTarget = Math.max(
+        1,
+        Number.isFinite(targetDurationSeconds) ? targetDurationSeconds : 1,
+      );
+      return {
+        code: "duration",
+        label: `${Math.round(safeTarget)}秒に整えるため`,
+        detail: "全体の要点と流れを残しながら、選んだ長さへ収めています。",
+      };
+    }
+    if (!filler && !duplicate) {
+      recentNormalized.push(normalized);
+      if (recentNormalized.length > 3) recentNormalized.shift();
+    }
+  }
+
+  return null;
+}
+
+/** Counts real gaps in the transcript that automatic editing can tighten. */
+export function summarizeAutomaticSilenceCuts(
+  captions: readonly CaptionSegment[],
+  cutMode: SpokenCutMode,
+  minimumGapSeconds = 0.8,
+): AutomaticSilenceSummary {
+  if (cutMode !== "auto") return { count: 0, totalSeconds: 0 };
+  const safeMinimum = Number.isFinite(minimumGapSeconds)
+    ? Math.max(0.2, minimumGapSeconds)
+    : 0.8;
+  const timed = captions
+    .filter(isTimedCaption)
+    .sort((left, right) => left.start - right.start);
+  let count = 0;
+  let totalSeconds = 0;
+  for (let index = 1; index < timed.length; index += 1) {
+    const gap = timed[index].start - timed[index - 1].end;
+    if (gap + 0.001 < safeMinimum) continue;
+    count += 1;
+    totalSeconds += gap;
+  }
+  return {
+    count,
+    totalSeconds: roundSeconds(totalSeconds),
+  };
 }
 
 export function isIncludedCaption(caption: CaptionSegment) {

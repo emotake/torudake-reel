@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   applyNarrationPronunciationGuide,
+  attachNarrationPronunciationReadings,
   buildDisclosedPostCaption,
   buildNarrationEditRanges,
   buildNarrationTimeline,
@@ -121,6 +122,32 @@ test("changes only the narration reading while preserving the display script", (
     "みくりやさんがとるだけりーるを紹介します。",
   );
   assert.equal(displayScript, "御厨さんが撮るだけリールを紹介します。");
+});
+
+test("attaches saved readings without changing display captions", () => {
+  const plan = {
+    title: "御厨さんの一日",
+    script: "御厨さんが撮るだけリールを紹介します。",
+    socialCaption: "今日の記録です。",
+    segments: [
+      { text: "御厨さんが", emphasis: true },
+      { text: "撮るだけリールを紹介します。", emphasis: false },
+    ],
+  };
+  const result = attachNarrationPronunciationReadings(
+    plan,
+    "御厨 → みくりや\n撮るだけリール → とるだけりーる",
+  );
+
+  assert.equal(result.script, plan.script);
+  assert.deepEqual(
+    result.segments.map((segment) => segment.text),
+    plan.segments.map((segment) => segment.text),
+  );
+  assert.deepEqual(
+    result.segments.map((segment) => segment.speechText),
+    ["みくりやさんが", "とるだけりーるを紹介します。"],
+  );
 });
 
 test("uses the longest pronunciation match without cascading replacements", () => {

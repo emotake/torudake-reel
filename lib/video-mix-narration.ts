@@ -488,7 +488,7 @@ export function getActiveVideoMixCaption(
   editedTime: number,
 ) {
   return captions.find((caption) => {
-    if (caption.removed) return false;
+    if (caption.removed || !caption.text.trim()) return false;
     const range = getCaptionDisplayRange(caption);
     return editedTime >= range.start && editedTime < range.end;
   }) ?? null;

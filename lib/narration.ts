@@ -227,6 +227,25 @@ export function applyNarrationPronunciationGuide(
   return script.replace(pattern, (surface) => readingBySurface.get(surface) ?? surface);
 }
 
+/**
+ * Adds speech-only readings to a narration plan without changing anything the
+ * viewer sees. The display script and each segment's text remain the source of
+ * truth for captions; speechText is used only for timing and synthesis.
+ */
+export function attachNarrationPronunciationReadings<T extends NarrationPlan>(
+  plan: T,
+  guide: string,
+): T {
+  if (!parseNarrationPronunciationGuide(guide).length) return plan;
+  return {
+    ...plan,
+    segments: plan.segments.map((segment) => ({
+      ...segment,
+      speechText: applyNarrationPronunciationGuide(segment.text, guide),
+    })),
+  } as T;
+}
+
 export function splitNarrationScript(script: string) {
   const normalized = cleanText(script, 2_000);
   if (!normalized) return [];

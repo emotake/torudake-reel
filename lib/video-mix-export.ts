@@ -1,4 +1,5 @@
 import type { InputAudioTrack } from "mediabunny";
+import { encodeMonoWavChunk } from "./audio";
 import {
   HIGH_QUALITY_VIDEO_BITRATE,
   PORTABLE_AUDIO_CUT_FADE_SECONDS,
@@ -354,9 +355,13 @@ export type VideoMixExportOptions = Readonly<{
   drawOverlay?: (frame: VideoMixOverlayContext) => void | Promise<void>;
 }>;
 
-type PreparedVideoMixSource = {
+type PreparedVideoMixAudioSource = {
   source: VideoMixSourceInput;
   input: InstanceType<(typeof import("mediabunny"))["Input"]>;
+  audioTrack: InputAudioTrack | null;
+};
+
+type PreparedVideoMixSource = PreparedVideoMixAudioSource & {
   videoTrack: NonNullable<
     Awaited<
       ReturnType<
@@ -364,7 +369,6 @@ type PreparedVideoMixSource = {
       >
     >
   >;
-  audioTrack: InputAudioTrack | null;
   duration: number;
   frameLayout: VideoMixFrameLayout;
   colorConversionPlan: PortableVideoColorConversionPlan;
@@ -1058,7 +1062,7 @@ function applyMixAudioCrossfades(
 
 async function collectVideoMixAudio(
   media: typeof import("mediabunny"),
-  prepared: readonly PreparedVideoMixSource[],
+  prepared: readonly PreparedVideoMixAudioSource[],
   plan: VideoCompositionPlan,
   signal?: AbortSignal,
 ) {
@@ -1111,7 +1115,7 @@ async function collectVideoMixAudio(
 
 async function renderVideoMixAudio(
   media: typeof import("mediabunny"),
-  prepared: readonly PreparedVideoMixSource[],
+  prepared: readonly PreparedVideoMixAudioSource[],
   plan: VideoCompositionPlan,
   options: Readonly<{
     audioGain: number;
@@ -1327,6 +1331,104 @@ async function renderVideoMixAudio(
       duckedSourceAudio,
     },
   };
+}
+
+export type VideoMixTranscriptionAudioOptions = Readonly<{
+  sources: readonly VideoMixSourceInput[];
+  transition?:
+    | VideoCompositionTransitionType
+    | Partial<VideoCompositionTransition>;
+  boundaryTransitions?: readonly VideoCompositionBoundaryTransitionInput[];
+  signal?: AbortSignal;
+}>;
+
+/**
+ * Builds one normalized mono WAV from the exact selected multi-video timeline.
+ * The caller can submit this once to the existing transcription route, so
+ * captions use the same edited clock as preview/export without transcribing
+ * discarded source ranges or spending one AI operation per source.
+ */
+export async function createVideoMixTranscriptionAudio(
+  options: VideoMixTranscriptionAudioOptions,
+): Promise<Readonly<{ file: File; plan: VideoCompositionPlan }>> {
+  if (typeof document === "undefined") {
+    throw new PortableVideoExportUnsupportedError(
+      "browser",
+      "複数動画の字幕用音声はブラウザ上でのみ作成できます。",
+    );
+  }
+  if (
+    options.sources.length < 1 ||
+    options.sources.length > VIDEO_COMPOSITION_MAX_SOURCES
+  ) {
+    throw new RangeError(
+      `動画は1本から${VIDEO_COMPOSITION_MAX_SOURCES}本まで選べます。`,
+    );
+  }
+  options.sources.forEach((source) => {
+    if (!(source.file instanceof File) || source.file.size <= 0) {
+      throw new TypeError("Each video mix source must contain a non-empty File.");
+    }
+  });
+
+  const plan = createVideoCompositionPlan({
+    sources: options.sources.map((source) => ({
+      id: source.id,
+      fileSize: source.file.size,
+      duration: Math.max(0.001, ...source.clips.map((clip) => clip.end)),
+      clips: source.clips,
+    })),
+    transition: options.transition,
+    boundaryTransitions: options.boundaryTransitions,
+  });
+  const media = await import("mediabunny");
+  const prepared: PreparedVideoMixAudioSource[] = [];
+  try {
+    for (const source of options.sources) {
+      throwIfAborted(options.signal);
+      const input = new media.Input({
+        source: new media.BlobSource(source.file),
+        formats: media.ALL_FORMATS,
+      });
+      if (!(await input.canRead())) {
+        input.dispose();
+        throw new PortableVideoExportUnsupportedError(
+          "input",
+          `「${source.file.name}」の音声を読み取れません。MP4・MOV・M4V・WebMでお試しください。`,
+        );
+      }
+      prepared.push({
+        source,
+        input,
+        audioTrack: await getPreferredPortableInputAudioTrack(input),
+      });
+    }
+    const rendered = await renderVideoMixAudio(media, prepared, plan, {
+      audioGain: 1,
+      narrationAudio: null,
+      narrationGain: 1,
+      narrationNormalizationGain: null,
+      duckSourceAudioDuringNarration: false,
+      signal: options.signal,
+    });
+    throwIfAborted(options.signal);
+    if (!rendered.buffer || rendered.buffer.duration <= TIME_EPSILON) {
+      throw new PortableVideoExportUnsupportedError(
+        "audio-decode",
+        "選んだ場面に文字起こしできる音声が見つかりませんでした。",
+      );
+    }
+    const duration = Math.min(plan.duration, rendered.buffer.duration);
+    const wav = encodeMonoWavChunk(rendered.buffer, 0, duration);
+    return {
+      file: new File([wav], "torudake-video-mix-captions.wav", {
+        type: "audio/wav",
+      }),
+      plan,
+    };
+  } finally {
+    prepared.forEach((item) => item.input.dispose());
+  }
 }
 
 function copyCanvasFrame(

@@ -69,7 +69,8 @@ LINEのアクセストークンとIDトークンはログイン確認にだけ�
 連携権限は残りません。アプリ側のログイン状態は、有効期限と取消機能を持つ
 独自の期限付きセッション（30日）で管理します。
 
-公開前に `drizzle/0025_worried_lake.sql` と `drizzle/0026_odd_blob.sql` を順番に
+公開前に `drizzle/0025_worried_lake.sql`、`drizzle/0026_odd_blob.sql`、
+`drizzle/0027_personal_edit_preferences.sql` を順番に
 適用します。0025に含まれる初回無料用テーブルは将来互換のための未使用schemaで、
 このリリースでは対応するAPI・画面・集計処理を公開しません。認証方式をすべて無効の
 まま本番公開すると、新規利用者がログインできません。`OIDC_AUTH_SECRET` と

@@ -84,11 +84,11 @@ test("adds an optional metered AI narration with locally aligned captions", () =
   assert.match(clientSource, /\/api\/narration\/disclosure/);
   assert.match(
     clientSource,
-    /「元音声のまま」ではテロップを追加しません/,
+    /元音声を活かす場合も、テロップを付けるか付けないか選べます/,
   );
   assert.match(
     clientSource,
-    /会話・解説など元の話し声を、テロップなしで活かしたいときにおすすめ/,
+    /元の話し声を保ち、自動テロップは必要に応じて追加できます/,
   );
   assert.match(
     clientSource,
@@ -102,8 +102,8 @@ test("adds an optional metered AI narration with locally aligned captions", () =
     clientSource,
     /元音声のまま仕上げるか、映像に合わせたAIナレーションを追加できます/,
   );
-  assert.match(clientSource, /「元音声のまま」ではテロップを追加しません/);
-  assert.match(clientSource, /元の話し声を、テロップなしで活かしたいときにおすすめ/);
+  assert.match(clientSource, /元音声のテロップを付ける/);
+  assert.match(clientSource, /元音声からテロップを作る/);
   assert.match(
     clientSource,
     /narrationCaptionsEnabled \? "AIナレーションとテロップ" : "AIナレーション"/,
@@ -343,7 +343,7 @@ test("keeps preview layers and paid reservations safe across transitions and nav
   assert.match(clientSource, /window\.addEventListener\("pagehide"/);
   assert.match(clientSource, /sendMixUsageReleaseBeacon/);
   assert.match(clientSource, /activeReservationRef\.current = reservationId/);
-  assert.match(clientSource, /preparing \|\| exporting \|\| narrationGenerating \|\| discardingPending \|\| Boolean\(pendingFinalize\)/);
+  assert.match(clientSource, /preparing \|\|[\s\S]*?exporting \|\|[\s\S]*?narrationGenerating \|\|[\s\S]*?originalCaptionsGenerating \|\|[\s\S]*?discardingPending \|\|[\s\S]*?Boolean\(pendingFinalize\)/);
   assert.match(clientSource, /ensureMixExportActive\(controller\.signal, mountedRef\.current\)/);
   assert.match(clientSource, /pendingFinalizeRef\.current = stagedPending/);
   assert.match(clientSource, /activeReservationRef\.current = null;[\s\S]*?updateUsage\("complete", reservationId\)/);
@@ -490,8 +490,14 @@ test("shares selectable caption styles and scene-grounded narration with preview
   assert.match(clientSource, /VIDEO_MIX_CAPTION_STYLE_OPTIONS/);
   assert.match(clientSource, /useState<VideoMixCaptionStyle>\(DEFAULT_VIDEO_MIX_CAPTION_STYLE\)/);
   assert.match(clientSource, /narrationCaptionStyle,/);
-  assert.ok(
-    (clientSource.match(/drawVideoMixNarrationCaption\([\s\S]*?narrationCaptionStyle,[\s\S]*?narrationGoal/g) ?? []).length >= 2,
+  assert.match(clientSource, /const activeCaptions = useMemo/);
+  assert.match(
+    clientSource,
+    /drawVideoMixNarrationCaption\([\s\S]*?time,[\s\S]*?activeCaptions,[\s\S]*?style,[\s\S]*?activeCaptionGoal/,
+  );
+  assert.match(
+    clientSource,
+    /drawVideoMixNarrationCaption\([\s\S]*?editedTime,[\s\S]*?activeCaptions,[\s\S]*?narrationCaptionStyle,[\s\S]*?activeCaptionGoal/,
   );
   assert.match(clientSource, /resolveCaptionDesign\([\s\S]*?DEFAULT_CAPTION_PROFILE[\s\S]*?option\.id/);
   assert.match(clientSource, /captionStyleSample \$\{option\.tone\}/);

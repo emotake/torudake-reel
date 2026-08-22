@@ -875,6 +875,14 @@ async function completeDeletion(
       .prepare("DELETE FROM caption_profiles WHERE user_id = ?")
       .bind(candidate.user_id),
     database
+      .prepare("DELETE FROM personal_edit_recipes WHERE user_id = ?")
+      .bind(candidate.user_id),
+    database
+      .prepare(
+        "DELETE FROM pronunciation_dictionary_entries WHERE user_id = ?",
+      )
+      .bind(candidate.user_id),
+    database
       .prepare("DELETE FROM account_oauth_challenges WHERE initiating_user_id = ?")
       .bind(candidate.user_id),
     database

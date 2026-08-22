@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -243,6 +245,125 @@ export const captionProfiles = sqliteTable("caption_profiles", {
   brandName: text("brand_name").notNull().default(""),
   updatedAt: integer("updated_at").notNull(),
 });
+
+/**
+ * Account-owned defaults that make a repeat edit start with the user's usual
+ * timing, caption, cut and audio choices. Caption visual branding remains in
+ * `caption_profiles` so there is only one source of truth for those fields.
+ */
+export const personalEditRecipes = sqliteTable(
+  "personal_edit_recipes",
+  {
+    userId: text("user_id").primaryKey(),
+    version: integer("version").notNull().default(1),
+    audioMode: text("audio_mode", {
+      enum: ["spoken", "narration"],
+    })
+      .notNull()
+      .default("spoken"),
+    targetDurationSeconds: integer("target_duration_seconds")
+      .notNull()
+      .default(60),
+    editingPace: text("editing_pace", {
+      enum: ["relaxed", "balanced", "dynamic"],
+    })
+      .notNull()
+      .default("balanced"),
+    spokenCaptionsEnabled: integer("spoken_captions_enabled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    spokenCutMode: text("spoken_cut_mode", {
+      enum: ["auto", "manual", "none"],
+    })
+      .notNull()
+      .default("auto"),
+    narrationStyle: text("narration_style", {
+      enum: ["bright", "calm", "comedy", "party"],
+    })
+      .notNull()
+      .default("calm"),
+    narrationCaptionsEnabled: integer("narration_captions_enabled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(true),
+    narrationAutoCutEnabled: integer("narration_auto_cut_enabled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    narrationOriginalAudioPercent: integer(
+      "narration_original_audio_percent",
+    )
+      .notNull()
+      .default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    check("personal_edit_recipes_version_check", sql`${table.version} = 1`),
+    check(
+      "personal_edit_recipes_duration_check",
+      sql`${table.targetDurationSeconds} in (30, 60, 90)`,
+    ),
+    check(
+      "personal_edit_recipes_original_audio_check",
+      sql`${table.narrationOriginalAudioPercent} between 0 and 20`,
+    ),
+    check(
+      "personal_edit_recipes_updated_at_check",
+      sql`${table.updatedAt} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * A privacy-minimal Japanese display/pronunciation dictionary. No transcript,
+ * script or source-media identifier is persisted. `match_key` is an
+ * application-normalized lookup key; the exact display text remains editable.
+ */
+export const pronunciationDictionaryEntries = sqliteTable(
+  "pronunciation_dictionary_entries",
+  {
+    userId: text("user_id").notNull(),
+    matchKey: text("match_key").notNull(),
+    displayText: text("display_text").notNull(),
+    readingText: text("reading_text").notNull(),
+    position: integer("position").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.matchKey],
+      name: "pronunciation_dictionary_entries_user_match_pk",
+    }),
+    index("pronunciation_dictionary_entries_user_position_idx").on(
+      table.userId,
+      table.position,
+    ),
+    check(
+      "pronunciation_dictionary_entries_match_key_check",
+      sql`length(${table.matchKey}) between 1 and 50`,
+    ),
+    check(
+      "pronunciation_dictionary_entries_display_check",
+      sql`length(${table.displayText}) between 1 and 50`,
+    ),
+    check(
+      "pronunciation_dictionary_entries_reading_check",
+      sql`length(${table.readingText}) between 1 and 80`,
+    ),
+    check(
+      "pronunciation_dictionary_entries_position_check",
+      sql`${table.position} between 0 and 49`,
+    ),
+    check(
+      "pronunciation_dictionary_entries_updated_at_check",
+      sql`${table.updatedAt} >= 0`,
+    ),
+  ],
+);
 
 export const billingSubscriptions = sqliteTable(
   "billing_subscriptions",

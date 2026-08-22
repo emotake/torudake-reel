@@ -167,6 +167,8 @@ test("execute anonymizes identity and deletes credentials while preserving billi
   assert.equal(row("SELECT COUNT(*) AS value FROM account_external_identities WHERE user_id = ?", fixture.userId).value, 0);
   assert.equal(row("SELECT COUNT(*) AS value FROM account_oauth_challenges WHERE initiating_user_id = ?", fixture.userId).value, 0);
   assert.equal(row("SELECT COUNT(*) AS value FROM account_email_challenges WHERE initiating_user_id = ?", fixture.userId).value, 0);
+  assert.equal(row("SELECT COUNT(*) AS value FROM personal_edit_recipes WHERE user_id = ?", fixture.userId).value, 0);
+  assert.equal(row("SELECT COUNT(*) AS value FROM pronunciation_dictionary_entries WHERE user_id = ?", fixture.userId).value, 0);
   assert.equal(row("SELECT COUNT(*) AS value FROM billing_purchases WHERE user_id = ?", fixture.userId).value, 1);
   const user = row("SELECT email, billing_email, full_name, account_deleted_at FROM users WHERE id = ?", fixture.userId);
   assert.match(user.email, /^deleted\+[0-9a-f]+@anonymous\.torudake\.invalid$/);
@@ -247,6 +249,8 @@ test("open local dispute blocks deletion and releases the execution lease", asyn
   assert.equal(request.execution_token, null);
   assert.equal(request.last_block_reason, "open_dispute");
   assert.equal(row("SELECT COUNT(*) AS value FROM account_passkeys WHERE user_id = ?", fixture.userId).value, 1);
+  assert.equal(row("SELECT COUNT(*) AS value FROM personal_edit_recipes WHERE user_id = ?", fixture.userId).value, 1);
+  assert.equal(row("SELECT COUNT(*) AS value FROM pronunciation_dictionary_entries WHERE user_id = ?", fixture.userId).value, 1);
   database.sqlite
     .prepare("UPDATE account_deletion_requests SET status = 'cancelled' WHERE user_id = ?")
     .run(fixture.userId);
@@ -280,6 +284,8 @@ test("multipart abort failure keeps account and transfer metadata for retry", as
   assert.equal(result.results[0].reasonCode, "media_cleanup_failed");
   assert.equal(row("SELECT COUNT(*) AS value FROM users WHERE id = ?", fixture.userId).value, 1);
   assert.equal(row("SELECT COUNT(*) AS value FROM account_passkeys WHERE user_id = ?", fixture.userId).value, 1);
+  assert.equal(row("SELECT COUNT(*) AS value FROM personal_edit_recipes WHERE user_id = ?", fixture.userId).value, 1);
+  assert.equal(row("SELECT COUNT(*) AS value FROM pronunciation_dictionary_entries WHERE user_id = ?", fixture.userId).value, 1);
   assert.equal(row("SELECT COUNT(*) AS value FROM video_transfers WHERE id = 'transfer-mediafailure'").value, 1);
   const request = row("SELECT status, execution_token, last_error_code FROM account_deletion_requests WHERE user_id = ?", fixture.userId);
   assert.equal(request.status, "scheduled");
@@ -552,6 +558,19 @@ function createFixture(
       ) VALUES (?, 'scheduled', 1, ?, NULL, NULL, NULL, NULL, 0, NULL, NULL, 1)
     `)
     .run(userId, executeAfter);
+  database.sqlite
+    .prepare(`
+      INSERT INTO personal_edit_recipes (user_id, updated_at)
+      VALUES (?, 1)
+    `)
+    .run(userId);
+  database.sqlite
+    .prepare(`
+      INSERT INTO pronunciation_dictionary_entries (
+        user_id, match_key, display_text, reading_text, position, updated_at
+      ) VALUES (?, 'torudake', 'Torudake', 'とるだけ', 0, 1)
+    `)
+    .run(userId);
   if (withPurchase) {
     database.sqlite
       .prepare(`

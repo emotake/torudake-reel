@@ -6,16 +6,55 @@ import {
   buildSpokenEditRanges,
   createNaturalEdit,
   editedTimeToSourceTime,
+  explainCaptionCut,
   getEditedDuration,
   remapCaptionsToEditedTimeline,
   setCaptionCut,
   snapEditRangesToTimedSilence,
   sourceTimeToEditedTime,
+  summarizeAutomaticSilenceCuts,
 } from "../lib/edit-plan.ts";
 
 function caption(id, start, end, text) {
   return { id, start, end, text, removed: false };
 }
+
+test("explains automatic and manual caption cuts without another model", () => {
+  const source = [
+    { ...caption(1, 0, 1, "えーと"), removed: true },
+    caption(2, 1.2, 3, "最初に結論をお伝えします。"),
+    { ...caption(3, 3.2, 5, "最初に結論をお伝えします。"), removed: true },
+    { ...caption(4, 5.2, 8, "補足の説明です。"), removed: true },
+  ];
+
+  assert.equal(explainCaptionCut(source, 1, "auto", 30)?.code, "filler");
+  assert.equal(explainCaptionCut(source, 3, "auto", 30)?.code, "duplicate");
+  assert.deepEqual(explainCaptionCut(source, 4, "auto", 30), {
+    code: "duration",
+    label: "30秒に整えるため",
+    detail: "全体の要点と流れを残しながら、選んだ長さへ収めています。",
+  });
+  assert.equal(explainCaptionCut(source, 4, "manual", 30)?.code, "manual");
+  assert.equal(explainCaptionCut(source, 2, "auto", 30), null);
+});
+
+test("summarizes only measured long transcript gaps in automatic mode", () => {
+  const source = [
+    caption(1, 0, 1, "前半です。"),
+    caption(2, 2, 3, "間を空けて続けます。"),
+    caption(3, 3.3, 4, "すぐ続きます。"),
+    caption(4, 5.5, 6, "最後です。"),
+  ];
+
+  assert.deepEqual(summarizeAutomaticSilenceCuts(source, "auto"), {
+    count: 2,
+    totalSeconds: 2.5,
+  });
+  assert.deepEqual(summarizeAutomaticSilenceCuts(source, "manual"), {
+    count: 0,
+    totalSeconds: 0,
+  });
+});
 
 test("builds a natural edit near the requested duration from the full source", () => {
   const source = [
