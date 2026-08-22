@@ -25,6 +25,7 @@
     "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
     "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs",
     "ops:prepare-character-voice-evaluation": "node scripts/operations/character-voice-evaluation.mjs",
+    "ops:prepare-pop-voice-blind-pack": "node scripts/operations/prepare-pop-voice-blind-pack.mjs",
     "ops:generate-character-voice-screening": "node scripts/operations/generate-character-voice-screening.mjs"
   },
   "dependencies": {

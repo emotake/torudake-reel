@@ -17,6 +17,7 @@ import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
 import {
   VOICE_SAMPLE_CATALOG,
+  VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION,
   VOICE_SAMPLE_SCRIPTS,
 } from "../lib/voice-sample-catalog";
 import { ModeMediaVisual } from "./home-rich-visuals";
@@ -220,9 +221,11 @@ function VoiceSamples() {
     <section className="voiceSampleShelf" aria-labelledby="voiceSampleTitle">
       <div>
         <p className="eyebrow">AI音声を試聴</p>
-        <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
+        <h2 id="voiceSampleTitle">AIナレーションの声質を、先に聴けます。</h2>
         <p className="voiceSampleDescription">
-          4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文なので、声の違いも比べやすくなっています。再生ではAI処理回数を使いません。
+          {VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION
+            ? "4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文で比較でき、再生ではAI処理回数を使いません。"
+            : "4つの声の雰囲気を固定見本で聴き比べられます。これは声質の参考で、実際の読み方・イントネーション・間は、入力した文章と最新の読み方設定に合わせて生成されるため異なる場合があります。キャラクター2種類は同じ短文で比較でき、再生ではAI処理回数を使いません。"}
         </p>
       </div>
       <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">

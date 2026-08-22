@@ -75,6 +75,7 @@ test("loads the sample as a real File and presents one direct, captioned demo", 
 
 test("presents four readable, no-cost AI voice examples", async () => {
   assert.match(pageSource, /VOICE_SAMPLE_CATALOG,/);
+  assert.match(pageSource, /VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION,/);
   assert.match(pageSource, /VOICE_SAMPLE_SCRIPTS,/);
   assert.match(voiceCatalogSource, /朝の公園をゆっくり歩きました/);
   assert.match(voiceCatalogSource, /海辺のカフェに立ち寄りました/);
@@ -82,8 +83,10 @@ test("presents four readable, no-cost AI voice examples", async () => {
   assert.doesNotMatch(voiceCatalogSource, /ナイトマーケット/);
   assert.doesNotMatch(voiceCatalogSource, /笑顔いっぱいの楽しい一日になりました/);
   assert.match(voiceCatalogSource, /たった10秒で、空気が変わる。見せ場は、ここからです。/);
-  assert.match(pageSource, /4つの話し方を固定見本で聴き比べられます/);
-  assert.match(pageSource, /キャラクター2種類は同じ短文なので、声の違いも比べやすくなっています/);
+  assert.match(pageSource, /VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION/);
+  assert.match(pageSource, /これは声質の参考で、実際の読み方・イントネーション・間は/);
+  assert.match(landingSource, /VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION/);
+  assert.match(voiceCatalogSource, /\.every\(\(sample\) => sample\.productionParity\)/);
   assert.match(pageSource, /const sample = VOICE_SAMPLE_CATALOG\[style\.id\]/);
   assert.match(pageSource, /src=\{sample\.src\}/);
   assert.match(landingSource, /const sample = VOICE_SAMPLE_CATALOG\[style\.id\]/);

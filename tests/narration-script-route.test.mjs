@@ -399,7 +399,7 @@ test("uses the shared character-v1 personas only when explicitly enabled", async
       );
       assert.equal(
         response.headers.get("x-narration-voice-profile-version"),
-        "2026-08-23-character-v1-selected",
+        "2026-08-23-character-v1-pop-ja-v2",
       );
       prompts.push(openAiRequests.at(-1).input[0].content[0].text);
     }
@@ -407,8 +407,12 @@ test("uses the shared character-v1 personas only when explicitly enabled", async
     assert.equal(openAiRequests.length, 2);
     assert.match(prompts[0], /声の雰囲気: ポップキャラクター/);
     assert.match(prompts[0], /大人の日常動画にも使いやすい/);
-    assert.match(prompts[0], /重要語だけを自然に弾ませ/);
-    assert.match(prompts[0], /台本の文字数: 107〜129字/);
+    assert.match(prompts[0], /明瞭な言葉と軽快なテンポ/);
+    assert.match(prompts[0], /意味のまとまりを一息/);
+    assert.match(prompts[0], /平叙文は自然に言い切/);
+    assert.match(prompts[0], /疑問の意図がある文だけを疑問文/);
+    assert.doesNotMatch(prompts[0], /重要語だけを自然に弾ませ/);
+    assert.match(prompts[0], /台本の文字数: 100〜120字/);
     assert.match(prompts[1], /声の雰囲気: ハイテンショントーク/);
     assert.match(prompts[1], /短い導入からすぐ本題/);
     assert.match(prompts[1], /要点の直前には意味のある短い一拍/);

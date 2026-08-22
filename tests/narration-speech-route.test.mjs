@@ -320,11 +320,11 @@ test("uses distinct draft character voices only when the explicit profile flag i
       );
       assert.equal(
         response.headers.get("x-narration-voice-profile-version"),
-        "2026-08-23-character-v1-selected",
+        "2026-08-23-character-v1-pop-ja-v2",
       );
       assert.equal(
         response.headers.get("x-narration-profile"),
-        `character-v1@2026-08-23-character-v1-selected:${candidate.style}:gpt-realtime-2.1-mini:${candidate.voice}:1`,
+        `character-v1@2026-08-23-character-v1-pop-ja-v2:${candidate.style}:gpt-realtime-2.1-mini:${candidate.voice}:1`,
       );
     }
 
@@ -350,6 +350,18 @@ test("uses distinct draft character voices only when the explicit profile flag i
       assert.doesNotMatch(instructions, /20代|クラブ|ギャル/);
     }
     assert.match(
+      sockets[0].sent[1].response.instructions,
+      /明瞭な発音と軽快なテンポ/,
+    );
+    assert.match(
+      sockets[0].sent[1].response.instructions,
+      /意味のまとまりは一息/,
+    );
+    assert.match(
+      sockets[0].sent[1].response.instructions,
+      /平叙文は語尾まで自然に言い切り、疑問文だけ語尾を軽く上げる/,
+    );
+    assert.doesNotMatch(
       sockets[0].sent[1].response.instructions,
       /重要語だけへ小さな弾み/,
     );

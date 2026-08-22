@@ -72,3 +72,7 @@ export const VOICE_SAMPLE_SCRIPTS = {
   comedy: VOICE_SAMPLE_CATALOG.comedy.script,
   party: VOICE_SAMPLE_CATALOG.party.script,
 } as const satisfies Record<VoiceSampleStyle, string>;
+
+export const VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION = Object.values(
+  VOICE_SAMPLE_CATALOG,
+).every((sample) => sample.productionParity);

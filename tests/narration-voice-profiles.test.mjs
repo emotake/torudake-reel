@@ -90,7 +90,7 @@ test("activates the selected character profile only through its explicit flag", 
   assert.equal(profile.activation, "explicit-flag");
   assert.equal(
     narrationVoiceProfileLogValue(profile),
-    "character-v1@2026-08-23-character-v1-selected",
+    "character-v1@2026-08-23-character-v1-pop-ja-v2",
   );
   assert.equal(profile.styles.party.realtimeVoice, "shimmer");
   assert.equal(profile.styles.party.legacyVoice, "shimmer");
@@ -98,6 +98,7 @@ test("activates the selected character profile only through its explicit flag", 
   assert.equal(profile.styles.comedy.legacyVoice, "verse");
   assert.equal(profile.styles.party.speed, 1);
   assert.equal(profile.styles.comedy.speed, 1);
+  assert.equal(profile.styles.party.naturalCharactersPerSecond, 4.2);
 
   const characterInstructions = [
     profile.styles.party.speechInstructions,
@@ -111,7 +112,13 @@ test("activates the selected character profile only through its explicit flag", 
   assert.match(characterInstructions, /ポップキャラクター/);
   assert.match(characterInstructions, /大人の日常動画/);
   assert.match(characterInstructions, /幼児・アニメ調/);
-  assert.match(characterInstructions, /重要語だけ.*弾み/);
+  assert.match(characterInstructions, /明瞭.*軽快なテンポ/);
+  assert.match(characterInstructions, /意味のまとまり.*一息/);
+  assert.match(characterInstructions, /一文.*強調.*一つ/);
+  assert.match(characterInstructions, /助詞や語尾を強調/);
+  assert.match(characterInstructions, /平叙文.*自然に言い切/);
+  assert.match(characterInstructions, /疑問文だけ.*軽く上げ/);
+  assert.doesNotMatch(characterInstructions, /冒頭から違い|重要語だけ.*弾ませ/);
   assert.match(characterInstructions, /ハイテンショントーク/);
   assert.match(characterInstructions, /導入.*素早く/);
   assert.match(characterInstructions, /要点の直前.*一拍/);
