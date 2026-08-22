@@ -100,6 +100,18 @@ PCM 24kHzのWAVへ変換してプレビューと書き出しへ渡します。�
 `NARRATION_SPEECH_MODE=legacy` を設定すると、運営判断で従来の
 `gpt-4o-mini-tts` に切り替えられます。
 
+キャラクター音声の人物像、台本指示、話速、基底音声は
+`lib/narration-voice-profiles.ts` で一元管理します。`character-v1` の基底音声は
+一次試聴で `shimmer` と `verse` が選定され、同じ音声の固定試聴もv6として
+品質確認済みです。公開環境では `NARRATION_VOICE_PROFILE=character-v1` を設定し、
+音声を戻す必要があるときだけ `classic` へ明示的に切り替えます。未設定または
+不正な値は安全側の `classic` へ戻ります。
+
+候補評価の準備は `pnpm run ops:prepare-character-voice-evaluation -- --output <出力先>`
+で行います。この処理は採点票と乾式の費用見積もりだけを作り、OpenAI API、APIキー、
+ネットワークを使用しません。詳しい手順と有料工程の境界は
+`docs/operations/character-voice-evaluation.md` に記載しています。
+
 通常の動画編集はR2を使用せず、25MB以下の対応動画を直接音声認識へ送り、
 それを超える動画やMOV/M4Vはブラウザ内で音声だけを分割します。
 R2の `MEDIA` bindingは既定では宣言しません。公開導線のない開発用ファイル転送APIを
@@ -127,6 +139,7 @@ Stripe課金には `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、
 - `pnpm run release:preflight`: 公開先・Git・本番D1を読み取り専用で事前確認
 - `pnpm run release:preflight:offline`: ローカル項目だけ確認（公開許可には使用不可）
 - `pnpm release:pages`: clean HEADからPages成果物manifestを作成し、同一成果物だけを検証付きで公開
+- `pnpm run ops:prepare-character-voice-evaluation`: APIを呼ばずにキャラクター音声の評価票と費用見積もりを作成
 
 ## リリース安全手順（Dドライブのみ）
 

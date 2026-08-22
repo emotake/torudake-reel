@@ -141,7 +141,10 @@ import {
   type NarrationStyle,
   type VideoAudioMode,
 } from "../lib/narration";
-import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
+import {
+  VOICE_SAMPLE_CATALOG,
+  VOICE_SAMPLE_SCRIPTS,
+} from "../lib/voice-sample-catalog";
 import {
   buildNarrationAudioSpans,
   resolveNarrationAudioBoundaries,
@@ -4579,12 +4582,13 @@ function Landing({
           <p className="eyebrow">AI音声を試聴</p>
           <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
           <p className="voiceSampleDescription">
-            それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。実際の生成では、最新の日本語向け発音調整が加わります。
+            4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文なので、声の違いも比べやすくなっています。一度生成した音声のため、試聴時にAPI料金やAI処理の回数は発生しません。
           </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
           {NARRATION_STYLES.map((style) => {
             const exampleId = `voiceSampleExample-${style.id}`;
+            const sample = VOICE_SAMPLE_CATALOG[style.id];
             return (
               <article key={style.id}>
                 <div>
@@ -4598,12 +4602,13 @@ function Landing({
                 <audio
                   controls
                   preload="none"
-                  src={`/demo/voices/${style.id}-v5.wav`}
+                  src={sample.src}
                   aria-label={`${style.label}の用途別固定音声サンプル`}
                   aria-describedby={exampleId}
                   onPlay={() =>
                     trackClientEvent("voice_sample_played", {
                       voice: style.id,
+                      sampleVersion: sample.version,
                     })
                   }
                 />

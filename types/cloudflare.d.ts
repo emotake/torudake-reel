@@ -21,6 +21,7 @@ declare module "cloudflare:workers" {
     OPS_HEALTH_SECRET?: string;
     ACCOUNT_DELETION_OPERATIONS_SECRET?: string;
     NARRATION_SPEECH_MODE?: string;
+    NARRATION_VOICE_PROFILE?: string;
     TRUST_SITES_AUTH_HEADERS?: string;
     PUBLIC_ORIGIN?: string;
     STRIPE_SECRET_KEY?: string;

@@ -271,6 +271,98 @@ test("generates four delivery templates with the recommended realtime voices", a
   }
 });
 
+test("uses distinct draft character voices only when the explicit profile flag is enabled", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  narrationCloudflareEnv.NARRATION_VOICE_PROFILE = "character-v1";
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  const sockets = [];
+  globalThis.fetch = async () => {
+    const socket = new MockRealtimeSocket();
+    sockets.push(socket);
+    return realtimeUpgrade(socket);
+  };
+
+  try {
+    const worker = await loadWorker("narration-character-v1-voices");
+    const cases = [
+      {
+        style: "party",
+        voice: "shimmer",
+        prompt: /ポップキャラクター/,
+      },
+      {
+        style: "comedy",
+        voice: "verse",
+        prompt: /ハイテンショントーク/,
+      },
+    ];
+
+    for (const candidate of cases) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/narration/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: "日常の一場面を、分かりやすく紹介します。",
+            style: candidate.style,
+          }),
+        }),
+        workerEnv,
+        workerContext,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-narration-voice"), candidate.voice);
+      assert.equal(
+        response.headers.get("x-narration-voice-profile"),
+        "character-v1",
+      );
+      assert.equal(
+        response.headers.get("x-narration-voice-profile-version"),
+        "2026-08-23-character-v1-selected",
+      );
+      assert.equal(
+        response.headers.get("x-narration-profile"),
+        `character-v1@2026-08-23-character-v1-selected:${candidate.style}:gpt-realtime-2.1-mini:${candidate.voice}:1`,
+      );
+    }
+
+    assert.equal(sockets.length, 2);
+    for (const [index, socket] of sockets.entries()) {
+      const sessionUpdates = socket.sent.filter(
+        (event) => event.type === "session.update",
+      );
+      const responseRequests = socket.sent.filter(
+        (event) => event.type === "response.create",
+      );
+      assert.equal(sessionUpdates.length, 1);
+      assert.equal(responseRequests.length, 1);
+      assert.equal(sessionUpdates[0].session.audio.output.speed, 1);
+      assert.equal(
+        sessionUpdates[0].session.audio.output.voice,
+        cases[index].voice,
+      );
+      const instructions = responseRequests[0].response.instructions;
+      assert.match(instructions, cases[index].prompt);
+      assert.match(instructions, /自然な1倍速/);
+      assert.match(instructions, /実在人物.*模倣しない/);
+      assert.doesNotMatch(instructions, /20代|クラブ|ギャル/);
+    }
+    assert.match(
+      sockets[0].sent[1].response.instructions,
+      /重要語だけへ小さな弾み/,
+    );
+    assert.match(
+      sockets[1].sent[1].response.instructions,
+      /要点の直前に一拍置き、結論だけを明瞭に強調/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete narrationCloudflareEnv.NARRATION_VOICE_PROFILE;
+  }
+});
+
 test("does not switch to an old voice when realtime cannot connect", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;

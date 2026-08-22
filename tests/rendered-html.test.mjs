@@ -227,8 +227,13 @@ test("renders the single-video editor as a focused public route", async () => {
   assert.match(html, /動画を1本選ぶ/);
   assert.match(html, /AIナレーションの4つの声を試聴する/);
   assert.match(html, /AIナレーションの仕上がりを、先に聴けます/);
-  for (const voice of ["calm", "bright", "comedy", "party"]) {
-    assert.match(html, new RegExp(`/demo/voices/${voice}-v5\\.wav`));
+  for (const [voice, version] of [
+    ["calm", "v5"],
+    ["bright", "v5"],
+    ["comedy", "v6"],
+    ["party", "v6"],
+  ]) {
+    assert.match(html, new RegExp(`/demo/voices/${voice}-${version}\\.wav`));
   }
 });
 

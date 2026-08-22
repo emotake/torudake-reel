@@ -23,7 +23,9 @@
     "ops:dry-run-account-deletion-scheduler": "wrangler deploy --config wrangler.account-deletion-scheduler.jsonc --dry-run",
     "ops:deploy-account-deletion-scheduler": "node scripts/operations/deploy-account-deletion-scheduler.mjs",
     "ops:payment-smoke": "node scripts/operations/payment-smoke.mjs",
-    "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs"
+    "ops:cloudflare-alerts": "node scripts/operations/configure-cloudflare-alerts.mjs",
+    "ops:prepare-character-voice-evaluation": "node scripts/operations/character-voice-evaluation.mjs",
+    "ops:generate-character-voice-screening": "node scripts/operations/generate-character-voice-screening.mjs"
   },
   "dependencies": {
     "@mediabunny/aac-encoder": "1.51.0",
@@ -51,7 +53,8 @@
     "typescript": "5.9.3",
     "vinext": "0.0.50",
     "vite": "8.0.16",
-    "wrangler": "4.118.0"
+    "wrangler": "4.118.0",
+    "ws": "8.21.1"
   },
   "type": "module"
 }

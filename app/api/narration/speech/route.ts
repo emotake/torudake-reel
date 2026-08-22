@@ -13,8 +13,12 @@ import {
   normalizeNarrationDeliveryPreset,
   normalizeNarrationStyle,
   type NarrationDeliveryPreset,
-  type NarrationStyle,
 } from "../../../../lib/narration";
+import {
+  narrationVoiceProfileLogValue,
+  resolveNarrationVoiceProfile,
+  type NarrationVoiceStyleProfile,
+} from "../../../../lib/narration-voice-profiles";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { narrationScriptCharacterLimit } from "../../../../lib/usage-duration";
 import {
@@ -54,52 +58,8 @@ const REALTIME_TIMEOUT_MS = 150_000;
 const NO_CHARGE_RETRY_HEADER = "X-Narration-No-Charge-Retry";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
 const MAX_SPEECH_REQUEST_BYTES = 64 * 1024;
-const NARRATION_PROFILE_VERSION = "2026-08-23-japanese-v5";
 const NO_CHARGE_RETRY_MESSAGE =
   "AI音声への接続が一時的に不安定です。この失敗では生成回数は消費されません。少し待ってからもう一度お試しください。";
-
-const VOICE_SETTINGS: Record<
-  NarrationStyle,
-  {
-    realtimeVoice: string;
-    legacyVoice: string;
-    speed: number;
-    instructions: string;
-  }
-> = {
-  bright: {
-    realtimeVoice: "marin",
-    legacyVoice: "marin",
-    speed: 1,
-    instructions:
-      "話者像: 親しみやすく、聞き手のすぐそばで話す自然な成人女性。\n声質とトーン: 温かくクリア。落ち着いた明るさと日常会話の距離感を保ち、息漏れ、作り声、広告調の誇張を避ける。\n話速と間: 急がず、意味のまとまりごとに短く自然な間を置く。重要語だけをやさしく強調し、語尾を不自然に伸ばさない。\n発音: 固有名詞と文頭を明瞭にし、機械的に一語ずつ区切らない。",
-  },
-  calm: {
-    realtimeVoice: "cedar",
-    legacyVoice: "cedar",
-    speed: 0.99,
-    instructions:
-      "話者像: 穏やかで信頼感があり、丁寧に案内する自然な成人男性。\n声質とトーン: 聞き取りやすい中低音。近すぎない落ち着いた距離感を保ち、過度な低音演技、芝居がかったナレーター調、息の多い話し方を避ける。\n話速と間: 少しゆとりを持ち、結論の前後に短い間を置く。一定の一本調子にせず、重要語だけを控えめに立たせる。\n発音: 固有名詞と数字を明瞭にし、語尾まで自然に言い切る。",
-  },
-  comedy: {
-    // Cedar is one of OpenAI's recommended high-quality Realtime voices.
-    // The brighter male template is differentiated by delivery rather than by
-    // switching to a rougher-sounding speaker.
-    realtimeVoice: "cedar",
-    legacyVoice: "cedar",
-    speed: 1,
-    instructions:
-      "話者像: 休日のお出かけや楽しかった体験を、友人へいきいきと伝える親しみやすい成人男性。\n声質とトーン: 若々しく明るく、自然な笑顔が伝わるクリアな声。楽しさは出すが、怒鳴り声、司会者の煽り、芝居がかった演技、過度な巻き舌は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。重要語へ自然にアクセントを置き、単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
-  },
-  party: {
-    // Marin is one of OpenAI's recommended high-quality Realtime voices.
-    realtimeVoice: "marin",
-    legacyVoice: "marin",
-    speed: 1,
-    instructions:
-      "話者像: 友人とのお出かけやおすすめの場所を、楽しそうに共有する親しみやすい成人女性。\n声質とトーン: 若々しく明るく、自然な笑顔と前向きさが伝わるクリアな声。豊かな抑揚はつけるが、幼いアニメ声、鼻にかかった作り声、叫び声、過度な流行語の演技は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。語尾には軽い弾みをつけるが引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有のイントネーションを模倣しない。",
-  },
-};
 
 type OpenAIError = {
   error?: { code?: string; type?: string; message?: string };
@@ -181,12 +141,11 @@ function partialCorrectionContinuityInstruction(
 }
 
 function realtimeNarrationInstructions(
-  style: NarrationStyle,
+  settings: NarrationVoiceStyleProfile,
   deliveryPreset: NarrationDeliveryPreset | null = null,
   emphasisText = "",
   expectedDurationSeconds: number | null = null,
 ) {
-  const settings = VOICE_SETTINGS[style];
   const deliveryInstruction = narrationDeliveryInstruction(
     deliveryPreset,
     emphasisText,
@@ -196,7 +155,7 @@ function realtimeNarrationInstructions(
     "入力された台本だけを、聞き取りやすい日本語ナレーションとして読む。",
     JAPANESE_LANGUAGE_AND_ACCENT,
     "# Voice",
-    settings.instructions,
+    settings.speechInstructions,
     "# Pace",
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
     "# Audio",
@@ -259,7 +218,7 @@ function isTemporaryRealtimeFailure(
 async function requestRealtimeSpeech(
   apiKey: string,
   script: string,
-  style: NarrationStyle,
+  settings: NarrationVoiceStyleProfile,
   options: {
     operation: SpeechProviderOperation;
     deliveryPreset: NarrationDeliveryPreset | null;
@@ -439,8 +398,8 @@ async function requestRealtimeSpeech(
                 audio: {
                   output: {
                     format: { type: "audio/pcm", rate: REALTIME_SAMPLE_RATE },
-                    voice: VOICE_SETTINGS[style].realtimeVoice,
-                    speed: VOICE_SETTINGS[style].speed,
+                    voice: settings.realtimeVoice,
+                    speed: settings.speed,
                   },
                 },
               },
@@ -479,7 +438,7 @@ async function requestRealtimeSpeech(
                 ],
                 output_modalities: ["audio"],
                 instructions: realtimeNarrationInstructions(
-                  style,
+                  settings,
                   options.deliveryPreset,
                   options.emphasisText,
                   options.expectedDurationSeconds,
@@ -613,7 +572,7 @@ async function requestRealtimeSpeech(
 async function requestSpeech(
   apiKey: string,
   script: string,
-  style: NarrationStyle,
+  settings: NarrationVoiceStyleProfile,
   options: {
     operation: SpeechProviderOperation;
     targetDurationSeconds: number | null;
@@ -624,13 +583,12 @@ async function requestSpeech(
   },
   signal?: AbortSignal,
 ) {
-  const settings = VOICE_SETTINGS[style];
   const forceLegacy = env.NARRATION_SPEECH_MODE === "legacy";
   if (!forceLegacy) {
     return requestRealtimeSpeech(
       apiKey,
       script,
-      style,
+      settings,
       {
         operation: options.operation,
         deliveryPreset: options.deliveryPreset,
@@ -658,7 +616,7 @@ async function requestSpeech(
         speed: settings.speed,
         instructions: [
           JAPANESE_LANGUAGE_AND_ACCENT,
-          settings.instructions,
+          settings.speechInstructions,
           narrationDeliveryInstruction(
             options.deliveryPreset,
             options.emphasisText,
@@ -818,6 +776,15 @@ export async function POST(request: Request) {
     );
   }
 
+  const voiceProfile = resolveNarrationVoiceProfile(
+    env.NARRATION_VOICE_PROFILE,
+  );
+  const voiceSettings = voiceProfile.styles[style];
+  const voiceProfileLogValue = narrationVoiceProfileLogValue(voiceProfile);
+  const speechOperation = partialCorrection
+    ? "narration_partial_correction"
+    : "narration_speech";
+
   let meteredAuthorization: AuthorizedMeteredAiOperation | null = null;
   let meteredAuthorizationSettled = false;
   if (usageEnforcementEnabled) {
@@ -972,11 +939,9 @@ export async function POST(request: Request) {
     const response = await requestSpeech(
       apiKey,
       script,
-      style,
+      voiceSettings,
       {
-        operation: partialCorrection
-          ? "narration_partial_correction"
-          : "narration_speech",
+        operation: speechOperation,
         targetDurationSeconds,
         deliveryPreset,
         emphasisText,
@@ -994,8 +959,8 @@ export async function POST(request: Request) {
       env.NARRATION_SPEECH_MODE === "legacy" ? LEGACY_MODEL : REALTIME_MODEL;
     const selectedVoice =
       env.NARRATION_SPEECH_MODE === "legacy"
-        ? VOICE_SETTINGS[style].legacyVoice
-        : VOICE_SETTINGS[style].realtimeVoice;
+        ? voiceSettings.legacyVoice
+        : voiceSettings.realtimeVoice;
 
     if (!response.ok) {
       const errorPayload = (await response
@@ -1008,11 +973,10 @@ export async function POST(request: Request) {
       logOperationalEvent("error", request, {
         event: "openai_narration_speech_failed",
         component: "ai",
-        operation: partialCorrection
-          ? "narration_partial_correction"
-          : "narration_speech",
+        operation: speechOperation,
         status: response.status,
         outcome: "failed",
+        eventType: voiceProfileLogValue,
         errorCode: errorPayload.error?.code ?? errorPayload.error?.type ?? null,
         upstreamRequestId: response.headers.get("x-request-id"),
         upstreamStatus: response.status,
@@ -1091,6 +1055,20 @@ export async function POST(request: Request) {
       voice: style,
       duration_bucket: productDurationBucket(targetDurationSeconds),
     });
+    logOperationalEvent("info", request, {
+      event: "openai_narration_speech_succeeded",
+      component: "ai",
+      operation: speechOperation,
+      status: 200,
+      outcome: "completed",
+      eventType: voiceProfileLogValue,
+      requestId,
+      correlationId,
+    });
+    const profileHeaderVersion =
+      voiceProfile.key === "classic"
+        ? voiceProfile.version
+        : voiceProfileLogValue;
     return new Response(audio, {
       headers: {
         "Content-Type":
@@ -1099,12 +1077,14 @@ export async function POST(request: Request) {
         "X-Narration-Model": selectedModel,
         "X-Narration-Voice": selectedVoice,
         "X-Narration-Profile": [
-          NARRATION_PROFILE_VERSION,
+          profileHeaderVersion,
           style,
           selectedModel,
           selectedVoice,
-          VOICE_SETTINGS[style].speed,
+          voiceSettings.speed,
         ].join(":"),
+        "X-Narration-Voice-Profile": voiceProfile.key,
+        "X-Narration-Voice-Profile-Version": voiceProfile.version,
         "X-Narration-Partial-Correction": partialCorrection ? "1" : "0",
         ...completedQuotaHeaders,
       },

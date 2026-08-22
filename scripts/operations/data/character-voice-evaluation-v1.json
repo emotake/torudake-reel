@@ -1,0 +1,191 @@
+{
+  "version": "2026-08-23-v1",
+  "model": "gpt-realtime-2.1-mini",
+  "profiles": [
+    {
+      "id": "pop",
+      "label": "ポップキャラクター",
+      "goal": "明るく弾む日本語で、最初の一文から耳を引き、親しみやすさとインパクトを両立する",
+      "impactDirection": "声を不自然に高くしたり叫んだりせず、語頭の立ち上がり、抑揚、短い間で印象を残す",
+      "avoid": [
+        "子どもや既存アニメキャラクターの模倣",
+        "甲高い叫び声",
+        "外国語話者のようなアクセント",
+        "全ての語を同じ強さで読むこと"
+      ],
+      "candidates": [
+        { "voice": "coral", "role": "candidate" },
+        { "voice": "shimmer", "role": "candidate" },
+        { "voice": "ballad", "role": "candidate" },
+        { "voice": "marin", "role": "control" }
+      ]
+    },
+    {
+      "id": "high_tension",
+      "label": "ハイテンショントーク",
+      "goal": "勢いのある日本語で、テンポと間の落差を作り、短い動画でも強く印象に残す",
+      "impactDirection": "音量や再生速度だけに頼らず、重要語の強調、畳みかけ、オチ直前の間でインパクトを作る",
+      "avoid": [
+        "怒鳴り声や常時最大音量",
+        "実在する芸能人や既存キャラクターの模倣",
+        "外国語話者のようなアクセント",
+        "間を消した機械的な早口"
+      ],
+      "candidates": [
+        { "voice": "ash", "role": "candidate" },
+        { "voice": "verse", "role": "candidate" },
+        { "voice": "echo", "role": "candidate" },
+        { "voice": "cedar", "role": "control" }
+      ]
+    }
+  ],
+  "screeningScriptIds": [
+    "japanese_phonemes",
+    "impact_hook",
+    "conversational_pacing"
+  ],
+  "qaScripts": [
+    {
+      "id": "numbers_datetime",
+      "label": "数字・日時・金額",
+      "coverage": ["数字", "日時", "金額"],
+      "expectedSeconds": 8,
+      "text": "次回は2026年9月14日、午前7時05分に集合。参加費は1,280円です。",
+      "readingCheckpoints": [
+        { "surface": "2026年9月14日", "expected": "にせんにじゅうろくねん くがつ じゅうよっか" },
+        { "surface": "午前7時05分", "expected": "ごぜん しちじ ごふん" },
+        { "surface": "1,280円", "expected": "せんにひゃくはちじゅうえん" }
+      ]
+    },
+    {
+      "id": "counters",
+      "label": "助数詞",
+      "coverage": ["助数詞"],
+      "expectedSeconds": 7,
+      "text": "赤いカップを3個、白い皿を2枚、紹介する動画を1本用意しました。",
+      "readingCheckpoints": [
+        { "surface": "3個", "expected": "さんこ" },
+        { "surface": "2枚", "expected": "にまい" },
+        { "surface": "1本", "expected": "いっぽん" }
+      ]
+    },
+    {
+      "id": "latin_katakana",
+      "label": "英字・カタカナ",
+      "coverage": ["英字", "カタカナ"],
+      "expectedSeconds": 10,
+      "text": "AIナレーションのV2テストを、Wi-FiとUSB-C対応のスマートフォンで確認します。",
+      "readingCheckpoints": [
+        { "surface": "AI", "expected": "エーアイ" },
+        { "surface": "V2", "expected": "ブイツー" },
+        { "surface": "Wi-Fi", "expected": "ワイファイ" },
+        { "surface": "USB-C", "expected": "ユーエスビーシー" }
+      ]
+    },
+    {
+      "id": "japanese_phonemes",
+      "label": "長音・促音・撥音",
+      "coverage": ["長音", "促音", "撥音"],
+      "expectedSeconds": 8,
+      "text": "スーパーでホットコーヒーを買って、新幹線の発車を待っています。",
+      "readingCheckpoints": [
+        { "surface": "スーパー", "expected": "スーパー（長音を保つ）" },
+        { "surface": "ホットコーヒー", "expected": "ホットコーヒー（促音と長音を保つ）" },
+        { "surface": "新幹線", "expected": "しんかんせん（撥音を保つ）" }
+      ]
+    },
+    {
+      "id": "proper_nouns",
+      "label": "固有語・サービス名",
+      "coverage": ["固有語"],
+      "expectedSeconds": 10,
+      "text": "渋谷スクランブルスクエアから横浜みなとみらいへ。撮るだけリールで今日の景色を紹介します。",
+      "readingCheckpoints": [
+        { "surface": "渋谷スクランブルスクエア", "expected": "しぶや スクランブルスクエア" },
+        { "surface": "横浜みなとみらい", "expected": "よこはま みなとみらい" },
+        { "surface": "撮るだけリール", "expected": "とるだけリール" }
+      ]
+    },
+    {
+      "id": "ambiguous_kanji",
+      "label": "文脈で変わる漢字",
+      "coverage": ["漢字", "文脈"],
+      "expectedSeconds": 8,
+      "text": "今日の行程を確認した後、生地を仕上げて、明日の市場へ向かいます。",
+      "readingCheckpoints": [
+        { "surface": "行程", "expected": "こうてい" },
+        { "surface": "生地", "expected": "きじ" },
+        { "surface": "市場", "expected": "いちば" }
+      ]
+    },
+    {
+      "id": "short_punchline",
+      "label": "短いオチ",
+      "coverage": ["短いオチ", "間"],
+      "expectedSeconds": 7,
+      "text": "映える一枚を狙った結果、写っていたのは……私の指でした。",
+      "readingCheckpoints": [
+        { "surface": "写っていた", "expected": "うつっていた" },
+        { "surface": "……", "expected": "オチの直前に短い間を置く" }
+      ]
+    },
+    {
+      "id": "impact_hook",
+      "label": "冒頭の引き・強調",
+      "coverage": ["インパクト", "強調"],
+      "expectedSeconds": 6,
+      "text": "たった10秒で、空気が変わる。見せ場は、ここからです。",
+      "readingCheckpoints": [
+        { "surface": "10秒", "expected": "じゅうびょう" },
+        { "surface": "ここから", "expected": "ここから（語を明確に立てる）" }
+      ]
+    },
+    {
+      "id": "conversational_pacing",
+      "label": "会話調・間",
+      "coverage": ["会話調", "間", "感情"],
+      "expectedSeconds": 7,
+      "text": "え、本当に？　ちょっと待って。最後の一口まで、まだ終われません。",
+      "readingCheckpoints": [
+        { "surface": "え、本当に？", "expected": "え、ほんとうに（驚きは出すが叫ばない）" },
+        { "surface": "ちょっと待って", "expected": "ちょっとまって（促音を保つ）" }
+      ]
+    },
+    {
+      "id": "longform_30s",
+      "label": "30秒の長文",
+      "coverage": ["30秒長文", "固有語", "数字", "間", "語尾"],
+      "expectedSeconds": 30,
+      "text": "日曜日の午後、鎌倉の海沿いを歩いていたら、路地の奥に小さなベーカリーを見つけました。焼きたての香りに誘われて、人気のクロワッサンを2個購入。外はさくっと、中はふんわり。最後の一口まで撮るつもりが、気づいた時には、もう袋だけ。おいしい場面ほど、カメラより先に手が動きます。",
+      "readingCheckpoints": [
+        { "surface": "鎌倉", "expected": "かまくら" },
+        { "surface": "ベーカリー", "expected": "ベーカリー（長音を保つ）" },
+        { "surface": "2個", "expected": "にこ" },
+        { "surface": "さくっと", "expected": "さくっと（促音を保つ）" },
+        { "surface": "もう袋だけ", "expected": "もう ふくろだけ（オチの間を作る）" }
+      ]
+    }
+  ],
+  "ratingScale": {
+    "minimum": 1,
+    "maximum": 5,
+    "anchors": {
+      "1": "明確に問題があり、実利用できない",
+      "3": "意味は伝わるが、違和感または弱さが残る",
+      "5": "自然で狙いが明確、公開品質として使いたい"
+    }
+  },
+  "requiredMetrics": [
+    "自然さ",
+    "聞き取りやすさ",
+    "耳に残る度",
+    "インパクト",
+    "狙いとの一致",
+    "他候補との違い",
+    "誤読",
+    "脱落",
+    "追加",
+    "語尾切れ",
+    "音割れ・歪み"
+  ]
+}

@@ -303,16 +303,16 @@ test("samples the whole source while matching the natural audio duration", () =>
 test("exposes only the four current narration templates", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
-    ["calm", "bright", "comedy", "party"],
+    ["calm", "bright", "party", "comedy"],
   );
   assert.equal(new Set(NARRATION_STYLES.map((style) => style.label)).size, 4);
   assert.ok(NARRATION_STYLES.every((style) => style.note.includes("声")));
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.label),
-    ["自然な男性", "自然な女性", "明るい男性", "明るい女性"],
+    ["自然な男性", "自然な女性", "ポップキャラクター", "ハイテンショントーク"],
   );
-  assert.match(NARRATION_STYLES[2].note, /華やかで勢い/);
-  assert.match(NARRATION_STYLES[3].note, /華やかでノリ/);
+  assert.match(NARRATION_STYLES[2].note, /明るく弾む/);
+  assert.match(NARRATION_STYLES[3].note, /テンポと間/);
   assert.doesNotMatch(
     NARRATION_STYLES.slice(2).map((style) => style.note).join("\n"),
     /コメディ|オチ/,

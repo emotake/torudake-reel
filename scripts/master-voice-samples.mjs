@@ -22,11 +22,19 @@ function argument(name) {
 
 const inputDirectory = argument("--input");
 const outputDirectory = argument("--output");
+const outputVersion = argument("--version") ?? "v5";
+const requestedStyles = (argument("--styles") ?? "calm,bright,comedy,party")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const ffmpeg = process.env.FFMPEG_PATH;
 if (!inputDirectory || !outputDirectory || !ffmpeg) {
   throw new Error(
-    "Usage: FFMPEG_PATH=<ffmpeg> node scripts/master-voice-samples.mjs --input <selected-raw-dir> --output <public-voice-dir>",
+    "Usage: FFMPEG_PATH=<ffmpeg> node scripts/master-voice-samples.mjs --input <selected-raw-dir> --output <public-voice-dir> [--version v5|v6] [--styles calm,bright,comedy,party]",
   );
+}
+if (!/^v\d+$/.test(outputVersion)) {
+  throw new Error("--version must use a value such as v5 or v6");
 }
 
 const selections = {
@@ -35,6 +43,12 @@ const selections = {
   comedy: "comedy-selected.wav",
   party: "party-selected.wav",
 };
+const unknownStyles = requestedStyles.filter((style) => !(style in selections));
+if (unknownStyles.length > 0 || requestedStyles.length === 0) {
+  throw new Error(
+    `--styles must contain one or more of: ${Object.keys(selections).join(", ")}`,
+  );
+}
 
 function runFfmpeg(args) {
   const result = spawnSync(ffmpeg, args, {
@@ -97,9 +111,10 @@ function inspectPcm16Wav(bytes) {
 
 await mkdir(outputDirectory, { recursive: true });
 const outputs = [];
-for (const [id, sourceName] of Object.entries(selections)) {
+for (const id of requestedStyles) {
+  const sourceName = selections[id];
   const input = path.resolve(inputDirectory, sourceName);
-  const output = path.resolve(outputDirectory, `${id}-v5.wav`);
+  const output = path.resolve(outputDirectory, `${id}-${outputVersion}.wav`);
   const raw = await readFile(input);
   const rawTiming = inspectPcm16Wav(raw);
   const targetDuration = rawTiming.activeEndSeconds + POST_ROLL_SECONDS;
@@ -168,7 +183,7 @@ for (const [id, sourceName] of Object.entries(selections)) {
 }
 
 await writeFile(
-  path.join(outputDirectory, "mastering-v5-results.json"),
+  path.join(outputDirectory, `mastering-${outputVersion}-results.json`),
   `${JSON.stringify(outputs, null, 2)}\n`,
   "utf8",
 );

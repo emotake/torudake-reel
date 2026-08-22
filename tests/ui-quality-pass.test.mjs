@@ -10,6 +10,7 @@ const [
   photoReelSource,
   videoMixSource,
   voiceCatalogSource,
+  voiceMasteringSource,
 ] = await Promise.all([
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/landing-router.tsx", import.meta.url), "utf8"),
@@ -23,6 +24,10 @@ const [
     "utf8",
   ),
   readFile(new URL("../lib/voice-sample-catalog.ts", import.meta.url), "utf8"),
+  readFile(
+    new URL("../scripts/master-voice-samples.mjs", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("keeps the recommended setup short and moves free caption styling to results", () => {
@@ -68,18 +73,24 @@ test("loads the sample as a real File and presents one direct, captioned demo", 
   assert.match(pageSource, /デモ動画を準備しています/);
 });
 
-test("presents four readable, no-cost AI voice examples for distinct use cases", async () => {
-  assert.match(pageSource, /import \{ VOICE_SAMPLE_SCRIPTS \} from "\.\.\/lib\/voice-sample-catalog"/);
+test("presents four readable, no-cost AI voice examples", async () => {
+  assert.match(pageSource, /VOICE_SAMPLE_CATALOG,/);
+  assert.match(pageSource, /VOICE_SAMPLE_SCRIPTS,/);
   assert.match(voiceCatalogSource, /朝の公園をゆっくり歩きました/);
   assert.match(voiceCatalogSource, /海辺のカフェに立ち寄りました/);
-  assert.match(voiceCatalogSource, /週末は友だちと夏祭りへ行きました/);
+  assert.doesNotMatch(voiceCatalogSource, /週末は友だちと夏祭りへ行きました/);
   assert.doesNotMatch(voiceCatalogSource, /ナイトマーケット/);
-  assert.match(voiceCatalogSource, /笑顔いっぱいの楽しい一日になりました/);
-  assert.match(pageSource, /用途別の例文で、4つの話し方を聴き比べられます/);
-  assert.match(
-    pageSource,
-    /src=\{`\/demo\/voices\/\$\{style\.id\}-v5\.wav`\}/,
-  );
+  assert.doesNotMatch(voiceCatalogSource, /笑顔いっぱいの楽しい一日になりました/);
+  assert.match(voiceCatalogSource, /たった10秒で、空気が変わる。見せ場は、ここからです。/);
+  assert.match(pageSource, /4つの話し方を固定見本で聴き比べられます/);
+  assert.match(pageSource, /キャラクター2種類は同じ短文なので、声の違いも比べやすくなっています/);
+  assert.match(pageSource, /const sample = VOICE_SAMPLE_CATALOG\[style\.id\]/);
+  assert.match(pageSource, /src=\{sample\.src\}/);
+  assert.match(landingSource, /const sample = VOICE_SAMPLE_CATALOG\[style\.id\]/);
+  assert.match(landingSource, /src=\{sample\.src\}/);
+  assert.doesNotMatch(pageSource, /\/demo\/voices\/\$\{style\.id\}-v5\.wav/);
+  assert.doesNotMatch(landingSource, /\/demo\/voices\/\$\{style\.id\}-v5\.wav/);
+  assert.match(pageSource, /sampleVersion: sample\.version/);
   assert.match(pageSource, /aria-describedby=\{exampleId\}/);
   assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
   assert.doesNotMatch(pageSource, /同じ短い文章を4つの声で/);
@@ -125,7 +136,7 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionParity, false);
   assert.match(voiceManifest.parityScope, /Same model, base voice, and speed/);
-  assert.match(pageSource, /実際の生成では、最新の日本語向け発音調整が加わります/);
+  assert.doesNotMatch(pageSource, /実際の生成では、最新の日本語向け発音調整が加わります/);
   for (const sample of voiceManifest.samples) {
     const expected = expectedSamples[sample.id];
     assert.ok(expected);
@@ -151,6 +162,107 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
     assert.equal(sample.postRollSeconds, 0.35);
     assert.equal(sample.transcriptionMatch, "exact_after_orthography_normalization");
   }
+});
+
+test("publishes only the selected and QA-approved v6 character previews", async () => {
+  const expectedActiveAssets = [
+    "calm-v5.wav",
+    "bright-v5.wav",
+    "comedy-v6.wav",
+    "party-v6.wav",
+  ];
+
+  for (const file of expectedActiveAssets) {
+    assert.match(voiceCatalogSource, new RegExp(`file: "${file.replace(".", "\\.")}"`));
+    const bytes = await readFile(
+      new URL(`../public/demo/voices/${file}`, import.meta.url),
+    );
+    assert.ok(bytes.byteLength > 44, `${file} must exist and contain WAV data`);
+  }
+
+  assert.match(
+    voiceCatalogSource,
+    /comedy:[\s\S]*?file: "comedy-v6\.wav"[\s\S]*?version: "v6"[\s\S]*?status: "ready"[\s\S]*?role: "current"[\s\S]*?plannedReplacement: null/,
+  );
+  assert.match(
+    voiceCatalogSource,
+    /party:[\s\S]*?file: "party-v6\.wav"[\s\S]*?version: "v6"[\s\S]*?status: "ready"[\s\S]*?role: "current"[\s\S]*?plannedReplacement: null/,
+  );
+  assert.doesNotMatch(voiceCatalogSource, /fallback-until-v6/);
+  assert.doesNotMatch(voiceCatalogSource, /status: "not-generated"/);
+  assert.doesNotMatch(pageSource, /-v5\.wav/);
+  assert.doesNotMatch(landingSource, /-v5\.wav/);
+
+  const voiceManifest = JSON.parse(
+    await readFile(
+      new URL("../public/demo/voices/manifest-v6.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const expectedSamples = {
+    comedy: {
+      label: "ハイテンショントーク",
+      selectionLabel: "ハイテンションB",
+      sourceSampleId: "CV-444DFF3BE1",
+      voice: "verse",
+      rawSha256: "717a6d7a877362c2e7da6dac66f44cefe1ee733e9bb0fafbb4b2b2a43a783d6c",
+    },
+    party: {
+      label: "ポップキャラクター",
+      selectionLabel: "ポップB",
+      sourceSampleId: "CV-3EA1DE9DE6",
+      voice: "shimmer",
+      rawSha256: "623942e15ad4e81efe89ecf2182a977de081b9ec230d5a98968d7e18cde19b07",
+    },
+  };
+  assert.equal(voiceManifest.samples.length, 2);
+  assert.equal(voiceManifest.sampleModel, "gpt-realtime-2.1-mini");
+  assert.equal(voiceManifest.productionParity, false);
+  assert.equal(voiceManifest.selection.decision, "pop B and high-tension B");
+  assert.equal(voiceManifest.selection.retryCount, 0);
+  assert.match(voiceManifest.selection.evaluationDataSha256, /^[a-f0-9]{64}$/u);
+  assert.match(voiceManifest.selection.generationRecordSha256, /^[a-f0-9]{64}$/u);
+  for (const sample of voiceManifest.samples) {
+    const expected = expectedSamples[sample.id];
+    assert.ok(expected);
+    assert.equal(sample.label, expected.label);
+    assert.equal(sample.selectionLabel, expected.selectionLabel);
+    assert.equal(sample.sourceSampleId, expected.sourceSampleId);
+    assert.equal(sample.voice, expected.voice);
+    assert.equal(sample.rawSha256, expected.rawSha256);
+    assert.equal(sample.script, "たった10秒で、空気が変わる。見せ場は、ここからです。");
+    assert.equal(
+      sample.transcriptionMatch,
+      "exact_after_nfkc_punctuation_space_normalization",
+    );
+    assert.ok(sample.durationSeconds >= 4.5 && sample.durationSeconds <= 5.5);
+    assert.ok(sample.integratedLufs >= -21.1 && sample.integratedLufs <= -20.5);
+    assert.ok(sample.truePeakDbtp <= -3);
+    assert.equal(sample.postRollSeconds, 0.35);
+    const audio = await readFile(
+      new URL(`../public/demo/voices/${sample.file}`, import.meta.url),
+    );
+    assert.equal(audio.byteLength, sample.bytes);
+    assert.equal(createHash("sha256").update(audio).digest("hex"), sample.sha256);
+    assert.equal(audio.toString("ascii", 0, 4), "RIFF");
+    assert.equal(audio.toString("ascii", 8, 12), "WAVE");
+    assert.equal(audio.readUInt16LE(20), 1);
+    assert.equal(audio.readUInt16LE(22), 1);
+    assert.equal(audio.readUInt32LE(24), 24_000);
+    assert.equal(audio.readUInt16LE(34), 16);
+  }
+
+  assert.match(voiceMasteringSource, /argument\("--version"\) \?\? "v5"/);
+  assert.match(voiceMasteringSource, /argument\("--styles"\)/);
+  assert.match(
+    voiceMasteringSource,
+    /`\$\{id\}-\$\{outputVersion\}\.wav`/,
+  );
+  assert.match(
+    voiceMasteringSource,
+    /`mastering-\$\{outputVersion\}-results\.json`/,
+  );
+  assert.doesNotMatch(voiceMasteringSource, /`\$\{id\}-v5\.wav`/);
 });
 
 test("labels the permanent hero value instead of presenting it as news", () => {

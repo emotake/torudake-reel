@@ -53,14 +53,14 @@ export const NARRATION_STYLES: Array<{
   { id: "calm", label: "自然な男性", note: "穏やかで信頼感のある声｜商品・解説" },
   { id: "bright", label: "自然な女性", note: "温かくクリアな声｜日常・説明" },
   {
-    id: "comedy",
-    label: "明るい男性",
-    note: "華やかで勢いのある声｜イベント・SNS",
+    id: "party",
+    label: "ポップキャラクター",
+    note: "明るく弾む、親しみやすい声｜日常・紹介",
   },
   {
-    id: "party",
-    label: "明るい女性",
-    note: "華やかでノリのよい声｜イベント・SNS",
+    id: "comedy",
+    label: "ハイテンショントーク",
+    note: "テンポと間で勢いを出す声｜リアクション・イベント",
   },
 ];
 

@@ -15,7 +15,10 @@ import {
 } from "../lib/billing-policy";
 import { trackClientEvent } from "../lib/client-analytics";
 import { NARRATION_STYLES } from "../lib/narration";
-import { VOICE_SAMPLE_SCRIPTS } from "../lib/voice-sample-catalog";
+import {
+  VOICE_SAMPLE_CATALOG,
+  VOICE_SAMPLE_SCRIPTS,
+} from "../lib/voice-sample-catalog";
 import { ModeMediaVisual } from "./home-rich-visuals";
 import { HomeShowcaseCarousel } from "./home-showcase-carousel";
 import {
@@ -219,12 +222,13 @@ function VoiceSamples() {
         <p className="eyebrow">AI音声を試聴</p>
         <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
         <p className="voiceSampleDescription">
-          4つの話し方を用途別の例文で聴き比べられます。固定見本の再生ではAI処理回数を使いません。
+          4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文なので、声の違いも比べやすくなっています。再生ではAI処理回数を使いません。
         </p>
       </div>
       <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
         {NARRATION_STYLES.map((style) => {
           const exampleId = `voiceSampleExample-${style.id}`;
+          const sample = VOICE_SAMPLE_CATALOG[style.id];
           return (
             <article key={style.id}>
               <div>
@@ -238,10 +242,15 @@ function VoiceSamples() {
               <audio
                 controls
                 preload="none"
-                src={`/demo/voices/${style.id}-v5.wav`}
+                src={sample.src}
                 aria-label={`${style.label}の用途別固定音声サンプル`}
                 aria-describedby={exampleId}
-                onPlay={() => trackClientEvent("voice_sample_played", { voice: style.id })}
+                onPlay={() =>
+                  trackClientEvent("voice_sample_played", {
+                    voice: style.id,
+                    sampleVersion: sample.version,
+                  })
+                }
               />
             </article>
           );

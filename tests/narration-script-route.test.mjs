@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+const narrationScriptCloudflareEnv = {
+  OPENAI_API_KEY: "test-key",
+  USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
+};
+
+function setNarrationScriptTestEnvironment(profile) {
+  if (profile) {
+    narrationScriptCloudflareEnv.NARRATION_VOICE_PROFILE = profile;
+  } else {
+    delete narrationScriptCloudflareEnv.NARRATION_VOICE_PROFILE;
+  }
+  globalThis.__cloudflareEnv = narrationScriptCloudflareEnv;
+}
+
 test("shortens only an overlong narration while preserving its intent", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
-  };
+  setNarrationScriptTestEnvironment();
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
@@ -85,10 +96,7 @@ test("shortens only an overlong narration while preserving its intent", async ()
 });
 
 test("maps the retired emotional style to the natural male template", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
-  };
+  setNarrationScriptTestEnvironment();
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
@@ -163,10 +171,7 @@ test("maps the retired emotional style to the natural male template", async () =
 });
 
 test("builds the bright male style without forcing comedy", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
-  };
+  setNarrationScriptTestEnvironment();
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
@@ -251,10 +256,7 @@ test("builds the bright male style without forcing comedy", async () => {
 });
 
 test("builds a lively young-adult female style without sacrificing clarity", async () => {
-  globalThis.__cloudflareEnv = {
-    OPENAI_API_KEY: "test-key",
-    USAGE_ENFORCEMENT_TEST_MODE: "codex-test-only",
-  };
+  setNarrationScriptTestEnvironment();
   const originalFetch = globalThis.fetch;
   let openAiRequest;
   globalThis.fetch = async (input, init) => {
@@ -323,6 +325,103 @@ test("builds a lively young-adult female style without sacrificing clarity", asy
     assert.doesNotMatch(prompt, /実在人物の声を模倣|幼いアニメ声/);
   } finally {
     globalThis.fetch = originalFetch;
+    delete globalThis.__cloudflareEnv;
+  }
+});
+
+test("uses the shared character-v1 personas only when explicitly enabled", async () => {
+  setNarrationScriptTestEnvironment("character-v1");
+  const originalFetch = globalThis.fetch;
+  const openAiRequests = [];
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string" || input instanceof URL
+        ? new URL(input)
+        : new URL(input.url);
+
+    if (url.href === "https://api.openai.com/v1/responses") {
+      openAiRequests.push(JSON.parse(init.body));
+      return Response.json({
+        output_text: JSON.stringify({
+          title: "日常の一場面",
+          script: "いつもの景色に、小さな発見がありました。今日の記録を残します。",
+          socialCaption: "日常の小さな発見。",
+          segments: [
+            { text: "いつもの景色に、", emphasis: false },
+            { text: "小さな発見がありました。", emphasis: true },
+            { text: "今日の記録を残します。", emphasis: false },
+          ],
+        }),
+      });
+    }
+
+    return originalFetch(input, init);
+  };
+
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set(
+      "narration-character-v1-script",
+      `${process.pid}-${Date.now()}`,
+    );
+    const { default: worker } = await import(workerUrl.href);
+    const prompts = [];
+
+    for (const style of ["party", "comedy"]) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/narration/script", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            frames: ["data:image/jpeg;base64,AA=="],
+            brief: "出かけた日に見つけた景色",
+            goal: "reach",
+            length: 30,
+            style,
+            sourceDuration: 45,
+          }),
+        }),
+        {
+          ASSETS: {
+            fetch: async () => new Response("Not found", { status: 404 }),
+          },
+        },
+        {
+          waitUntil() {},
+          passThroughOnException() {},
+        },
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("x-narration-voice-profile"),
+        "character-v1",
+      );
+      assert.equal(
+        response.headers.get("x-narration-voice-profile-version"),
+        "2026-08-23-character-v1-selected",
+      );
+      prompts.push(openAiRequests.at(-1).input[0].content[0].text);
+    }
+
+    assert.equal(openAiRequests.length, 2);
+    assert.match(prompts[0], /声の雰囲気: ポップキャラクター/);
+    assert.match(prompts[0], /大人の日常動画にも使いやすい/);
+    assert.match(prompts[0], /重要語だけを自然に弾ませ/);
+    assert.match(prompts[0], /台本の文字数: 107〜129字/);
+    assert.match(prompts[1], /声の雰囲気: ハイテンショントーク/);
+    assert.match(prompts[1], /短い導入からすぐ本題/);
+    assert.match(prompts[1], /要点の直前には意味のある短い一拍/);
+    assert.match(prompts[1], /結論だけを明瞭に強調/);
+    assert.match(prompts[1], /台本の文字数: 104〜125字/);
+    for (const prompt of prompts) {
+      assert.match(prompt, /実在人物、投稿者、声優、既存キャラクター/);
+      assert.match(prompt, /映像にない出来事や感情を作らない/);
+      assert.doesNotMatch(prompt, /20代|クラブ|ギャル/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete narrationScriptCloudflareEnv.NARRATION_VOICE_PROFILE;
     delete globalThis.__cloudflareEnv;
   }
 });

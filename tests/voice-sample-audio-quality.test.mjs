@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-const styles = ["calm", "bright", "comedy", "party"];
+// Keep this list aligned with the active, ready entries in
+// lib/voice-sample-catalog.ts.
+const activeSamples = [
+  ["calm", "calm-v5.wav"],
+  ["bright", "bright-v5.wav"],
+  ["comedy", "comedy-v6.wav"],
+  ["party", "party-v6.wav"],
+];
 
 function wavPcm16(bytes) {
   assert.equal(bytes.toString("ascii", 0, 4), "RIFF");
@@ -32,9 +39,9 @@ function percentile(values, fraction) {
 }
 
 test("keeps a clean, quiet post-speech tail after every fixed voice preview", async () => {
-  for (const style of styles) {
+  for (const [style, file] of activeSamples) {
     const bytes = await readFile(
-      new URL(`../public/demo/voices/${style}-v5.wav`, import.meta.url),
+      new URL(`../public/demo/voices/${file}`, import.meta.url),
     );
     const { pcm, sampleRate } = wavPcm16(bytes);
     const finalTwentyMs = pcm.subarray(

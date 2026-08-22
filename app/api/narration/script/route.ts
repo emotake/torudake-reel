@@ -23,8 +23,12 @@ import {
   normalizeNarrationStyle,
   normalizeNarrationPlan,
   validateNarrationPronunciationGuide,
-  type NarrationStyle,
 } from "../../../../lib/narration";
+import {
+  formatNarrationScriptRules,
+  narrationVoiceProfileLogValue,
+  resolveNarrationVoiceProfile,
+} from "../../../../lib/narration-voice-profiles";
 import { isUsageEnforcementEnabled } from "../../../../lib/usage-enforcement";
 import { isDurationWithinReservation } from "../../../../lib/usage-duration";
 import { validateVideoInputDuration } from "../../../../lib/video-input-policy";
@@ -94,22 +98,6 @@ function meteredResponseHeaders(
       : limit,
   );
 }
-
-const STYLE_INSTRUCTIONS: Record<NarrationStyle, string> = {
-  bright: "自然な女性の話し言葉。飾らず親しく、標準語で分かりやすく伝える",
-  calm: "自然な男性の話し言葉。落ち着いた標準語で、要点を素直に伝える",
-  comedy:
-    "20代らしい活気と華やかさのある男性の話し言葉。クラブや音楽イベントの高揚感を感じる軽快なテンポで、フレンドリーかつ明瞭に伝える",
-  party:
-    "20代らしい活気と華やかさのある女性の話し言葉。クラブや音楽イベントの高揚感を感じる軽快なテンポで、親しみやすく自信をもって伝える",
-};
-
-const NATURAL_CHARACTERS_PER_SECOND: Record<NarrationStyle, number> = {
-  bright: 4.7,
-  calm: 4.5,
-  comedy: 4.9,
-  party: 4.9,
-};
 
 type OpenAIResponse = {
   output_text?: string;
@@ -355,6 +343,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const voiceProfile = resolveNarrationVoiceProfile(
+    env.NARRATION_VOICE_PROFILE,
+  );
+  const voiceStyleProfile = voiceProfile.styles[style];
+  const voiceProfileLogValue = narrationVoiceProfileLogValue(voiceProfile);
+
   let sceneTimeline: readonly VideoMixNarrationScene[] | null = null;
   if (payload.sceneTimeline !== undefined) {
     const sceneTimelineResult = normalizeVideoMixNarrationSceneTimeline(
@@ -526,7 +520,9 @@ export async function POST(request: Request) {
   const narrationWindow = Math.max(3, targetDuration * 0.88 * timingScale);
   const characterGuide = Math.max(
     18,
-    Math.round(narrationWindow * NATURAL_CHARACTERS_PER_SECOND[style]),
+    Math.round(
+      narrationWindow * voiceStyleProfile.naturalCharactersPerSecond,
+    ),
   );
   const characterMinimum = Math.max(12, Math.round(characterGuide * 0.9));
   const characterMaximum = Math.max(
@@ -543,25 +539,12 @@ export async function POST(request: Request) {
   const timingCorrection = previousScript
     ? `\n再調整する元台本: ${previousScript}\n元台本の意味・事実・冒頭の引き・結びを保ち、重複や補足を削って指定文字数へ短くしてください。`
     : "";
-  const livelyStyleRule =
-    style === "comedy"
-      ? "「明るい男性」は、20代のクラブカルチャーや音楽イベントを思わせる、社交的で自信のある語り口にしてください。"
-      : style === "party"
-        ? "「明るい女性」は、20代のギャル系ファッションやクラブカルチャーを思わせる、華やかで自信と親しみやすさのある語り口にしてください。"
-        : "";
-  const characterRules = livelyStyleRule
-    ? `
-- ${livelyStyleRule}
-- 冒頭3秒以内に要点を置き、短い文と自然な緩急でテンポよく伝えてください。自然な口語と弾みのある言い回しを使い、映像に合う軽いノリを取り入れてください。
-- 無理な若者言葉、ギャル語、内輪ノリ、煽り文句を連発せず、初めて見る人にも意味が伝わる台本にしてください。
-- 実在人物、投稿者、声優、既存キャラクター、地域芸能人の声質、口癖、話速、固有のイントネーション、間合いは模倣しないでください。
-- 商品情報・効果・価格・実績を誇張せず、映像にない出来事や感情を作らないでください。`
-    : "";
+  const characterRules = formatNarrationScriptRules(voiceStyleProfile);
   const sceneRules = sceneTimeline
     ? videoMixNarrationScenePromptRules(sceneTimeline)
     : "";
   const sceneCharacterRate =
-    NATURAL_CHARACTERS_PER_SECOND[style] * 0.88 * timingScale;
+    voiceStyleProfile.naturalCharactersPerSecond * 0.88 * timingScale;
   const frameContent = frames.flatMap((frame, imageIndex) =>
     sceneTimeline
       ? [
@@ -596,7 +579,7 @@ export async function POST(request: Request) {
       text: `この動画から、日本語のショート動画用AIナレーションを作成してください。元動画の話し声をそのまま使うのではなく、映像と利用者の補足に基づいて内容をAIナレーションで伝え直す独立した台本にしてください。環境音やBGMが含まれる場合も、映像の内容に合う台本にしてください。
 
 目的: ${goalInstruction}
-声の雰囲気: ${STYLE_INSTRUCTIONS[style]}
+声の雰囲気: ${voiceStyleProfile.scriptStyleInstruction}
 完成尺の上限: ${targetDuration}秒
 自然な読み上げ時間: 約${Math.round(narrationWindow)}秒
 台本の文字数: ${characterMinimum}〜${characterMaximum}字
@@ -701,6 +684,7 @@ export async function POST(request: Request) {
       operation: initialNarration ? "narration_initial" : "narration_script",
       status: 502,
       outcome: "failed",
+      eventType: voiceProfileLogValue,
       errorCode: upstreamAbort.didTimeOut()
         ? "upstream_timeout"
         : "upstream_request_failed",
@@ -733,6 +717,7 @@ export async function POST(request: Request) {
       operation: initialNarration ? "narration_initial" : "narration_script",
       status: response.status,
       outcome: "failed",
+      eventType: voiceProfileLogValue,
       errorCode:
         responsePayload.error?.code ?? responsePayload.error?.type ?? null,
       upstreamRequestId: response.headers.get("x-request-id"),
@@ -816,12 +801,27 @@ export async function POST(request: Request) {
       voice: style,
       duration_bucket: productDurationBucket(Math.min(length, sourceDuration)),
     });
+    logOperationalEvent("info", request, {
+      event: "openai_narration_script_succeeded",
+      component: "ai",
+      operation: initialNarration ? "narration_initial" : "narration_script",
+      status: 200,
+      outcome: "completed",
+      eventType: voiceProfileLogValue,
+      requestId,
+      correlationId,
+    });
     return Response.json(
       responseNarrationBundleToken
         ? { ...plan, narrationBundleToken: responseNarrationBundleToken }
         : plan,
       {
-      headers: { "Cache-Control": "private, no-store", ...quotaHeaders },
+      headers: {
+        "Cache-Control": "private, no-store",
+        "X-Narration-Voice-Profile": voiceProfile.key,
+        "X-Narration-Voice-Profile-Version": voiceProfile.version,
+        ...quotaHeaders,
+      },
       },
     );
   } catch (error) {
@@ -831,6 +831,7 @@ export async function POST(request: Request) {
       operation: initialNarration ? "narration_initial" : "narration_script",
       status: 502,
       outcome: "failed",
+      eventType: voiceProfileLogValue,
       errorCode: "invalid_upstream_response",
       upstreamRequestId: response.headers.get("x-request-id"),
       requestId,
