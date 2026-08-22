@@ -123,10 +123,9 @@ test("presents four readable, no-cost AI voice examples for distinct use cases",
   assert.equal(voiceManifest.samples.length, 4);
   assert.equal(voiceManifest.sampleModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
-  assert.equal(voiceManifest.productionParity, true);
-  assert.match(voiceManifest.parityScope, /Same model, voice, speed/);
-  assert.doesNotMatch(pageSource, /固定見本は試聴用モデル/);
-  assert.doesNotMatch(pageSource, /実際の動画では本番モデル/);
+  assert.equal(voiceManifest.productionParity, false);
+  assert.match(voiceManifest.parityScope, /Same model, base voice, and speed/);
+  assert.match(pageSource, /実際の生成では、最新の日本語向け発音調整が加わります/);
   for (const sample of voiceManifest.samples) {
     const expected = expectedSamples[sample.id];
     assert.ok(expected);

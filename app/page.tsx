@@ -4579,7 +4579,7 @@ function Landing({
           <p className="eyebrow">AI音声を試聴</p>
           <h2 id="voiceSampleTitle">AIナレーションの仕上がりを、先に聴けます。</h2>
           <p className="voiceSampleDescription">
-            それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。
+            それぞれの雰囲気が伝わる用途別の例文で、4つの話し方を聴き比べられます。一度生成した固定見本のため、試聴時にAPI料金やAI処理の回数は発生しません。実際の生成では、最新の日本語向け発音調整が加わります。
           </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">

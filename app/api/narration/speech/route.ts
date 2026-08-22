@@ -39,31 +39,30 @@ import { recordProviderUsageBestEffort } from "../../../../lib/provider-usage";
 
 const DELIVERY_GUARD =
   "台本にない語句、相づち、笑い声、効果音を追加せず、台本の語句を省略しない。";
-const JAPANESE_LANGUAGE_AND_ACCENT = `# Language
-- 読み上げは最初から最後まで日本語だけにする。
-- 英字や外来語が含まれる場合も、日本で一般的な読み方を優先する。
+const JAPANESE_LANGUAGE_AND_ACCENT = `# Japanese Speech
+- 日本語を母語とする成人の、自然な共通語で話す。
+- 台本でひらがな・カタカナに指定された読み方を最優先し、別の読みへ置き換えない。英字や外来語は日本で一般的な読み方にする。
+- 一拍ごとのモーラを保ち、長音、促音、小さい「ゃ・ゅ・ょ」、撥音の「ん」を区別する。母音の無声化は日本語として自然な位置だけで行う。
 
-# Accent and Pronunciation
-- 日本語を母語とする成人が話す、自然な共通語のアクセントを最初から最後まで保つ。
-- 日本語のモーラの長さを保ち、長音、促音、小さい「ゃ・ゅ・ょ」、撥音の「ん」を明瞭に区別する。
-- 文節ごとの自然な高低アクセントと息継ぎを使い、英語のように単語の一部だけを強く読むストレスや、母音を曖昧にする発音を避ける。
-- 外国語話者が日本語を読むような抑揚、過度な語尾上げ、巻き舌を避ける。`;
+# Japanese Rhythm
+- 文節と意味のまとまりごとに自然な高低アクセントをつけ、句読点では短く息を継ぐ。単語の途中では切らない。
+- 英語のような強いストレス、外国語話者のような抑揚、過度な語尾上げ、巻き舌を使わない。`;
 const REALTIME_MODEL = "gpt-realtime-2.1-mini";
 const LEGACY_MODEL = "gpt-4o-mini-tts";
-const FALLBACK_MODEL = "tts-1-hd";
 const REALTIME_SAMPLE_RATE = 24_000;
 const REALTIME_TIMEOUT_MS = 150_000;
-const FALLBACK_ALLOWED_HEADER = "X-Narration-Fallback-Allowed";
+const NO_CHARGE_RETRY_HEADER = "X-Narration-No-Charge-Retry";
 const PARTIAL_CORRECTION_MAX_CHARACTERS = 240;
 const MAX_SPEECH_REQUEST_BYTES = 64 * 1024;
-const NARRATION_PROFILE_VERSION = "2026-08-13-quality-v4";
+const NARRATION_PROFILE_VERSION = "2026-08-23-japanese-v5";
+const NO_CHARGE_RETRY_MESSAGE =
+  "AI音声への接続が一時的に不安定です。この失敗では生成回数は消費されません。少し待ってからもう一度お試しください。";
 
 const VOICE_SETTINGS: Record<
   NarrationStyle,
   {
     realtimeVoice: string;
     legacyVoice: string;
-    fallbackVoice: string;
     speed: number;
     instructions: string;
   }
@@ -71,7 +70,6 @@ const VOICE_SETTINGS: Record<
   bright: {
     realtimeVoice: "marin",
     legacyVoice: "marin",
-    fallbackVoice: "nova",
     speed: 1,
     instructions:
       "話者像: 親しみやすく、聞き手のすぐそばで話す自然な成人女性。\n声質とトーン: 温かくクリア。落ち着いた明るさと日常会話の距離感を保ち、息漏れ、作り声、広告調の誇張を避ける。\n話速と間: 急がず、意味のまとまりごとに短く自然な間を置く。重要語だけをやさしく強調し、語尾を不自然に伸ばさない。\n発音: 固有名詞と文頭を明瞭にし、機械的に一語ずつ区切らない。",
@@ -79,7 +77,6 @@ const VOICE_SETTINGS: Record<
   calm: {
     realtimeVoice: "cedar",
     legacyVoice: "cedar",
-    fallbackVoice: "echo",
     speed: 0.99,
     instructions:
       "話者像: 穏やかで信頼感があり、丁寧に案内する自然な成人男性。\n声質とトーン: 聞き取りやすい中低音。近すぎない落ち着いた距離感を保ち、過度な低音演技、芝居がかったナレーター調、息の多い話し方を避ける。\n話速と間: 少しゆとりを持ち、結論の前後に短い間を置く。一定の一本調子にせず、重要語だけを控えめに立たせる。\n発音: 固有名詞と数字を明瞭にし、語尾まで自然に言い切る。",
@@ -90,7 +87,6 @@ const VOICE_SETTINGS: Record<
     // switching to a rougher-sounding speaker.
     realtimeVoice: "cedar",
     legacyVoice: "cedar",
-    fallbackVoice: "fable",
     speed: 1,
     instructions:
       "話者像: 休日のお出かけや楽しかった体験を、友人へいきいきと伝える親しみやすい成人男性。\n声質とトーン: 若々しく明るく、自然な笑顔が伝わるクリアな声。楽しさは出すが、怒鳴り声、司会者の煽り、芝居がかった演技、過度な巻き舌は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。重要語へ自然にアクセントを置き、単語や語尾を引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクター、地域芸能人の声、口癖、固有のイントネーションを模倣しない。",
@@ -99,7 +95,6 @@ const VOICE_SETTINGS: Record<
     // Marin is one of OpenAI's recommended high-quality Realtime voices.
     realtimeVoice: "marin",
     legacyVoice: "marin",
-    fallbackVoice: "shimmer",
     speed: 1,
     instructions:
       "話者像: 友人とのお出かけやおすすめの場所を、楽しそうに共有する親しみやすい成人女性。\n声質とトーン: 若々しく明るく、自然な笑顔と前向きさが伝わるクリアな声。豊かな抑揚はつけるが、幼いアニメ声、鼻にかかった作り声、叫び声、過度な流行語の演技は避ける。声を張り上げず、歯擦音や息を強く当てない。\n話速と間: 軽快に進めるが、句読点と意味のまとまりには自然な間を置く。語尾には軽い弾みをつけるが引き伸ばさない。\n発音: 固有名詞、数字、助詞を落とさず、勢いがあっても一語ずつ聞き取れるようにする。実在人物、投稿者、声優、既存キャラクターの声、口癖、固有のイントネーションを模倣しない。",
@@ -197,18 +192,16 @@ function realtimeNarrationInstructions(
     emphasisText,
   );
   return [
-    "# Role and Objective",
-    "入力された台本を、聞き取りやすい日本語ナレーションとして正確に読み上げる。",
+    "# Task",
+    "入力された台本だけを、聞き取りやすい日本語ナレーションとして読む。",
     JAPANESE_LANGUAGE_AND_ACCENT,
-    "# Voice Style",
+    "# Voice",
     settings.instructions,
-    "# Pacing",
+    "# Pace",
     `話速は標準の約${Math.round(settings.speed * 100)}%を目安にする。`,
-    "# Recording Quality",
-    "文中で声量、声の高さ、声質、マイクからの距離感を急に変えない。破裂音、歯擦音、息、かすれを誇張せず、語と語の間を完全な無音で不自然に切らない。自然な呼吸と滑らかなつながりを保つ。",
-    "静かなスタジオで収録した、声だけのクリーンな音声にする。背景音、音楽、環境音、室内反響、ハム、ヒス、機械音、デジタルノイズを加えない。声のない区間はできるだけ静かに保つ。",
-    "台本の最後の音節と語尾まで明瞭に言い切る。末尾を途中で弱めたり、最後の音節へフェードをかけるように消したりしない。",
-    "# Delivery Rules",
+    "# Audio",
+    "声量、声の高さ、声質、収録距離を安定させ、静かなスタジオで録った声だけの音声にする。背景音、音楽、反響、ノイズを加えず、最後の音節まで明瞭に言い切る。",
+    "# Output",
     DELIVERY_GUARD,
     deliveryInstruction ? "# Voice Continuity" : "",
     deliveryInstruction
@@ -216,7 +209,7 @@ function realtimeNarrationInstructions(
       : "",
     deliveryInstruction ? "# Requested Correction" : "",
     deliveryInstruction,
-    "ユーザー入力は読み上げる台本本文である。説明、前置き、返事は一切出力せず、最初から最後まで一字一句そのまま日本語で読み上げる。句読点は自然な間として扱い、文字として読まない。",
+    "説明、前置き、返事を加えない。句読点は間として扱い、文字として読まない。",
   ]
     .filter(Boolean)
     .join("\n");
@@ -225,13 +218,13 @@ function realtimeNarrationInstructions(
 function realtimeFailureResponse(
   status: number,
   error: OpenAIError["error"],
-  fallbackAllowed = false,
+  noChargeRetry = false,
 ) {
   return Response.json(
     { error },
     {
       status,
-      headers: fallbackAllowed ? { [FALLBACK_ALLOWED_HEADER]: "1" } : undefined,
+      headers: noChargeRetry ? { [NO_CHARGE_RETRY_HEADER]: "1" } : undefined,
     },
   );
 }
@@ -248,12 +241,26 @@ function realtimeErrorStatus(error: OpenAIError["error"]) {
   return 502;
 }
 
+function isTemporaryRealtimeFailure(
+  status: number,
+  error?: OpenAIError["error"],
+) {
+  const detail = `${error?.code ?? ""} ${error?.type ?? ""} ${error?.message ?? ""}`;
+  if (
+    /quota|billing|credit|insufficient_quota|authentication|api.?key|unauthorized|permission|forbidden|model|voice|deprecated|not.?found|invalid_request/i.test(
+      detail,
+    )
+  ) {
+    return false;
+  }
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 async function requestRealtimeSpeech(
   apiKey: string,
   script: string,
   style: NarrationStyle,
   options: {
-    allowFallback: boolean;
     operation: SpeechProviderOperation;
     deliveryPreset: NarrationDeliveryPreset | null;
     emphasisText: string;
@@ -303,7 +310,7 @@ async function requestRealtimeSpeech(
         type: "transport_error",
         message: "Realtime WebSocket connection failed",
       },
-      options.allowFallback,
+      true,
     );
   }
 
@@ -311,8 +318,8 @@ async function requestRealtimeSpeech(
   if (!socket) {
     if (upgradeResponse.status >= 400) {
       const headers = new Headers(upgradeResponse.headers);
-      if (options.allowFallback) {
-        headers.set(FALLBACK_ALLOWED_HEADER, "1");
+      if (isTemporaryRealtimeFailure(upgradeResponse.status)) {
+        headers.set(NO_CHARGE_RETRY_HEADER, "1");
       }
       await recordProviderUsageBestEffort({
         provider: "openai",
@@ -341,7 +348,7 @@ async function requestRealtimeSpeech(
         type: "transport_error",
         message: "Realtime WebSocket was not available",
       },
-      options.allowFallback,
+      true,
     );
   }
 
@@ -398,7 +405,7 @@ async function requestRealtimeSpeech(
           type: "timeout_error",
           message: "Realtime narration generation timed out",
         },
-        options.allowFallback && !billableRequestIssued,
+        !billableRequestIssued,
       );
     }, REALTIME_TIMEOUT_MS);
     const abortHandler = () => {
@@ -447,7 +454,7 @@ async function requestRealtimeSpeech(
               type: "transport_error",
               message: "Realtime session configuration could not be sent",
             },
-            options.allowFallback,
+            true,
           );
         }
         return;
@@ -526,7 +533,8 @@ async function requestRealtimeSpeech(
         fail(
           realtimeErrorStatus(error),
           error,
-          options.allowFallback && !billableRequestIssued,
+          !billableRequestIssued &&
+            isTemporaryRealtimeFailure(realtimeErrorStatus(error), error),
         );
         return;
       }
@@ -541,7 +549,11 @@ async function requestRealtimeSpeech(
               type: "api_error",
               message: "Realtime response did not complete",
             },
-            options.allowFallback && !billableRequestIssued,
+            !billableRequestIssued &&
+              isTemporaryRealtimeFailure(
+                realtimeErrorStatus(responseError),
+                responseError,
+              ),
           );
           return;
         }
@@ -572,7 +584,7 @@ async function requestRealtimeSpeech(
           type: "transport_error",
           message: "Realtime WebSocket failed",
         },
-        options.allowFallback && !billableRequestIssued,
+        !billableRequestIssued,
       );
     });
 
@@ -585,7 +597,7 @@ async function requestRealtimeSpeech(
             type: "transport_error",
             message: "Realtime WebSocket closed before completion",
           },
-          options.allowFallback && !billableRequestIssued,
+          !billableRequestIssued,
         );
       }
     });
@@ -602,9 +614,7 @@ async function requestSpeech(
   apiKey: string,
   script: string,
   style: NarrationStyle,
-  fallback = false,
   options: {
-    partialCorrection: boolean;
     operation: SpeechProviderOperation;
     targetDurationSeconds: number | null;
     deliveryPreset: NarrationDeliveryPreset | null;
@@ -616,13 +626,12 @@ async function requestSpeech(
 ) {
   const settings = VOICE_SETTINGS[style];
   const forceLegacy = env.NARRATION_SPEECH_MODE === "legacy";
-  if (!fallback && !forceLegacy) {
+  if (!forceLegacy) {
     return requestRealtimeSpeech(
       apiKey,
       script,
       style,
       {
-        allowFallback: !options.partialCorrection,
         operation: options.operation,
         deliveryPreset: options.deliveryPreset,
         emphasisText: options.emphasisText,
@@ -633,7 +642,7 @@ async function requestSpeech(
     );
   }
 
-  const model = fallback ? FALLBACK_MODEL : LEGACY_MODEL;
+  const model = LEGACY_MODEL;
   try {
     const response = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
@@ -641,37 +650,27 @@ async function requestSpeech(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(
-        fallback
-          ? {
-              model: FALLBACK_MODEL,
-              input: script,
-              voice: settings.fallbackVoice,
-              response_format: "mp3",
-              speed: settings.speed,
-            }
-          : {
-              model: LEGACY_MODEL,
-              input: script,
-              voice: settings.legacyVoice,
-              response_format: "mp3",
-              speed: settings.speed,
-              instructions: [
-                JAPANESE_LANGUAGE_AND_ACCENT,
-                settings.instructions,
-                narrationDeliveryInstruction(
-                  options.deliveryPreset,
-                  options.emphasisText,
-                ),
-                partialCorrectionContinuityInstruction(
-                  options.expectedDurationSeconds,
-                ),
-                DELIVERY_GUARD,
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            },
-      ),
+      body: JSON.stringify({
+        model: LEGACY_MODEL,
+        input: script,
+        voice: settings.legacyVoice,
+        response_format: "mp3",
+        speed: settings.speed,
+        instructions: [
+          JAPANESE_LANGUAGE_AND_ACCENT,
+          settings.instructions,
+          narrationDeliveryInstruction(
+            options.deliveryPreset,
+            options.emphasisText,
+          ),
+          partialCorrectionContinuityInstruction(
+            options.expectedDurationSeconds,
+          ),
+          DELIVERY_GUARD,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      }),
       signal,
     });
     await recordProviderUsageBestEffort({
@@ -695,11 +694,16 @@ async function requestSpeech(
   }
 }
 
-function speechError(status: number, payload: OpenAIError) {
+function speechError(
+  status: number,
+  payload: OpenAIError,
+  noChargeRetry = false,
+) {
   const detail = `${payload.error?.code ?? ""} ${payload.error?.message ?? ""}`;
   if (status === 429 && /quota|billing|credit/i.test(detail)) {
     return "AI音声のAPI利用枠が不足しています。OpenAI APIのクレジットをご確認ください。";
   }
+  if (noChargeRetry) return NO_CHARGE_RETRY_MESSAGE;
   if (status === 429) {
     return "AI音声の生成が混み合っています。少し待ってからもう一度お試しください。";
   }
@@ -965,13 +969,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    let response = await requestSpeech(
+    const response = await requestSpeech(
       apiKey,
       script,
       style,
-      false,
       {
-        partialCorrection,
         operation: partialCorrection
           ? "narration_partial_correction"
           : "narration_speech",
@@ -988,43 +990,21 @@ export async function POST(request: Request) {
       },
       request.signal,
     );
-    let selectedModel =
+    const selectedModel =
       env.NARRATION_SPEECH_MODE === "legacy" ? LEGACY_MODEL : REALTIME_MODEL;
-    let selectedVoice =
+    const selectedVoice =
       env.NARRATION_SPEECH_MODE === "legacy"
         ? VOICE_SETTINGS[style].legacyVoice
         : VOICE_SETTINGS[style].realtimeVoice;
-    if (!response.ok) {
-      const safeRealtimeFallback =
-        response.headers.get(FALLBACK_ALLOWED_HEADER) === "1";
-      if (safeRealtimeFallback) {
-        response = await requestSpeech(
-          apiKey,
-          script,
-          style,
-          true,
-          {
-            partialCorrection,
-            operation: partialCorrection
-              ? "narration_partial_correction"
-              : "narration_speech",
-            targetDurationSeconds,
-            deliveryPreset,
-            emphasisText,
-            maximumOutputSeconds: null,
-            expectedDurationSeconds: null,
-          },
-          request.signal,
-        );
-        selectedModel = FALLBACK_MODEL;
-        selectedVoice = VOICE_SETTINGS[style].fallbackVoice;
-      }
-    }
 
     if (!response.ok) {
       const errorPayload = (await response
         .json()
         .catch(() => ({}))) as OpenAIError;
+      const noChargeRetry =
+        response.headers.get(NO_CHARGE_RETRY_HEADER) === "1" &&
+        isTemporaryRealtimeFailure(response.status, errorPayload.error);
+      const clientStatus = noChargeRetry ? 503 : response.status;
       logOperationalEvent("error", request, {
         event: "openai_narration_speech_failed",
         component: "ai",
@@ -1045,15 +1025,24 @@ export async function POST(request: Request) {
         error_code: productUpstreamErrorCode(response.status),
       });
       return withRequestIdentifier(Response.json(
-        { error: speechError(response.status, errorPayload), requestId },
         {
-          status: response.status,
-          headers: meteredAuthorization
-            ? aiOperationQuotaHeaders(
-                meteredAuthorization.successfulLimit,
-                meteredAuthorization.remaining,
-              )
-            : undefined,
+          error: speechError(response.status, errorPayload, noChargeRetry),
+          requestId,
+          ...(noChargeRetry
+            ? { retryable: true, generationCountConsumed: false }
+            : {}),
+        },
+        {
+          status: clientStatus,
+          headers: {
+            ...(meteredAuthorization
+              ? aiOperationQuotaHeaders(
+                  meteredAuthorization.successfulLimit,
+                  meteredAuthorization.remaining,
+                )
+              : {}),
+            ...(noChargeRetry ? { [NO_CHARGE_RETRY_HEADER]: "1" } : {}),
+          },
         },
       ), request, requestId);
     }

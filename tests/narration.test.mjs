@@ -17,6 +17,7 @@ import {
   getNarrationPlaybackRate,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
+  normalizeNarrationSpeechText,
   normalizeNarrationStyle,
   normalizeNarrationPlan,
   parseNarrationPronunciationGuide,
@@ -124,6 +125,30 @@ test("changes only the narration reading while preserving the display script", (
   assert.equal(displayScript, "御厨さんが撮るだけリールを紹介します。");
 });
 
+test("normalizes only speech text into stable Japanese-friendly punctuation", () => {
+  const raw = "  ＡＩ 音声\r\n御厨さん…／便利😊  ";
+  const normalized = "AI 音声、御厨さん、便利";
+
+  assert.equal(normalizeNarrationSpeechText(raw), normalized);
+  assert.equal(normalizeNarrationSpeechText(normalized), normalized);
+  assert.equal(raw, "  ＡＩ 音声\r\n御厨さん…／便利😊  ");
+});
+
+test("keeps kanji, numbers, and meaningful symbols instead of guessing readings", () => {
+  const speechText = "御厨のC++講座は1,234円。ver.2です。";
+  assert.equal(normalizeNarrationSpeechText(speechText), speechText);
+});
+
+test("applies an exact manual reading before Unicode and punctuation cleanup", () => {
+  assert.equal(
+    applyNarrationPronunciationGuide(
+      "ＡＩ\n御厨😊",
+      "ＡＩ → エーアイ\n御厨 → みくりや",
+    ),
+    "エーアイ、みくりや",
+  );
+});
+
 test("attaches saved readings without changing display captions", () => {
   const plan = {
     title: "御厨さんの一日",
@@ -147,6 +172,29 @@ test("attaches saved readings without changing display captions", () => {
   assert.deepEqual(
     result.segments.map((segment) => segment.speechText),
     ["みくりやさんが", "とるだけりーるを紹介します。"],
+  );
+});
+
+test("attaches cleaned speech text even when no manual reading is needed", () => {
+  const plan = {
+    title: "表示はそのまま",
+    script: "朝の景色\n今日もきれいです😊",
+    socialCaption: "朝の記録です。",
+    segments: [
+      { text: "朝の景色\n", emphasis: true },
+      { text: "今日もきれいです😊", emphasis: false },
+    ],
+  };
+  const result = attachNarrationPronunciationReadings(plan, "");
+
+  assert.equal(result.script, plan.script);
+  assert.deepEqual(
+    result.segments.map((segment) => segment.text),
+    plan.segments.map((segment) => segment.text),
+  );
+  assert.deepEqual(
+    result.segments.map((segment) => segment.speechText),
+    ["朝の景色", "今日もきれいです"],
   );
 });
 

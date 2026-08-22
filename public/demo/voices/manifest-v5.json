@@ -7,9 +7,9 @@
   "provider": "OpenAI",
   "sampleModel": "gpt-realtime-2.1-mini",
   "productionModel": "gpt-realtime-2.1-mini",
-  "productionParity": true,
-  "parityScope": "Same model, voice, speed, and instruction profile as production. Individual generations remain nondeterministic.",
-  "purpose": "Static, no-cost voice previews selected for script accuracy and low background noise",
+  "productionParity": false,
+  "parityScope": "Same model, base voice, and speed as production, but retained from the previous instruction profile. Individual generations remain nondeterministic.",
+  "purpose": "Static, no-cost previews of each base voice tendency; production now applies newer Japanese pronunciation and pacing instructions",
   "qa": {
     "transcriptionModel": "gpt-4o-transcribe",
     "normalization": "NFKC, Japanese orthographic variants only",

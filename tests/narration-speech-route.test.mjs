@@ -167,7 +167,7 @@ test("generates four delivery templates with the recommended realtime voices", a
       assert.equal(response.headers.get("x-narration-voice"), voices[index]);
       assert.equal(
         response.headers.get("x-narration-profile"),
-        `2026-08-13-quality-v4:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
+        `2026-08-23-japanese-v5:${style}:gpt-realtime-2.1-mini:${voices[index]}:${speeds[index]}`,
       );
       const wav = new Uint8Array(await response.arrayBuffer());
       assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), "RIFF");
@@ -221,14 +221,15 @@ test("generates four delivery templates with the recommended realtime voices", a
           response.instructions.includes(
             "台本にない語句、相づち、笑い声、効果音を追加せず",
           ) &&
-          response.instructions.includes("# Language") &&
-          response.instructions.includes("日本語だけにする") &&
-          response.instructions.includes("# Accent and Pronunciation") &&
+          response.instructions.includes("# Japanese Speech") &&
           response.instructions.includes("日本語を母語とする成人") &&
           response.instructions.includes("自然な共通語") &&
-          response.instructions.includes("日本語のモーラ") &&
-          response.instructions.includes("自然な高低アクセント") &&
-          response.instructions.includes("外国語話者が日本語を読むような抑揚"),
+          response.instructions.includes("台本でひらがな・カタカナに指定された読み方を最優先") &&
+          response.instructions.includes("一拍ごとのモーラ") &&
+          response.instructions.includes("母音の無声化") &&
+          response.instructions.includes("# Japanese Rhythm") &&
+          response.instructions.includes("文節と意味のまとまりごと") &&
+          response.instructions.includes("英語のような強いストレス"),
       ),
     );
     assert.equal(
@@ -249,12 +250,12 @@ test("generates four delivery templates with the recommended realtime voices", a
     assert.match(responses[3].instructions, /自然な笑顔と前向きさ/);
     assert.ok(
       responses.every((response) =>
-        response.instructions.includes("台本の最後の音節と語尾まで明瞭に言い切る"),
+        response.instructions.includes("最後の音節まで明瞭に言い切る"),
       ),
     );
     assert.ok(
       responses.every((response) =>
-        response.instructions.includes("声のない区間はできるだけ静かに保つ"),
+        response.instructions.includes("背景音、音楽、反響、ノイズを加えず"),
       ),
     );
     assert.doesNotMatch(
@@ -270,20 +271,14 @@ test("generates four delivery templates with the recommended realtime voices", a
   }
 });
 
-test("uses the matching HD fallback when realtime cannot connect", async () => {
+test("does not switch to an old voice when realtime cannot connect", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, init) => {
     requests.push({ url, init });
-    if (requests.length === 1) {
-      return realtimeUpgrade(new MockRealtimeSocket("error"));
-    }
-    return new Response(new Uint8Array([1, 2, 3]), {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" },
-    });
+    return realtimeUpgrade(new MockRealtimeSocket("error"));
   };
 
   try {
@@ -301,38 +296,30 @@ test("uses the matching HD fallback when realtime cannot connect", async () => {
       workerContext,
     );
 
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "audio/mpeg");
-    assert.equal(response.headers.get("x-narration-model"), "tts-1-hd");
-    assert.equal(requests.length, 2);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("x-narration-no-charge-retry"), "1");
+    assert.equal(requests.length, 1);
     assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
-    const fallbackBody = JSON.parse(requests[1].init.body);
+    const payload = await response.json();
     assert.equal(
-      requests[1].url,
-      "https://api.openai.com/v1/audio/speech",
+      payload.error,
+      "AI音声への接続が一時的に不安定です。この失敗では生成回数は消費されません。少し待ってからもう一度お試しください。",
     );
-    assert.equal(fallbackBody.model, "tts-1-hd");
-    assert.equal(fallbackBody.voice, "echo");
-    assert.equal(fallbackBody.speed, 0.99);
+    assert.equal(payload.retryable, true);
+    assert.equal(payload.generationCountConsumed, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("maps the retired pop voice to the bright female HD fallback", async () => {
+test("returns the same no-charge retry when realtime transport cannot open", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, init) => {
     requests.push({ url, init });
-    if (requests.length === 1) {
-      return realtimeUpgrade(new MockRealtimeSocket("error"));
-    }
-    return new Response(new Uint8Array([1, 2, 3]), {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" },
-    });
+    throw new Error("temporary connection failure");
   };
 
   try {
@@ -350,13 +337,17 @@ test("maps the retired pop voice to the bright female HD fallback", async () => 
       workerContext,
     );
 
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("x-narration-model"), "tts-1-hd");
-    assert.equal(requests.length, 2);
-    const fallbackBody = JSON.parse(requests[1].init.body);
-    assert.equal(fallbackBody.model, "tts-1-hd");
-    assert.equal(fallbackBody.voice, "shimmer");
-    assert.equal(fallbackBody.speed, 1);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("x-narration-no-charge-retry"), "1");
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+    const payload = await response.json();
+    assert.equal(
+      payload.error,
+      "AI音声への接続が一時的に不安定です。この失敗では生成回数は消費されません。少し待ってからもう一度お試しください。",
+    );
+    assert.equal(payload.retryable, true);
+    assert.equal(payload.generationCountConsumed, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -388,8 +379,12 @@ test("does not create a second billable request after realtime generation is req
     );
 
     assert.equal(response.status, 502);
+    assert.equal(response.headers.get("x-narration-no-charge-retry"), null);
     assert.equal(requests.length, 1);
     assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+    const payload = await response.json();
+    assert.equal(payload.retryable, undefined);
+    assert.equal(payload.generationCountConsumed, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -427,7 +422,7 @@ test("applies an allowlisted intonation correction to one sentence", async () =>
     assert.equal(response.headers.get("x-narration-voice"), "marin");
     assert.equal(
       response.headers.get("x-narration-profile"),
-      "2026-08-13-quality-v4:bright:gpt-realtime-2.1-mini:marin:1",
+      "2026-08-23-japanese-v5:bright:gpt-realtime-2.1-mini:marin:1",
     );
     const session = socket.sent[0].session;
     assert.equal(session.audio.output.voice, "marin");
@@ -524,9 +519,13 @@ test("does not switch voice models when a partial correction cannot connect", as
       workerContext,
     );
 
-    assert.equal(response.status, 502);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("x-narration-no-charge-retry"), "1");
     assert.equal(requests.length, 1);
     assert.match(requests[0].url, /gpt-realtime-2\.1-mini/);
+    const payload = await response.json();
+    assert.equal(payload.retryable, true);
+    assert.equal(payload.generationCountConsumed, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -606,9 +605,9 @@ test("supports an emergency rollback to the legacy TTS model", async () => {
     assert.equal(requests[0].url, "https://api.openai.com/v1/audio/speech");
     assert.equal(requests[0].body.model, "gpt-4o-mini-tts");
     assert.equal(requests[0].body.voice, "cedar");
-    assert.match(requests[0].body.instructions, /日本語だけにする/);
+    assert.match(requests[0].body.instructions, /台本でひらがな・カタカナに指定された読み方を最優先/);
     assert.match(requests[0].body.instructions, /日本語を母語とする成人/);
-    assert.match(requests[0].body.instructions, /自然な高低アクセント/);
+    assert.match(requests[0].body.instructions, /母音の無声化/);
     assert.match(requests[0].body.instructions, /穏やかで信頼感/);
     assert.match(requests[0].body.instructions, /聞き取りやすい中低音/);
   } finally {

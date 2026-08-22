@@ -210,12 +210,54 @@ function escapeRegularExpression(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const NARRATION_INVISIBLE_CHARACTERS =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00ad\u034f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu;
+const NARRATION_EMOJI =
+  /(?:\p{Regional_Indicator}{2}|\p{Extended_Pictographic})(?:\ufe0e|\ufe0f|\p{Emoji_Modifier})?(?:\u200d\p{Extended_Pictographic}(?:\ufe0e|\ufe0f|\p{Emoji_Modifier})?)*/gu;
+
+/**
+ * Makes speech-only text predictable for Japanese synthesis without guessing
+ * kanji readings or rewriting numbers. Display copy must never use this value.
+ */
+export function normalizeNarrationSpeechText(script: string) {
+  if (typeof script !== "string" || !script) return "";
+
+  const normalized = script
+    .normalize("NFKC")
+    .replace(/\r\n?|\n/gu, "、")
+    .replace(NARRATION_EMOJI, "、")
+    .replace(NARRATION_INVISIBLE_CHARACTERS, "")
+    .replace(/(?:\.{2,}|…+|‥+)/gu, "、")
+    .replace(/[／/|｜;；]+/gu, "、")
+    .replace(/[—―–]+/gu, "、")
+    .replace(/[,，]+/gu, (commas, offset, source: string) => {
+      const before = source[offset - 1] ?? "";
+      const after = source[offset + commas.length] ?? "";
+      return /[0-9]/u.test(before) && /[0-9]/u.test(after) ? commas : "、";
+    })
+    .replace(/[\t\v\f\p{Zs}]+/gu, " ")
+    .replace(/\s*、\s*/gu, "、")
+    .replace(/、{2,}/gu, "、")
+    .replace(/([。！？!?])、/gu, "$1")
+    .replace(/、([。！？!?])/gu, "$1")
+    .replace(/。{2,}/gu, "。")
+    .replace(/！{2,}/gu, "！")
+    .replace(/？{2,}/gu, "？")
+    .replace(/!{2,}/gu, "!")
+    .replace(/\?{2,}/gu, "?")
+    .replace(/ {2,}/gu, " ")
+    .replace(/^、|、$/gu, "")
+    .trim();
+
+  return normalized;
+}
+
 export function applyNarrationPronunciationGuide(
   script: string,
   guide: string,
 ) {
   const entries = parseNarrationPronunciationGuide(guide);
-  if (!entries.length) return script;
+  if (!entries.length) return normalizeNarrationSpeechText(script);
 
   const readingBySurface = new Map(
     entries.map((entry) => [entry.surface, entry.reading] as const),
@@ -224,7 +266,11 @@ export function applyNarrationPronunciationGuide(
     entries.map((entry) => escapeRegularExpression(entry.surface)).join("|"),
     "gu",
   );
-  return script.replace(pattern, (surface) => readingBySurface.get(surface) ?? surface);
+  const speechText = script.replace(
+    pattern,
+    (surface) => readingBySurface.get(surface) ?? surface,
+  );
+  return normalizeNarrationSpeechText(speechText);
 }
 
 /**
@@ -236,7 +282,6 @@ export function attachNarrationPronunciationReadings<T extends NarrationPlan>(
   plan: T,
   guide: string,
 ): T {
-  if (!parseNarrationPronunciationGuide(guide).length) return plan;
   return {
     ...plan,
     segments: plan.segments.map((segment) => ({
