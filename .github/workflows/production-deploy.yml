@@ -28,8 +28,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PRODUCTION_API_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       REQUESTED_COMMIT: ${{ inputs.commit }}
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,6 +102,8 @@ jobs:
       - name: Release account-deletion scheduler
         shell: pwsh
         run: |
+          $env:TEMP = $env:RUNNER_TEMP
+          $env:TMP = $env:RUNNER_TEMP
           $env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $env:PREVIOUS_SCHEDULER_MANIFEST
           pnpm ops:deploy-account-deletion-scheduler -- --execute `
             --confirm deploy-account-deletion-scheduler `
@@ -160,6 +160,8 @@ jobs:
         if: success()
         shell: pwsh
         run: |
+          $env:TEMP = $env:RUNNER_TEMP
+          $env:TMP = $env:RUNNER_TEMP
           "TORUDAKE_ROLLBACK_MANIFEST=$env:ROLLBACK_MANIFEST" | Out-File -FilePath $env:GITHUB_ENV -Append
           $env:TORUDAKE_ROLLBACK_MANIFEST = $env:ROLLBACK_MANIFEST
           pnpm release:preflight
