@@ -31,6 +31,7 @@
 
 - [本番運用](operations/production-operations.md) — 公開、検証、監視、切り戻し
 - [災害復旧](operations/disaster-recovery.md) — 復旧対象、秘密情報、復元確認
+- [Codex解約後の運用と復旧](operations/codex-independent-recovery.md) — Codexに依存しない正本、公開、D1復元
 - [アカウント復旧](operations/account-recovery.md) — 利用者対応と本人確認
 - [サポート手順](operations/support-playbook.md) — 問い合わせ対応
 - [LINE認証の可観測性](operations/line-auth-observability.md) — 監視指標と調査手順

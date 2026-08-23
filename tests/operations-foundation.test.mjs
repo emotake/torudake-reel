@@ -151,9 +151,10 @@ test("backup is encrypted on D and restore drill is production-read-only", () =>
   assert.match(backupSource, /age -r/u);
   assert.match(backupSource, /finally/u);
   assert.match(backupSource, /Remove-Item -LiteralPath \$sqlPath/u);
-  assert.match(restoreSource, /sqlite3 \$databasePath/u);
+  assert.match(restoreSource, /\$SqliteExecutable \$databasePath/u);
   assert.match(restoreSource, /PRAGMA quick_check/u);
   assert.match(restoreSource, /migration ledger does not exactly match/u);
+  assert.match(restoreSource, /Remove-Item -LiteralPath \$databasePath/u);
   assert.doesNotMatch(restoreSource, /wrangler d1 execute/u);
 });
 

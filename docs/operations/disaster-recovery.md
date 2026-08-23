@@ -5,6 +5,10 @@ tests and Cloudflare Pages artifact. It intentionally does not contain runtime
 credentials, account recovery codes, cardholder data, customer media or a D1
 data export.
 
+Codex is not a recovery source or a production dependency. Cancellation of the
+Codex plan does not require a production redeploy. The operator-facing handoff
+is documented in [Codex解約後の運用と復旧](codex-independent-recovery.md).
+
 ## Recovery sources
 
 | Source | Purpose | May contain plaintext secrets |
@@ -45,6 +49,10 @@ that reports missing names without printing secret values. A recovery is not
 ready until that verifier passes and at least one encrypted D1 backup has a
 verified SHA-256 entry.
 
+Run the verifier with `--scope codex-cancellation` when GitHub and provider
+accounts remain available. Use `--scope full-provider-loss` only for the stricter
+case where every provider must be recreated from the recovery vault.
+
 ## Restore safety
 
 Cloudflare D1 Time Travel and import operations can overwrite production data.
@@ -52,6 +60,9 @@ Always restore into an isolated database first, validate the migration ledger,
 `PRAGMA quick_check` and foreign keys, then plan the production cutover and
 rollback. A recovery check must not create a Stripe Checkout session, charge a
 card, replay a webhook or enable authentication automatically.
+
+The local restore drill removes both the decrypted SQL and the temporary SQLite
+database in `finally`; only the non-secret result JSON may remain.
 
 References:
 

@@ -2,7 +2,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$EncryptedBackup,
   [Parameter(Mandatory = $true)][string]$AgeIdentity,
-  [string]$DrillRoot = "D:\TorudakeRestoreDrills"
+  [string]$DrillRoot = "D:\TorudakeRestoreDrills",
+  [string]$SqliteExecutable = "sqlite3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,7 +28,7 @@ if (-not (Test-Path -LiteralPath $AgeIdentity -PathType Leaf)) {
 if (-not (Get-Command age -ErrorAction SilentlyContinue)) {
   throw "age is required for the restore drill."
 }
-if (-not (Get-Command sqlite3 -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command $SqliteExecutable -ErrorAction SilentlyContinue)) {
   throw "sqlite3 is required for the restore drill."
 }
 
@@ -40,12 +41,12 @@ New-Item -ItemType Directory -Force -Path $drillDirectory | Out-Null
 try {
   & age -d -i $AgeIdentity -o $sqlPath $EncryptedBackup
   if ($LASTEXITCODE -ne 0) { throw "Backup decryption failed." }
-  Get-Content -Raw -LiteralPath $sqlPath | & sqlite3 $databasePath
+  Get-Content -Raw -LiteralPath $sqlPath | & $SqliteExecutable $databasePath
   if ($LASTEXITCODE -ne 0) { throw "Local SQLite import failed." }
-  $quickCheck = (& sqlite3 $databasePath "PRAGMA quick_check;").Trim()
-  $foreignKeys = (& sqlite3 $databasePath "PRAGMA foreign_key_check;").Trim()
+  $quickCheck = "$(& $SqliteExecutable $databasePath "PRAGMA quick_check;")".Trim()
+  $foreignKeys = "$(& $SqliteExecutable $databasePath "PRAGMA foreign_key_check;")".Trim()
   $restoredMigrations = @(
-    & sqlite3 -noheader $databasePath "SELECT name FROM d1_migrations ORDER BY id;" |
+    & $SqliteExecutable -noheader $databasePath "SELECT name FROM d1_migrations ORDER BY id;" |
       ForEach-Object { $_.Trim() } |
       Where-Object { $_ }
   )
@@ -78,6 +79,9 @@ try {
 } finally {
   if (Test-Path -LiteralPath $sqlPath) {
     Remove-Item -LiteralPath $sqlPath -Force
+  }
+  if (Test-Path -LiteralPath $databasePath) {
+    Remove-Item -LiteralPath $databasePath -Force
   }
 }
 

@@ -104,6 +104,7 @@ Instagram ReelsだけでなくYouTube Shortsにも対応し、同じ編集結果
 - [認証・セキュリティ](docs/security/authentication.md)
 - [課金](docs/billing/stripe.md)
 - [本番運用](docs/operations/production-operations.md)
+- [Codex解約後の運用と復旧](docs/operations/codex-independent-recovery.md)
 - [ドキュメント管理方針](docs/documentation-policy.md)
 
 企画、顧客インタビュー、仮説、コピー案は、必要になった段階でNotionに分離します。実装や運用に影響する決定は、必ずこのリポジトリの資料へ反映します。
