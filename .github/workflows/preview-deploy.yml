@@ -1,0 +1,156 @@
+name: Deploy Preview
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  deployments: write
+
+concurrency:
+  group: preview-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      ((github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') ||
+      (github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: preview
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+      PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Check preview credentials
+        id: credentials
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CLOUDFLARE_API_TOKEN)) {
+            "configured=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "### Preview deployment skipped" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "CLOUDFLARE_PAGES_API_TOKEN is not configured in the preview environment." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CLOUDFLARE_ACCOUNT_ID) -or
+              [string]::IsNullOrWhiteSpace($env:PAGES_PROJECT)) {
+            throw "Preview Cloudflare variables are not configured."
+          }
+          "configured=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Check out trusted deployment tooling
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up pnpm
+        if: steps.credentials.outputs.configured == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        if: steps.credentials.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+
+      - name: Install trusted deployment dependencies
+        if: steps.credentials.outputs.configured == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download reviewed CI artifact
+        if: steps.credentials.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          $artifactRoot = Join-Path $env:RUNNER_TEMP "cloudflare-pages"
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+          gh run download $env:RUN_ID --repo $env:GITHUB_REPOSITORY --name cloudflare-pages --dir $artifactRoot
+          if (-not (Test-Path -LiteralPath (Join-Path $artifactRoot "_worker.js"))) {
+            throw "Reviewed Pages artifact is incomplete."
+          }
+          "PAGES_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Select isolated preview branch
+        if: steps.credentials.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          if ($env:SOURCE_EVENT -eq "pull_request") {
+            if ($env:PR_NUMBER -notmatch '^\d+$') { throw "Pull request number is invalid." }
+            $previewBranch = "review-pr-$($env:PR_NUMBER)"
+          } elseif ($env:SOURCE_EVENT -eq "push") {
+            $previewBranch = "staging-main"
+          } else {
+            throw "Unsupported preview source event."
+          }
+          "PREVIEW_BRANCH=$previewBranch" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PREVIEW_URL=https://$previewBranch.$env:PAGES_PROJECT.pages.dev" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Deploy reviewed artifact to preview
+        if: steps.credentials.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          pnpm exec wrangler pages deploy $env:PAGES_ARTIFACT_ROOT `
+            --project-name $env:PAGES_PROJECT `
+            --branch $env:PREVIEW_BRANCH `
+            --commit-hash $env:SOURCE_SHA `
+            --commit-message "verified-preview run=$env:RUN_ID" `
+            --commit-dirty=false `
+            --no-bundle
+
+      - name: Verify preview response and disabled authentication
+        if: steps.credentials.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          $pageUrl = "$env:PREVIEW_URL/video-edit?ci=$env:SOURCE_SHA"
+          $lastError = $null
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+              $page = Invoke-WebRequest -UseBasicParsing -Uri $pageUrl -TimeoutSec 20
+              $methods = Invoke-RestMethod -Uri "$env:PREVIEW_URL/api/account/auth/methods" -TimeoutSec 20
+              if ($page.StatusCode -ne 200 -or $page.Content -notmatch '撮るだけリール') {
+                throw "Preview HTML contract is not ready."
+              }
+              $authNames = @(
+                "OIDC_AUTH_ENABLED",
+                "LINE_LOGIN_ENABLED",
+                "GOOGLE_OIDC_ENABLED",
+                "EMAIL_AUTH_ENABLED",
+                "PASSKEY_AUTH_ENABLED"
+              )
+              foreach ($name in $authNames) {
+                $property = $methods.authenticationFlags.PSObject.Properties[$name]
+                if ($null -eq $property -or $property.Value -ne $false) {
+                  throw "Preview authentication flag $name must be present and disabled."
+                }
+              }
+              if ($methods.line -ne $false -or $methods.google -ne $false -or
+                  $methods.email -ne $false -or $methods.passkey -ne $false) {
+                throw "Preview authentication must remain disabled."
+              }
+              "### Preview ready" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              "[$env:PREVIEW_URL]($env:PREVIEW_URL)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              exit 0
+            } catch {
+              $lastError = $_.Exception.Message
+              if ($attempt -lt 10) { Start-Sleep -Seconds 2 }
+            }
+          }
+          throw "Preview verification failed: $lastError"

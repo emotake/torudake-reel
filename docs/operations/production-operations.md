@@ -134,6 +134,47 @@ Before a production release:
    confirming payment. A controlled real transaction requires separate written
    approval and a refund/reconciliation plan.
 
+## GitHub Actions CI/CD
+
+The repository has three intentionally separate pipelines:
+
+1. `.github/workflows/ci.yml` runs the offline release preflight, TypeScript,
+   lint, the complete test suite, and the Cloudflare Pages build for pull
+   requests and `main`. It receives no Cloudflare, OpenAI, Stripe, LINE, or
+   customer-data credentials. The exact Pages directory, including hidden
+   files, is retained for seven days as the `cloudflare-pages` Actions artifact.
+2. `.github/workflows/preview-deploy.yml` runs only after CI succeeds. It checks
+   out deployment tooling from trusted `main`, downloads the reviewed artifact,
+   and deploys it to `review-pr-<number>` or `staging-main`. Pull requests from
+   forks never receive the preview credential. Preview authentication stays
+   disabled and preview Pages has no production D1 binding, so this environment
+   is for UI and routing review rather than account, billing, or data tests.
+3. `.github/workflows/production-deploy.yml` is manual and protected by the
+   GitHub `production` environment. It accepts only the exact lowercase commit
+   currently at `origin/main`, repeats all verification, releases the deletion
+   scheduler, provisions a disabled rollback deployment, restores the intended
+   authentication flags even on failure, runs the online preflight, and deploys
+   only through the hardened Pages wrapper. Successful non-secret release
+   manifests replace the assets on the `production-state` GitHub release.
+
+Configure these GitHub environments without putting credentials in source:
+
+- Repository variables: `CLOUDFLARE_ACCOUNT_ID` and
+  `CLOUDFLARE_PAGES_PROJECT`.
+- `preview` environment secret: `CLOUDFLARE_PAGES_API_TOKEN`, restricted to
+  Cloudflare Pages Edit for the pinned account. If it is absent, CI still
+  succeeds and the preview deployment reports that it was skipped.
+- `production` environment secret: `CLOUDFLARE_PRODUCTION_API_TOKEN`. Grant
+  only the permissions needed by the checked-in wrappers: Cloudflare Pages
+  Edit, Workers Scripts Edit, D1 Read, and Account Analytics Read for the pinned
+  account. Also set `OPS_HEALTH_SECRET` to the same detailed-readiness secret
+  held by the production Pages environment. Require the repository owner as an
+  environment reviewer.
+
+Never use `pull_request_target` to build or execute pull-request code with a
+Cloudflare secret. Never place an API token in a workflow variable, release
+asset, artifact, command argument, log, or repository file.
+
 ## Stripe/webhook incident order
 
 1. Do not replay an event until the D1 ledger health and current event state

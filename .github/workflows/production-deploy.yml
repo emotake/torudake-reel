@@ -1,0 +1,204 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact 40-character commit currently at main
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  deployments: write
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PRODUCTION_API_TOKEN }}
+      OPS_HEALTH_SECRET: ${{ secrets.OPS_HEALTH_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_COMMIT: ${{ inputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+
+      - name: Validate release identity and credentials
+        shell: pwsh
+        run: |
+          if ($env:REQUESTED_COMMIT -notmatch '^[0-9a-f]{40}$') {
+            throw "A lowercase 40-character commit is required."
+          }
+          $head = (git rev-parse HEAD).Trim()
+          $remoteMain = (git rev-parse origin/main).Trim()
+          if ($head -ne $env:REQUESTED_COMMIT -or $remoteMain -ne $env:REQUESTED_COMMIT) {
+            throw "The requested commit is not the current origin/main commit."
+          }
+          if (-not [string]::IsNullOrWhiteSpace((git status --porcelain | Out-String))) {
+            throw "Production checkout is not clean."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CLOUDFLARE_API_TOKEN)) {
+            throw "CLOUDFLARE_PRODUCTION_API_TOKEN is not configured."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:OPS_HEALTH_SECRET) -or
+              $env:OPS_HEALTH_SECRET.Length -lt 32) {
+            throw "OPS_HEALTH_SECRET is not configured."
+          }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit --incremental false
+      - run: pnpm lint
+      - run: pnpm test
+
+      - name: Download verified current release state
+        shell: pwsh
+        run: |
+          $releaseRoot = Join-Path $env:RUNNER_TEMP "torudake-release-$env:REQUESTED_COMMIT"
+          $stateRoot = Join-Path $releaseRoot "state"
+          New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+          gh release download production-state --repo $env:GITHUB_REPOSITORY `
+            --pattern scheduler.json --dir $stateRoot
+          $previousScheduler = Join-Path $stateRoot "scheduler.json"
+          if (-not (Test-Path -LiteralPath $previousScheduler)) {
+            throw "The verified scheduler state is missing."
+          }
+          "RELEASE_ROOT=$releaseRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "STATE_ROOT=$stateRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PAGES_MANIFEST=$(Join-Path $releaseRoot 'pages-artifact.json')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SCHEDULER_MANIFEST=$(Join-Path $releaseRoot 'scheduler.json')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ROLLBACK_MANIFEST=$(Join-Path $releaseRoot 'rollback.json')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PRODUCTION_RECORD=$(Join-Path $releaseRoot 'pages-production.json')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "AUTH_FLAGS_SNAPSHOT=$(Join-Path $releaseRoot 'auth-flags.json')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PREVIOUS_SCHEDULER_MANIFEST=$previousScheduler" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Prepare immutable Pages artifact
+        shell: pwsh
+        run: |
+          pnpm release:pages -- --prepare `
+            --manifest $env:PAGES_MANIFEST `
+            --external-root $env:RELEASE_ROOT `
+            --execute --confirm prepare-pages-release
+          "TORUDAKE_PAGES_ARTIFACT_MANIFEST=$env:PAGES_MANIFEST" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $env:TORUDAKE_PAGES_ARTIFACT_MANIFEST = $env:PAGES_MANIFEST
+          pnpm release:preflight:offline
+
+      - name: Release account-deletion scheduler
+        shell: pwsh
+        run: |
+          $env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $env:PREVIOUS_SCHEDULER_MANIFEST
+          pnpm ops:deploy-account-deletion-scheduler -- --execute `
+            --confirm deploy-account-deletion-scheduler `
+            --manifest $env:SCHEDULER_MANIFEST
+          "TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST=$env:SCHEDULER_MANIFEST" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Capture and disable production authentication for rollback snapshot
+        id: disable_auth
+        shell: pwsh
+        run: |
+          pnpm ops:pages-auth-flags -- --capture --output $env:AUTH_FLAGS_SNAPSHOT
+          pnpm ops:pages-auth-flags -- --disable --snapshot $env:AUTH_FLAGS_SNAPSHOT
+          "attempted=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          pnpm ops:pages-auth-flags -- --disable --snapshot $env:AUTH_FLAGS_SNAPSHOT `
+            --execute --confirm update-pages-auth-flags
+          "disabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Provision verified disabled rollback deployment
+        shell: pwsh
+        run: |
+          pnpm release:pages -- --deploy `
+            --manifest $env:PAGES_MANIFEST `
+            --external-root $env:RELEASE_ROOT `
+            --deployment-record $env:ROLLBACK_MANIFEST `
+            --provision-disabled-rollback
+          pnpm release:pages -- --deploy `
+            --manifest $env:PAGES_MANIFEST `
+            --external-root $env:RELEASE_ROOT `
+            --deployment-record $env:ROLLBACK_MANIFEST `
+            --provision-disabled-rollback `
+            --execute --confirm deploy-cloudflare-pages
+
+      - name: Restore intended production authentication
+        id: restore_auth
+        if: steps.disable_auth.outputs.disabled == 'true'
+        shell: pwsh
+        run: |
+          pnpm ops:pages-auth-flags -- --restore --snapshot $env:AUTH_FLAGS_SNAPSHOT
+          pnpm ops:pages-auth-flags -- --restore --snapshot $env:AUTH_FLAGS_SNAPSHOT `
+            --execute --confirm update-pages-auth-flags
+          "restored=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Emergency authentication restoration
+        if: >-
+          always() &&
+          steps.disable_auth.outputs.attempted == 'true' &&
+          steps.restore_auth.outputs.restored != 'true'
+        shell: pwsh
+        run: |
+          pnpm ops:pages-auth-flags -- --restore --snapshot $env:AUTH_FLAGS_SNAPSHOT `
+            --execute --confirm update-pages-auth-flags
+
+      - name: Verify online production dependencies
+        if: success()
+        shell: pwsh
+        run: |
+          "TORUDAKE_ROLLBACK_MANIFEST=$env:ROLLBACK_MANIFEST" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $env:TORUDAKE_ROLLBACK_MANIFEST = $env:ROLLBACK_MANIFEST
+          pnpm release:preflight
+
+      - name: Deploy verified artifact to production
+        if: success()
+        shell: pwsh
+        run: |
+          pnpm release:pages -- --deploy `
+            --manifest $env:PAGES_MANIFEST `
+            --external-root $env:RELEASE_ROOT `
+            --deployment-record $env:PRODUCTION_RECORD `
+            --execute --confirm deploy-cloudflare-pages
+
+      - name: Verify health and payment read-only contracts
+        if: success()
+        run: |
+          pnpm ops:health:detailed
+          pnpm ops:payment-smoke
+
+      - name: Publish verified release state
+        if: success()
+        shell: pwsh
+        run: |
+          $publishRoot = Join-Path $env:RUNNER_TEMP "production-state"
+          New-Item -ItemType Directory -Force -Path $publishRoot | Out-Null
+          Copy-Item -LiteralPath $env:SCHEDULER_MANIFEST -Destination (Join-Path $publishRoot "scheduler.json")
+          Copy-Item -LiteralPath $env:ROLLBACK_MANIFEST -Destination (Join-Path $publishRoot "rollback.json")
+          Copy-Item -LiteralPath $env:PRODUCTION_RECORD -Destination (Join-Path $publishRoot "pages-production.json")
+          Copy-Item -LiteralPath $env:PAGES_MANIFEST -Destination (Join-Path $publishRoot "pages-artifact.json")
+          gh release upload production-state --repo $env:GITHUB_REPOSITORY `
+            (Join-Path $publishRoot "scheduler.json") `
+            (Join-Path $publishRoot "rollback.json") `
+            (Join-Path $publishRoot "pages-production.json") `
+            (Join-Path $publishRoot "pages-artifact.json") `
+            --clobber
+          "### Production deployed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Commit: ``$env:REQUESTED_COMMIT``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "https://torudake-reel.pages.dev" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
