@@ -44,6 +44,21 @@ jobs:
           node-version: 22.19.0
           cache: pnpm
 
+      - name: Configure isolated release runtime
+        shell: pwsh
+        run: |
+          $xdgConfig = Join-Path $env:RUNNER_TEMP "xdg-config"
+          $xdgCache = Join-Path $env:RUNNER_TEMP "xdg-cache"
+          $wranglerRoot = Join-Path $env:RUNNER_TEMP "wrangler"
+          New-Item -ItemType Directory -Force -Path $xdgConfig, $xdgCache, $wranglerRoot | Out-Null
+          @(
+            "TEMP=$env:RUNNER_TEMP"
+            "TMP=$env:RUNNER_TEMP"
+            "XDG_CONFIG_HOME=$xdgConfig"
+            "XDG_CACHE_HOME=$xdgCache"
+            "WRANGLER_LOG_PATH=$(Join-Path $wranglerRoot 'wrangler.log')"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Validate release identity and credentials
         shell: pwsh
         run: |
@@ -102,8 +117,6 @@ jobs:
       - name: Release account-deletion scheduler
         shell: pwsh
         run: |
-          $env:TEMP = $env:RUNNER_TEMP
-          $env:TMP = $env:RUNNER_TEMP
           $env:TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST = $env:PREVIOUS_SCHEDULER_MANIFEST
           pnpm ops:deploy-account-deletion-scheduler -- --execute `
             --confirm deploy-account-deletion-scheduler `
@@ -160,8 +173,6 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          $env:TEMP = $env:RUNNER_TEMP
-          $env:TMP = $env:RUNNER_TEMP
           "TORUDAKE_ROLLBACK_MANIFEST=$env:ROLLBACK_MANIFEST" | Out-File -FilePath $env:GITHUB_ENV -Append
           $env:TORUDAKE_ROLLBACK_MANIFEST = $env:ROLLBACK_MANIFEST
           pnpm release:preflight
