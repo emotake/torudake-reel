@@ -21,29 +21,7 @@
         ▼       ▼          ▼
        D1     OpenAI     Stripe / LINE
 
-    Cloudflare Worker（試験）
-      ├─ Workers Static Assets
-      ├─ 専用D1
-      └─ SSR / API互換性の検証
-
 GitHub Actionsは、検証済みの同一成果物を試験環境から本番へ昇格します。アカウント削除の期限処理は専用のscheduled Workerが担当します。
-
-## Workers試験環境
-
-本番の `torudake-reel.pages.dev` は維持したまま、同じアプリを
-`torudake-reel-worker-staging` としてWorkers Static Assets上で検証できます。
-専用のD1データベースを使い、本番利用者・課金状態・利用枠へ影響させません。
-
-- Worker設定の正本は `wrangler.worker-staging.jsonc`
-- 試験環境のリソース識別子は `config/worker-staging-targets.json` に分離し、本番リリース契約を変更しない
-- 静的ファイルはWorkerを起動せず配信する
-- SSR、API、`/demo/*` のRange応答だけWorkerを通す
-- `workers.dev` 側は非正規ホストとして検索登録を拒否する
-- OpenAI、Stripe、LINEの秘密情報は初期状態では設定しない
-- R2は料金判断が必要になるまでbindingを追加しない
-
-この試験環境は、将来のR2直接アップロード、処理状態管理、再試行基盤を
-本番URLと切り離して検証するための土台であり、本番トラフィックを受けません。
 
 ## ブラウザの責務
 
