@@ -40,6 +40,14 @@ import {
 } from "../lib/edit-plan";
 import { buildPostingReadinessChecklist } from "../lib/posting-readiness";
 import {
+  buildPublishingCopy,
+  buildPublishingFormatChecks,
+  FINISH_PRESETS,
+  PUBLISHING_TARGETS,
+  publishingTargetLabel,
+  type PublishingTarget,
+} from "../lib/publishing-targets";
+import {
   DEFAULT_PERSONAL_EDIT_RECIPE,
   PERSONAL_EDIT_PREFERENCE_LIMITS,
   dictionaryMatchKey,
@@ -2178,6 +2186,8 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
     useState(false);
   const [stage, setStage] = useState<Stage>("start");
   const [goal, setGoal] = useState<Goal>("follow");
+  const [publishingTarget, setPublishingTarget] =
+    useState<PublishingTarget>("both");
   const [captionProfile, setCaptionProfile] = useCaptionProfileSync();
   const [personalDictionary, setPersonalDictionaryState] = useState<
     PronunciationDictionaryEntry[]
@@ -4177,6 +4187,8 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           videoUrl={videoUrl}
           goal={goal}
           setGoal={setGoal}
+          publishingTarget={publishingTarget}
+          setPublishingTarget={setPublishingTarget}
           captionProfile={captionProfile}
           length={length}
           setLength={setPersonalLength}
@@ -4257,6 +4269,7 @@ export default function Home({ landingVariant = "home" }: HomeProps = {}) {
           setTranscript={setTranscript}
           keptLines={keptLines}
           goal={goal}
+          publishingTarget={publishingTarget}
           captionProfile={captionProfile}
           setCaptionProfile={setCaptionProfile}
           length={length}
@@ -5201,6 +5214,8 @@ function SetupWorkspace({
   videoUrl,
   goal,
   setGoal,
+  publishingTarget,
+  setPublishingTarget,
   captionProfile,
   length,
   setLength,
@@ -5238,6 +5253,8 @@ function SetupWorkspace({
   videoUrl: string;
   goal: Goal;
   setGoal: (goal: Goal) => void;
+  publishingTarget: PublishingTarget;
+  setPublishingTarget: (target: PublishingTarget) => void;
   captionProfile: CaptionProfile;
   length: number;
   setLength: (length: number) => void;
@@ -5307,9 +5324,9 @@ function SetupWorkspace({
       <div className="workspaceHeading">
         <div>
           <p className="eyebrow">新しい動画</p>
-          <h1>どんなリールにしますか？</h1>
+          <h1>どんなショート動画にしますか？</h1>
           <p>
-            会話・解説を活かすか、AIナレーションで伝え直すかを選べます。
+            Instagram ReelsとYouTube Shortsへ使える形で、最初の1本を整えます。
           </p>
         </div>
         <span>ステップ 1 / 2</span>
@@ -5406,10 +5423,29 @@ function SetupWorkspace({
             <div className="setupQuickStartHeading">
               <div>
                 <span>おすすめ</span>
-                <h2 id="quickStartTitle">おすすめで作る</h2>
+                <h2 id="quickStartTitle">まず、おまかせ初稿を作る</h2>
               </div>
-              <p>会話・解説を活かすか、AI音声で伝え直すかを選べます。</p>
+              <p>投稿先と音声だけ選べば、あとから見た目を無料で調整できます。</p>
             </div>
+            <fieldset className="publishingTargetChoice">
+              <legend>投稿先</legend>
+              <div className="publishingTargetCards">
+                {PUBLISHING_TARGETS.map((target) => (
+                  <button
+                    type="button"
+                    key={target.id}
+                    className={publishingTarget === target.id ? "selected" : ""}
+                    aria-pressed={publishingTarget === target.id}
+                    onClick={() => setPublishingTarget(target.id)}
+                  >
+                    <strong>{target.shortLabel}</strong>
+                    <small>{target.note}</small>
+                    {target.id === "both" && <b>おすすめ</b>}
+                  </button>
+                ))}
+              </div>
+              <small>動画の書き出しは共通です。投稿先を増やしてもAI処理回数は増えません。</small>
+            </fieldset>
             <fieldset className="quickAudioMode">
               <legend>音声の仕上げ方</legend>
               <div className="audioModeCards">
@@ -5480,6 +5516,11 @@ function SetupWorkspace({
                     : "テロップは見やすい設定で作成し、色とデザインは仕上がりを見てから無料で変更できます。"}
                 </small>
               </p>
+            </div>
+            <div className="quickDraftSummary" aria-label="おまかせ初稿の内容">
+              <span><b>1</b>{publishingTargetLabel(publishingTarget)}</span>
+              <span><b>2</b>{audioMode === "spoken" ? "元音声を活かす" : "AIナレーション"}</span>
+              <span><b>3</b>初稿を見てから無料で調整</span>
             </div>
           </section>
 
@@ -5870,9 +5911,9 @@ function SetupWorkspace({
             <button className="mainCta" onClick={startEditing}>
               <span>
                 {audioMode === "narration"
-                  ? "AIナレーション付きで作る"
+                  ? "AIナレーションの初稿を見る"
                   : spokenCutMode === "auto"
-                    ? "おすすめ設定で作る"
+                    ? "この設定で初稿を見る"
                     : spokenCutMode === "manual"
                       ? "文字起こしして自分で選ぶ"
                       : "元動画の流れを保って仕上げる"}
@@ -6075,6 +6116,7 @@ function ResultWorkspace({
   setTranscript,
   keptLines,
   goal,
+  publishingTarget,
   captionProfile,
   setCaptionProfile,
   length,
@@ -6122,6 +6164,7 @@ function ResultWorkspace({
   setTranscript: (lines: TranscriptLine[]) => void;
   keptLines: TranscriptLine[];
   goal: Goal;
+  publishingTarget: PublishingTarget;
   captionProfile: CaptionProfile;
   setCaptionProfile: (profile: CaptionProfile) => void;
   length: number;
@@ -6270,6 +6313,15 @@ function ResultWorkspace({
     null,
   );
   const [isCaptionDesignerOpen, setIsCaptionDesignerOpen] = useState(false);
+  const [selectedFinishPreset, setSelectedFinishPreset] = useState<
+    "natural" | "story" | "impact"
+  >(() =>
+    captionProfile.mood === "bold"
+      ? "impact"
+      : captionProfile.mood === "vlog"
+        ? "story"
+        : "natural",
+  );
   const [narrationDraft, setNarrationDraft] = useState(
     narrationPlan?.script ?? "",
   );
@@ -6912,6 +6964,24 @@ function ResultWorkspace({
     },
     [thumbnailPreviewUrl],
   );
+  const publishingCopy = useMemo(
+    () =>
+      buildPublishingCopy({
+        titleSource:
+          thumbnailTitle ||
+          narrationPlan?.title ||
+          editedTranscript.find((line) => line.text.trim())?.text ||
+          "ショート動画",
+        body:
+          narrationPlan?.socialCaption ||
+          editedTranscript
+            .map((line) => line.text.trim())
+            .filter(Boolean)
+            .join("\n"),
+        disclosureText: narrationPlan ? NARRATION_DISCLOSURE_TEXT : "",
+      }),
+    [editedTranscript, narrationPlan, thumbnailTitle],
+  );
   const removedCount = transcript.filter((line) => line.removed).length;
   const cutReasonById = useMemo(() => {
     if (narrationPlan || spokenCutMode === "none") {
@@ -6967,6 +7037,21 @@ function ResultWorkspace({
       plannedExportDimensions,
       readyExportedVideoFile,
       unreadableCaptionCount,
+    ],
+  );
+  const publishingFormatChecks = useMemo(
+    () =>
+      buildPublishingFormatChecks({
+        target: publishingTarget,
+        durationSeconds: editDuration,
+        width: plannedExportDimensions?.width,
+        height: plannedExportDimensions?.height,
+      }),
+    [
+      editDuration,
+      plannedExportDimensions?.height,
+      plannedExportDimensions?.width,
+      publishingTarget,
     ],
   );
   const hasCutChanges = transcript.some(
@@ -8167,6 +8252,25 @@ function ResultWorkspace({
       buildDisclosedPostCaption(narrationPlan.socialCaption),
     );
     notify("開示文を含む投稿文をコピーしました");
+  }
+
+  async function copyPublishingText(
+    text: string,
+    successMessage: string,
+  ) {
+    await navigator.clipboard.writeText(text);
+    notify(successMessage);
+  }
+
+  function applyFinishPreset(presetId: "natural" | "story" | "impact") {
+    const preset = FINISH_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    setSelectedFinishPreset(presetId);
+    setCaptionProfile({
+      ...captionProfile,
+      mood: preset.captionMood,
+    });
+    notify(`「${preset.label}」をプレビューへ反映しました`);
   }
 
   function updateNarrationPronunciationRow(
@@ -10215,7 +10319,7 @@ function ResultWorkspace({
       </div>
 
       {file && (
-        <aside className="resultPrimaryAction" aria-label="完成動画の保存">
+        <aside id="export-actions" className="resultPrimaryAction" aria-label="完成動画の保存">
           <div>
             <span className="resultPrimaryActionIcon" aria-hidden="true">▶</span>
             <p>
@@ -10266,6 +10370,63 @@ function ResultWorkspace({
         </aside>
       )}
 
+      <section className="finishPresetPanel" aria-labelledby="finish-preset-heading">
+        <div className="finishPresetHeading">
+          <div>
+            <p className="eyebrow">3つの仕上がり</p>
+            <h2 id="finish-preset-heading">同じ編集結果を、見た目だけ比べる</h2>
+          </div>
+          <span>追加AI 0回</span>
+        </div>
+        <div className="finishPresetCards">
+          {FINISH_PRESETS.map((preset) => (
+            <button
+              type="button"
+              key={preset.id}
+              className={selectedFinishPreset === preset.id ? "selected" : ""}
+              aria-pressed={selectedFinishPreset === preset.id}
+              disabled={!captionsVisible || isMediaBusy}
+              onClick={() => applyFinishPreset(preset.id)}
+            >
+              <i aria-hidden="true">Aa</i>
+              <strong>{preset.label}</strong>
+              <small>{preset.note}</small>
+              <b>{selectedFinishPreset === preset.id ? "選択中" : "試す"}</b>
+            </button>
+          ))}
+        </div>
+        {!captionsVisible && (
+          <p className="finishPresetDisabledNote">テロップを「あり」にすると、3種類をすぐ比較できます。</p>
+        )}
+      </section>
+
+      <section className="editReviewPanel" aria-labelledby="edit-review-heading">
+        <div className="editReviewHeading">
+          <span aria-hidden="true">✓</span>
+          <div>
+            <h2 id="edit-review-heading">要確認だけ修正</h2>
+            <p>問題のない場所は触らず、確認が必要な箇所だけ表示します。</p>
+          </div>
+        </div>
+        <div className="editReviewItems">
+          <a className={unreadableCaptionCount > 0 ? "warning" : "pass"} href="#caption-adjustments">
+            <span>{unreadableCaptionCount > 0 ? "!" : "✓"}</span>
+            <p><strong>テロップ</strong><small>{!captionsVisible ? "使用しない設定です" : unreadableCaptionCount > 0 ? `読み切りにくい可能性が${unreadableCaptionCount}件` : "読みやすさに問題はありません"}</small></p>
+          </a>
+          <a
+            className={narrationPlan && (pronunciationValidation.error || hasPendingPronunciationChanges) ? "warning" : "pass"}
+            href={narrationPlan ? "#narration-adjustments" : "#caption-adjustments"}
+          >
+            <span>{narrationPlan && (pronunciationValidation.error || hasPendingPronunciationChanges) ? "!" : "✓"}</span>
+            <p><strong>音声・読み方</strong><small>{!narrationPlan ? "元音声を使用します" : pronunciationValidation.error ? "読み方の入力を確認してください" : hasPendingPronunciationChanges ? "音声への反映待ちがあります" : "反映待ちはありません"}</small></p>
+          </a>
+          <a className={readyExportedVideoFile ? "pass" : "pending"} href="#export-actions">
+            <span>{readyExportedVideoFile ? "✓" : "…"}</span>
+            <p><strong>完成動画</strong><small>{readyExportedVideoFile ? "映像と音声の確認済み" : "書き出し時に自動確認します"}</small></p>
+          </a>
+        </div>
+      </section>
+
       {narrationPlan && (
         <details className="narrationStudio resultDetailCard">
           <summary className="resultDetailSummary">
@@ -10276,7 +10437,7 @@ function ResultWorkspace({
             </p>
             <i aria-hidden="true">⌄</i>
           </summary>
-          <div className="narrationStudioHeading">
+          <div id="narration-adjustments" className="narrationStudioHeading">
             <div>
               <p className="eyebrow">AI音声の調整</p>
               <h2>声と投稿文を、あなたらしく整える</h2>
@@ -10862,8 +11023,57 @@ function ResultWorkspace({
         </details>
       )}
 
+      <section id="posting-package" className="publishingPackage" aria-labelledby="publishing-package-heading">
+        <div className="publishingPackageHeading">
+          <div>
+            <p className="eyebrow">投稿セット</p>
+            <h2 id="publishing-package-heading">動画と一緒に、投稿に必要な文章も用意</h2>
+            <p>{publishingTargetLabel(publishingTarget)}向け・追加のAI処理なし</p>
+          </div>
+          <span>コピーして投稿画面へ</span>
+        </div>
+        <div className="publishingPackageGrid">
+          {(publishingTarget === "instagram" || publishingTarget === "both") && (
+            <article>
+              <span className="publishingPlatformBadge instagram">Instagram Reels</span>
+              <strong>投稿文</strong>
+              <p>{publishingCopy.instagramCaption || "テロップの文章を投稿文として使えます。"}</p>
+              <button
+                type="button"
+                onClick={() => void copyPublishingText(publishingCopy.instagramCaption, "Instagram用の投稿文をコピーしました")}
+                disabled={!publishingCopy.instagramCaption}
+              >
+                投稿文をコピー
+              </button>
+            </article>
+          )}
+          {(publishingTarget === "youtube" || publishingTarget === "both") && (
+            <article>
+              <span className="publishingPlatformBadge youtube">YouTube Shorts</span>
+              <strong>タイトル</strong>
+              <p>{publishingCopy.youtubeTitle}</p>
+              <div className="publishingCopyActions">
+                <button
+                  type="button"
+                  onClick={() => void copyPublishingText(publishingCopy.youtubeTitle, "YouTube Shorts用タイトルをコピーしました")}
+                >
+                  タイトルをコピー
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyPublishingText(publishingCopy.youtubeDescription, "YouTube Shorts用説明文をコピーしました")}
+                >
+                  説明文をコピー
+                </button>
+              </div>
+              <small>{Array.from(publishingCopy.youtubeTitle).length}/100文字・説明文に #Shorts を付与</small>
+            </article>
+          )}
+        </div>
+      </section>
+
       <div className="resultGrid">
-        <div className="previewPanel">
+        <div id="caption-adjustments" className="previewPanel">
           <div className="previewTop">
             <div className="modeSwitch">
               <button
@@ -10920,6 +11130,17 @@ function ResultWorkspace({
                       : check.status === "warning"
                         ? "!"
                         : "…"}
+                  </span>
+                  <div>
+                    <strong>{check.label}</strong>
+                    <small>{check.detail}</small>
+                  </div>
+                </li>
+              ))}
+              {publishingFormatChecks.map((check) => (
+                <li className={check.status} key={check.id}>
+                  <span aria-hidden="true">
+                    {check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "…"}
                   </span>
                   <div>
                     <strong>{check.label}</strong>

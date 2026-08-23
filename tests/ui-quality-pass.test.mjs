@@ -37,7 +37,8 @@ test("keeps the recommended setup short and moves free caption styling to result
   const resultStart = pageSource.indexOf("function ResultWorkspace");
   const resultSource = pageSource.slice(resultStart);
 
-  assert.match(setupSource, /おすすめで作る/);
+  assert.match(setupSource, /まず、おまかせ初稿を作る/);
+  assert.match(setupSource, /Instagram ReelsとYouTube Shorts/);
   assert.match(setupSource, /<details className="advancedSettings">/);
   assert.match(setupSource, /細かく設定/);
   assert.doesNotMatch(setupSource, /<CaptionStylePicker/);
