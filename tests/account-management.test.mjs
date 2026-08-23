@@ -738,6 +738,18 @@ test("external-only accounts expose their linked step-up method and obey the sam
   );
 });
 
+test("raw ECDSA signatures beginning with the DER marker are still encoded", () => {
+  const rawSignature = new Uint8Array(64);
+  rawSignature[0] = 0x30;
+  rawSignature[31] = 0x01;
+  rawSignature[63] = 0x02;
+
+  const encoded = rawEcdsaSignatureToDer(rawSignature);
+  assert.notEqual(encoded.length, rawSignature.length);
+  assert.equal(encoded[0], 0x30);
+  assert.equal(encoded[1], encoded.length - 2);
+});
+
 async function createAccountFixture(suffix, ageSeconds = 0) {
   const now = Math.floor(Date.now() / 1_000);
   const userId = `account-management-${suffix}`;
@@ -942,7 +954,7 @@ async function createRegistrationResponse(options, authenticator) {
 }
 
 function rawEcdsaSignatureToDer(signature) {
-  if (signature[0] === 0x30) return signature;
+  if (isDerEcdsaSignature(signature)) return signature;
   assert.equal(signature.length, 64);
   const encodeInteger = (value) => {
     let start = 0;
@@ -957,6 +969,24 @@ function rawEcdsaSignatureToDer(signature) {
   const r = encodeInteger(signature.slice(0, 32));
   const s = encodeInteger(signature.slice(32));
   return concatBytes(new Uint8Array([0x30, r.length + s.length]), r, s);
+}
+
+function isDerEcdsaSignature(signature) {
+  if (signature.length < 8 || signature[0] !== 0x30) return false;
+  if (signature[1] !== signature.length - 2 || signature[2] !== 0x02) {
+    return false;
+  }
+  const rLength = signature[3];
+  const sTagOffset = 4 + rLength;
+  if (
+    rLength === 0 ||
+    sTagOffset + 2 > signature.length ||
+    signature[sTagOffset] !== 0x02
+  ) {
+    return false;
+  }
+  const sLength = signature[sTagOffset + 1];
+  return sLength > 0 && sTagOffset + 2 + sLength === signature.length;
 }
 
 function concatBytes(...values) {
