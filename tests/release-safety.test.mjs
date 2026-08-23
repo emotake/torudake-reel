@@ -1460,30 +1460,30 @@ test("all D1 preflight SQL is provably read-only", () => {
 });
 
 test("canonical release docs require all external manifests and verified wrappers", async () => {
-  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-  assert.match(readme, /TORUDAKE_PAGES_ARTIFACT_MANIFEST/);
-  assert.match(readme, /TORUDAKE_ROLLBACK_MANIFEST/);
-  assert.match(readme, /TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST/);
-  assert.match(readme, /previousSchedulerManifest/);
-  assert.match(readme, /newSchedulerManifest/);
-  assert.match(readme, /--bootstrap-previous-provenance/);
-  assert.match(readme, /bootstrap-account-deletion-scheduler-provenance/);
-  assert.match(readme, /wrangler triggers deploy/);
-  assert.match(readme, /release:pages -- --prepare/);
-  assert.match(readme, /release:pages -- --deploy/);
-  assert.match(readme, /deploy-cloudflare-pages/);
-  assert.match(readme, /artifact SHA入りmessage/);
-  assert.match(readme, /reviewed-clean-release-worktree/);
-  assert.doesNotMatch(readme, /torudake-release-src-20260810/);
-  assert.match(
-    readme,
-    /release:pages -- --prepare[\s\S]*ops:deploy-account-deletion-scheduler -- --execute[\s\S]*TORUDAKE_ROLLBACK_MANIFEST[\s\S]*run release:preflight[\s\S]*release:pages -- --deploy/,
-  );
-
-  const operations = await readFile(
+  const releaseDocs = await readFile(
     new URL("../docs/operations/production-operations.md", import.meta.url),
     "utf8",
   );
+  assert.match(releaseDocs, /TORUDAKE_PAGES_ARTIFACT_MANIFEST/);
+  assert.match(releaseDocs, /TORUDAKE_ROLLBACK_MANIFEST/);
+  assert.match(releaseDocs, /TORUDAKE_ACCOUNT_DELETION_SCHEDULER_MANIFEST/);
+  assert.match(releaseDocs, /previousSchedulerManifest/);
+  assert.match(releaseDocs, /newSchedulerManifest/);
+  assert.match(releaseDocs, /--bootstrap-previous-provenance/);
+  assert.match(releaseDocs, /bootstrap-account-deletion-scheduler-provenance/);
+  assert.match(releaseDocs, /wrangler triggers deploy/);
+  assert.match(releaseDocs, /release:pages -- --prepare/);
+  assert.match(releaseDocs, /release:pages -- --deploy/);
+  assert.match(releaseDocs, /deploy-cloudflare-pages/);
+  assert.match(releaseDocs, /artifact SHA入りmessage/);
+  assert.match(releaseDocs, /reviewed-clean-release-worktree/);
+  assert.doesNotMatch(releaseDocs, /torudake-release-src-20260810/);
+  assert.match(
+    releaseDocs,
+    /release:pages -- --prepare[\s\S]*ops:deploy-account-deletion-scheduler -- --execute[\s\S]*TORUDAKE_ROLLBACK_MANIFEST[\s\S]*run release:preflight[\s\S]*release:pages -- --deploy/,
+  );
+
+  const operations = releaseDocs;
   assert.match(operations, /versions upload/);
   assert.match(operations, /wrangler triggers deploy/);
   assert.match(operations, /Schedules API/);

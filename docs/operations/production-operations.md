@@ -223,8 +223,9 @@ ledger contains every reviewed migration.
 ## Pages artifact preparation and verified deploy
 
 `dist/cloudflare-pages` is ignored by Git, so a clean worktree alone does not
-prove which bytes will be uploaded. From a clean reviewed HEAD, create one new
-external directory and manifest on drive D:
+prove which bytes will be uploaded. From a clean reviewed HEAD in a
+`reviewed-clean-release-worktree`, create one new external directory and
+manifest on drive D:
 
 ```powershell
 $pagesReleaseRoot = 'D:\private\torudake-pages-<commit>'
@@ -251,7 +252,7 @@ replace the Dashboard-managed Pages configuration. The wrapper pins
 project/branch/commit/message/`commit_dirty=false`, uses `--no-bundle` so the
 reviewed `_worker.js` bytes are not transformed again, and does not use
 `--skip-caching`.
-The exact deployment message is
+The exact deployment message（artifact SHA入りmessage）は
 `torudake-pages-v1 commit=<40-hex-commit> artifactSha256=<64-hex-sha256>`.
 
 After upload, the wrapper rejects any concurrent Production deployment, checks
@@ -493,6 +494,12 @@ deployment still requires all five raw flags.
    by its exact ID; if live project/status/branch/full commit, binding,
    readiness or five-flag checks fail; if the active Worker ID/ETag/annotation
    or bindings differ; or if either Cloudflare inspection is unavailable.
+   Run the verified online gate explicitly:
+
+   ```powershell
+   pnpm run release:preflight
+   ```
+
 6. Redeploy the exact same reviewed artifact through the wrapper so the restored
    live variables become a new deployment snapshot:
 
