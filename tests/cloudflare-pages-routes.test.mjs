@@ -22,6 +22,7 @@ const workerRoutes = [
   "/account/profile",
   "/api/usage",
   "/internal/health",
+  "/demo/voices/party-v6.wav",
 ];
 
 function routeMatches(rule, pathname) {

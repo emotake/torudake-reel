@@ -28,10 +28,14 @@ const { default: pagesWorker } = await import(
   new URL("../cloudflare-pages-entry.mjs", import.meta.url).href
 );
 
-async function requestMedia({ method = "GET", range } = {}) {
+async function requestMedia({
+  method = "GET",
+  path = "/demo/sample.mp4",
+  range,
+} = {}) {
   const headers = range ? { Range: range } : undefined;
   return pagesWorker.fetch(
-    new Request("https://torudake-reel.pages.dev/demo/sample.mp4", {
+    new Request(new URL(path, "https://torudake-reel.pages.dev"), {
       headers,
       method,
     }),
@@ -39,6 +43,65 @@ async function requestMedia({ method = "GET", range } = {}) {
     context,
   );
 }
+
+test("returns 410 for every retired party preview without reading Pages assets", async () => {
+  const retiredPaths = [
+    "/demo/voices/party.wav",
+    "/demo/voices/party-v2.wav",
+    "/demo/voices/party-v3.wav",
+    "/demo/voices/party-v4.wav",
+    "/demo/voices/party-v5.wav",
+    "/demo/voices/party-v6.wav",
+  ];
+
+  for (const path of retiredPaths) {
+    const assetRequestCount = assetRequests.length;
+    const response = await requestMedia({ path });
+    assert.equal(response.status, 410, path);
+    assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
+    assert.equal(
+      response.headers.get("cloudflare-cdn-cache-control"),
+      "no-store",
+    );
+    assert.equal(response.headers.get("content-length"), "0");
+    assert.equal(response.headers.get("content-type"), null);
+    assert.equal(response.headers.get("x-robots-tag"), "noindex");
+    assert.equal((await response.arrayBuffer()).byteLength, 0);
+    assert.equal(assetRequests.length, assetRequestCount, path);
+  }
+});
+
+test("keeps retired preview variants blocked for HEAD, Range, query, and encoded paths", async () => {
+  for (const options of [
+    { method: "HEAD", path: "/demo/voices/party-v6.wav" },
+    { path: "/demo/voices/party-v6.wav", range: "bytes=0-9" },
+    { path: "/demo/voices/party-v6.wav?cache-bust=1" },
+    { path: "/demo/voices/%70arty-v6.wav" },
+  ]) {
+    const assetRequestCount = assetRequests.length;
+    const response = await requestMedia(options);
+    assert.equal(response.status, 410, JSON.stringify(options));
+    assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
+    assert.equal(response.headers.get("content-range"), null);
+    assert.equal((await response.arrayBuffer()).byteLength, 0);
+    assert.equal(assetRequests.length, assetRequestCount, JSON.stringify(options));
+  }
+});
+
+test("continues to serve current public media through Pages assets", async () => {
+  const assetRequestCount = assetRequests.length;
+  const response = await requestMedia({
+    path: "/demo/voices/comedy-v6.wav",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+  assert.equal(assetRequests.length, assetRequestCount + 1);
+  assert.equal(
+    response.headers.get("cache-control"),
+    "public, max-age=86400, stale-while-revalidate=604800",
+  );
+});
 
 test("streams full public media with seek and cache metadata", async () => {
   const response = await requestMedia();

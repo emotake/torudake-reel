@@ -4,6 +4,14 @@ import { setRuntimeEnvironment } from "./cloudflare-pages-env-shim.mjs";
 const PUBLIC_MEDIA_PREFIX = "/demo/";
 const PUBLIC_MEDIA_CACHE_CONTROL =
   "public, max-age=86400, stale-while-revalidate=604800";
+const RETIRED_PUBLIC_MEDIA_PATHS = new Set([
+  "/demo/voices/party.wav",
+  "/demo/voices/party-v2.wav",
+  "/demo/voices/party-v3.wav",
+  "/demo/voices/party-v4.wav",
+  "/demo/voices/party-v5.wav",
+  "/demo/voices/party-v6.wav",
+]);
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 const pagesWorker = {
@@ -31,11 +39,25 @@ const pagesWorker = {
 
     let response;
     try {
-      // Pages static assets currently answer Range requests with 200. Keep demo
-      // media in the Worker route so browsers can seek without downloading from
-      // the beginning, while continuing to source the immutable bytes from the
-      // Pages asset namespace.
+      const publicMediaPathname = safelyDecodePathname(url.pathname);
       if (
+        (request.method === "GET" || request.method === "HEAD") &&
+        RETIRED_PUBLIC_MEDIA_PATHS.has(publicMediaPathname)
+      ) {
+        response = new Response(null, {
+          status: 410,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+            "Cloudflare-CDN-Cache-Control": "no-store",
+            "Content-Length": "0",
+            "X-Robots-Tag": "noindex",
+          },
+        });
+      } else if (
+        // Pages static assets currently answer Range requests with 200. Keep demo
+        // media in the Worker route so browsers can seek without downloading from
+        // the beginning, while continuing to source the immutable bytes from the
+        // Pages asset namespace.
         (request.method === "GET" || request.method === "HEAD") &&
         url.pathname.startsWith(PUBLIC_MEDIA_PREFIX)
       ) {
@@ -260,6 +282,20 @@ function requestIdentifier(value, fallback = "") {
   const normalized = value?.trim() ?? "";
   if (REQUEST_ID_PATTERN.test(normalized)) return normalized;
   return fallback || crypto.randomUUID();
+}
+
+function safelyDecodePathname(pathname) {
+  let decoded = pathname;
+  for (let pass = 0; pass < 3; pass += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) return decoded;
+      decoded = next;
+    } catch {
+      return decoded;
+    }
+  }
+  return decoded;
 }
 
 function runtimeLog(request, url, requestId, correlationId, fields) {
