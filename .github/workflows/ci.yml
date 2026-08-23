@@ -1,16 +1,14 @@
-name: Private CI template
+name: CI
 
 on:
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: "17 18 * * 5"
 
 permissions:
   contents: read
 
 concurrency:
-  group: private-ci-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,6 +33,5 @@ jobs:
       - run: pnpm test
       - run: pnpm build:cloudflare-pages
 
-  # Intentionally no deployment, D1 mutation, remote health secret, or payment
-  # credential. Keep the repository private and use a protected production
-  # environment with required reviewers if deployment is added later.
+  # CI only verifies source changes. Production deployment, D1 mutations,
+  # remote health secrets, and payment credentials are intentionally excluded.
