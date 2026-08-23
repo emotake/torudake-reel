@@ -33,6 +33,14 @@ pnpm run test
 - `tests/`: セキュリティ、課金、字幕、プレビュー、書き出しの回帰テスト
 - `cloudflare-pages-entry.mjs`: Pages用エントリーとセキュリティヘッダー
 
+## 災害復旧と秘密情報
+
+公開リポジトリにはAPIキー、決済用secret、利用者データを保存しません。
+必要な変数名は `.env.example`、復旧の境界と確認手順は
+`docs/operations/disaster-recovery.md` に記載します。暗号化した復旧情報は
+非公開リポジトリ `emotake/torudake-reel-recovery` で管理し、復号鍵は
+GitHub外に保管します。
+
 ## 認証と公開環境
 
 公開Cloudflare Pagesでは、クライアントが偽装できる認証ヘッダーを信用しません。
