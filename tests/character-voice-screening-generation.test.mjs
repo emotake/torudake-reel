@@ -14,6 +14,7 @@ import {
   SCREENING_SAMPLE_COUNT,
   buildPaidScreeningPlan,
   generateScreeningSamples,
+  hashEvaluationDataBytes,
   normalizeRealtimeUsage,
   resumeScreeningSamples,
   validatePcm16Audio,
@@ -218,6 +219,19 @@ test("pins the approved 24-sample screening plan and maximum cost", () => {
     japanese_phonemes: 220,
     conversational_pacing: 200,
   });
+});
+
+test("evaluation data approval is stable across LF and CRLF checkouts", async () => {
+  const bytes = await readFile(
+    new URL(
+      "../scripts/operations/data/character-voice-evaluation-v1.json",
+      import.meta.url,
+    ),
+  );
+  const lf = bytes.toString("utf8").replaceAll("\r\n", "\n");
+  const crlf = lf.replaceAll("\n", "\r\n");
+  assert.equal(hashEvaluationDataBytes(Buffer.from(lf)), APPROVED_EVALUATION_DATA_SHA256);
+  assert.equal(hashEvaluationDataBytes(Buffer.from(crlf)), APPROVED_EVALUATION_DATA_SHA256);
 });
 
 test("requires every paid execution guard before creating a socket", async () => {

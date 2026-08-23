@@ -999,9 +999,19 @@ async function assertTargetsAreFresh(outputDirectory, plan) {
   return { manifestPath, audioDirectory };
 }
 
+export function hashEvaluationDataBytes(bytes) {
+  const normalized = Buffer.from(bytes)
+    .toString("utf8")
+    .replaceAll("\r\n", "\n");
+  return createHash("sha256")
+    .update(normalized, "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
 async function verifyApprovedEvaluationData() {
   const bytes = await readFile(EVALUATION_DATA_URL);
-  const hash = createHash("sha256").update(bytes).digest("hex").toUpperCase();
+  const hash = hashEvaluationDataBytes(bytes);
   if (hash !== APPROVED_EVALUATION_DATA_SHA256) {
     throw new Error(
       `Evaluation data hash changed (${hash}); no request was made.`,
