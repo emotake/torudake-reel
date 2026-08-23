@@ -88,7 +88,7 @@ const preferences = await import("../lib/personal-edit-preferences.ts");
 const store = await import("../lib/personal-edit-preferences-store.ts");
 const route = await import("../app/api/personal-edit-preferences/route.ts");
 
-test("normalizes a bounded recipe and Japanese display/reading dictionary", () => {
+test("normalizes a bounded recipe, paused voice, and Japanese display/reading dictionary", () => {
   assert.deepEqual(
     preferences.normalizePersonalEditRecipe({
       audioMode: "narration",
@@ -108,7 +108,7 @@ test("normalizes a bounded recipe and Japanese display/reading dictionary", () =
       editingPace: "dynamic",
       spokenCaptionsEnabled: true,
       spokenCutMode: "none",
-      narrationStyle: "party",
+      narrationStyle: "bright",
       narrationCaptionsEnabled: false,
       narrationAutoCutEnabled: true,
       narrationOriginalAudioPercent: 13,

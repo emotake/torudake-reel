@@ -102,10 +102,12 @@ PCM 24kHzのWAVへ変換してプレビューと書き出しへ渡します。�
 
 キャラクター音声の人物像、台本指示、話速、基底音声は
 `lib/narration-voice-profiles.ts` で一元管理します。`character-v1` の基底音声は
-一次試聴で `shimmer` と `verse` が選定され、同じ音声の固定試聴もv6として
-品質確認済みです。公開環境では `NARRATION_VOICE_PROFILE=character-v1` を設定し、
-音声を戻す必要があるときだけ `classic` へ明示的に切り替えます。未設定または
-不正な値は安全側の `classic` へ戻ります。
+一次試聴で `shimmer` と `verse` が選定されましたが、`party`（ポップキャラクター）は
+日本語イントネーションの品質調整中のため公開を一時停止しています。既存データとの
+互換性を保つため内部定義は残し、公開UIと生成APIでは利用できない状態です。
+公開環境では `NARRATION_VOICE_PROFILE=character-v1` を設定し、音声を戻す必要が
+あるときだけ `classic` へ明示的に切り替えます。未設定または不正な値は安全側の
+`classic` へ戻ります。
 
 候補評価の準備は `pnpm run ops:prepare-character-voice-evaluation -- --output <出力先>`
 で行います。この処理は採点票と乾式の費用見積もりだけを作り、OpenAI API、APIキー、

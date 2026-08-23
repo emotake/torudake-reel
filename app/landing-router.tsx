@@ -14,7 +14,7 @@ import {
   STARTER_MONTHLY_VIDEO_LIMIT,
 } from "../lib/billing-policy";
 import { trackClientEvent } from "../lib/client-analytics";
-import { NARRATION_STYLES } from "../lib/narration";
+import { PUBLIC_NARRATION_STYLES } from "../lib/narration";
 import {
   VOICE_SAMPLE_CATALOG,
   VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION,
@@ -224,12 +224,12 @@ function VoiceSamples() {
         <h2 id="voiceSampleTitle">AIナレーションの声質を、先に聴けます。</h2>
         <p className="voiceSampleDescription">
           {VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION
-            ? "4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文で比較でき、再生ではAI処理回数を使いません。"
-            : "4つの声の雰囲気を固定見本で聴き比べられます。これは声質の参考で、実際の読み方・イントネーション・間は、入力した文章と最新の読み方設定に合わせて生成されるため異なる場合があります。キャラクター2種類は同じ短文で比較でき、再生ではAI処理回数を使いません。"}
+            ? "現在提供中の3つの話し方を固定見本で聴き比べられます。再生ではAI処理回数を使いません。"
+            : "現在提供中の3つの声の雰囲気を固定見本で聴き比べられます。これは声質の参考で、実際の読み方・イントネーション・間は、入力した文章と最新の読み方設定に合わせて生成されるため異なる場合があります。再生ではAI処理回数を使いません。"}
         </p>
       </div>
       <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
-        {NARRATION_STYLES.map((style) => {
+        {PUBLIC_NARRATION_STYLES.map((style) => {
           const exampleId = `voiceSampleExample-${style.id}`;
           const sample = VOICE_SAMPLE_CATALOG[style.id];
           return (
@@ -520,7 +520,7 @@ export function VideoEditLanding(props: LandingSharedProps) {
       </section>
 
       <details className="voiceSampleDisclosure">
-        <summary>AIナレーションの4つの声を試聴する <span aria-hidden="true">＋</span></summary>
+        <summary>AIナレーションの3つの声を試聴する <span aria-hidden="true">＋</span></summary>
         <VoiceSamples />
       </details>
 

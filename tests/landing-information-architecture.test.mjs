@@ -296,7 +296,7 @@ test("keeps one video editor engine while giving it a focused public entry", () 
   assert.match(videoEditSource, /import \{ VideoEditExperience \} from "\.\.\/page"/);
   assert.match(videoEditSource, /path:\s*"\/video-edit"/);
   assert.match(landingSource, /export function VideoEditLanding/);
-  assert.match(landingSource, /AIナレーションの4つの声を試聴する/);
+  assert.match(landingSource, /AIナレーションの3つの声を試聴する/);
   assert.match(pageSource, /prefers-reduced-motion: reduce/);
 });
 

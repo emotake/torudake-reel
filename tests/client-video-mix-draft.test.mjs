@@ -73,6 +73,16 @@ test("reads a valid video mix draft and rejects corrupt data", () => {
     readVideoMixClientDraft(legacyCaptionStyleStorage)?.narrationCaptionStyle,
     "auto",
   );
+  const pausedNarrationStyleStorage = {
+    getItem: (key) =>
+      key === VIDEO_MIX_DRAFT_STORAGE_KEY
+        ? JSON.stringify({ ...draft, narrationStyle: "party" })
+        : null,
+  };
+  assert.equal(
+    readVideoMixClientDraft(pausedNarrationStyleStorage)?.narrationStyle,
+    "bright",
+  );
   for (const [legacyStyle, expectedStyle] of [
     ["panel", "auto"],
     ["outline", "soft"],

@@ -8,7 +8,6 @@ const activeSamples = [
   ["calm", "calm-v5.wav"],
   ["bright", "bright-v5.wav"],
   ["comedy", "comedy-v6.wav"],
-  ["party", "party-v6.wav"],
 ];
 
 function wavPcm16(bytes) {

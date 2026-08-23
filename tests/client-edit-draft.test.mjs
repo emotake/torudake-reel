@@ -96,4 +96,8 @@ test("normalizes legacy caption preferences to safe mode-specific defaults", () 
   );
   assert.equal(normalizeLocalEditDraft({ ...base, audioMode: "invalid" }), null);
   assert.equal(normalizeLocalEditDraft({ ...base, spokenCutMode: undefined }), null);
+  assert.equal(
+    normalizeLocalEditDraft({ ...base, narrationStyle: "party" }).narrationStyle,
+    "bright",
+  );
 });

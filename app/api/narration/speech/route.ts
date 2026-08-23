@@ -10,6 +10,7 @@ import { getUsagePrincipal } from "../../../../lib/operator-access";
 import { authenticationRequired } from "../../../../lib/current-user";
 import { verifyInitialNarrationToken } from "../../../../lib/narration-initial";
 import {
+  isPublicNarrationStyle,
   normalizeNarrationDeliveryPreset,
   normalizeNarrationStyle,
   type NarrationDeliveryPreset,
@@ -773,6 +774,17 @@ export async function POST(request: Request) {
           : "台本は1〜2,000文字で入力してください。",
       },
       { status: 400 },
+    );
+  }
+
+  if (!isPublicNarrationStyle(style)) {
+    return Response.json(
+      {
+        error:
+          "「ポップキャラクター」は音声品質の調整中です。別の声を選んでください。",
+        code: "narration_style_temporarily_unavailable",
+      },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
     );
   }
 

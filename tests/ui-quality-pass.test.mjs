@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const [
@@ -73,7 +73,7 @@ test("loads the sample as a real File and presents one direct, captioned demo", 
   assert.match(pageSource, /デモ動画を準備しています/);
 });
 
-test("presents four readable, no-cost AI voice examples", async () => {
+test("presents three available, readable, no-cost AI voice examples", async () => {
   assert.match(pageSource, /VOICE_SAMPLE_CATALOG,/);
   assert.match(pageSource, /VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION,/);
   assert.match(pageSource, /VOICE_SAMPLE_SCRIPTS,/);
@@ -96,6 +96,14 @@ test("presents four readable, no-cost AI voice examples", async () => {
   assert.match(pageSource, /sampleVersion: sample\.version/);
   assert.match(pageSource, /aria-describedby=\{exampleId\}/);
   assert.match(pageSource, /trackClientEvent\("voice_sample_played"/);
+  assert.match(pageSource, /PUBLIC_NARRATION_STYLES\.map/);
+  assert.match(landingSource, /PUBLIC_NARRATION_STYLES\.map/);
+  assert.match(videoMixSource, /PUBLIC_NARRATION_STYLES\.map/);
+  assert.doesNotMatch(voiceCatalogSource, /^\s*party:\s*\{/m);
+  assert.doesNotMatch(
+    voiceCatalogSource,
+    /party:\s*VOICE_SAMPLE_CATALOG\.party\.script/,
+  );
   assert.doesNotMatch(pageSource, /同じ短い文章を4つの声で/);
   assert.doesNotMatch(pageSource, /用途別の例文で、4つの声を/);
   assert.match(
@@ -127,20 +135,17 @@ test("presents four readable, no-cost AI voice examples", async () => {
       script:
         "週末は友だちと夏祭りへ行きました。焼きそばを食べて、音楽を聴いて、最後は大きな花火を楽しみました。",
     },
-    party: {
-      voice: "marin",
-      speed: 1,
-      script:
-        "友だちと夜景を見に行きました。写真もきれいに撮れて、笑顔いっぱいの楽しい一日になりました。",
-    },
   };
-  assert.equal(voiceManifest.samples.length, 4);
+  const publicSamples = voiceManifest.samples.filter(
+    (sample) => Object.hasOwn(expectedSamples, sample.id),
+  );
+  assert.equal(publicSamples.length, 3);
   assert.equal(voiceManifest.sampleModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionParity, false);
   assert.match(voiceManifest.parityScope, /Same model, base voice, and speed/);
   assert.doesNotMatch(pageSource, /実際の生成では、最新の日本語向け発音調整が加わります/);
-  for (const sample of voiceManifest.samples) {
+  for (const sample of publicSamples) {
     const expected = expectedSamples[sample.id];
     assert.ok(expected);
     assert.equal(sample.model, voiceManifest.productionModel);
@@ -167,12 +172,11 @@ test("presents four readable, no-cost AI voice examples", async () => {
   }
 });
 
-test("publishes only the selected and QA-approved v6 character previews", async () => {
+test("publishes only currently available and QA-approved voice previews", async () => {
   const expectedActiveAssets = [
     "calm-v5.wav",
     "bright-v5.wav",
     "comedy-v6.wav",
-    "party-v6.wav",
   ];
 
   for (const file of expectedActiveAssets) {
@@ -187,10 +191,20 @@ test("publishes only the selected and QA-approved v6 character previews", async 
     voiceCatalogSource,
     /comedy:[\s\S]*?file: "comedy-v6\.wav"[\s\S]*?version: "v6"[\s\S]*?status: "ready"[\s\S]*?role: "current"[\s\S]*?plannedReplacement: null/,
   );
-  assert.match(
-    voiceCatalogSource,
-    /party:[\s\S]*?file: "party-v6\.wav"[\s\S]*?version: "v6"[\s\S]*?status: "ready"[\s\S]*?role: "current"[\s\S]*?plannedReplacement: null/,
-  );
+  assert.doesNotMatch(voiceCatalogSource, /^\s*party:\s*\{/m);
+  for (const file of [
+    "party.wav",
+    "party-v2.wav",
+    "party-v3.wav",
+    "party-v4.wav",
+    "party-v5.wav",
+    "party-v6.wav",
+  ]) {
+    await assert.rejects(
+      access(new URL(`../public/demo/voices/${file}`, import.meta.url)),
+      { code: "ENOENT" },
+    );
+  }
   assert.doesNotMatch(voiceCatalogSource, /fallback-until-v6/);
   assert.doesNotMatch(voiceCatalogSource, /status: "not-generated"/);
   assert.doesNotMatch(pageSource, /-v5\.wav/);
@@ -210,22 +224,17 @@ test("publishes only the selected and QA-approved v6 character previews", async 
       voice: "verse",
       rawSha256: "717a6d7a877362c2e7da6dac66f44cefe1ee733e9bb0fafbb4b2b2a43a783d6c",
     },
-    party: {
-      label: "ポップキャラクター",
-      selectionLabel: "ポップB",
-      sourceSampleId: "CV-3EA1DE9DE6",
-      voice: "shimmer",
-      rawSha256: "623942e15ad4e81efe89ecf2182a977de081b9ec230d5a98968d7e18cde19b07",
-    },
   };
-  assert.equal(voiceManifest.samples.length, 2);
+  const publicCharacterSamples = voiceManifest.samples.filter(
+    (sample) => Object.hasOwn(expectedSamples, sample.id),
+  );
+  assert.equal(publicCharacterSamples.length, 1);
   assert.equal(voiceManifest.sampleModel, "gpt-realtime-2.1-mini");
   assert.equal(voiceManifest.productionParity, false);
-  assert.equal(voiceManifest.selection.decision, "pop B and high-tension B");
   assert.equal(voiceManifest.selection.retryCount, 0);
   assert.match(voiceManifest.selection.evaluationDataSha256, /^[a-f0-9]{64}$/u);
   assert.match(voiceManifest.selection.generationRecordSha256, /^[a-f0-9]{64}$/u);
-  for (const sample of voiceManifest.samples) {
+  for (const sample of publicCharacterSamples) {
     const expected = expectedSamples[sample.id];
     assert.ok(expected);
     assert.equal(sample.label, expected.label);

@@ -9,6 +9,7 @@ export const NARRATION_DISCLOSURE_TEXT =
 export const NARRATION_TERMS_VERSION = "2026-08-11";
 export type VideoAudioMode = "spoken" | "narration";
 export type NarrationStyle = "bright" | "calm" | "comedy" | "party";
+export type PublicNarrationStyle = Exclude<NarrationStyle, "party">;
 export type NarrationDeliveryPreset =
   | "natural"
   | "firm_ending"
@@ -63,6 +64,15 @@ export const NARRATION_STYLES: Array<{
     note: "テンポと間で勢いを出す声｜リアクション・イベント",
   },
 ];
+
+/**
+ * Styles currently offered to users. Keep the full style union above so old
+ * drafts can be migrated without becoming unreadable while a style is paused.
+ */
+export const PUBLIC_NARRATION_STYLES = NARRATION_STYLES.filter(
+  (style): style is (typeof style & { id: PublicNarrationStyle }) =>
+    style.id !== "party",
+);
 
 export const NARRATION_DELIVERY_PRESETS: Array<{
   id: NarrationDeliveryPreset;
@@ -507,6 +517,12 @@ export function getNarrationMixLevels(
 
 export function isNarrationStyle(value: unknown): value is NarrationStyle {
   return NARRATION_STYLES.some((style) => style.id === value);
+}
+
+export function isPublicNarrationStyle(
+  value: unknown,
+): value is PublicNarrationStyle {
+  return PUBLIC_NARRATION_STYLES.some((style) => style.id === value);
 }
 
 export function isNarrationDeliveryPreset(

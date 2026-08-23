@@ -225,17 +225,18 @@ test("renders the single-video editor as a focused public route", async () => {
   assert.match(html, /1本の動画を、/);
   assert.match(html, /投稿できる形へ/);
   assert.match(html, /動画を1本選ぶ/);
-  assert.match(html, /AIナレーションの4つの声を試聴する/);
+  assert.match(html, /AIナレーションの3つの声を試聴する/);
   assert.match(html, /AIナレーションの声質を、先に聴けます/);
   assert.match(html, /これは声質の参考で、実際の読み方・イントネーション・間は/);
   for (const [voice, version] of [
     ["calm", "v5"],
     ["bright", "v5"],
     ["comedy", "v6"],
-    ["party", "v6"],
   ]) {
     assert.match(html, new RegExp(`/demo/voices/${voice}-${version}\\.wav`));
   }
+  assert.doesNotMatch(html, /\/demo\/voices\/party(?:-v\d+)?\.wav/);
+  assert.doesNotMatch(html, /ポップキャラクター/);
 });
 
 test("renders a dedicated, monthly-first pricing page with one-time rescue", async () => {

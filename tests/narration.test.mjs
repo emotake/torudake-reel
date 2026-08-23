@@ -15,8 +15,10 @@ import {
   getNarrationMixLevels,
   getNarrationOriginalAudioGain,
   getNarrationPlaybackRate,
+  isPublicNarrationStyle,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
+  PUBLIC_NARRATION_STYLES,
   normalizeNarrationSpeechText,
   normalizeNarrationStyle,
   normalizeNarrationPlan,
@@ -300,7 +302,7 @@ test("samples the whole source while matching the natural audio duration", () =>
   assert.equal(timeline.at(-1).end, 72);
 });
 
-test("exposes only the four current narration templates", () => {
+test("keeps all four known narration templates while publishing only available voices", () => {
   assert.deepEqual(
     NARRATION_STYLES.map((style) => style.id),
     ["calm", "bright", "party", "comedy"],
@@ -317,6 +319,15 @@ test("exposes only the four current narration templates", () => {
     NARRATION_STYLES.slice(2).map((style) => style.note).join("\n"),
     /コメディ|オチ/,
   );
+  assert.deepEqual(
+    PUBLIC_NARRATION_STYLES.map((style) => style.id),
+    ["calm", "bright", "comedy"],
+  );
+  assert.ok(PUBLIC_NARRATION_STYLES.every((style) => style.id !== "party"));
+  assert.equal(isPublicNarrationStyle("calm"), true);
+  assert.equal(isPublicNarrationStyle("bright"), true);
+  assert.equal(isPublicNarrationStyle("comedy"), true);
+  assert.equal(isPublicNarrationStyle("party"), false);
 });
 
 test("maps retired narration templates to safe current voices", () => {

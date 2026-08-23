@@ -179,6 +179,8 @@ export function readVideoMixClientDraft(
       ...value,
       narrationSourceAudioMode:
         value.narrationSourceAudioMode === "ambient" ? "ambient" : "mute",
+      narrationStyle:
+        value.narrationStyle === "party" ? "bright" : value.narrationStyle!,
       // Keep v1 drafts valid while moving the former three styles to the
       // nearest matching pattern from the single-video editor.
       narrationCaptionStyle: normalizeVideoMixCaptionStyle(

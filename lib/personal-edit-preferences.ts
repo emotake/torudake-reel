@@ -104,11 +104,14 @@ export function normalizePersonalEditRecipe(value: unknown): PersonalEditRecipe 
       SPOKEN_CUT_MODES,
       DEFAULT_PERSONAL_EDIT_RECIPE.spokenCutMode,
     ),
-    narrationStyle: enumValue(
-      candidate?.narrationStyle,
-      NARRATION_STYLES,
-      DEFAULT_PERSONAL_EDIT_RECIPE.narrationStyle,
-    ),
+    narrationStyle:
+      candidate?.narrationStyle === "party"
+        ? "bright"
+        : enumValue(
+            candidate?.narrationStyle,
+            NARRATION_STYLES,
+            DEFAULT_PERSONAL_EDIT_RECIPE.narrationStyle,
+          ),
     narrationCaptionsEnabled: booleanValue(
       candidate?.narrationCaptionsEnabled,
       DEFAULT_PERSONAL_EDIT_RECIPE.narrationCaptionsEnabled,

@@ -104,6 +104,10 @@ export function normalizeLocalEditDraft(value: unknown): LocalEditDraft | null {
   return {
     ...(candidate as LocalEditDraft),
     spokenCaptionsEnabled: candidate.spokenCaptionsEnabled === true,
+    narrationStyle:
+      candidate.narrationStyle === "party"
+        ? "bright"
+        : candidate.narrationStyle!,
     narrationCaptionsEnabled: candidate.narrationCaptionsEnabled !== false,
   };
 }

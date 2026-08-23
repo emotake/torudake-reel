@@ -126,7 +126,7 @@ function realtimeUpgrade(socket) {
   };
 }
 
-test("generates four delivery templates with the recommended realtime voices", async () => {
+test("generates the three public delivery templates with the recommended realtime voices", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
   const originalFetch = globalThis.fetch;
@@ -141,9 +141,9 @@ test("generates four delivery templates with the recommended realtime voices", a
 
   try {
     const worker = await loadWorker("narration-realtime-voices");
-    const styles = ["calm", "bright", "comedy", "party"];
-    const voices = ["cedar", "marin", "cedar", "marin"];
-    const speeds = [0.99, 1, 1, 1];
+    const styles = ["calm", "bright", "comedy"];
+    const voices = ["cedar", "marin", "cedar"];
+    const speeds = [0.99, 1, 1];
 
     for (const [index, style] of styles.entries()) {
       const response = await worker.fetch(
@@ -234,7 +234,7 @@ test("generates four delivery templates with the recommended realtime voices", a
     );
     assert.equal(
       new Set(responses.map((response) => response.instructions)).size,
-      4,
+      3,
     );
     assert.match(responses[0].instructions, /聞き取りやすい中低音/);
     assert.match(responses[1].instructions, /温かくクリア/);
@@ -243,11 +243,6 @@ test("generates four delivery templates with the recommended realtime voices", a
       /休日のお出かけや楽しかった体験.*成人男性/,
     );
     assert.match(responses[2].instructions, /自然な笑顔が伝わるクリアな声/);
-    assert.match(
-      responses[3].instructions,
-      /友人とのお出かけやおすすめの場所.*成人女性/,
-    );
-    assert.match(responses[3].instructions, /自然な笑顔と前向きさ/);
     assert.ok(
       responses.every((response) =>
         response.instructions.includes("最後の音節まで明瞭に言い切る"),
@@ -271,7 +266,46 @@ test("generates four delivery templates with the recommended realtime voices", a
   }
 });
 
-test("uses distinct draft character voices only when the explicit profile flag is enabled", async () => {
+test("rejects temporarily unavailable pop-character aliases without opening an OpenAI transport", async () => {
+  delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
+  delete narrationCloudflareEnv.NARRATION_VOICE_PROFILE;
+  globalThis.__cloudflareEnv = narrationCloudflareEnv;
+  const originalFetch = globalThis.fetch;
+  let externalRequestCount = 0;
+  globalThis.fetch = async () => {
+    externalRequestCount += 1;
+    throw new Error("A temporarily unavailable style must not call OpenAI.");
+  };
+
+  try {
+    const worker = await loadWorker("narration-party-temporarily-unavailable");
+    for (const style of ["party", "tempo"]) {
+      const response = await worker.fetch(
+        new Request("http://localhost/api/narration/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: "公開停止中の声は生成しません。",
+            style,
+          }),
+        }),
+        workerEnv,
+        workerContext,
+      );
+
+      assert.equal(response.status, 409);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const payload = await response.json();
+      assert.equal(payload.code, "narration_style_temporarily_unavailable");
+      assert.match(payload.error, /ポップキャラクター.*調整中/);
+    }
+    assert.equal(externalRequestCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uses the active draft character voice only when the explicit profile flag is enabled", async () => {
   delete narrationCloudflareEnv.NARRATION_SPEECH_MODE;
   narrationCloudflareEnv.NARRATION_VOICE_PROFILE = "character-v1";
   globalThis.__cloudflareEnv = narrationCloudflareEnv;
@@ -286,11 +320,6 @@ test("uses distinct draft character voices only when the explicit profile flag i
   try {
     const worker = await loadWorker("narration-character-v1-voices");
     const cases = [
-      {
-        style: "party",
-        voice: "shimmer",
-        prompt: /ポップキャラクター/,
-      },
       {
         style: "comedy",
         voice: "verse",
@@ -328,7 +357,7 @@ test("uses distinct draft character voices only when the explicit profile flag i
       );
     }
 
-    assert.equal(sockets.length, 2);
+    assert.equal(sockets.length, 1);
     for (const [index, socket] of sockets.entries()) {
       const sessionUpdates = socket.sent.filter(
         (event) => event.type === "session.update",
@@ -351,22 +380,6 @@ test("uses distinct draft character voices only when the explicit profile flag i
     }
     assert.match(
       sockets[0].sent[1].response.instructions,
-      /明瞭な発音と軽快なテンポ/,
-    );
-    assert.match(
-      sockets[0].sent[1].response.instructions,
-      /意味のまとまりは一息/,
-    );
-    assert.match(
-      sockets[0].sent[1].response.instructions,
-      /平叙文は語尾まで自然に言い切り、疑問文だけ語尾を軽く上げる/,
-    );
-    assert.doesNotMatch(
-      sockets[0].sent[1].response.instructions,
-      /重要語だけへ小さな弾み/,
-    );
-    assert.match(
-      sockets[1].sent[1].response.instructions,
       /要点の直前に一拍置き、結論だけを明瞭に強調/,
     );
   } finally {
@@ -427,14 +440,14 @@ test("returns the same no-charge retry when realtime transport cannot open", asy
   };
 
   try {
-    const worker = await loadWorker("narration-party-fallback");
+    const worker = await loadWorker("narration-bright-transport-fallback");
     const response = await worker.fetch(
       new Request("http://localhost/api/narration/speech", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          script: "華やかな声でテンポよく読みます。",
-          style: "tempo",
+          script: "温かく自然な声で読みます。",
+          style: "bright",
         }),
       }),
       workerEnv,

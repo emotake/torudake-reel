@@ -61,6 +61,7 @@ import {
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
+  PUBLIC_NARRATION_STYLES,
   buildDisclosedPostCaption,
   type NarrationPlan,
   type NarrationStyle,
@@ -5136,7 +5137,7 @@ export default function VideoMixClient() {
                 </label>
                 <fieldset className="videoMixVoiceOptions">
                   <legend>ナレーションの声</legend>
-                  {NARRATION_STYLES.map((style) => (
+                  {PUBLIC_NARRATION_STYLES.map((style) => (
                     <button
                       key={style.id}
                       type="button"

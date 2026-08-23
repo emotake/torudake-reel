@@ -20,6 +20,7 @@ import {
 } from "../../../../lib/narration-initial";
 import {
   applyNarrationPronunciationGuide,
+  isPublicNarrationStyle,
   normalizeNarrationStyle,
   normalizeNarrationPlan,
   validateNarrationPronunciationGuide,
@@ -340,6 +341,17 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "動画の場面を確認できませんでした。動画を選び直してください。" },
       { status: 400 },
+    );
+  }
+
+  if (!isPublicNarrationStyle(style)) {
+    return Response.json(
+      {
+        error:
+          "「ポップキャラクター」は音声品質の調整中です。別の声を選んでください。",
+        code: "narration_style_temporarily_unavailable",
+      },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
     );
   }
 

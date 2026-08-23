@@ -132,6 +132,7 @@ import {
   NARRATION_DELIVERY_PRESETS,
   NARRATION_DISCLOSURE_TEXT,
   NARRATION_STYLES,
+  PUBLIC_NARRATION_STYLES,
   NARRATION_TERMS_VERSION,
   splitNarrationScript,
   validateNarrationPronunciationGuide,
@@ -4584,12 +4585,12 @@ function Landing({
           <h2 id="voiceSampleTitle">AIナレーションの声質を、先に聴けます。</h2>
           <p className="voiceSampleDescription">
             {VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION
-              ? "4つの話し方を固定見本で聴き比べられます。キャラクター2種類は同じ短文で比較できます。試聴時にAPI料金やAI処理の回数は発生しません。"
-              : "4つの声の雰囲気を固定見本で聴き比べられます。これは声質の参考で、実際の読み方・イントネーション・間は、入力した文章と最新の読み方設定に合わせて生成されるため異なる場合があります。キャラクター2種類は同じ短文で比較でき、試聴時にAPI料金やAI処理の回数は発生しません。"}
+              ? "現在提供中の3つの話し方を固定見本で聴き比べられます。試聴時にAPI料金やAI処理の回数は発生しません。"
+              : "現在提供中の3つの声の雰囲気を固定見本で聴き比べられます。これは声質の参考で、実際の読み方・イントネーション・間は、入力した文章と最新の読み方設定に合わせて生成されるため異なる場合があります。試聴時にAPI料金やAI処理の回数は発生しません。"}
           </p>
         </div>
         <div className="voiceSampleTypes" aria-label="選べるAI音声の固定見本">
-          {NARRATION_STYLES.map((style) => {
+          {PUBLIC_NARRATION_STYLES.map((style) => {
             const exampleId = `voiceSampleExample-${style.id}`;
             const sample = VOICE_SAMPLE_CATALOG[style.id];
             return (
@@ -5689,7 +5690,7 @@ function SetupWorkspace({
               </legend>
               <p className="narrationOptionLabel">声の雰囲気</p>
               <div className="narrationStyleCards">
-                {NARRATION_STYLES.map((style) => (
+                {PUBLIC_NARRATION_STYLES.map((style) => (
                   <button
                     type="button"
                     key={style.id}
@@ -10542,7 +10543,7 @@ function ResultWorkspace({
                 )}
               </div>
               <div className="voiceStylePicker">
-                {NARRATION_STYLES.map((style) => (
+                {PUBLIC_NARRATION_STYLES.map((style) => (
                   <button
                     type="button"
                     key={style.id}

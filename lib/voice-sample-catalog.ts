@@ -3,7 +3,7 @@ export type VoiceSampleRole = "current";
 export type VoiceSampleVersion = "v5" | "v6";
 
 export type VoiceSampleCatalogEntry = {
-  id: "calm" | "bright" | "comedy" | "party";
+  id: "calm" | "bright" | "comedy";
   script: string;
   file: string;
   src: string;
@@ -51,17 +51,6 @@ export const VOICE_SAMPLE_CATALOG = {
     role: "current",
     plannedReplacement: null,
   },
-  party: {
-    id: "party",
-    script: "たった10秒で、空気が変わる。見せ場は、ここからです。",
-    file: "party-v6.wav",
-    src: "/demo/voices/party-v6.wav",
-    version: "v6",
-    status: "ready",
-    productionParity: false,
-    role: "current",
-    plannedReplacement: null,
-  },
 } as const satisfies Record<string, VoiceSampleCatalogEntry>;
 
 export type VoiceSampleStyle = keyof typeof VOICE_SAMPLE_CATALOG;
@@ -70,7 +59,6 @@ export const VOICE_SAMPLE_SCRIPTS = {
   calm: VOICE_SAMPLE_CATALOG.calm.script,
   bright: VOICE_SAMPLE_CATALOG.bright.script,
   comedy: VOICE_SAMPLE_CATALOG.comedy.script,
-  party: VOICE_SAMPLE_CATALOG.party.script,
 } as const satisfies Record<VoiceSampleStyle, string>;
 
 export const VOICE_SAMPLE_PREVIEWS_MATCH_PRODUCTION = Object.values(
