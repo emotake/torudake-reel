@@ -49,7 +49,7 @@ test("production CD is manual, approved, and uses only hardened release wrappers
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /environment: production/);
   assert.match(workflow, /CLOUDFLARE_PRODUCTION_API_TOKEN/);
-  assert.match(workflow, /OPS_HEALTH_SECRET/);
+  assert.doesNotMatch(workflow, /OPS_HEALTH_SECRET/);
   assert.match(workflow, /pnpm release:pages -- --prepare/);
   assert.match(workflow, /--provision-disabled-rollback/);
   assert.match(workflow, /Emergency authentication restoration/);

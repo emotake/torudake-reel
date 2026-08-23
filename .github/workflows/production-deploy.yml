@@ -26,7 +26,6 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PRODUCTION_API_TOKEN }}
-      OPS_HEALTH_SECRET: ${{ secrets.OPS_HEALTH_SECRET }}
       GH_TOKEN: ${{ github.token }}
       REQUESTED_COMMIT: ${{ inputs.commit }}
     steps:
@@ -61,10 +60,6 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($env:CLOUDFLARE_API_TOKEN)) {
             throw "CLOUDFLARE_PRODUCTION_API_TOKEN is not configured."
-          }
-          if ([string]::IsNullOrWhiteSpace($env:OPS_HEALTH_SECRET) -or
-              $env:OPS_HEALTH_SECRET.Length -lt 32) {
-            throw "OPS_HEALTH_SECRET is not configured."
           }
 
       - run: pnpm install --frozen-lockfile
@@ -180,7 +175,7 @@ jobs:
       - name: Verify health and payment read-only contracts
         if: success()
         run: |
-          pnpm ops:health:detailed
+          pnpm ops:health
           pnpm ops:payment-smoke
 
       - name: Publish verified release state

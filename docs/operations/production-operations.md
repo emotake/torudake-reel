@@ -167,9 +167,10 @@ Configure these GitHub environments without putting credentials in source:
 - `production` environment secret: `CLOUDFLARE_PRODUCTION_API_TOKEN`. Grant
   only the permissions needed by the checked-in wrappers: Cloudflare Pages
   Edit, Workers Scripts Edit, D1 Read, and Account Analytics Read for the pinned
-  account. Also set `OPS_HEALTH_SECRET` to the same detailed-readiness secret
-  held by the production Pages environment. Require the repository owner as an
-  environment reviewer.
+  account. Require the repository owner as an environment reviewer. The online
+  release preflight already performs the detailed D1, binding, Worker and
+  Analytics checks; the final workflow therefore needs no copy of the internal
+  readiness secret.
 
 Never use `pull_request_target` to build or execute pull-request code with a
 Cloudflare secret. Never place an API token in a workflow variable, release
