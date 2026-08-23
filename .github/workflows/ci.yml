@@ -35,6 +35,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
 
+      - name: Validate Workers staging bundle
+        run: pnpm worker:staging:dry-run
+
       - name: Prepare immutable Pages artifact
         shell: pwsh
         run: |

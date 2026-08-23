@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "torudake-reel-worker-staging",
+  "account_id": "e7572bf15e2fc4346e54f72ed7cb3ff0",
+  "main": "cloudflare-pages-entry.mjs",
+  "compatibility_date": "2026-08-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "run_worker_first": ["/demo/*"]
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "torudake-reel-worker-staging-db",
+      "database_id": "cde3dd85-bb76-4dfc-9d29-56004bd6878b",
+      "migrations_dir": "drizzle",
+      "migrations_table": "d1_migrations"
+    }
+  ]
+}
