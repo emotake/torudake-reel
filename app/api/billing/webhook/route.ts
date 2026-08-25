@@ -35,12 +35,20 @@ import {
   getRequestIdentifiers,
   logOperationalEvent,
 } from "../../../../lib/observability";
+import {
+  createOneTimePaymentNotification,
+  createPaidInvoiceNotification,
+  LinePaymentNotificationError,
+  sendLinePaymentNotification,
+  type LinePaymentNotification,
+} from "../../../../lib/line-payment-notifications";
 
 type StripeObject = Record<string, unknown>;
 
 type StripeEvent = {
   id: string;
   type: string;
+  created?: number;
   data: {
     object: StripeObject;
   };
@@ -143,11 +151,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    let paymentNotification: LinePaymentNotification | null = null;
     if (
       event.type === "checkout.session.completed" ||
       event.type === "checkout.session.async_payment_succeeded"
     ) {
-      await handleCheckoutCompleted(event.data.object);
+      paymentNotification = await handleCheckoutCompleted(
+        event.data.object,
+        eventOccurredAt(event),
+      );
     } else if (event.type === "checkout.session.expired") {
       await handleCheckoutExpired(event.data.object);
     } else if (
@@ -160,11 +172,23 @@ export async function POST(request: Request) {
       event.type === "invoice.paid" ||
       event.type === "invoice.payment_failed"
     ) {
-      await handleInvoiceChanged(event.data.object);
+      const plan = await handleInvoiceChanged(event.data.object);
+      if (event.type === "invoice.paid" && plan) {
+        paymentNotification = createPaidInvoiceNotification(
+          event.data.object,
+          plan,
+          eventOccurredAt(event),
+        );
+      }
     } else if (PURCHASE_STATE_EVENT_TYPES.has(event.type)) {
       await handlePurchaseStateChanged(event.type, event.data.object);
     }
 
+    await deliverPaymentNotification(
+      request,
+      event,
+      paymentNotification,
+    );
     await finishStripeEvent(event.id);
     await recordStripeProductEvent(request, event);
     return Response.json({ received: true });
@@ -189,7 +213,10 @@ export async function POST(request: Request) {
   }
 }
 
-async function handleCheckoutCompleted(session: StripeObject) {
+async function handleCheckoutCompleted(
+  session: StripeObject,
+  occurredAt: number,
+): Promise<LinePaymentNotification | null> {
   const plan = metadataValue(session, "plan");
   if (
     plan !== "starter" &&
@@ -198,7 +225,7 @@ async function handleCheckoutCompleted(session: StripeObject) {
     plan !== "one_time"
   ) {
     // The Stripe account can contain products unrelated to this service.
-    return;
+    return null;
   }
 
   const checkoutSessionId = stringValue(session.id);
@@ -249,14 +276,14 @@ async function handleCheckoutCompleted(session: StripeObject) {
         lockToken: checkoutLockToken,
       });
     }
-    return;
+    return null;
   }
 
   const paymentStatus = stringValue(session.payment_status);
   if (mode !== "payment") {
     throw new Error("One-time checkout has an unexpected mode.");
   }
-  if (paymentStatus !== "paid") return;
+  if (paymentStatus !== "paid") return null;
 
   const paymentIntentId = objectId(session.payment_intent);
   if (!paymentIntentId) {
@@ -272,6 +299,49 @@ async function handleCheckoutCompleted(session: StripeObject) {
     stripePriceId: expectedPriceId,
   });
   await reconcileOneTimePurchase(paymentIntentId);
+  return createOneTimePaymentNotification(session, occurredAt);
+}
+
+async function deliverPaymentNotification(
+  request: Request,
+  event: StripeEvent,
+  notification: LinePaymentNotification | null,
+) {
+  if (!notification) return;
+  try {
+    const result = await sendLinePaymentNotification(notification, event.id);
+    if (result.outcome === "disabled") return;
+    logOperationalEvent("info", request, {
+      event: "line_payment_notification_completed",
+      component: "line_notification",
+      operation: "send_payment_notification",
+      status: result.status ?? undefined,
+      outcome: result.outcome,
+      upstreamRequestId: result.requestId,
+      eventType: event.type,
+    });
+  } catch (error) {
+    logOperationalEvent("warn", request, {
+      event: "line_payment_notification_failed",
+      component: "line_notification",
+      operation: "send_payment_notification",
+      status:
+        error instanceof LinePaymentNotificationError
+          ? error.status ?? undefined
+          : undefined,
+      outcome: "failed",
+      errorCode:
+        error instanceof LinePaymentNotificationError
+          ? error.code
+          : "line_payment_notification_failed",
+      upstreamRequestId:
+        error instanceof LinePaymentNotificationError
+          ? error.requestId
+          : undefined,
+      eventType: event.type,
+      error,
+    });
+  }
 }
 
 async function recordStripeProductEvent(request: Request, event: StripeEvent) {
@@ -422,8 +492,14 @@ async function listStripePaymentObjects(
 
 async function handleInvoiceChanged(invoice: StripeObject) {
   const subscriptionId = subscriptionIdFromInvoice(invoice);
-  if (!subscriptionId) return;
-  await handleSubscriptionChanged({ id: subscriptionId });
+  if (!subscriptionId) return null;
+  return handleSubscriptionChanged({ id: subscriptionId });
+}
+
+function eventOccurredAt(event: StripeEvent) {
+  return Number.isSafeInteger(event.created) && (event.created ?? 0) > 0
+    ? (event.created as number)
+    : Math.floor(Date.now() / 1_000);
 }
 
 function subscriptionIdFromInvoice(invoice: StripeObject) {
@@ -573,11 +649,11 @@ async function verifyCheckoutLineItem(
 export async function handleSubscriptionChanged(subscription: StripeObject) {
   const subscriptionId = stringValue(subscription.id);
   if (!subscriptionId) throw new Error("Subscription has no Stripe ID.");
-  await withSubscriptionSyncLease(subscriptionId, async () => {
+  return withSubscriptionSyncLease(subscriptionId, async () => {
     const latestSubscription = await stripeGet<StripeObject>(
       `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
     );
-    await persistSubscriptionForResolvedUser(latestSubscription);
+    return persistSubscriptionForResolvedUser(latestSubscription);
   });
 }
 
@@ -607,7 +683,8 @@ async function persistSubscriptionForResolvedUser(subscription: StripeObject) {
   const customerId = objectId(subscription.customer);
   const item = firstSubscriptionItem(subscription);
   const priceId = item ? objectId(item.price) : null;
-  if (!priceId || !stripeMonthlyPlanForPrice(priceId)) {
+  const planKey = priceId ? stripeMonthlyPlanForPrice(priceId) : null;
+  if (!priceId || !planKey) {
     // Ignore subscriptions for other products in the same Stripe account.
     return;
   }
@@ -626,6 +703,7 @@ async function persistSubscriptionForResolvedUser(subscription: StripeObject) {
     throw new Error("Subscription user belongs to another Stripe customer.");
   }
   await persistSubscription(userId, subscription);
+  return planKey;
 }
 
 async function persistSubscription(userId: string, subscription: StripeObject) {

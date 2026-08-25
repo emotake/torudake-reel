@@ -53,6 +53,9 @@ AI生成回数は動画枠と別に制限します。
 | STRIPE_PRICE_STANDARD_MONTHLY | 変数 | 月7動画 |
 | STRIPE_PRICE_ONE_TIME | 変数 | 1動画作成 |
 | STRIPE_PRICE_LIGHT_MONTHLY | 変数・任意 | 旧月8動画の既存契約互換 |
+| LINE_PAYMENT_NOTIFICATION_ENABLED | 変数・任意 | 運営LINE通知の明示的な有効化 |
+| LINE_PAYMENT_NOTIFICATION_ACCESS_TOKEN | Secret・任意 | LINE Messaging APIチャネルアクセストークン |
+| LINE_PAYMENT_NOTIFICATION_TO | Secret・任意 | 通知先の運営ユーザー・グループ・トークルームID |
 
 値はCloudflareのSecretまたは環境別varsへ設定します。秘密鍵、Webhook secret、顧客情報をリポジトリやNotionへ保存しません。
 
@@ -66,6 +69,33 @@ AI生成回数は動画枠と別に制限します。
 - 処理失敗は再送可能な状態にし、利用枠の二重付与を防ぐ
 
 カード番号は本サービスのサーバーやD1へ保存せず、Stripe Checkoutで扱います。
+
+## 運営LINEへの決済通知
+
+`LINE_PAYMENT_NOTIFICATION_ENABLED=true`で、ほかの2つのLINE通知用Secretが設定済みの
+場合だけ、署名検証と課金台帳への反映が完了した決済を運営者へ通知します。
+
+- 1動画作成の有料決済
+- 月額プランの初回決済
+- 月額プランの更新・変更決済
+
+0円決済、決済失敗、解約、返金はこの通知の対象外です。通知内容はプラン、実際の金額、
+決済区分、時刻、Stripe eventの末尾12文字だけとし、氏名、メールアドレス、カード情報、
+Stripe Customer IDやPaymentIntent IDは送信しません。
+
+Stripe event IDから決定的な`X-Line-Retry-Key`を生成し、StripeのWebhook再送やLINEの
+一時障害で同じ通知が重複しないようにします。LINE通知が失敗しても課金台帳と利用枠の
+反映は取り消さず、秘密値を含まない運用ログへ失敗を記録します。
+
+日本のLINE公式アカウントは、コミュニケーションプランなら月200通まで固定費0円です。
+Push messageは送信通数に数えられ、上限到達後は無料プランでは送信されません。コードが
+有料プランへ自動変更したり、追加メッセージを購入したりすることはありません。
+
+参考:
+
+- https://developers.line.biz/en/docs/messaging-api/pricing/
+- https://developers.line.biz/en/docs/messaging-api/retrying-api-request/
+- https://developers.line.biz/en/reference/messaging-api/#send-push-message
 
 ## 本番有効化の前提
 

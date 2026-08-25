@@ -12,7 +12,8 @@ export type OperationalLogFields = {
     | "health"
     | "runtime"
     | "account_deletion"
-    | "authentication";
+    | "authentication"
+    | "line_notification";
   operation?: string;
   status?: number;
   outcome?: string;
