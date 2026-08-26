@@ -6,9 +6,13 @@ import {
   type ClientProductEvent,
   type SafeProductProperties,
 } from "./product-analytics-schema";
+import {
+  sendGoogleAnalyticsEvent,
+  type GoogleTag,
+} from "./google-analytics";
 
 type AnalyticsWindow = Window & {
-  gtag?: (...args: unknown[]) => void;
+  gtag?: GoogleTag;
 };
 
 /** Records only allow-listed, content-free product events. Never pass names,
@@ -21,7 +25,11 @@ export function trackClientEvent(
   try {
     const safeProperties = sanitizeProductProperties(properties);
     if (!isClientProductEvent(name) || !safeProperties) return;
-    (window as AnalyticsWindow).gtag?.("event", name, safeProperties);
+    sendGoogleAnalyticsEvent(
+      (window as AnalyticsWindow).gtag,
+      name,
+      safeProperties,
+    );
     const body = JSON.stringify({ event: name, properties: safeProperties });
     if (body.length > 4_096) return;
     if (navigator.sendBeacon) {

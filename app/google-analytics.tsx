@@ -3,23 +3,25 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import {
-  GA4_MEASUREMENT_ID,
+  GA4_MEASUREMENT_IDS,
   GOOGLE_TAG_SCRIPT_ID,
   GOOGLE_TAG_SCRIPT_URL,
   isGoogleAnalyticsExcludedPath,
+  sendGoogleAnalyticsEvent,
+  type GoogleTag,
 } from "../lib/google-analytics";
-
-type GoogleTag = (...args: unknown[]) => void;
 
 type AnalyticsRuntime = Window & {
   dataLayer?: unknown[];
   gtag?: GoogleTag;
-  __torudakeGaConfigured?: boolean;
+  __torudakeGaConfiguredIds?: Set<string>;
   __torudakeGaLastPath?: string | null;
 };
 
 function setGoogleAnalyticsDisabled(runtime: AnalyticsRuntime, disabled: boolean) {
-  Reflect.set(runtime, `ga-disable-${GA4_MEASUREMENT_ID}`, disabled);
+  for (const measurementId of GA4_MEASUREMENT_IDS) {
+    Reflect.set(runtime, `ga-disable-${measurementId}`, disabled);
+  }
 }
 
 function ensureGoogleTag(runtime: AnalyticsRuntime) {
@@ -28,12 +30,17 @@ function ensureGoogleTag(runtime: AnalyticsRuntime) {
     runtime.dataLayer?.push(args);
   };
 
-  if (!runtime.__torudakeGaConfigured) {
+  const configuredIds =
+    runtime.__torudakeGaConfiguredIds ??= new Set<string>();
+  if (configuredIds.size === 0) {
     runtime.gtag("js", new Date());
-    runtime.gtag("config", GA4_MEASUREMENT_ID, {
+  }
+  for (const measurementId of GA4_MEASUREMENT_IDS) {
+    if (configuredIds.has(measurementId)) continue;
+    runtime.gtag("config", measurementId, {
       send_page_view: false,
     });
-    runtime.__torudakeGaConfigured = true;
+    configuredIds.add(measurementId);
   }
 
   if (!document.getElementById(GOOGLE_TAG_SCRIPT_ID)) {
@@ -66,7 +73,7 @@ export default function GoogleAnalytics() {
       return;
     }
 
-    runtime.gtag?.("event", "page_view", {
+    sendGoogleAnalyticsEvent(runtime.gtag, "page_view", {
       page_location: `${window.location.origin}${safePath}`,
       page_path: safePath,
       page_title: document.title,
