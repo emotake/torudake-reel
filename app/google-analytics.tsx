@@ -6,6 +6,7 @@ import {
   GA4_MEASUREMENT_IDS,
   GOOGLE_TAG_SCRIPT_ID,
   GOOGLE_TAG_SCRIPT_URL,
+  createGoogleTagCommandQueue,
   isGoogleAnalyticsExcludedPath,
   sendGoogleAnalyticsEvent,
   type GoogleTag,
@@ -25,10 +26,8 @@ function setGoogleAnalyticsDisabled(runtime: AnalyticsRuntime, disabled: boolean
 }
 
 function ensureGoogleTag(runtime: AnalyticsRuntime) {
-  runtime.dataLayer ??= [];
-  runtime.gtag ??= function gtag(...args: unknown[]) {
-    runtime.dataLayer?.push(args);
-  };
+  const dataLayer = runtime.dataLayer ??= [];
+  runtime.gtag ??= createGoogleTagCommandQueue(dataLayer);
 
   const configuredIds =
     runtime.__torudakeGaConfiguredIds ??= new Set<string>();

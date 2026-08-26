@@ -8,9 +8,26 @@ import {
   GOOGLE_TAG_SCRIPT_URL,
   LEGACY_GA4_MEASUREMENT_ID,
   MANAGEMENT_GA4_MEASUREMENT_ID,
+  createGoogleTagCommandQueue,
   isGoogleAnalyticsExcludedPath,
   sendGoogleAnalyticsEvent,
 } from "../lib/google-analytics.ts";
+
+test("queues Google tag commands as Arguments objects", () => {
+  const dataLayer = [];
+  const gtag = createGoogleTagCommandQueue(dataLayer);
+
+  gtag("config", MANAGEMENT_GA4_MEASUREMENT_ID, { send_page_view: false });
+
+  assert.equal(dataLayer.length, 1);
+  assert.equal(Array.isArray(dataLayer[0]), false);
+  assert.equal(Object.prototype.toString.call(dataLayer[0]), "[object Arguments]");
+  assert.deepEqual(Array.from(dataLayer[0]), [
+    "config",
+    MANAGEMENT_GA4_MEASUREMENT_ID,
+    { send_page_view: false },
+  ]);
+});
 
 test("configures both GA4 measurements without exposing private routes", async () => {
   assert.equal(LEGACY_GA4_MEASUREMENT_ID, "G-CV2ZLFXCCT");

@@ -14,6 +14,14 @@ export const GOOGLE_TAG_SCRIPT_ID = "torudake-google-tag";
 
 export type GoogleTag = (...args: unknown[]) => void;
 
+export function createGoogleTagCommandQueue(dataLayer: unknown[]): GoogleTag {
+  return function gtag() {
+    // Google tag requires its command queue entries to be Arguments objects.
+    // eslint-disable-next-line prefer-rest-params
+    dataLayer.push(arguments);
+  };
+}
+
 export function sendGoogleAnalyticsEvent(
   gtag: GoogleTag | undefined,
   eventName: string,
