@@ -9,9 +9,44 @@ import {
   drawVideoMixNarrationCaption,
   extractVideoMixNarrationFrames,
   getActiveVideoMixCaption,
+  getSequentialVideoMixCaptionText,
   prepareVideoMixNarration,
   VIDEO_MIX_CAPTION_STYLE_OPTIONS,
 } from "../lib/video-mix-narration.ts";
+
+test("reveals caption words when their spoken timing begins", () => {
+  const caption = {
+    id: 1,
+    start: 2,
+    end: 5,
+    text: "今日は海へ行きます",
+    removed: false,
+    wordTimings: [
+      { word: "今日は", startOffset: 0.1, endOffset: 0.7 },
+      { word: "海へ", startOffset: 0.9, endOffset: 1.4 },
+      { word: "行きます", startOffset: 1.6, endOffset: 2.5 },
+    ],
+  };
+
+  assert.equal(getSequentialVideoMixCaptionText(caption, 2.05), "");
+  assert.equal(getSequentialVideoMixCaptionText(caption, 2.12), "今日は");
+  assert.equal(getSequentialVideoMixCaptionText(caption, 3), "今日は海へ");
+  assert.equal(getSequentialVideoMixCaptionText(caption, 3.7), "今日は海へ行きます");
+});
+
+test("uses a stable local sequential fallback without word timing", () => {
+  const caption = {
+    id: 1,
+    start: 0,
+    end: 2,
+    text: "旅の始まりです",
+    removed: false,
+  };
+
+  assert.equal(getSequentialVideoMixCaptionText(caption, 0), "");
+  assert.equal(getSequentialVideoMixCaptionText(caption, 0.5), "旅の");
+  assert.equal(getSequentialVideoMixCaptionText(caption, 2), "旅の始まりです");
+});
 
 test("shares a bounded narration normalization gain with preview and export", () => {
   const quiet = new Float32Array(48_000).fill(0.01);
@@ -488,7 +523,7 @@ test("shared Canvas renderer draws only during the aligned caption window", () =
     drawVideoMixNarrationCaption(context, 1080, 1920, 1.05, captions),
     true,
   );
-  assert.equal(drawn.length, 2);
+  assert.equal(drawn.length, 1);
 });
 
 test("renders the shared text-only caption patterns without a panel", () => {

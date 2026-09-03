@@ -5177,13 +5177,13 @@ export default function VideoMixClient() {
                   />
                   <span>
                     <strong>AIナレーションのテロップも表示する</strong>
-                    <small>発話の「間」を端末内で解析し、実際に話す位置へ合わせます</small>
+                    <small>声に合わせて、話す順に文字を表示します</small>
                   </span>
                 </label>
                 {narrationCaptionsEnabled ? (
                   <fieldset className="videoMixCaptionStyles">
                     <legend>テロップの見た目</legend>
-                    <p>音声を作り直さず、プレビューと完成動画へ同じデザインを反映します。</p>
+                    <p>音声を作り直さず、声に合わせた順番と同じデザインをプレビュー・完成動画へ反映します。</p>
                     <div>
                       {VIDEO_MIX_CAPTION_STYLE_OPTIONS.map((option) => {
                         const design = resolveCaptionDesign(
@@ -5373,7 +5373,7 @@ export default function VideoMixClient() {
                           </option>
                         ))}
                       </select>
-                      <small>見た目・文字修正・表示切替ではAI処理を使いません。</small>
+                      <small>声に合わせて話す順に表示します。見た目・文字修正・表示切替ではAI処理を使いません。</small>
                     </label>
                     <div className="videoMixNarrationAction">
                       <button

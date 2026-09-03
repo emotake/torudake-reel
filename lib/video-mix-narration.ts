@@ -494,6 +494,77 @@ export function getActiveVideoMixCaption(
   }) ?? null;
 }
 
+function compactSequentialCaptionText(value: string) {
+  return Array.from(value.normalize("NFKC"))
+    .filter((character) => !/\s/u.test(character))
+    .join("");
+}
+
+function takeSequentialCaptionPrefix(text: string, visibleCharacters: number) {
+  if (visibleCharacters <= 0) return "";
+  let count = 0;
+  let result = "";
+  for (const character of Array.from(text)) {
+    if (!/\s/u.test(character)) count += 1;
+    if (count > visibleCharacters) break;
+    result += character;
+  }
+  return result.trimEnd();
+}
+
+/**
+ * Reveals a caption in spoken order. Exact ASR word timings win; captions
+ * without usable word timing receive a deterministic local fallback so the
+ * preview and exported video remain identical without another API request.
+ */
+export function getSequentialVideoMixCaptionText(
+  caption: CaptionSegment,
+  editedTime: number,
+) {
+  const text = caption.text.trim();
+  if (!text) return "";
+  const timedWords = (caption.wordTimings ?? [])
+    .filter(
+      (word) =>
+        word.word.trim() &&
+        Number.isFinite(word.startOffset) &&
+        Number.isFinite(word.endOffset) &&
+        word.startOffset >= 0 &&
+        word.endOffset > word.startOffset,
+    )
+    .sort(
+      (left, right) =>
+        left.startOffset - right.startOffset || left.endOffset - right.endOffset,
+    );
+  const timedText = timedWords.map((word) => word.word).join("");
+  if (
+    timedWords.length > 0 &&
+    compactSequentialCaptionText(timedText) === compactSequentialCaptionText(text)
+  ) {
+    const elapsed = Math.max(0, editedTime - caption.start);
+    const startedText = timedWords
+      .filter((word) => word.startOffset <= elapsed + 0.015)
+      .map((word) => word.word)
+      .join("");
+    return takeSequentialCaptionPrefix(
+      text,
+      Array.from(compactSequentialCaptionText(startedText)).length,
+    );
+  }
+
+  const range = getCaptionDisplayRange(caption);
+  const duration = Math.max(0.001, range.end - range.start);
+  const progress = Math.min(1, Math.max(0, (editedTime - range.start) / duration));
+  if (progress <= 0) return "";
+  const characters = Array.from(text);
+  const revealSteps = Math.max(1, Math.ceil(characters.length / 2));
+  const visibleCharacters = Math.min(
+    characters.length,
+    Math.ceil(progress * revealSteps) * 2,
+  );
+  return characters.slice(0, visibleCharacters).join("");
+}
+
 /**
  * Shared 9:16 Canvas caption renderer for preview and export. It deliberately
  * uses the same design primitives and layout rules as the single-video editor.
@@ -509,6 +580,8 @@ export function drawVideoMixNarrationCaption(
 ) {
   const caption = getActiveVideoMixCaption(captions, editedTime);
   if (!caption) return false;
+  const sequentialText = getSequentialVideoMixCaptionText(caption, editedTime);
+  if (!sequentialText) return false;
   const displayRange = getCaptionDisplayRange(caption);
   const keptCaptions = captions.filter(
     (item) => !item.removed && Boolean(item.text.trim()),
@@ -680,18 +753,26 @@ export function drawVideoMixNarrationCaption(
           ? fontSize * 0.045
           : fontSize * 0.08;
   }
+  let remainingVisibleCharacters = Array.from(sequentialText).length;
   lines.forEach((line, index) => {
+    if (remainingVisibleCharacters <= 0) return;
+    const fullLineCharacters = Array.from(line);
+    const visibleLine = fullLineCharacters
+      .slice(0, remainingVisibleCharacters)
+      .join("");
+    remainingVisibleCharacters -= fullLineCharacters.length;
+    if (!visibleLine) return;
     const lineY =
       boxY +
       verticalPadding +
       brandHeight +
       lineHeight * (index + 0.5);
-    const highlightIndex = highlight ? line.indexOf(highlight) : -1;
+    const highlightIndex = highlight ? visibleLine.indexOf(highlight) : -1;
     const parts =
       highlightIndex >= 0
         ? [
             {
-              text: line.slice(0, highlightIndex),
+              text: visibleLine.slice(0, highlightIndex),
               color: palette.text,
               highlighted: false,
             },
@@ -704,12 +785,12 @@ export function drawVideoMixNarrationCaption(
               highlighted: true,
             },
             {
-              text: line.slice(highlightIndex + highlight.length),
+              text: visibleLine.slice(highlightIndex + highlight.length),
               color: palette.text,
               highlighted: false,
             },
           ]
-        : [{ text: line, color: palette.text, highlighted: false }];
+        : [{ text: visibleLine, color: palette.text, highlighted: false }];
     let textX = width / 2 - context.measureText(line).width / 2;
 
     parts.forEach((part) => {
