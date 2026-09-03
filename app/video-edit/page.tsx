@@ -1,14 +1,30 @@
 import type { Metadata } from "next";
+import { buildPublicPageStructuredData } from "../../lib/seo";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import { VideoEditExperience } from "../page";
+import StructuredData from "../structured-data";
+
+const title = "スマホ動画をAIで自動編集｜撮るだけリール";
+const description =
+  "スマホで撮った1本の動画を、自動カット・日本語の自動テロップ・AIナレーションでショート動画へ。編集とプレビューは無料で、InstagramリールやYouTubeショート向けに仕上げられます。";
 
 export const metadata: Metadata = buildPublicPageMetadata({
-  title: "1本の動画をかんたん編集｜撮るだけリール",
-  description:
-    "スマホで撮った1本の動画を選び、元の話し声を活かすかAIナレーションへ置き換えて、必要なカット・テロップ・表紙まで整えます。編集とプレビューは無料です。",
+  title,
+  description,
   path: "/video-edit",
 });
 
 export default function VideoEditPage() {
-  return <VideoEditExperience />;
+  return (
+    <>
+      <StructuredData
+        data={buildPublicPageStructuredData({
+          name: title,
+          description,
+          path: "/video-edit",
+        })}
+      />
+      <VideoEditExperience />
+    </>
+  );
 }

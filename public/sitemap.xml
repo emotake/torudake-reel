@@ -3,7 +3,7 @@
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://torudake-reel.pages.dev/</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
@@ -13,67 +13,85 @@
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/video-mix</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/video-edit</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/photo-reel</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/pricing</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://torudake-reel.pages.dev/guide</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://torudake-reel.pages.dev/guide/automatic-video-captions</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://torudake-reel.pages.dev/guide/youtube-shorts-editing</loc>
+    <lastmod>2026-09-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://torudake-reel.pages.dev/guide/iphone-mov-reel</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/silent-video-narration</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/japanese-reading</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/support</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/privacy</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/terms</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/commercial-disclosure</loc>
-    <lastmod>2026-08-14</lastmod>
+    <lastmod>2026-09-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>

@@ -14,8 +14,10 @@ import {
   STANDARD_MONTHLY_VIDEO_LIMIT,
   SUBSCRIPTION_AI_OPERATION_SUCCESS_LIMIT,
 } from "../../lib/billing-policy";
+import { buildPublicPageStructuredData } from "../../lib/seo";
 import { buildPublicPageMetadata } from "../../lib/site-metadata";
 import SiteFooter from "../site-footer";
+import StructuredData from "../structured-data";
 import {
   MonthlyFirstPurchaseOptions,
   OneTimeRescue,
@@ -24,10 +26,12 @@ import CheckoutLink from "./checkout-link";
 import styles from "./pricing.module.css";
 
 const FREE_MINUTES = Math.floor(FREE_SECONDS_LIMIT / 60);
+const pricingTitle = "ショート動画編集の料金プラン｜撮るだけリール";
+const pricingDescription = `編集とプレビューは無料。保存は月${STARTER_MONTHLY_VIDEO_LIMIT}本${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、月${STANDARD_MONTHLY_VIDEO_LIMIT}本${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、または動画1本${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円から選べます。表示価格はすべて税込です。`;
 
 export const metadata = buildPublicPageMetadata({
-  title: "料金プラン｜撮るだけリール",
-  description: `まずは無料で編集とプレビュー。続けて保存するなら月${STARTER_MONTHLY_VIDEO_LIMIT}本${STARTER_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円、月${STANDARD_MONTHLY_VIDEO_LIMIT}本${STANDARD_MONTHLY_PRICE_JPY.toLocaleString("ja-JP")}円。今回だけ必要な方は1本${ONE_TIME_PRICE_JPY.toLocaleString("ja-JP")}円で保存できます。表示価格はすべて税込です。`,
+  title: pricingTitle,
+  description: pricingDescription,
   path: "/pricing",
 });
 
@@ -77,6 +81,13 @@ const plans = [
 export default function PricingPage() {
   return (
     <>
+      <StructuredData
+        data={buildPublicPageStructuredData({
+          name: pricingTitle,
+          description: pricingDescription,
+          path: "/pricing",
+        })}
+      />
       <main className={styles.page}>
       <header className={styles.siteHeader}>
         <div className={styles.headerInner}>

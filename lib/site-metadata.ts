@@ -32,7 +32,7 @@ export function buildPublicPageMetadata({
           url: SITE_OG_IMAGE_PATH,
           width: 1734,
           height: 907,
-          alt: `${SITE_NAME}｜動画を選ぶだけで自動編集`,
+          alt: `${SITE_NAME}｜動画や写真からショート動画を自動編集`,
         },
       ],
     },

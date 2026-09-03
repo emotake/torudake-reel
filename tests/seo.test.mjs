@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { buildSiteStructuredData } from "../lib/seo.ts";
+import {
+  buildGuideStructuredData,
+  buildPublicPageStructuredData,
+  buildSiteStructuredData,
+} from "../lib/seo.ts";
 import {
   SITE_DESCRIPTION,
   SITE_LAST_MODIFIED,
@@ -57,6 +61,9 @@ test("lists only canonical public pages in the sitemap", () => {
     `${SITE_ORIGIN}/video-edit`,
     `${SITE_ORIGIN}/photo-reel`,
     `${SITE_ORIGIN}/pricing`,
+    `${SITE_ORIGIN}/guide`,
+    `${SITE_ORIGIN}/guide/automatic-video-captions`,
+    `${SITE_ORIGIN}/guide/youtube-shorts-editing`,
     `${SITE_ORIGIN}/guide/iphone-mov-reel`,
     `${SITE_ORIGIN}/guide/silent-video-narration`,
     `${SITE_ORIGIN}/guide/japanese-reading`,
@@ -100,7 +107,7 @@ test("marks account pages as private from search results", () => {
 test("describes the real web application without invented ratings", () => {
   const value = buildSiteStructuredData();
   const application = value["@graph"].find(
-    (entry) => entry["@type"] === "WebApplication",
+    (entry) => entry["@type"] === "SoftwareApplication",
   );
   assert.ok(application);
   assert.equal(application.url, `${SITE_ORIGIN}/`);
@@ -115,7 +122,7 @@ test("describes the real web application without invented ratings", () => {
       "AIナレーションモードでInstagram投稿文を作成",
     ),
   );
-  assert.ok(SITE_DESCRIPTION.includes("AIナレーションモードでは投稿文も作成"));
+  assert.ok(SITE_DESCRIPTION.includes("Instagramリール・YouTubeショート"));
   assert.ok(
     application.featureList.includes("最大5本の動画を素材順に保って自動編集"),
   );
@@ -144,6 +151,43 @@ test("describes the real web application without invented ratings", () => {
   );
   assert.match(application.offers[0].description, /合計3分以内・動画2本まで/);
   assert.ok(application.offers.slice(1).every((offer) => /税込/.test(offer.description)));
+});
+
+test("connects public pages and guides to canonical breadcrumbs", () => {
+  const page = buildPublicPageStructuredData({
+    name: "自動テロップ",
+    description: "説明",
+    path: "/guide/automatic-video-captions",
+  });
+  const webPage = page["@graph"].find((entry) => entry["@type"] === "WebPage");
+  const breadcrumb = page["@graph"].find(
+    (entry) => entry["@type"] === "BreadcrumbList",
+  );
+  assert.equal(webPage.url, `${SITE_ORIGIN}/guide/automatic-video-captions`);
+  assert.equal(webPage.isPartOf["@id"], `${SITE_ORIGIN}/#website`);
+  assert.deepEqual(
+    breadcrumb.itemListElement.map((item) => item.position),
+    [1, 2],
+  );
+
+  const guide = buildGuideStructuredData({
+    name: "自動テロップ",
+    description: "説明",
+    path: "/guide/automatic-video-captions",
+  });
+  const article = guide["@graph"].find((entry) => entry["@type"] === "Article");
+  const guideBreadcrumb = guide["@graph"].find(
+    (entry) => entry["@type"] === "BreadcrumbList",
+  );
+  assert.equal(article.mainEntityOfPage["@id"], `${SITE_ORIGIN}/guide/automatic-video-captions#webpage`);
+  assert.deepEqual(
+    guideBreadcrumb.itemListElement.map((item) => item.item),
+    [
+      `${SITE_ORIGIN}/`,
+      `${SITE_ORIGIN}/guide`,
+      `${SITE_ORIGIN}/guide/automatic-video-captions`,
+    ],
+  );
 });
 
 test("publishes a real product demo as VideoObject", () => {

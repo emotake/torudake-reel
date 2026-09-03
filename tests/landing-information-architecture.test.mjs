@@ -64,7 +64,7 @@ test("keeps the hero promises semantic, ordered, and ahead of the finished resul
   const home = landingSource.slice(homeStart, singleStart);
   const introCopyIndex = home.indexOf('className="landingIntroCopy"');
   const leadIndex = home.indexOf(
-    "画面の案内に沿って、必要な機能だけを選んで仕上げられます。",
+    "InstagramリールやYouTubeショート向けに、画面の案内に沿って必要な編集だけを選べます。",
     introCopyIndex,
   );
   const promiseListIndex = home.indexOf(

@@ -284,8 +284,8 @@ test("labels the permanent hero value instead of presenting it as news", () => {
     /<span>かんたん動画編集<\/span>\s*素材を選ぶだけで、投稿できる動画へ/,
   );
   assert.match(landingSource, /動画や写真を、/);
-  assert.match(landingSource, /<em>リールに。<\/em>/);
-  assert.match(landingSource, /必要な機能だけを選んで仕上げられます。/);
+  assert.match(landingSource, /<em>ショート動画に。<\/em>/);
+  assert.match(landingSource, /InstagramリールやYouTubeショート向けに/);
   assert.doesNotMatch(landingSource, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(landingSource, /<span>新着<\/span>/);
   assert.doesNotMatch(landingSource, /素材を選んで、|作り方をひとつ選ぶだけ。/);

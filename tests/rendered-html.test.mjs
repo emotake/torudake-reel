@@ -28,10 +28,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>撮るだけリール｜動画・写真をかんたんリール編集<\/title>/);
+  assert.match(html, /<title>撮るだけリール｜AIでショート動画をかんたん編集<\/title>/);
   assert.match(html, /動画や写真を、/);
-  assert.match(html, /リールに。/);
-  assert.match(html, /必要な機能だけを選んで仕上げられます。/);
+  assert.match(html, /ショート動画に。/);
+  assert.match(html, /InstagramリールやYouTubeショート向けに/);
   const heroCopyStart = html.indexOf('class="landingIntroCopy"');
   const heroResultStart = html.indexOf(
     'class="landingHeroResult"',
@@ -42,7 +42,7 @@ test("renders the Torudake Reel product experience", async () => {
 
   const heroCopyHtml = html.slice(heroCopyStart, heroResultStart);
   const heroLeadIndex = heroCopyHtml.indexOf(
-    "画面の案内に沿って、必要な機能だけを選んで仕上げられます。",
+    "InstagramリールやYouTubeショート向けに、画面の案内に沿って必要な編集だけを選べます。",
   );
   const heroPromiseIndex = heroCopyHtml.indexOf('class="landingPromiseList"');
   assert.ok(heroLeadIndex >= 0 && heroLeadIndex < heroPromiseIndex);
@@ -220,7 +220,7 @@ test("renders the single-video editor as a focused public route", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
 
-  assert.match(html, /<title>1本の動画をかんたん編集｜撮るだけリール<\/title>/);
+  assert.match(html, /<title>スマホ動画をAIで自動編集｜撮るだけリール<\/title>/);
   assert.match(html, /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/video-edit"/);
   assert.match(html, /1本の動画を、/);
   assert.match(html, /投稿できる形へ/);
@@ -244,7 +244,7 @@ test("renders a dedicated, monthly-first pricing page with one-time rescue", asy
   assert.equal(response.status, 200);
   const html = await response.text();
 
-  assert.match(html, /<title>料金プラン｜撮るだけリール<\/title>/);
+  assert.match(html, /<title>ショート動画編集の料金プラン｜撮るだけリール<\/title>/);
   assert.match(html, /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/pricing"/);
   assert.match(html, /続けて投稿するなら/);
   assert.match(html, /月額がお得です/);
@@ -320,7 +320,7 @@ test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="撮るだけリール｜動画・写真をかんたんリール編集"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜AIでショート動画をかんたん編集"/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/"/,
@@ -337,7 +337,7 @@ test("ships production metadata without starter markers", async () => {
   assert.match(html, /rel="shortcut icon"[^>]+favicon\.ico/);
   assert.match(html, /rel="manifest"[^>]+manifest\.webmanifest/);
   assert.match(html, /type="application\/ld\+json"/);
-  assert.match(html, /"@type":"WebApplication"/);
+  assert.match(html, /"@type":"SoftwareApplication"/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Starter Project|30秒ジャッジ/);
 });
 

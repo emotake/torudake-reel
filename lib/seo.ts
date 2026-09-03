@@ -35,7 +35,7 @@ export function buildSiteStructuredData() {
         dateModified: SITE_LAST_MODIFIED,
       },
       {
-        "@type": "WebApplication",
+        "@type": "SoftwareApplication",
         "@id": `${SITE_ORIGIN}/#application`,
         url: `${SITE_ORIGIN}/`,
         name: SITE_NAME,
@@ -60,6 +60,7 @@ export function buildSiteStructuredData() {
           "写真リールの5種類の自動編集",
           "投稿用表紙の生成",
           "AIナレーションモードでInstagram投稿文を作成",
+          "Instagramリール・YouTubeショート向けの縦型動画作成",
         ],
         offers: [
           {
@@ -119,6 +120,101 @@ export function buildSiteStructuredData() {
         duration: "PT10.4S",
         contentUrl: siteUrl("/demo/torudake-demo.mp4"),
         inLanguage: "ja-JP",
+      },
+    ],
+  };
+}
+
+export type PublicBreadcrumb = {
+  name: string;
+  path: string;
+};
+
+export function buildPublicPageStructuredData({
+  name,
+  description,
+  path,
+  breadcrumbs,
+}: {
+  name: string;
+  description: string;
+  path: string;
+  breadcrumbs?: readonly PublicBreadcrumb[];
+}) {
+  const pageUrl = siteUrl(path);
+  const trail = breadcrumbs ?? [
+    { name: SITE_NAME, path: "/" },
+    { name, path },
+  ];
+
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        url: pageUrl,
+        name,
+        description,
+        inLanguage: "ja-JP",
+        dateModified: SITE_LAST_MODIFIED,
+        isPartOf: { "@id": `${SITE_ORIGIN}/#website` },
+        about: { "@id": `${SITE_ORIGIN}/#application` },
+        primaryImageOfPage: {
+          "@type": "ImageObject",
+          url: siteUrl(SITE_OG_IMAGE_PATH),
+        },
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": `${pageUrl}#breadcrumb`,
+        itemListElement: trail.map((item, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          name: item.name,
+          item: siteUrl(item.path),
+        })),
+      },
+    ],
+  };
+}
+
+export function buildGuideStructuredData({
+  name,
+  description,
+  path,
+}: {
+  name: string;
+  description: string;
+  path: string;
+}) {
+  const pageUrl = siteUrl(path);
+  const page = buildPublicPageStructuredData({
+    name,
+    description,
+    path,
+    breadcrumbs: [
+      { name: SITE_NAME, path: "/" },
+      { name: "動画編集ガイド", path: "/guide" },
+      { name, path },
+    ],
+  });
+
+  return {
+    ...page,
+    "@graph": [
+      ...page["@graph"],
+      {
+        "@type": "Article",
+        "@id": `${pageUrl}#article`,
+        headline: name,
+        description,
+        inLanguage: "ja-JP",
+        datePublished: "2026-08-12",
+        dateModified: SITE_LAST_MODIFIED,
+        mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
+        image: siteUrl(SITE_OG_IMAGE_PATH),
+        publisher: { "@type": "Organization", name: SITE_NAME },
       },
     ],
   };

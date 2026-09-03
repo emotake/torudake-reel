@@ -51,6 +51,9 @@ const expectedLinks = [
   ["/video-edit", "1本の動画を整える"],
   ["/video-mix", "複数の動画をつなぐ"],
   ["/photo-reel", "写真から作る"],
+  ["/guide", "動画編集ガイド一覧"],
+  ["/guide/automatic-video-captions", "動画にテロップを自動生成"],
+  ["/guide/youtube-shorts-editing", "YouTubeショートの編集"],
   ["/guide/iphone-mov-reel", "iPhone動画の編集"],
   ["/guide/silent-video-narration", "無音動画にAI音声"],
   ["/guide/japanese-reading", "読み方を修正する"],
@@ -87,7 +90,7 @@ function assertFooterFollowsMain(name, source, footerPattern = /<SiteFooter \/>/
   assert.match(source.slice(mainEnd), footerPattern);
 }
 
-test("groups the shared footer into four labelled sections with twelve routes", () => {
+test("groups the shared footer into four labelled sections with public routes", () => {
   const groupsStart = footerSource.indexOf("const FOOTER_GROUPS");
   const groupsEnd = footerSource.indexOf("] as const;", groupsStart);
   const groupsSource = footerSource.slice(groupsStart, groupsEnd);
@@ -98,7 +101,7 @@ test("groups the shared footer into four labelled sections with twelve routes", 
 
   assert.deepEqual(groups, expectedGroups);
   assert.deepEqual(links, expectedLinks);
-  assert.match(footerSource, /動画や写真から、投稿できる1本へ/);
+  assert.match(footerSource, /動画や写真から、投稿できるショート動画へ/);
   assert.doesNotMatch(footerSource, /素材を選ぶだけで、投稿できる動画へ/);
   assert.match(
     footerSource,
@@ -132,9 +135,9 @@ test("uses the same footer outside main on every public page family", () => {
     );
   }
 
-  assert.match(videoEditPageSource, /return <VideoEditExperience \/>/);
-  assert.match(photoReelPageSource, /return <PhotoReelClient \/>/);
-  assert.match(videoMixPageSource, /return <VideoMixClient \/>/);
+  assert.match(videoEditPageSource, /<VideoEditExperience \/>/);
+  assert.match(photoReelPageSource, /<PhotoReelClient \/>/);
+  assert.match(videoMixPageSource, /<VideoMixClient \/>/);
   assert.match(accountSource, /<AccountClient \/>\s*<SiteFooter \/>/);
 
   const retiredFooterClasses = [

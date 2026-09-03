@@ -276,10 +276,10 @@ export function HomeLanding(props: LandingSharedProps) {
             <h1>
               動画や写真を、
               <br />
-              <em>リールに。</em>
+              <em>ショート動画に。</em>
             </h1>
             <p>
-              画面の案内に沿って、必要な機能だけを選んで仕上げられます。
+              InstagramリールやYouTubeショート向けに、画面の案内に沿って必要な編集だけを選べます。
             </p>
             <ul className="landingPromiseList" aria-label="共通の仕上がり条件">
               <li className="landingPromiseItem">

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { SITE_NAME, SITE_ORIGIN } from "../../lib/site";
+import { buildGuideStructuredData } from "../../lib/seo";
 import SiteFooter from "../site-footer";
+import StructuredData from "../structured-data";
 
 export function GuideArticle({
   title,
@@ -13,29 +14,20 @@ export function GuideArticle({
   path: string;
   children: React.ReactNode;
 }) {
-  const structuredData = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: title,
+  const structuredData = buildGuideStructuredData({
+    name: title,
     description,
-    inLanguage: "ja-JP",
-    datePublished: "2026-08-12",
-    dateModified: "2026-08-12",
-    mainEntityOfPage: `${SITE_ORIGIN}${path}`,
-    publisher: { "@type": "Organization", name: SITE_NAME },
-  };
+    path,
+  });
   return (
     <>
       <main className="legalPage">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
-        }}
-      />
-      <Link className="legalBack" href="/">
-        ← 撮るだけリールへ戻る
-      </Link>
+      <StructuredData data={structuredData} />
+      <nav className="legalBack" aria-label="パンくずリスト">
+        <Link href="/">撮るだけリール</Link>
+        <span aria-hidden="true">／</span>
+        <Link href="/guide">動画編集ガイド</Link>
+      </nav>
       <header>
         <p className="eyebrow">REEL EDITING GUIDE</p>
         <h1>{title}</h1>
@@ -48,7 +40,9 @@ export function GuideArticle({
           撮るだけリールは編集とプレビューまで無料です。完成動画の保存時に、動画1本200円または月額プランを選べます。
         </p>
         <p>
-          <Link href="/">動画を選んで試す</Link>
+          <Link href="/video-edit">動画を1本選んで試す</Link>
+          {" ／ "}
+          <Link href="/video-mix">複数の動画から作る</Link>
           {" ／ "}
           <Link href="/photo-reel">写真からリールを作る</Link>
         </p>

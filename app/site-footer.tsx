@@ -16,6 +16,9 @@ const FOOTER_GROUPS = [
     id: "guides",
     title: "ガイド",
     links: [
+      { href: "/guide", label: "動画編集ガイド一覧" },
+      { href: "/guide/automatic-video-captions", label: "動画にテロップを自動生成" },
+      { href: "/guide/youtube-shorts-editing", label: "YouTubeショートの編集" },
       { href: "/guide/iphone-mov-reel", label: "iPhone動画の編集" },
       { href: "/guide/silent-video-narration", label: "無音動画にAI音声" },
       { href: "/guide/japanese-reading", label: "読み方を修正する" },
@@ -69,7 +72,7 @@ export default function SiteFooter({
               <Image src="/favicon-v2.svg" width={48} height={48} alt="" />
               <span>
                 <strong>撮るだけリール</strong>
-                <small>動画や写真から、投稿できる1本へ</small>
+                <small>動画や写真から、投稿できるショート動画へ</small>
               </span>
             </Link>
           </h2>
