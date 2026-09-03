@@ -501,7 +501,10 @@ test("shares selectable caption styles and scene-grounded narration with preview
   );
   assert.match(clientSource, /resolveCaptionDesign\([\s\S]*?DEFAULT_CAPTION_PROFILE[\s\S]*?option\.id/);
   assert.match(clientSource, /captionStyleSample \$\{option\.tone\}/);
-  assert.match(clientSource, /音声を作り直さず、プレビューと完成動画へ同じデザイン/);
+  assert.match(
+    clientSource,
+    /音声を作り直さず、声に合わせた順番と同じデザインをプレビュー・完成動画へ反映/,
+  );
   assert.match(clientSource, /createVideoMixNarrationSceneTimeline\(plan\)/);
   assert.match(clientSource, /sceneTimeline,/);
   assert.match(clientSource, /prepareVideoMixNarration\([\s\S]*?controller\.signal,[\s\S]*?sceneTimeline/);
