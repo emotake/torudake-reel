@@ -52,6 +52,7 @@ const expectedLinks = [
   ["/video-mix", "複数の動画をつなぐ"],
   ["/photo-reel", "写真から作る"],
   ["/guide", "動画編集ガイド一覧"],
+  ["/guide/instagram-reels-editing", "Instagramリールの編集"],
   ["/guide/automatic-video-captions", "動画にテロップを自動生成"],
   ["/guide/youtube-shorts-editing", "YouTubeショートの編集"],
   ["/guide/iphone-mov-reel", "iPhone動画の編集"],

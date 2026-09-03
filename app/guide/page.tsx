@@ -16,6 +16,11 @@ export const metadata = buildPublicPageMetadata({
 
 const guides = [
   {
+    href: "/guide/instagram-reels-editing",
+    title: "Instagramリール用の動画をスマホで編集する方法",
+    description: "日常の動画や写真から、投稿前に確認できる縦型リールへ仕上げる流れです。",
+  },
+  {
     href: "/guide/automatic-video-captions",
     title: "動画にテロップを自動生成する方法",
     description: "日本語の話し声を文字にして、声に合わせて順番に表示する手順です。",

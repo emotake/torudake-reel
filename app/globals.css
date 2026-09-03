@@ -15635,6 +15635,7 @@ a {
 .homeSteps,
 .homePricingTeaser,
 .homeFaq,
+.homeGuideHub,
 .videoEditDetails {
   width: min(1120px, calc(100% - 48px));
   margin: 0 auto;
@@ -15653,6 +15654,7 @@ a {
 .homeSteps > header h2,
 .homePricingTeaser h2,
 .homeFaq > header h2,
+.homeGuideHub > header h2,
 .videoEditDetails h2 {
   margin: 0;
   font-size: clamp(28px, 3.7vw, 44px);
@@ -15663,7 +15665,8 @@ a {
 .landingSectionCopy > p:last-child,
 .homeSteps > header > p:last-child,
 .homePricingTeaser > header > p:last-child,
-.homeFaq > header > p:last-child {
+.homeFaq > header > p:last-child,
+.homeGuideHub > header > p:last-child {
   margin: 16px 0 0;
   color: var(--muted);
   font-size: 14px;
@@ -15732,7 +15735,8 @@ a {
 
 .homeSteps > header,
 .homePricingTeaser > header,
-.homeFaq > header {
+.homeFaq > header,
+.homeGuideHub > header {
   max-width: 680px;
   margin-bottom: 25px;
 }
@@ -15868,6 +15872,72 @@ a {
   line-height: 1.8;
 }
 
+.homeGuideHub {
+  border-top: 1px solid rgba(16, 24, 40, 0.08);
+}
+
+.homeGuideGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.homeGuideGrid article {
+  display: flex;
+  min-height: 240px;
+  flex-direction: column;
+  padding: 24px;
+  border: 1px solid rgba(16, 24, 40, 0.09);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.homeGuideGrid article > span {
+  color: #155f39;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.homeGuideGrid h3 {
+  margin: 14px 0 8px;
+  font-size: 19px;
+  line-height: 1.45;
+}
+
+.homeGuideGrid p {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.homeGuideGrid a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  margin-top: auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.homeGuideIndexLink {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  margin-top: 20px;
+  padding: 0 17px;
+  border-radius: 13px;
+  background: var(--ink);
+  color: white;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .homeFinalChooser {
   padding: 58px 24px;
   background: var(--ink);
@@ -15985,6 +16055,7 @@ a {
   .homeSteps,
   .homePricingTeaser,
   .homeFaq,
+  .homeGuideHub,
   .videoEditIntro,
   .videoEditDetails,
   .voiceSampleDisclosure {
@@ -16023,6 +16094,7 @@ a {
   .creationModeGrid,
   .homeBenefitGrid,
   .homeStepGrid,
+  .homeGuideGrid,
   .homePriceChips {
     grid-template-columns: 1fr;
   }
@@ -16071,6 +16143,7 @@ a {
   .landingDemoSection,
   .homeSteps,
   .homeFaq,
+  .homeGuideHub,
   .videoEditDetails {
     padding-block: 52px;
   }

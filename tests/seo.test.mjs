@@ -62,6 +62,7 @@ test("lists only canonical public pages in the sitemap", () => {
     `${SITE_ORIGIN}/photo-reel`,
     `${SITE_ORIGIN}/pricing`,
     `${SITE_ORIGIN}/guide`,
+    `${SITE_ORIGIN}/guide/instagram-reels-editing`,
     `${SITE_ORIGIN}/guide/automatic-video-captions`,
     `${SITE_ORIGIN}/guide/youtube-shorts-editing`,
     `${SITE_ORIGIN}/guide/iphone-mov-reel`,
@@ -78,7 +79,14 @@ test("lists only canonical public pages in the sitemap", () => {
     ...sitemapSource.matchAll(/<lastmod>([^<]+)<\/lastmod>/g),
   ].map((match) => match[1]);
   assert.equal(lastModifiedValues.length, urls.length);
-  assert.ok(lastModifiedValues.every((value) => value === SITE_LAST_MODIFIED));
+  assert.ok(lastModifiedValues.every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)));
+  assert.ok(lastModifiedValues.every((value) => value <= SITE_LAST_MODIFIED));
+  assert.match(
+    sitemapSource,
+    new RegExp(
+      `<loc>${SITE_ORIGIN}/guide/instagram-reels-editing</loc>\\s*<lastmod>${SITE_LAST_MODIFIED}</lastmod>`,
+    ),
+  );
   assert.match(
     sitemapSource,
     /<image:loc>https:\/\/torudake-reel\.pages\.dev\/og\.png\?v=20260811-accessibility<\/image:loc>/,
@@ -106,10 +114,22 @@ test("marks account pages as private from search results", () => {
 
 test("describes the real web application without invented ratings", () => {
   const value = buildSiteStructuredData();
+  const organization = value["@graph"].find(
+    (entry) => entry["@type"] === "Organization",
+  );
+  const website = value["@graph"].find(
+    (entry) => entry["@type"] === "WebSite",
+  );
   const application = value["@graph"].find(
     (entry) => entry["@type"] === "SoftwareApplication",
   );
+  assert.ok(organization);
+  assert.ok(website);
   assert.ok(application);
+  assert.equal(organization.url, `${SITE_ORIGIN}/`);
+  assert.equal(organization.logo.url, `${SITE_ORIGIN}/icon-512-v2.png`);
+  assert.equal(website.publisher["@id"], `${SITE_ORIGIN}/#organization`);
+  assert.equal(application.provider["@id"], `${SITE_ORIGIN}/#organization`);
   assert.equal(application.url, `${SITE_ORIGIN}/`);
   assert.equal(application.applicationCategory, "MultimediaApplication");
   assert.equal(application.dateModified, SITE_LAST_MODIFIED);
@@ -201,13 +221,16 @@ test("publishes a real product demo as VideoObject", () => {
 
 test("publishes useful, canonical guides without invented capability claims", async () => {
   const guides = await Promise.all([
+    readProjectFile("app/guide/instagram-reels-editing/page.tsx"),
     readProjectFile("app/guide/iphone-mov-reel/page.tsx"),
     readProjectFile("app/guide/silent-video-narration/page.tsx"),
     readProjectFile("app/guide/japanese-reading/page.tsx"),
   ]);
-  assert.match(guides[0], /path: "\/guide\/iphone-mov-reel"/);
-  assert.match(guides[1], /元の映像をそのまま使う/);
-  assert.match(guides[2], /画面に出す文字と、声の読み方を分けて/);
+  assert.match(guides[0], /path: "\/guide\/instagram-reels-editing"/);
+  assert.match(guides[0], /自動カット、自動テロップ、AIナレーション/);
+  assert.match(guides[1], /path: "\/guide\/iphone-mov-reel"/);
+  assert.match(guides[2], /元の映像をそのまま使う/);
+  assert.match(guides[3], /画面に出す文字と、声の読み方を分けて/);
   assert.ok(guides.every((source) => !/完全無料|無制限|必ず/.test(source)));
 });
 

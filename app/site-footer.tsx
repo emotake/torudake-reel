@@ -17,6 +17,7 @@ const FOOTER_GROUPS = [
     title: "ガイド",
     links: [
       { href: "/guide", label: "動画編集ガイド一覧" },
+      { href: "/guide/instagram-reels-editing", label: "Instagramリールの編集" },
       { href: "/guide/automatic-video-captions", label: "動画にテロップを自動生成" },
       { href: "/guide/youtube-shorts-editing", label: "YouTubeショートの編集" },
       { href: "/guide/iphone-mov-reel", label: "iPhone動画の編集" },

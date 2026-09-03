@@ -31,6 +31,8 @@ test("shows the playable finish before three equal creation choices", () => {
   const stepsIndex = home.indexOf('className="homeSteps"');
   const pricingIndex = home.indexOf("<PricingTeaser");
   const faqIndex = home.indexOf('className="homeFaq"');
+  const guideIndex = home.indexOf('className="homeGuideHub"');
+  const finalIndex = home.indexOf('className="homeFinalChooser"');
 
   assert.ok(finishIndex >= 0 && finishIndex < playableDemoIndex);
   assert.ok(playableDemoIndex < chooserIndex);
@@ -38,6 +40,8 @@ test("shows the playable finish before three equal creation choices", () => {
   assert.ok(benefitsIndex < stepsIndex);
   assert.ok(stepsIndex < pricingIndex);
   assert.ok(pricingIndex < faqIndex);
+  assert.ok(faqIndex < guideIndex);
+  assert.ok(guideIndex < finalIndex);
   assert.doesNotMatch(home, /<VoiceSamples/);
   assert.doesNotMatch(home, /landingDemoSection/);
 
@@ -56,6 +60,9 @@ test("shows the playable finish before three equal creation choices", () => {
   );
   assert.match(landingSource, /href="\/video-mix"/);
   assert.match(landingSource, /href="\/photo-reel"/);
+  assert.match(landingSource, /href="\/guide\/instagram-reels-editing"/);
+  assert.match(landingSource, /href="\/guide\/youtube-shorts-editing"/);
+  assert.match(landingSource, /href="\/guide\/automatic-video-captions"/);
 });
 
 test("keeps the hero promises semantic, ordered, and ahead of the finished result", () => {

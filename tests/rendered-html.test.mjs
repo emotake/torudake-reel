@@ -138,6 +138,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(html, /href="\/video-mix"/);
   assert.match(html, /href="\/photo-reel"/);
   assert.match(html, /href="\/pricing"/);
+  assert.match(html, /作りたい動画に合わせて、手順から確認できます。/);
+  assert.match(html, /href="\/guide\/instagram-reels-editing"/);
+  assert.match(html, /href="\/guide\/youtube-shorts-editing"/);
+  assert.match(html, /href="\/guide\/automatic-video-captions"/);
   assert.match(html, /class="heroVisual realDemo"/);
   assert.equal((html.match(/<video\b/g) ?? []).length, 1);
   assert.match(html, /<source src="\/demo\/torudake-demo\.mp4" type="video\/mp4"/);
@@ -213,6 +217,27 @@ test("renders the Torudake Reel product experience", async () => {
     html,
     /device-access-7k9m2p|運営端末を登録|登録コード/,
   );
+});
+
+test("renders an indexable Instagram Reels editing guide", async () => {
+  const response = await render("/guide/instagram-reels-editing");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(
+    html,
+    /<title>Instagramリール用の動画をスマホで編集する方法｜撮るだけリール<\/title>/,
+  );
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/guide\/instagram-reels-editing"/,
+  );
+  assert.match(html, /動画1本・複数動画・写真から選ぶ/);
+  assert.match(html, /カットとテロップは必要なものだけ使う/);
+  assert.match(html, /保存前に投稿先をInstagramにする/);
+  assert.match(html, /"@type":"Article"/);
+  assert.match(html, /"@type":"BreadcrumbList"/);
+  assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
 });
 
 test("renders the single-video editor as a focused public route", async () => {

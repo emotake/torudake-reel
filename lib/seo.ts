@@ -26,13 +26,34 @@ export function buildSiteStructuredData() {
     "@context": "https://schema.org",
     "@graph": [
       {
+        "@type": "Organization",
+        "@id": `${SITE_ORIGIN}/#organization`,
+        url: `${SITE_ORIGIN}/`,
+        name: SITE_NAME,
+        logo: {
+          "@type": "ImageObject",
+          url: siteUrl("/icon-512-v2.png"),
+          width: 512,
+          height: 512,
+        },
+        email: "torudake.reel@gmail.com",
+        contactPoint: {
+          "@type": "ContactPoint",
+          contactType: "customer support",
+          email: "torudake.reel@gmail.com",
+          availableLanguage: "Japanese",
+        },
+      },
+      {
         "@type": "WebSite",
         "@id": `${SITE_ORIGIN}/#website`,
         url: `${SITE_ORIGIN}/`,
         name: SITE_NAME,
+        alternateName: "撮るだけリール",
         description: SITE_DESCRIPTION,
         inLanguage: "ja-JP",
         dateModified: SITE_LAST_MODIFIED,
+        publisher: { "@id": `${SITE_ORIGIN}/#organization` },
       },
       {
         "@type": "SoftwareApplication",
@@ -50,6 +71,7 @@ export function buildSiteStructuredData() {
         dateModified: SITE_LAST_MODIFIED,
         isAccessibleForFree: true,
         termsOfService: siteUrl("/terms"),
+        provider: { "@id": `${SITE_ORIGIN}/#organization` },
         featureList: [
           "動画の自動カット",
           "日本語音声の自動文字起こし",
@@ -214,7 +236,7 @@ export function buildGuideStructuredData({
         dateModified: SITE_LAST_MODIFIED,
         mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
         image: siteUrl(SITE_OG_IMAGE_PATH),
-        publisher: { "@type": "Organization", name: SITE_NAME },
+        publisher: { "@id": `${SITE_ORIGIN}/#organization` },
       },
     ],
   };

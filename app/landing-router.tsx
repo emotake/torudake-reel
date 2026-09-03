@@ -440,6 +440,39 @@ export function HomeLanding(props: LandingSharedProps) {
         </details>
       </section>
 
+      <section className="homeGuideHub" aria-labelledby="homeGuideHubTitle">
+        <header>
+          <p className="eyebrow">ショート動画編集ガイド</p>
+          <h2 id="homeGuideHubTitle">作りたい動画に合わせて、手順から確認できます。</h2>
+          <p>
+            Instagramリール、YouTubeショート、自動テロップの使い方を、実際の機能に沿ってまとめています。
+          </p>
+        </header>
+        <div className="homeGuideGrid">
+          <article>
+            <span>Instagram</span>
+            <h3>リール用の動画を編集する</h3>
+            <p>日常で撮った動画や写真から、縦型の1本へ仕上げる流れを確認できます。</p>
+            <Link href="/guide/instagram-reels-editing">Instagramリールの編集手順を見る →</Link>
+          </article>
+          <article>
+            <span>YouTube</span>
+            <h3>ショート用の動画を編集する</h3>
+            <p>1本の動画、複数動画、写真から作る場合の選び方をまとめています。</p>
+            <Link href="/guide/youtube-shorts-editing">YouTubeショートの編集手順を見る →</Link>
+          </article>
+          <article>
+            <span>テロップ</span>
+            <h3>声に合わせて文字を表示する</h3>
+            <p>自動文字起こしから、誤字修正と表示方法の選択まで確認できます。</p>
+            <Link href="/guide/automatic-video-captions">自動テロップの使い方を見る →</Link>
+          </article>
+        </div>
+        <Link className="homeGuideIndexLink" href="/guide">
+          すべての動画編集ガイドを見る
+        </Link>
+      </section>
+
       <section
         className="homeFinalChooser"
         aria-labelledby="homeFinalTitle"
