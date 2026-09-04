@@ -147,6 +147,45 @@ function CreationChooser({
   );
 }
 
+function UseCaseLinks() {
+  const useCases = [
+    {
+      href: "/use-cases/daily-moments",
+      label: "日常・お出かけ",
+      title: "撮ったままの景色が、投稿まで進まない",
+    },
+    {
+      href: "/use-cases/talking-video",
+      label: "会話・解説",
+      title: "字幕起こしと不要部分の調整で止まる",
+    },
+    {
+      href: "/use-cases/shop-introduction",
+      label: "商品・お店紹介",
+      title: "素材はあるのに、並べ方で迷う",
+    },
+  ] as const;
+
+  return (
+    <section className="homeUseCases" aria-labelledby="homeUseCasesTitle">
+      <header>
+        <p className="eyebrow">使い方別の実演</p>
+        <h2 id="homeUseCasesTitle">編集で止まりやすい3つの場面から選べます。</h2>
+        <p>それぞれ約10秒の動画で、使い始めから仕上がりまでの流れを確認できます。</p>
+      </header>
+      <div>
+        {useCases.map((useCase, index) => (
+          <Link href={useCase.href} key={useCase.href}>
+            <span>0{index + 1} / {useCase.label}</span>
+            <strong>{useCase.title}</strong>
+            <small>実演動画を見る →</small>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PricingTeaser() {
   const sectionRef = useRef<HTMLElement>(null);
   const viewedRef = useRef(false);
@@ -271,15 +310,15 @@ export function HomeLanding(props: LandingSharedProps) {
           <div className="landingIntroCopy">
             <p className="eyebrow">
               <span>かんたん動画編集</span>
-              素材を選ぶだけで、投稿できる動画へ
+              撮ったままを、投稿できる1本へ
             </p>
             <h1>
-              動画や写真を、
+              編集が面倒で、
               <br />
-              <em>ショート動画に。</em>
+              <em>投稿できない。をなくす。</em>
             </h1>
             <p>
-              InstagramリールやYouTubeショート向けに、画面の案内に沿って必要な編集だけを選べます。
+              動画や写真を選び、必要な仕上げだけを画面に沿って決めるだけ。InstagramリールやYouTubeショートへ出せる形まで進められます。
             </p>
             <ul className="landingPromiseList" aria-label="共通の仕上がり条件">
               <li className="landingPromiseItem">
@@ -349,6 +388,7 @@ export function HomeLanding(props: LandingSharedProps) {
           openSample={props.openSample}
           isSampleLoading={props.isSampleLoading}
         />
+        <UseCaseLinks />
       </section>
 
       <section

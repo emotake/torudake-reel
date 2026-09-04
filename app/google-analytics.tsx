@@ -2,6 +2,9 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { attributionToSearch } from "../lib/acquisition";
+import { captureCurrentAttribution } from "../lib/client-attribution";
+import { trackClientEvent } from "../lib/client-analytics";
 import {
   GA4_MEASUREMENT_IDS,
   GOOGLE_TAG_SCRIPT_ID,
@@ -17,6 +20,7 @@ type AnalyticsRuntime = Window & {
   gtag?: GoogleTag;
   __torudakeGaConfiguredIds?: Set<string>;
   __torudakeGaLastPath?: string | null;
+  __torudakeAcquisitionTracked?: boolean;
 };
 
 function setGoogleAnalyticsDisabled(runtime: AnalyticsRuntime, disabled: boolean) {
@@ -68,15 +72,25 @@ export default function GoogleAnalytics() {
 
     ensureGoogleTag(runtime);
 
+    const attribution = captureCurrentAttribution();
+
     if (runtime.__torudakeGaLastPath === safePath) {
       return;
     }
 
     sendGoogleAnalyticsEvent(runtime.gtag, "page_view", {
-      page_location: `${window.location.origin}${safePath}`,
+      page_location: `${window.location.origin}${safePath}${attributionToSearch(attribution)}`,
       page_path: safePath,
       page_title: document.title,
+      campaign_source: attribution.traffic_source,
+      campaign_medium: attribution.traffic_medium,
+      campaign_name: attribution.traffic_campaign,
+      campaign_content: attribution.traffic_content,
     });
+    if (!runtime.__torudakeAcquisitionTracked) {
+      trackClientEvent("acquisition_landing");
+      runtime.__torudakeAcquisitionTracked = true;
+    }
     runtime.__torudakeGaLastPath = safePath;
   }, [pathname]);
 

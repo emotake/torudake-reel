@@ -41,6 +41,7 @@ export async function GET(request: Request) {
       firstEvent,
       lastEvent,
       providerUsage,
+      acquisitionRows,
     ] = await Promise.all([
       database
         .prepare(`
@@ -135,6 +136,32 @@ export async function GET(request: Request) {
       scalar(database, "SELECT MIN(created_at) AS value FROM product_events"),
       scalar(database, "SELECT MAX(created_at) AS value FROM product_events"),
       listProviderUsageDaily({ sinceDay, limit: 1_000 }),
+      database
+        .prepare(`
+          SELECT
+            json_extract(properties, '$.traffic_source') AS source,
+            json_extract(properties, '$.traffic_content') AS content,
+            COUNT(DISTINCT CASE WHEN event_name = 'acquisition_landing' THEN actor_hash END) AS landings,
+            COUNT(DISTINCT CASE WHEN event_name IN ('video_selected', 'demo_started') THEN actor_hash END) AS started,
+            COUNT(DISTINCT CASE WHEN event_name = 'preview_completed' THEN actor_hash END) AS previews,
+            COUNT(DISTINCT CASE WHEN event_name = 'checkout_started' THEN actor_hash END) AS checkouts,
+            COUNT(DISTINCT CASE WHEN event_name = 'export_completed' THEN actor_hash END) AS exports
+          FROM product_events
+          WHERE created_at >= ?
+            AND json_extract(properties, '$.traffic_campaign') = 'recognition_202609'
+          GROUP BY source, content
+          ORDER BY previews DESC, landings DESC, source ASC, content ASC
+        `)
+        .bind(since)
+        .all<{
+          source: string;
+          content: string;
+          landings: number;
+          started: number;
+          previews: number;
+          checkouts: number;
+          exports: number;
+        }>(),
     ]);
 
     const events = eventRows.results ?? [];
@@ -203,6 +230,15 @@ export async function GET(request: Request) {
       activePlans: planRows.results ?? [],
       providerSummary,
       providerUsage,
+      acquisitionFunnel: (acquisitionRows.results ?? []).map((row) => ({
+        source: row.source,
+        content: row.content,
+        landings: safeInteger(row.landings),
+        started: safeInteger(row.started),
+        previews: safeInteger(row.previews),
+        checkouts: safeInteger(row.checkouts),
+        exports: safeInteger(row.exports),
+      })),
       caveats: [
         "匿名の集計値のみです。ファイル名、字幕、台本、メールアドレスは記録しません。",
         "母数が20端末未満の期間は、率ではなく件数を中心に判断してください。",

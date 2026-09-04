@@ -281,11 +281,11 @@ test("publishes only currently available and QA-approved voice previews", async 
 test("labels the permanent hero value instead of presenting it as news", () => {
   assert.match(
     landingSource,
-    /<span>かんたん動画編集<\/span>\s*素材を選ぶだけで、投稿できる動画へ/,
+    /<span>かんたん動画編集<\/span>\s*撮ったままを、投稿できる1本へ/,
   );
-  assert.match(landingSource, /動画や写真を、/);
-  assert.match(landingSource, /<em>ショート動画に。<\/em>/);
-  assert.match(landingSource, /InstagramリールやYouTubeショート向けに/);
+  assert.match(landingSource, /編集が面倒で、/);
+  assert.match(landingSource, /<em>投稿できない。をなくす。<\/em>/);
+  assert.match(landingSource, /InstagramリールやYouTubeショートへ/);
   assert.doesNotMatch(landingSource, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(landingSource, /<span>新着<\/span>/);
   assert.doesNotMatch(landingSource, /素材を選んで、|作り方をひとつ選ぶだけ。/);

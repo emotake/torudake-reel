@@ -25,6 +25,8 @@ test("operator metrics require an enrolled operator and expose aggregates only",
   );
   assert.doesNotMatch(route, /SELECT[\s\S]{0,80}\bscript\b/i);
   assert.match(route, /listProviderUsageDaily\(\{ sinceDay, limit: 1_000 \}\)/);
+  assert.match(route, /traffic_campaign'\) = 'recognition_202609'/);
+  assert.match(route, /acquisitionFunnel/);
 });
 
 test("operations dashboard explains small samples and privacy limits", () => {
@@ -34,4 +36,5 @@ test("operations dashboard explains small samples and privacy limits", () => {
   assert.match(dashboard, /未処理Webhook/);
   assert.match(dashboard, /OpenAI実使用量/);
   assert.match(dashboard, /providerOperationLabel/);
+  assert.match(dashboard, /認知施策の流入別ファネル/);
 });

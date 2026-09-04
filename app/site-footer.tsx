@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { getPublicSocialLinks } from "../lib/site-socials";
 
 const FOOTER_GROUPS = [
   {
@@ -53,6 +54,7 @@ export default function SiteFooter({
 }: SiteFooterProps) {
   const navigationTarget = preserveWorkspace ? "_blank" : undefined;
   const navigationRel = preserveWorkspace ? "noreferrer" : undefined;
+  const socialLinks = getPublicSocialLinks();
 
   return (
     <footer className="siteFooter" aria-labelledby="siteFooterTitle">
@@ -83,6 +85,20 @@ export default function SiteFooter({
           <p className="siteFooterPromise">
             初回・上限つきで編集とプレビューを試せます。仕上がりを見てから保存方法を選べます。
           </p>
+          {socialLinks.length > 0 ? (
+            <nav className="siteFooterSocials" aria-label="公式SNS">
+              {socialLinks.map((social) => (
+                <a
+                  key={social.id}
+                  href={social.href}
+                  target="_blank"
+                  rel="me noreferrer"
+                >
+                  公式{social.label}
+                </a>
+              ))}
+            </nav>
+          ) : null}
           {preserveWorkspace ? (
             <p className="siteFooterWorkspaceNote">
               編集内容を守るため、リンクは新しいタブで開きます。

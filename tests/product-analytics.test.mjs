@@ -14,6 +14,7 @@ import { POST as postProductFeedback } from "../app/api/feedback/route.ts";
 import { describeStripeProductTelemetry } from "../lib/stripe-product-analytics.ts";
 
 test("accepts only the bounded product funnel vocabulary", () => {
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("acquisition_landing"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_selected"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("checkout_started"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("purchase_options_shown"));
@@ -48,6 +49,20 @@ test("keeps product properties content-free and bounded", () => {
       format: "mov",
       count: 2,
       tags: ["voice", "quality"],
+    },
+  );
+  assert.deepEqual(
+    sanitizeProductProperties({
+      traffic_source: "instagram",
+      traffic_medium: "organic_social",
+      traffic_campaign: "recognition_202609",
+      traffic_content: "daily_a",
+    }),
+    {
+      traffic_source: "instagram",
+      traffic_medium: "organic_social",
+      traffic_campaign: "recognition_202609",
+      traffic_content: "daily_a",
     },
   );
   assert.deepEqual(

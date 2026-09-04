@@ -18,9 +18,11 @@ import {
   SITE_ORIGIN,
   siteUrl,
 } from "./site";
+import { getPublicSocialLinks } from "./site-socials";
 
 export function buildSiteStructuredData() {
   const freeMinutes = Math.floor(FREE_SECONDS_LIMIT / 60);
+  const sameAs = getPublicSocialLinks().map((social) => social.href);
 
   return {
     "@context": "https://schema.org",
@@ -37,6 +39,7 @@ export function buildSiteStructuredData() {
           height: 512,
         },
         email: "torudake.reel@gmail.com",
+        ...(sameAs.length > 0 ? { sameAs } : {}),
         contactPoint: {
           "@type": "ContactPoint",
           contactType: "customer support",

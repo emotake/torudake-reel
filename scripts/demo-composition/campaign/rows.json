@@ -1,0 +1,10 @@
+{
+  "rows": [
+    {"name":"daily-a","eyebrow":"日常・お出かけ動画","headline":"撮ったのに、編集が面倒でまだ投稿していない。","feature":"使いたい場面を選ぶ","result":"投稿できる1本へ","media":"assets/daily.jpg","icon":"景","accent":"coral"},
+    {"name":"daily-b","eyebrow":"日常・お出かけ動画","headline":"カメラロールで眠る景色を、投稿できる1本へ。","feature":"使いたい場面を選ぶ","result":"投稿できる1本へ","media":"assets/daily.jpg","icon":"景","accent":"coral"},
+    {"name":"talking-a","eyebrow":"会話・解説動画","headline":"字幕を付けるだけで、投稿が今日も後回し。","feature":"文字と使う発話を確認","result":"見やすさだけ整える","media":"assets/talking.jpg","icon":"声","accent":"sky"},
+    {"name":"talking-b","eyebrow":"会話・解説動画","headline":"話した内容はそのまま。見やすさだけ整える。","feature":"文字と使う発話を確認","result":"見やすさだけ整える","media":"assets/talking.jpg","icon":"声","accent":"sky"},
+    {"name":"shop-a","eyebrow":"商品・お店紹介","headline":"紹介したいのに、並べ方で投稿が止まる。","feature":"撮った順番を確認","result":"紹介できる1本へ","media":"assets/shop.jpg","icon":"店","accent":"mint"},
+    {"name":"shop-b","eyebrow":"商品・お店紹介","headline":"外観も店内も商品も。撮った順番から1本へ。","feature":"撮った順番を確認","result":"紹介できる1本へ","media":"assets/shop.jpg","icon":"店","accent":"mint"}
+  ]
+}

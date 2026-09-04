@@ -1,0 +1,11 @@
+{
+  "duration": 10.4,
+  "maxStaticSec": 1.4,
+  "assertions": [
+    { "kind": "appearsBy", "selector": ".introInner", "bySec": 0.9 },
+    { "kind": "appearsBy", "selector": ".demoInner", "bySec": 3.9 },
+    { "kind": "appearsBy", "selector": ".outroPanel", "bySec": 8.6 },
+    { "kind": "before", "a": ".introInner", "b": ".demoInner" },
+    { "kind": "before", "a": ".demoInner", "b": ".outroPanel" }
+  ]
+}

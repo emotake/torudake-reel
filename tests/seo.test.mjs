@@ -61,6 +61,9 @@ test("lists only canonical public pages in the sitemap", () => {
     `${SITE_ORIGIN}/video-edit`,
     `${SITE_ORIGIN}/photo-reel`,
     `${SITE_ORIGIN}/pricing`,
+    `${SITE_ORIGIN}/use-cases/daily-moments`,
+    `${SITE_ORIGIN}/use-cases/talking-video`,
+    `${SITE_ORIGIN}/use-cases/shop-introduction`,
     `${SITE_ORIGIN}/guide`,
     `${SITE_ORIGIN}/guide/instagram-reels-editing`,
     `${SITE_ORIGIN}/guide/automatic-video-captions`,
@@ -149,7 +152,7 @@ test("describes the real web application without invented ratings", () => {
   assert.ok(
     application.featureList.includes("最大10枚の写真から縦型リールを自動作成"),
   );
-  assert.ok(SITE_DESCRIPTION.includes("最大5本の動画"));
+  assert.ok(SITE_DESCRIPTION.includes("編集が面倒で投稿できない人へ"));
   assert.equal("aggregateRating" in application, false);
   assert.equal("review" in application, false);
   assert.deepEqual(

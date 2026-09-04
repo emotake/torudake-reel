@@ -1,0 +1,30 @@
+.page { min-height: 100vh; background: #f7f4ee; color: #101827; }
+.hero { max-width: 1160px; margin: 0 auto; padding: 72px 28px 56px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); gap: 64px; align-items: center; }
+.copy h1 { margin: 18px 0; max-width: 720px; font-size: clamp(2.45rem, 6vw, 5.6rem); line-height: .98; letter-spacing: -.055em; }
+.back { color: #596273; text-decoration: none; font-weight: 700; }
+.eyebrow { color: #f25a3c; font-size: .78rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+.lead { max-width: 660px; color: #3f4958; font-size: clamp(1.05rem, 2vw, 1.28rem); line-height: 1.8; }
+.problemSolution { margin: 30px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.problemSolution p { margin: 0; padding: 18px; border: 1px solid #ded8cf; border-radius: 18px; background: rgba(255,255,255,.72); font-weight: 800; line-height: 1.55; }
+.problemSolution small { display: block; margin-bottom: 7px; color: #7a8290; font-size: .72rem; }
+.cta { display: inline-flex; gap: 28px; align-items: center; justify-content: space-between; min-width: min(100%, 340px); padding: 18px 22px; border-radius: 16px; background: #101827; color: white; text-decoration: none; font-weight: 900; }
+.freeNote { color: #727986; font-size: .82rem; }
+.videoCard { margin: 0; padding: 14px; border-radius: 30px; background: #101827; box-shadow: 18px 20px 0 #f25a3c; color: white; }
+.videoCard > span { display: block; padding: 4px 6px 12px; font-size: .76rem; font-weight: 900; letter-spacing: .12em; }
+.videoCard video { display: block; width: 100%; aspect-ratio: 9 / 16; border-radius: 20px; background: #05080d; object-fit: cover; }
+.videoCard figcaption { padding: 14px 6px 4px; color: #d9dee7; font-size: .82rem; line-height: 1.6; }
+.steps { max-width: 1160px; margin: 0 auto; padding: 72px 28px; }
+.steps h2 { max-width: 760px; margin: 12px 0 34px; font-size: clamp(1.8rem, 4vw, 3.2rem); letter-spacing: -.04em; }
+.steps ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.steps li { min-height: 150px; padding: 22px; border-radius: 22px; background: white; border: 1px solid #e3ddd5; }
+.steps li span { color: #f25a3c; font-weight: 900; }
+.steps li p { margin: 30px 0 0; font-weight: 800; line-height: 1.65; }
+.related { max-width: 1160px; margin: 0 auto; padding: 0 28px 80px; }
+.related h2 { font-size: 1.4rem; }
+.related div { display: flex; flex-wrap: wrap; gap: 12px; }
+.related a { padding: 13px 16px; border-radius: 999px; background: #fff; color: #101827; text-decoration: none; border: 1px solid #ded8cf; font-weight: 800; }
+@media (max-width: 780px) {
+  .hero { padding-top: 42px; grid-template-columns: 1fr; gap: 42px; }
+  .problemSolution, .steps ol { grid-template-columns: 1fr; }
+  .videoCard { max-width: 430px; justify-self: center; box-shadow: 10px 12px 0 #f25a3c; }
+}

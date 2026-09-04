@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja" data-resolution="portrait" data-composition-variables="[
+    {&quot;id&quot;:&quot;name&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Output name&quot;,&quot;default&quot;:&quot;daily-a&quot;},
+    {&quot;id&quot;:&quot;eyebrow&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Use case&quot;,&quot;default&quot;:&quot;日常・お出かけ動画&quot;},
+    {&quot;id&quot;:&quot;headline&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Opening copy&quot;,&quot;default&quot;:&quot;撮ったのに、編集が面倒でまだ投稿していない。&quot;},
+    {&quot;id&quot;:&quot;feature&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Editing choice&quot;,&quot;default&quot;:&quot;使いたい場面を選ぶ&quot;},
+    {&quot;id&quot;:&quot;result&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Outcome&quot;,&quot;default&quot;:&quot;投稿できる1本へ&quot;},
+    {&quot;id&quot;:&quot;media&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Background media&quot;,&quot;default&quot;:&quot;assets/daily.jpg&quot;},
+    {&quot;id&quot;:&quot;icon&quot;,&quot;type&quot;:&quot;string&quot;,&quot;label&quot;:&quot;Use case icon&quot;,&quot;default&quot;:&quot;景&quot;},
+    {&quot;id&quot;:&quot;accent&quot;,&quot;type&quot;:&quot;enum&quot;,&quot;label&quot;:&quot;Accent&quot;,&quot;default&quot;:&quot;coral&quot;,&quot;options&quot;:[{&quot;value&quot;:&quot;coral&quot;,&quot;label&quot;:&quot;Coral&quot;},{&quot;value&quot;:&quot;mint&quot;,&quot;label&quot;:&quot;Mint&quot;},{&quot;value&quot;:&quot;sky&quot;,&quot;label&quot;:&quot;Sky&quot;}]}
+  ]">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1080, height=1920">
+    <title>撮るだけリール 認知施策パイロット</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; margin: 0; overflow: hidden; background: #101827; }
+      body { color: #fff; font-family: system-ui, sans-serif; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+      .clip { position: absolute; inset: 0; overflow: hidden; }
+      .mediaFrame { position: absolute; inset: -40px; }
+      .mediaFrame img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+      .shade { background: linear-gradient(180deg, rgba(9,17,29,.16), rgba(9,17,29,.30) 42%, rgba(9,17,29,.88) 100%); }
+      .brand { position: absolute; z-index: 5; top: 78px; left: 70px; right: 70px; display: flex; align-items: center; justify-content: space-between; }
+      .brandLockup { display: flex; align-items: center; gap: 16px; padding: 10px 18px 10px 10px; border-radius: 22px; background: rgba(9,17,29,.78); font-size: 28px; font-weight: 900; letter-spacing: -.03em; }
+      .brandMark { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 15px; background: var(--accent); color: #101827; font-size: 21px; }
+      .prototype { padding: 10px 16px; border: 1px solid rgba(255,255,255,.45); border-radius: 999px; background: rgba(9,17,29,.28); font-size: 17px; font-weight: 800; letter-spacing: .08em; }
+      .intro, .demo, .outro { position: absolute; inset: 0; display: flex; padding: 190px 70px 100px; flex-direction: column; }
+      .intro { justify-content: flex-end; padding-bottom: 215px; }
+      .kicker { margin: 0 0 26px; color: var(--accent); font-size: 25px; font-weight: 900; letter-spacing: .14em; }
+      .headline { max-width: 920px; margin: 0; font-size: 94px; font-weight: 950; line-height: 1.06; letter-spacing: -.065em; text-wrap: balance; text-shadow: 0 4px 30px rgba(0,0,0,.3); }
+      .demo { justify-content: center; }
+      .phone { width: 820px; margin: 110px auto 0; padding: 28px; border: 3px solid rgba(255,255,255,.76); border-radius: 58px; background: rgba(247,244,238,.96); box-shadow: 0 34px 90px rgba(0,0,0,.34); color: #101827; }
+      .phoneTop { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 26px; }
+      .phoneTop strong { font-size: 24px; }
+      .phoneTop span { color: #384150; font-size: 17px; font-weight: 800; }
+      .flow { display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; }
+      .flowCard { min-height: 370px; padding: 28px; border-radius: 30px; background: #ebe7df; display: flex; flex-direction: column; justify-content: space-between; }
+      .flowCard.after { background: #101827; color: white; }
+      .flowIcon { display: grid; width: 74px; height: 74px; place-items: center; border-radius: 20px; background: var(--accent); color: #101827; font-size: 28px; font-weight: 950; }
+      .flowCard small { color: #46505f; font-size: 18px; font-weight: 800; }
+      .flowCard.after small { color: #aeb7c5; }
+      .flowCard strong { font-size: 34px; line-height: 1.25; letter-spacing: -.04em; }
+      .flowArrow { color: #101827; font-size: 42px; font-weight: 900; }
+      .choice { display: flex; margin-top: 20px; padding: 22px 24px; align-items: center; gap: 16px; border: 2px solid #d9d3c9; border-radius: 22px; background: white; font-size: 24px; font-weight: 900; }
+      .choiceCheck { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; background: var(--accent); font-size: 20px; }
+      .outro { justify-content: flex-end; padding-bottom: 180px; }
+      .outroPanel { padding: 48px; border-radius: 36px; background: rgba(16,24,39,.92); border: 1px solid rgba(255,255,255,.20); box-shadow: 0 28px 80px rgba(0,0,0,.32); }
+      .outroPanel small { color: var(--accent); font-size: 24px; font-weight: 900; letter-spacing: .12em; }
+      .outroPanel h2 { margin: 20px 0 34px; font-size: 62px; line-height: 1.1; letter-spacing: -.055em; }
+      .cta { display: flex; align-items: center; justify-content: space-between; padding: 24px 28px; border-left: 12px solid var(--accent); border-radius: 22px; background: #fff; color: #101827; font-size: 25px; font-weight: 950; }
+      .cta span:last-child { font-size: 34px; }
+      .introInner, .demoInner, .outroPanel { opacity: 0; will-change: transform, opacity; }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-ykte" id="root" data-composition-id="recognition-pilot" data-start="0" data-width="1080" data-height="1920" data-duration="10.4">
+      <section data-hf-id="hf-sdho" id="background" class="clip" data-start="0" data-duration="10.4" data-track-index="0" data-layout-allow-overflow="">
+        <div data-hf-id="hf-azur" class="mediaFrame"><img data-hf-id="hf-6etr" id="campaign-media" data-var-src="media" src="assets/daily.jpg" alt=""></div>
+      </section>
+      <div data-hf-id="hf-6ljg" id="shade" class="clip shade" data-start="0" data-duration="10.4" data-track-index="1"></div>
+      <div data-hf-id="hf-p6pv" class="brand" aria-label="撮るだけリール">
+        <div data-hf-id="hf-sitp" class="brandLockup"><span data-hf-id="hf-6gz3" class="brandMark">撮</span><span data-hf-id="hf-3ipk">撮るだけリール</span></div>
+        <span data-hf-id="hf-kfhf" class="prototype">試作</span>
+      </div>
+      <section data-hf-id="hf-eotz" id="intro" class="clip" data-start="0" data-duration="10.4" data-track-index="2">
+        <div data-hf-id="hf-hdnq" class="intro">
+          <div data-hf-id="hf-cfrq" class="introInner">
+            <p data-hf-id="hf-ofws" class="kicker" data-var-text="eyebrow">日常・お出かけ動画</p>
+            <h1 data-hf-id="hf-osf5" class="headline" data-var-text="headline">撮ったのに、編集が面倒でまだ投稿していない。</h1>
+          </div>
+        </div>
+      </section>
+      <section data-hf-id="hf-0p53" id="demo" class="clip" data-start="0" data-duration="10.4" data-track-index="3">
+        <div data-hf-id="hf-jui5" class="demo">
+          <div data-hf-id="hf-t41v" class="demoInner">
+            <div data-hf-id="hf-kda4" class="phone">
+              <div data-hf-id="hf-kw3x" class="phoneTop"><strong data-hf-id="hf-8pq7">仕上げ方を確認</strong><span data-hf-id="hf-4tqo">プレビュー無料</span></div>
+              <div data-hf-id="hf-ck2w" class="flow">
+                <div data-hf-id="hf-8pde" class="flowCard"><span data-hf-id="hf-osel" class="flowIcon" data-var-text="icon">景</span><small data-hf-id="hf-36uw">撮った素材</small><strong data-hf-id="hf-jc7j" data-var-text="eyebrow">日常・お出かけ動画</strong></div>
+                <span data-hf-id="hf-4zce" class="flowArrow">→</span>
+                <div data-hf-id="hf-5pk8" class="flowCard after"><span data-hf-id="hf-07hj" class="flowIcon">✓</span><small data-hf-id="hf-ykvx">仕上がり</small><strong data-hf-id="hf-6imd" data-var-text="result">投稿できる1本へ</strong></div>
+              </div>
+              <div data-hf-id="hf-h5cx" class="choice"><span data-hf-id="hf-xqwl" class="choiceCheck">✓</span><span data-hf-id="hf-tjqx" data-var-text="feature">使いたい場面を選ぶ</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section data-hf-id="hf-tmbe" id="outro" class="clip" data-start="0" data-duration="10.4" data-track-index="4">
+        <div data-hf-id="hf-e0lx" class="outro">
+          <div data-hf-id="hf-vnzh" class="outroPanel">
+            <small data-hf-id="hf-nmqz">撮るだけリール</small>
+            <h2 data-hf-id="hf-zgeq">編集が面倒で投稿できない。をなくす。</h2>
+            <div data-hf-id="hf-apeu" class="cta"><span data-hf-id="hf-uwzf">無料で仕上がりを見る</span><span data-hf-id="hf-p70p">→</span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script>
+      (function () {
+        "use strict";
+        var vars = window.__hyperframes && window.__hyperframes.getVariables ? window.__hyperframes.getVariables() : {};
+        var accents = { coral: "#ff6a4d", mint: "#8ee7bd", sky: "#8dc8ff" };
+        document.documentElement.style.setProperty("--accent", accents[vars.accent] || accents.coral);
+        var tl = gsap.timeline({ paused: true });
+        tl.fromTo(".mediaFrame", { scale: 1.02, x: -12, y: 10 }, { scale: 1.1, x: 18, y: -24, duration: 10.4, ease: "sine.inOut" }, 0);
+        tl.fromTo(".introInner", { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.25);
+        tl.to(".introInner", { opacity: 0, y: -36, duration: 0.45, ease: "power2.in" }, 2.8);
+        tl.set(".demoInner", { opacity: 1 }, 3.05);
+        tl.fromTo(".demoInner", { y: 70, scale: 0.97 }, { y: 0, scale: 1, duration: 0.7, ease: "power3.out" }, 3.05);
+        tl.set(".demoInner", { opacity: 0 }, 7.55);
+        tl.set(".outroPanel", { opacity: 1 }, 7.72);
+        tl.fromTo(".outroPanel", { y: 74, scale: 0.97 }, { y: 0, scale: 1, duration: 0.7, ease: "power3.out" }, 7.72);
+        window.__timelines = window.__timelines || {};
+        window.__timelines["recognition-pilot"] = tl;
+      })();
+    </script>
+  </body>
+</html>

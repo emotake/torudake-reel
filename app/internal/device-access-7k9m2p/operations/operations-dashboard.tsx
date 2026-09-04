@@ -27,6 +27,15 @@ type Metrics = {
   };
   providerSummary: ProviderUsageTotals;
   providerUsage: ProviderUsageRow[];
+  acquisitionFunnel: Array<{
+    source: string;
+    content: string;
+    landings: number;
+    started: number;
+    previews: number;
+    checkouts: number;
+    exports: number;
+  }>;
   events: Array<{ eventName: string; events: number; actors: number }>;
   feedback: Array<{ rating: string; context: string; responses: number }>;
   daily: Array<{ day: string; events: number; actors: number }>;
@@ -55,6 +64,7 @@ type ProviderUsageRow = ProviderUsageTotals & {
 };
 
 const EVENT_LABELS: Record<string, string> = {
+  acquisition_landing: "施策ページへ流入",
   demo_started: "見本を再生",
   video_selected: "動画を選択",
   preview_completed: "プレビュー完成",
@@ -326,6 +336,47 @@ export default function OperationsDashboard() {
               </div>
             </article>
           </section>
+
+          <section aria-labelledby="acquisition-funnel-title">
+            <div className={styles.sectionHeading}>
+              <div>
+                <h2 id="acquisition-funnel-title">認知施策の流入別ファネル</h2>
+                <p>Instagram／YouTubeと、3用途×冒頭コピーA/Bを比較します。</p>
+              </div>
+            </div>
+            {metrics.acquisitionFunnel.length ? (
+              <div className={styles.tableWrap}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>流入</th>
+                      <th>用途・コピー</th>
+                      <th>着地</th>
+                      <th>開始</th>
+                      <th>プレビュー</th>
+                      <th>購入開始</th>
+                      <th>書き出し</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metrics.acquisitionFunnel.map((row) => (
+                      <tr key={`${row.source}:${row.content}`}>
+                        <th scope="row">{trafficSourceLabel(row.source)}</th>
+                        <td>{trafficContentLabel(row.content)}</td>
+                        <td>{row.landings}</td>
+                        <td>{row.started}</td>
+                        <td>{row.previews}</td>
+                        <td>{row.checkouts}</td>
+                        <td>{row.exports}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className={styles.empty}>認知施策からの流入はまだありません。</p>
+            )}
+          </section>
         </>
       ) : null}
     </main>
@@ -402,6 +453,21 @@ function feedbackLabel(rating: string) {
 
 function contextLabel(context: string) {
   return ({ preview: "プレビュー", export: "書き出し", checkout: "購入", general: "全体" } as Record<string, string>)[context] ?? context;
+}
+
+function trafficSourceLabel(source: string) {
+  return ({ instagram: "Instagram", youtube: "YouTube" } as Record<string, string>)[source] ?? source;
+}
+
+function trafficContentLabel(content: string) {
+  return ({
+    daily_a: "日常・A",
+    daily_b: "日常・B",
+    talking_a: "会話・A",
+    talking_b: "会話・B",
+    shop_a: "商品・店舗・A",
+    shop_b: "商品・店舗・B",
+  } as Record<string, string>)[content] ?? content;
 }
 
 async function fetchMetrics(signal?: AbortSignal) {

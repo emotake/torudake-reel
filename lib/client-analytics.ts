@@ -10,6 +10,7 @@ import {
   sendGoogleAnalyticsEvent,
   type GoogleTag,
 } from "./google-analytics";
+import { currentAttributionProperties } from "./client-attribution";
 
 type AnalyticsWindow = Window & {
   gtag?: GoogleTag;
@@ -23,8 +24,13 @@ export function trackClientEvent(
 ) {
   if (typeof window === "undefined") return;
   try {
-    const safeProperties = sanitizeProductProperties(properties);
-    if (!isClientProductEvent(name) || !safeProperties) return;
+    const initialProperties = sanitizeProductProperties(properties);
+    if (!isClientProductEvent(name) || !initialProperties) return;
+    const safeProperties = sanitizeProductProperties({
+      ...initialProperties,
+      ...currentAttributionProperties(),
+    });
+    if (!safeProperties) return;
     sendGoogleAnalyticsEvent(
       (window as AnalyticsWindow).gtag,
       name,

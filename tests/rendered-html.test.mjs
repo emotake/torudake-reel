@@ -28,10 +28,10 @@ test("renders the Torudake Reel product experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>撮るだけリール｜AIでショート動画をかんたん編集<\/title>/);
-  assert.match(html, /動画や写真を、/);
-  assert.match(html, /ショート動画に。/);
-  assert.match(html, /InstagramリールやYouTubeショート向けに/);
+  assert.match(html, /<title>撮るだけリール｜編集が面倒で投稿できない悩みを軽くする<\/title>/);
+  assert.match(html, /編集が面倒で、/);
+  assert.match(html, /投稿できない。をなくす。/);
+  assert.match(html, /InstagramリールやYouTubeショートへ出せる形まで進められます。/);
   const heroCopyStart = html.indexOf('class="landingIntroCopy"');
   const heroResultStart = html.indexOf(
     'class="landingHeroResult"',
@@ -42,7 +42,7 @@ test("renders the Torudake Reel product experience", async () => {
 
   const heroCopyHtml = html.slice(heroCopyStart, heroResultStart);
   const heroLeadIndex = heroCopyHtml.indexOf(
-    "InstagramリールやYouTubeショート向けに、画面の案内に沿って必要な編集だけを選べます。",
+    "動画や写真を選び、必要な仕上げだけを画面に沿って決めるだけ。InstagramリールやYouTubeショートへ出せる形まで進められます。",
   );
   const heroPromiseIndex = heroCopyHtml.indexOf('class="landingPromiseList"');
   assert.ok(heroLeadIndex >= 0 && heroLeadIndex < heroPromiseIndex);
@@ -120,7 +120,7 @@ test("renders the Torudake Reel product experience", async () => {
   assert.doesNotMatch(html, /landingPromiseRow/);
   assert.doesNotMatch(html, /素材を選んで、|作り方をひとつ選ぶだけ。/);
   assert.match(html, /<span>かんたん動画編集<\/span>/);
-  assert.match(html, /素材を選ぶだけで、投稿できる動画へ/);
+  assert.match(html, /撮ったままを、投稿できる1本へ/);
   assert.doesNotMatch(html, /<span>AI自動編集<\/span>/);
   assert.doesNotMatch(html, /<span>新着<\/span>/);
   assert.match(html, /id="create"/);
@@ -240,6 +240,36 @@ test("renders an indexable Instagram Reels editing guide", async () => {
   assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
 });
 
+for (const useCase of [
+  {
+    path: "/use-cases/daily-moments",
+    title: "日常・お出かけ動画をショート動画へ",
+    video: "daily-a.mp4",
+  },
+  {
+    path: "/use-cases/talking-video",
+    title: "会話・解説動画に自動テロップ",
+    video: "talking-a.mp4",
+  },
+  {
+    path: "/use-cases/shop-introduction",
+    title: "商品・お店紹介のショート動画を作る",
+    video: "shop-a.mp4",
+  },
+]) {
+  test(`renders an indexable, video-led use-case page: ${useCase.path}`, async () => {
+    const response = await render(useCase.path);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, new RegExp(`<title>${useCase.title}`));
+    assert.match(html, new RegExp(`<link rel="canonical" href="https://torudake-reel\\.pages\\.dev${useCase.path}`));
+    assert.match(html, new RegExp(useCase.video.replace(".", "\\.")));
+    assert.match(html, /約10秒の実演/);
+    assert.match(html, /"@type":"VideoObject"/);
+    assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
+  });
+}
+
 test("renders the single-video editor as a focused public route", async () => {
   const response = await render("/video-edit");
   assert.equal(response.status, 200);
@@ -345,7 +375,7 @@ test("ships production metadata without starter markers", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:title" content="撮るだけリール｜AIでショート動画をかんたん編集"/);
+  assert.match(html, /property="og:title" content="撮るだけリール｜編集が面倒で投稿できない悩みを軽くする"/);
   assert.match(
     html,
     /<link rel="canonical" href="https:\/\/torudake-reel\.pages\.dev\/"/,

@@ -69,9 +69,10 @@ test("configures both GA4 measurements without exposing private routes", async (
   assert.match(analyticsSource, /sendGoogleAnalyticsEvent\(runtime\.gtag, "page_view"/);
   assert.match(
     analyticsSource,
-    /page_location: `\$\{window\.location\.origin\}\$\{safePath\}`/,
+    /page_location: `\$\{window\.location\.origin\}\$\{safePath\}\$\{attributionToSearch\(attribution\)\}`/,
   );
-  assert.doesNotMatch(analyticsSource, /location\.search|searchParams/);
+  assert.match(analyticsSource, /captureCurrentAttribution\(\)/);
+  assert.match(analyticsSource, /"acquisition_landing"/);
   assert.match(analyticsSource, /isGoogleAnalyticsExcludedPath\(safePath\)/);
   assert.match(analyticsSource, /configuredIds\.has\(measurementId\)/);
   assert.match(analyticsSource, /__torudakeGaLastPath === safePath/);

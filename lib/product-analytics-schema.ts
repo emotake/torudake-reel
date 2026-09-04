@@ -1,4 +1,5 @@
 export const CLIENT_PRODUCT_EVENTS = [
+  "acquisition_landing",
   "demo_started",
   "video_selected",
   "preview_completed",
@@ -43,6 +44,32 @@ export type ProductEventName = ClientProductEvent | ServerProductEvent;
 const CLIENT_EVENT_SET = new Set<string>(CLIENT_PRODUCT_EVENTS);
 
 const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
+  traffic_source: new Set([
+    "instagram",
+    "youtube",
+    "google",
+    "line",
+    "direct",
+    "other",
+  ]),
+  traffic_medium: new Set([
+    "organic_social",
+    "organic_search",
+    "referral",
+    "direct",
+    "unknown",
+  ]),
+  traffic_campaign: new Set(["recognition_202609", "none", "unknown"]),
+  traffic_content: new Set([
+    "daily_a",
+    "daily_b",
+    "talking_a",
+    "talking_b",
+    "shop_a",
+    "shop_b",
+    "unknown",
+    "none",
+  ]),
   mode: new Set(["spoken", "narration", "photo", "video_mix"]),
   duration_bucket: new Set([
     "up_to_15s",
