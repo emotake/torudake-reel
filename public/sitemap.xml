@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
   <url>
     <loc>https://torudake-reel.pages.dev/</loc>
     <lastmod>2026-09-04</lastmod>
@@ -10,6 +11,15 @@
       <image:loc>https://torudake-reel.pages.dev/og.png?v=20260811-accessibility</image:loc>
       <image:title>撮るだけリール</image:title>
     </image:image>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/demo/torudake-demo-poster.jpg</video:thumbnail_loc>
+      <video:title>撮るだけリール 編集後デモ</video:title>
+      <video:description>風景動画に自動編集とテロップを加えた、撮るだけリールの仕上がり例です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/demo/torudake-demo.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-08-12T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/video-mix</loc>
@@ -40,18 +50,45 @@
     <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/daily-poster.jpg</video:thumbnail_loc>
+      <video:title>日常・お出かけ動画の編集実演</video:title>
+      <video:description>日常の風景を選び、InstagramリールやYouTubeショート向けの縦型動画に整える実演です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/daily-a.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/use-cases/talking-video</loc>
     <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/talking-poster.jpg</video:thumbnail_loc>
+      <video:title>会話・解説動画の自動テロップ実演</video:title>
+      <video:description>元音声を活かしながら、認識した文字と映像の仕上げ方を選ぶ流れの実演です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/talking-a.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/use-cases/shop-introduction</loc>
     <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/shop-poster.jpg</video:thumbnail_loc>
+      <video:title>商品・お店紹介動画の編集実演</video:title>
+      <video:description>複数の動画を撮った順番で確認し、商品やお店を紹介する縦型動画へまとめる実演です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/shop-a.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide</loc>

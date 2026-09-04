@@ -19,6 +19,17 @@ export type UseCasePageContent = {
   videoDescription: string;
   ctaHref: string;
   ctaLabel: string;
+  fit: readonly [string, string, string];
+  choices: readonly {
+    title: string;
+    body: string;
+    href?: string;
+    linkLabel?: string;
+  }[];
+  faqs: readonly {
+    question: string;
+    answer: string;
+  }[];
 };
 
 export default function UseCasePage({ content }: { content: UseCasePageContent }) {
@@ -39,10 +50,11 @@ export default function UseCasePage({ content }: { content: UseCasePageContent }
     description: content.videoDescription,
     thumbnailUrl: siteUrl(content.poster),
     uploadDate: "2026-09-04",
-    duration: "PT10.4S",
+    duration: "PT10S",
     contentUrl: siteUrl(content.video),
-    embedUrl: siteUrl(path),
     inLanguage: "ja-JP",
+    mainEntityOfPage: { "@id": `${siteUrl(path)}#webpage` },
+    publisher: { "@id": `${siteUrl("/")}#organization` },
   };
 
   return (
@@ -83,6 +95,41 @@ export default function UseCasePage({ content }: { content: UseCasePageContent }
             <li key={step}><span>0{index + 1}</span><p>{step}</p></li>
           ))}
         </ol>
+      </section>
+
+      <section className={styles.guide} aria-labelledby="useCaseGuideTitle">
+        <div className={styles.fitCard}>
+          <p className={styles.eyebrow}>こんなときに</p>
+          <h2 id="useCaseGuideTitle">この使い方が合う人</h2>
+          <ul>
+            {content.fit.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+        <div className={styles.choiceList}>
+          <p className={styles.eyebrow}>自分で決められること</p>
+          {content.choices.map((choice) => (
+            <article key={choice.title}>
+              <h3>{choice.title}</h3>
+              <p>{choice.body}</p>
+              {choice.href && choice.linkLabel ? (
+                <Link href={choice.href}>{choice.linkLabel} →</Link>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.faq} aria-labelledby="useCaseFaqTitle">
+        <p className={styles.eyebrow}>よくある質問</p>
+        <h2 id="useCaseFaqTitle">始める前に確認できます。</h2>
+        <div>
+          {content.faqs.map((faq) => (
+            <article key={faq.question}>
+              <h3>{faq.question}</h3>
+              <p>{faq.answer}</p>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className={styles.related} aria-labelledby="relatedUseCasesTitle">

@@ -19,6 +19,24 @@
 .steps li { min-height: 150px; padding: 22px; border-radius: 22px; background: white; border: 1px solid #e3ddd5; }
 .steps li span { color: #f25a3c; font-weight: 900; }
 .steps li p { margin: 30px 0 0; font-weight: 800; line-height: 1.65; }
+.guide { max-width: 1160px; margin: 0 auto; padding: 20px 28px 72px; display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
+.fitCard, .choiceList { padding: 28px; border: 1px solid #ded8cf; border-radius: 26px; background: rgba(255,255,255,.78); }
+.fitCard h2 { margin: 10px 0 20px; font-size: clamp(1.7rem, 3vw, 2.4rem); letter-spacing: -.035em; }
+.fitCard ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.fitCard li { position: relative; padding-left: 26px; color: #3f4958; font-weight: 750; line-height: 1.65; }
+.fitCard li::before { position: absolute; left: 0; top: .1em; color: #f25a3c; content: "✓"; font-weight: 950; }
+.choiceList { display: grid; gap: 14px; }
+.choiceList > .eyebrow { margin: 0 0 4px; }
+.choiceList article { padding: 20px; border-radius: 18px; background: #f7f4ee; }
+.choiceList h3 { margin: 0 0 8px; font-size: 1.08rem; }
+.choiceList p { margin: 0; color: #4b5563; line-height: 1.75; }
+.choiceList a { display: inline-block; margin-top: 12px; color: #d9482c; font-weight: 850; }
+.faq { max-width: 1160px; margin: 0 auto; padding: 0 28px 72px; }
+.faq > h2 { margin: 10px 0 28px; font-size: clamp(1.8rem, 4vw, 3.1rem); letter-spacing: -.04em; }
+.faq > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.faq article { padding: 24px; border-top: 3px solid #101827; background: white; }
+.faq h3 { margin: 0 0 12px; font-size: 1.05rem; line-height: 1.5; }
+.faq p { margin: 0; color: #4b5563; line-height: 1.8; }
 .related { max-width: 1160px; margin: 0 auto; padding: 0 28px 80px; }
 .related h2 { font-size: 1.4rem; }
 .related div { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -26,5 +44,7 @@
 @media (max-width: 780px) {
   .hero { padding-top: 42px; grid-template-columns: 1fr; gap: 42px; }
   .problemSolution, .steps ol { grid-template-columns: 1fr; }
+  .guide, .faq > div { grid-template-columns: 1fr; }
+  .guide { padding-top: 0; }
   .videoCard { max-width: 430px; justify-self: center; box-shadow: 10px 12px 0 #f25a3c; }
 }

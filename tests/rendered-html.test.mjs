@@ -265,7 +265,13 @@ for (const useCase of [
     assert.match(html, new RegExp(`<link rel="canonical" href="https://torudake-reel\\.pages\\.dev${useCase.path}`));
     assert.match(html, new RegExp(useCase.video.replace(".", "\\.")));
     assert.match(html, /約10秒の実演/);
+    assert.match(html, /この使い方が合う人/);
+    assert.match(html, /自分で決められること/);
+    assert.match(html, /始める前に確認できます/);
     assert.match(html, /"@type":"VideoObject"/);
+    assert.match(html, /"duration":"PT10S"/);
+    assert.match(html, /"mainEntityOfPage":\{"@id":"https:\/\/torudake-reel\.pages\.dev\/use-cases\//);
+    assert.doesNotMatch(html, /"embedUrl"/);
     assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
   });
 }

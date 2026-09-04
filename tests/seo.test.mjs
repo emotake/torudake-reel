@@ -94,6 +94,29 @@ test("lists only canonical public pages in the sitemap", () => {
     sitemapSource,
     /<image:loc>https:\/\/torudake-reel\.pages\.dev\/og\.png\?v=20260811-accessibility<\/image:loc>/,
   );
+  assert.match(
+    sitemapSource,
+    /xmlns:video="http:\/\/www\.google\.com\/schemas\/sitemap-video\/1\.1"/,
+  );
+  assert.equal(
+    [...sitemapSource.matchAll(/<video:video>/g)].length,
+    4,
+  );
+  for (const videoPath of [
+    "/demo/torudake-demo.mp4",
+    "/campaign/recognition-202609/daily-a.mp4",
+    "/campaign/recognition-202609/talking-a.mp4",
+    "/campaign/recognition-202609/shop-a.mp4",
+  ]) {
+    assert.match(
+      sitemapSource,
+      new RegExp(`<video:content_loc>${SITE_ORIGIN}${videoPath.replaceAll(".", "\\.")}</video:content_loc>`),
+    );
+  }
+  assert.equal(
+    [...sitemapSource.matchAll(/<video:thumbnail_loc>/g)].length,
+    4,
+  );
 });
 
 test("uses a fixed public canonical instead of the request host", () => {
