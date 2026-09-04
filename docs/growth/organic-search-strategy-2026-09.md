@@ -20,6 +20,22 @@ Googleは、検索用に量産した一般論ではなく、利用者に独自�
 - [有用で信頼できる、人を第一に考えたコンテンツ](https://developers.google.com/search/docs/fundamentals/creating-helpful-content)
 - [Google検索の生成AI機能に向けた最適化ガイド](https://developers.google.com/search/docs/fundamentals/ai-optimization-guide)
 
+## 実装状況（2026年9月4日）
+
+優先度Aのうち、サービス側だけで完結する以下を実装した。
+
+- 自動テロップ、Instagramリール、YouTubeショートの上位3ガイドを実演ページへ変更
+- 各ページへ結論、10秒の完成例、入力・設定・完成仕様、できること、制約、編集CTAを追加
+- 用途ページと上位3ガイドへ内容固有のOG画像・代表画像を設定
+- 上位3ガイドへ`VideoObject`を追加し、動画サイトマップを4本から7本へ拡張
+- ガイド別の動画再生と編集CTAを、本文やファイル名を送らない限定語彙で計測
+
+次の項目は外部アカウントまたは新しい公開物が必要なため未実施。
+
+- Search Console上のURL検査・サイトマップ再送信・GA4とのプロパティ接続
+- 公式YouTubeチャンネルURLの設定とYouTubeへの6本公開
+- 利用者の許諾を伴う実利用事例と外部サイトからの紹介
+
 ## 現在地
 
 ### すでに整っているもの

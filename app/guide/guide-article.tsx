@@ -2,26 +2,42 @@ import Link from "next/link";
 import { buildGuideStructuredData } from "../../lib/seo";
 import SiteFooter from "../site-footer";
 import StructuredData from "../structured-data";
+import GuideDemo, { type GuideDemoContent } from "./guide-demo";
 
 export function GuideArticle({
   title,
   description,
   path,
+  imagePath,
+  demo,
   children,
 }: {
   title: string;
   description: string;
   path: string;
+  imagePath?: string;
+  demo?: GuideDemoContent;
   children: React.ReactNode;
 }) {
   const structuredData = buildGuideStructuredData({
     name: title,
     description,
     path,
+    imagePath,
+    video: demo
+      ? {
+          name: demo.title,
+          description: demo.videoDescription,
+          thumbnailPath: demo.posterPath,
+          contentPath: demo.videoPath,
+          duration: "PT10S",
+          uploadDate: "2026-09-04",
+        }
+      : undefined,
   });
   return (
     <>
-      <main className="legalPage">
+      <main className="legalPage guideArticlePage">
       <StructuredData data={structuredData} />
       <nav className="legalBack" aria-label="パンくずリスト">
         <Link href="/">撮るだけリール</Link>
@@ -33,6 +49,7 @@ export function GuideArticle({
         <h1>{title}</h1>
         <p>{description}</p>
       </header>
+      {demo ? <GuideDemo demo={demo} /> : null}
       {children}
       <article>
         <h2>まずは無料で仕上がりを確認</h2>

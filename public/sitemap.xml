@@ -101,18 +101,57 @@
     <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/daily-poster.jpg</image:loc>
+      <image:title>日常の動画をInstagramリール向けに整えた完成例</image:title>
+    </image:image>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/daily-poster.jpg</video:thumbnail_loc>
+      <video:title>Instagramリール向けの日常動画編集例</video:title>
+      <video:description>日常やお出かけで撮った動画から、使いたい場面を選んで縦型動画へ整える10秒の完成例です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/daily-b.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/automatic-video-captions</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/talking-poster.jpg</image:loc>
+      <image:title>会話・解説動画に日本語テロップを付けた完成例</image:title>
+    </image:image>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/talking-poster.jpg</video:thumbnail_loc>
+      <video:title>日本語音声から自動テロップを作る完成例</video:title>
+      <video:description>元の話し声を活かし、認識した文字と使う発話を確認してテロップ付き動画へ整える10秒の例です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/talking-b.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/youtube-shorts-editing</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/shop-poster.jpg</image:loc>
+      <image:title>商品・お店の動画をYouTubeショート向けに整えた完成例</image:title>
+    </image:image>
+    <video:video>
+      <video:thumbnail_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/shop-poster.jpg</video:thumbnail_loc>
+      <video:title>YouTubeショート向けの商品・お店紹介動画の完成例</video:title>
+      <video:description>商品やお店を撮った複数の動画を、撮った順番で確認して縦型ショート動画へまとめる10秒の例です。</video:description>
+      <video:content_loc>https://torudake-reel.pages.dev/campaign/recognition-202609/shop-b.mp4</video:content_loc>
+      <video:duration>10</video:duration>
+      <video:publication_date>2026-09-04T00:00:00+09:00</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/iphone-mov-reel</loc>

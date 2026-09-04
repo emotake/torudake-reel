@@ -15,6 +15,8 @@ import { describeStripeProductTelemetry } from "../lib/stripe-product-analytics.
 
 test("accepts only the bounded product funnel vocabulary", () => {
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("acquisition_landing"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("guide_demo_started"));
+  assert.ok(CLIENT_PRODUCT_EVENTS.includes("guide_cta_clicked"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("video_selected"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("checkout_started"));
   assert.ok(CLIENT_PRODUCT_EVENTS.includes("purchase_options_shown"));
@@ -85,6 +87,11 @@ test("keeps product properties content-free and bounded", () => {
   assert.deepEqual(sanitizeProductProperties({ source: "account" }), {
     source: "account",
   });
+  assert.deepEqual(
+    sanitizeProductProperties({ guide: "automatic_captions" }),
+    { guide: "automatic_captions" },
+  );
+  assert.equal(sanitizeProductProperties({ guide: "private-guide-name" }), null);
 
   assert.deepEqual(
     sanitizeProductProperties({

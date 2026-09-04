@@ -100,13 +100,16 @@ test("lists only canonical public pages in the sitemap", () => {
   );
   assert.equal(
     [...sitemapSource.matchAll(/<video:video>/g)].length,
-    4,
+    7,
   );
   for (const videoPath of [
     "/demo/torudake-demo.mp4",
     "/campaign/recognition-202609/daily-a.mp4",
     "/campaign/recognition-202609/talking-a.mp4",
     "/campaign/recognition-202609/shop-a.mp4",
+    "/campaign/recognition-202609/daily-b.mp4",
+    "/campaign/recognition-202609/talking-b.mp4",
+    "/campaign/recognition-202609/shop-b.mp4",
   ]) {
     assert.match(
       sitemapSource,
@@ -115,7 +118,7 @@ test("lists only canonical public pages in the sitemap", () => {
   }
   assert.equal(
     [...sitemapSource.matchAll(/<video:thumbnail_loc>/g)].length,
-    4,
+    7,
   );
 });
 
@@ -246,6 +249,41 @@ test("publishes a real product demo as VideoObject", () => {
   assert.equal(video.contentUrl, `${SITE_ORIGIN}/demo/torudake-demo.mp4`);
   assert.equal(video.thumbnailUrl, `${SITE_ORIGIN}/demo/torudake-demo-poster.jpg`);
   assert.equal(video.uploadDate, "2026-08-12");
+});
+
+test("connects guide proof media to page, article and video structured data", () => {
+  const value = buildGuideStructuredData({
+    name: "日本語の自動テロップ",
+    description: "説明",
+    path: "/guide/automatic-video-captions",
+    imagePath: "/campaign/recognition-202609/talking-poster.jpg",
+    video: {
+      name: "テロップ付き動画の完成例",
+      description: "10秒の完成例です。",
+      thumbnailPath: "/campaign/recognition-202609/talking-poster.jpg",
+      contentPath: "/campaign/recognition-202609/talking-b.mp4",
+      duration: "PT10S",
+      uploadDate: "2026-09-04",
+    },
+  });
+  const page = value["@graph"].find((entry) => entry["@type"] === "WebPage");
+  const article = value["@graph"].find((entry) => entry["@type"] === "Article");
+  const video = value["@graph"].find((entry) => entry["@type"] === "VideoObject");
+
+  assert.equal(
+    page.primaryImageOfPage.url,
+    `${SITE_ORIGIN}/campaign/recognition-202609/talking-poster.jpg`,
+  );
+  assert.equal(article.image, page.primaryImageOfPage.url);
+  assert.equal(
+    video.contentUrl,
+    `${SITE_ORIGIN}/campaign/recognition-202609/talking-b.mp4`,
+  );
+  assert.equal(video.duration, "PT10S");
+  assert.equal(
+    video.mainEntityOfPage["@id"],
+    `${SITE_ORIGIN}/guide/automatic-video-captions#webpage`,
+  );
 });
 
 test("publishes useful, canonical guides without invented capability claims", async () => {

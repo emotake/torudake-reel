@@ -38,6 +38,7 @@ export default function UseCasePage({ content }: { content: UseCasePageContent }
     name: content.title,
     description: content.lead,
     path,
+    imagePath: content.poster,
     breadcrumbs: [
       { name: "撮るだけリール", path: "/" },
       { name: content.title, path },

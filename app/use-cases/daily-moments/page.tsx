@@ -4,7 +4,17 @@ import UseCasePage from "../use-case-page";
 
 const title = "日常・お出かけ動画をショート動画へ｜撮るだけリール";
 const description = "撮ったまま眠っている日常やお出かけの動画を、Instagramリール・YouTubeショートへ投稿できる形に整える使い方を動画で紹介します。";
-export const metadata: Metadata = buildPublicPageMetadata({ title, description, path: "/use-cases/daily-moments" });
+export const metadata: Metadata = buildPublicPageMetadata({
+  title,
+  description,
+  path: "/use-cases/daily-moments",
+  image: {
+    path: "/campaign/recognition-202609/daily-poster.jpg",
+    width: 1080,
+    height: 1920,
+    alt: "日常・お出かけ動画をショート動画へ整えた完成例",
+  },
+});
 
 export default function DailyMomentsPage() {
   return <UseCasePage content={{

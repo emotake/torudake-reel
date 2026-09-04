@@ -4,7 +4,17 @@ import UseCasePage from "../use-case-page";
 
 const title = "商品・お店紹介のショート動画を作る｜撮るだけリール";
 const description = "商品やお店で撮った複数の動画・写真を、順番を保ちながら1本のInstagramリール・YouTubeショートへ整える使い方を紹介します。";
-export const metadata: Metadata = buildPublicPageMetadata({ title, description, path: "/use-cases/shop-introduction" });
+export const metadata: Metadata = buildPublicPageMetadata({
+  title,
+  description,
+  path: "/use-cases/shop-introduction",
+  image: {
+    path: "/campaign/recognition-202609/shop-poster.jpg",
+    width: 600,
+    height: 400,
+    alt: "商品・お店紹介のショート動画の完成例",
+  },
+});
 
 export default function ShopIntroductionPage() {
   return <UseCasePage content={{

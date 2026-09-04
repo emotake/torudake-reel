@@ -5,11 +5,18 @@ import { GuideArticle } from "../guide-article";
 const title = "動画にテロップを自動生成する方法";
 const description =
   "スマホ動画の日本語音声からテロップを作り、声に合わせて順番に表示し、誤字や不要な部分を直してショート動画へ書き出す手順を紹介します。";
+const imagePath = "/campaign/recognition-202609/talking-poster.jpg";
 
 export const metadata = buildPublicPageMetadata({
   title: `${title}｜撮るだけリール`,
   description,
   path: "/guide/automatic-video-captions",
+  image: {
+    path: imagePath,
+    width: 1080,
+    height: 1920,
+    alt: "会話・解説動画に日本語テロップを付けた縦型動画の完成例",
+  },
 });
 
 export default function AutomaticVideoCaptionsGuide() {
@@ -18,6 +25,32 @@ export default function AutomaticVideoCaptionsGuide() {
       title={title}
       description={description}
       path="/guide/automatic-video-captions"
+      imagePath={imagePath}
+      demo={{
+        id: "automatic_captions",
+        title: "日本語の話し声から、テロップ付きの完成形まで確認できます。",
+        conclusion: "音声を一度認識したあと、誤字・表示しない発話・テロップの見た目を保存前に調整できます。文字修正だけなら音声認識をやり直しません。",
+        videoPath: "/campaign/recognition-202609/talking-b.mp4",
+        posterPath: imagePath,
+        videoDescription: "元の話し声を活かし、認識した文字と使う発話を確認して見やすく整える10秒の例です。",
+        facts: [
+          { label: "入力", value: "日本語の会話・解説が入った縦動画" },
+          { label: "設定", value: "元音声を活かす／テロップあり／元の流れを維持" },
+          { label: "完成", value: "10秒・縦1080×1920・MP4" },
+        ],
+        available: [
+          "日本語音声からテロップを自動生成",
+          "認識した文字の修正と不要なテロップの非表示",
+          "枠付き・文字だけのテロップデザインを比較",
+        ],
+        notes: [
+          "声が小さい、音楽と重なる、複数人が同時に話す場合は認識精度が下がることがあります。",
+          "音声認識は作成時に実行されます。文字修正やデザイン変更では再実行しません。",
+          "対応ブラウザは最新のSafari、Chrome、Edgeです。",
+        ],
+        ctaHref: "/video-edit",
+        ctaLabel: "自分の動画でテロップを試す",
+      }}
     >
       <article>
         <h2>話し声のある動画を選ぶ</h2>

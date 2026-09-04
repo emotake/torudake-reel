@@ -160,11 +160,13 @@ export function buildPublicPageStructuredData({
   description,
   path,
   breadcrumbs,
+  imagePath = SITE_OG_IMAGE_PATH,
 }: {
   name: string;
   description: string;
   path: string;
   breadcrumbs?: readonly PublicBreadcrumb[];
+  imagePath?: string;
 }) {
   const pageUrl = siteUrl(path);
   const trail = breadcrumbs ?? [
@@ -187,7 +189,7 @@ export function buildPublicPageStructuredData({
         about: { "@id": `${SITE_ORIGIN}/#application` },
         primaryImageOfPage: {
           "@type": "ImageObject",
-          url: siteUrl(SITE_OG_IMAGE_PATH),
+          url: siteUrl(imagePath),
         },
       },
       {
@@ -208,16 +210,28 @@ export function buildGuideStructuredData({
   name,
   description,
   path,
+  imagePath = SITE_OG_IMAGE_PATH,
+  video,
 }: {
   name: string;
   description: string;
   path: string;
+  imagePath?: string;
+  video?: {
+    name: string;
+    description: string;
+    thumbnailPath: string;
+    contentPath: string;
+    duration: string;
+    uploadDate: string;
+  };
 }) {
   const pageUrl = siteUrl(path);
   const page = buildPublicPageStructuredData({
     name,
     description,
     path,
+    imagePath,
     breadcrumbs: [
       { name: SITE_NAME, path: "/" },
       { name: "動画編集ガイド", path: "/guide" },
@@ -238,9 +252,26 @@ export function buildGuideStructuredData({
         datePublished: "2026-08-12",
         dateModified: SITE_LAST_MODIFIED,
         mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
-        image: siteUrl(SITE_OG_IMAGE_PATH),
+        image: siteUrl(imagePath),
         publisher: { "@id": `${SITE_ORIGIN}/#organization` },
       },
+      ...(video
+        ? [
+            {
+              "@type": "VideoObject",
+              "@id": `${pageUrl}#demo-video`,
+              name: video.name,
+              description: video.description,
+              thumbnailUrl: siteUrl(video.thumbnailPath),
+              uploadDate: video.uploadDate,
+              duration: video.duration,
+              contentUrl: siteUrl(video.contentPath),
+              inLanguage: "ja-JP",
+              mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
+              publisher: { "@id": `${SITE_ORIGIN}/#organization` },
+            },
+          ]
+        : []),
     ],
   };
 }

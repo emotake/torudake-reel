@@ -5,11 +5,18 @@ import { GuideArticle } from "../guide-article";
 const title = "Instagramリール用の動画をスマホで編集する方法";
 const description =
   "スマホで撮った日常の動画や写真から、Instagramリール向けの縦型動画を作る手順を紹介します。自動カット、自動テロップ、AIナレーションを必要に応じて選べます。";
+const imagePath = "/campaign/recognition-202609/daily-poster.jpg";
 
 export const metadata = buildPublicPageMetadata({
   title: `${title}｜撮るだけリール`,
   description,
   path: "/guide/instagram-reels-editing",
+  image: {
+    path: imagePath,
+    width: 1080,
+    height: 1920,
+    alt: "日常やお出かけの動画をInstagramリール向けに整えた完成例",
+  },
 });
 
 export default function InstagramReelsEditingGuide() {
@@ -18,6 +25,32 @@ export default function InstagramReelsEditingGuide() {
       title={title}
       description={description}
       path="/guide/instagram-reels-editing"
+      imagePath={imagePath}
+      demo={{
+        id: "instagram_reels",
+        title: "編集で止まっていた日常の動画を、投稿できる縦型の1本へ進められます。",
+        conclusion: "動画1本、複数動画、写真から作り方を選び、カット・テロップ・AIナレーションは必要なものだけ使えます。完成形を見てから保存方法を選べます。",
+        videoPath: "/campaign/recognition-202609/daily-b.mp4",
+        posterPath: imagePath,
+        videoDescription: "カメラロールで眠っていた日常の景色から、使いたい場面を選んで縦型動画へ整える10秒の例です。",
+        facts: [
+          { label: "入力", value: "日常・お出かけで撮った縦動画" },
+          { label: "設定", value: "使いたい場面を選ぶ／元音声を活かす" },
+          { label: "完成", value: "10秒・縦1080×1920・MP4" },
+        ],
+        available: [
+          "動画1本、2〜5本の動画、2〜10枚の写真から作成",
+          "自動カット、テロップ、AIナレーションを必要に応じて選択",
+          "Instagram向け投稿文の下書きを確認",
+        ],
+        notes: [
+          "Instagramへの自動投稿は行いません。保存した動画をInstagramアプリから投稿します。",
+          "動画の完成尺は最大90秒です。素材や設定により仕上がりは変わります。",
+          "編集とプレビューには初回上限があり、完成動画の保存時に料金を選びます。",
+        ],
+        ctaHref: "/#create",
+        ctaLabel: "手元の素材に合う作り方を選ぶ",
+      }}
     >
       <article>
         <h2>動画1本・複数動画・写真から選ぶ</h2>

@@ -235,10 +235,48 @@ test("renders an indexable Instagram Reels editing guide", async () => {
   assert.match(html, /動画1本・複数動画・写真から選ぶ/);
   assert.match(html, /カットとテロップは必要なものだけ使う/);
   assert.match(html, /保存前に投稿先をInstagramにする/);
+  assert.match(html, /daily-b\.mp4/);
+  assert.match(html, /10秒の完成例/);
+  assert.match(html, /このページの方法でできること/);
+  assert.match(html, /Instagramへの自動投稿は行いません/);
   assert.match(html, /"@type":"Article"/);
+  assert.match(html, /"@type":"VideoObject"/);
+  assert.match(html, /"duration":"PT10S"/);
+  assert.match(
+    html,
+    /<meta property="og:image" content="https:\/\/torudake-reel\.pages\.dev\/campaign\/recognition-202609\/daily-poster\.jpg"/,
+  );
   assert.match(html, /"@type":"BreadcrumbList"/);
   assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
 });
+
+for (const guide of [
+  {
+    path: "/guide/automatic-video-captions",
+    video: "talking-b.mp4",
+    poster: "talking-poster.jpg",
+    copy: "文字修正だけなら音声認識をやり直しません",
+  },
+  {
+    path: "/guide/youtube-shorts-editing",
+    video: "shop-b.mp4",
+    poster: "shop-poster.jpg",
+    copy: "YouTubeへの自動アップロードは行いません",
+  },
+]) {
+  test(`renders evidence, unique media and video data on ${guide.path}`, async () => {
+    const response = await render(guide.path);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, new RegExp(guide.video.replace(".", "\\.")));
+    assert.match(html, new RegExp(guide.poster.replace(".", "\\.")));
+    assert.match(html, new RegExp(guide.copy));
+    assert.match(html, /10秒の完成例/);
+    assert.match(html, /"@type":"VideoObject"/);
+    assert.match(html, /"duration":"PT10S"/);
+    assert.doesNotMatch(html, /<meta name="robots" content="noindex/);
+  });
+}
 
 for (const useCase of [
   {

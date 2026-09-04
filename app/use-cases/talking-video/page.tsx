@@ -4,7 +4,17 @@ import UseCasePage from "../use-case-page";
 
 const title = "会話・解説動画に自動テロップ｜撮るだけリール";
 const description = "話して撮った動画の音声を活かし、不要な場面を選び直して自動テロップを付ける使い方を動画で紹介します。";
-export const metadata: Metadata = buildPublicPageMetadata({ title, description, path: "/use-cases/talking-video" });
+export const metadata: Metadata = buildPublicPageMetadata({
+  title,
+  description,
+  path: "/use-cases/talking-video",
+  image: {
+    path: "/campaign/recognition-202609/talking-poster.jpg",
+    width: 1080,
+    height: 1920,
+    alt: "会話・解説動画に自動テロップを付けた完成例",
+  },
+});
 
 export default function TalkingVideoPage() {
   return <UseCasePage content={{
