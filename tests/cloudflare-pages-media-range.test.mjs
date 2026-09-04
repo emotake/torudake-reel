@@ -103,6 +103,22 @@ test("continues to serve current public media through Pages assets", async () =>
   );
 });
 
+test("serves campaign videos through the same seekable media path", async () => {
+  const response = await requestMedia({
+    path: "/campaign/recognition-202609/talking-b.mp4",
+    range: "bytes=0-3",
+  });
+
+  assert.equal(response.status, 206);
+  assert.equal(response.headers.get("content-range"), "bytes 0-3/10");
+  assert.equal(response.headers.get("content-length"), "4");
+  assert.equal(response.headers.get("accept-ranges"), "bytes");
+  assert.equal(
+    response.headers.get("cache-control"),
+    "public, max-age=86400, stale-while-revalidate=604800",
+  );
+});
+
 test("streams full public media with seek and cache metadata", async () => {
   const response = await requestMedia();
 

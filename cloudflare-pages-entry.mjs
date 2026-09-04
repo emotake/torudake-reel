@@ -1,7 +1,7 @@
 import worker from "./dist/server/index.js";
 import { setRuntimeEnvironment } from "./cloudflare-pages-env-shim.mjs";
 
-const PUBLIC_MEDIA_PREFIX = "/demo/";
+const PUBLIC_MEDIA_PREFIXES = ["/demo/", "/campaign/"];
 const PUBLIC_MEDIA_CACHE_CONTROL =
   "public, max-age=86400, stale-while-revalidate=604800";
 const RETIRED_PUBLIC_MEDIA_PATHS = new Set([
@@ -54,12 +54,12 @@ const pagesWorker = {
           },
         });
       } else if (
-        // Pages static assets currently answer Range requests with 200. Keep demo
-        // media in the Worker route so browsers can seek without downloading from
-        // the beginning, while continuing to source the immutable bytes from the
-        // Pages asset namespace.
+        // Pages static assets currently answer Range requests with 200. Keep
+        // public demo and campaign media in the Worker route so browsers can seek
+        // without downloading from the beginning, while continuing to source the
+        // immutable bytes from the Pages asset namespace.
         (request.method === "GET" || request.method === "HEAD") &&
-        url.pathname.startsWith(PUBLIC_MEDIA_PREFIX)
+        PUBLIC_MEDIA_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))
       ) {
         response = await servePublicMedia(sanitizedRequest, env);
       } else if (
