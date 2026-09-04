@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../../lib/site-metadata";
 import { GuideArticle } from "../guide-article";
+import { EDITOR_SCREENSHOTS } from "../guide-proof-assets";
 
 const title = "YouTubeショート用の動画をスマホで編集する方法";
 const description =
@@ -26,6 +27,7 @@ export default function YoutubeShortsEditingGuide() {
       description={description}
       path="/guide/youtube-shorts-editing"
       imagePath={imagePath}
+      screenshots={EDITOR_SCREENSHOTS}
       demo={{
         id: "youtube_shorts",
         title: "商品やお店の動画も、順番と伝えたい内容を確認してショート動画にできます。",

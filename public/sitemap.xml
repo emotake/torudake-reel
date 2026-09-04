@@ -155,21 +155,53 @@
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/iphone-mov-reel</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/editor-step-setup.png</image:loc>
+      <image:title>iPhoneのMOVを選ぶ実際の編集画面</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/silent-video-narration</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/editor-step-preview.png</image:loc>
+      <image:title>AIナレーションの仕上がり確認画面</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/guide/japanese-reading</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/editor-step-options.png</image:loc>
+      <image:title>商品名・人名・地名の正しい表記を入力する画面</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://torudake-reel.pages.dev/case-studies</loc>
+    <lastmod>2026-09-04</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/editor-step-preview.png</image:loc>
+      <image:title>ショート動画の運営検証事例</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://torudake-reel.pages.dev/compare/video-editing-methods</loc>
+    <lastmod>2026-09-04</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <image:image>
+      <image:loc>https://torudake-reel.pages.dev/campaign/recognition-202609/editor-step-options.png</image:loc>
+      <image:title>自動編集・テンプレート編集・編集代行の違い</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://torudake-reel.pages.dev/support</loc>

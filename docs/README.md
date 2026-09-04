@@ -27,6 +27,7 @@
 - [Google自然検索の成長施策](growth/organic-search-strategy-2026-09.md) — 検索テーマ、競合差、12週間の実行順と評価指標
 - [Google検索流入の改善計画](growth/google-search-growth-2026-09.md) — 実装済みSEOとSearch Console確認手順
 - [認知施策パイロット](growth/recognition-pilot-2026-09.md) — Instagram・YouTubeの用途別配信と流入計測
+- [Search Console開始値](growth/search-console-baseline-2026-09-04.md) — 公開前後を比較する検索・動画登録の基準値
 
 ## セキュリティと課金
 

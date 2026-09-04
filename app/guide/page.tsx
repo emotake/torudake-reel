@@ -77,6 +77,15 @@ export default function GuideIndexPage() {
             </p>
           </article>
         ))}
+        <article>
+          <h2>実際の条件と、ほかの作り方も確認する</h2>
+          <p>運営側で使った素材・設定・制約と、自動編集・テンプレート編集・編集代行の違いを公開しています。</p>
+          <p>
+            <Link href="/case-studies">運営検証事例を見る →</Link>
+            {" ／ "}
+            <Link href="/compare/video-editing-methods">動画編集方法を比較する →</Link>
+          </p>
+        </article>
       </main>
       <SiteFooter />
     </>

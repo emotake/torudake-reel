@@ -19,6 +19,10 @@ export type UseCasePageContent = {
   videoDescription: string;
   ctaHref: string;
   ctaLabel: string;
+  verification: readonly {
+    label: string;
+    value: string;
+  }[];
   fit: readonly [string, string, string];
   choices: readonly {
     title: string;
@@ -96,6 +100,24 @@ export default function UseCasePage({ content }: { content: UseCasePageContent }
             <li key={step}><span>0{index + 1}</span><p>{step}</p></li>
           ))}
         </ol>
+      </section>
+
+      <section className={styles.verification} aria-labelledby="useCaseVerificationTitle">
+        <div>
+          <p className={styles.eyebrow}>運営検証</p>
+          <h2 id="useCaseVerificationTitle">この実演で確認した条件</h2>
+          <p>
+            実利用者の成果を装った事例ではありません。公開中の機能と素材を使い、運営側で確認した条件と制約を記録しています。
+          </p>
+        </div>
+        <dl>
+          {content.verification.map((item) => (
+            <div key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <section className={styles.guide} aria-labelledby="useCaseGuideTitle">

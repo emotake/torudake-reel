@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element -- Local, dimensioned product screenshots document the real UI. */
 "use client";
 
 import Link from "next/link";
@@ -7,15 +8,21 @@ import { trackClientEvent } from "../../lib/client-analytics";
 export type GuideDemoId =
   | "automatic_captions"
   | "instagram_reels"
-  | "youtube_shorts";
+  | "youtube_shorts"
+  | "ai_narration"
+  | "iphone_mov"
+  | "japanese_reading";
 
 export type GuideDemoContent = {
   id: GuideDemoId;
   title: string;
   conclusion: string;
-  videoPath: string;
+  videoPath?: string;
+  audioPath?: string;
+  imagePath?: string;
   posterPath: string;
   videoDescription: string;
+  mediaLabel?: string;
   facts: readonly { label: string; value: string }[];
   available: readonly string[];
   notes: readonly string[];
@@ -42,20 +49,45 @@ export default function GuideDemo({ demo }: { demo: GuideDemoContent }) {
       </div>
 
       <figure className="guideProofVideo">
-        <span>10秒の完成例</span>
-        <video
-          controls
-          playsInline
-          preload="metadata"
-          poster={demo.posterPath}
-          onPlay={() => {
-            if (trackedPlayback.current) return;
-            trackedPlayback.current = true;
-            trackClientEvent("guide_demo_started", { guide: demo.id });
-          }}
-        >
-          <source src={demo.videoPath} type="video/mp4" />
-        </video>
+        <span>{demo.mediaLabel ?? "10秒の完成例"}</span>
+        {demo.videoPath ? (
+          <video
+            controls
+            playsInline
+            preload="metadata"
+            poster={demo.posterPath}
+            onPlay={() => {
+              if (trackedPlayback.current) return;
+              trackedPlayback.current = true;
+              trackClientEvent("guide_demo_started", { guide: demo.id });
+            }}
+          >
+            <source src={demo.videoPath} type="video/mp4" />
+          </video>
+        ) : null}
+        {demo.audioPath ? (
+          <div className="guideProofAudio">
+            <img src={demo.posterPath} alt="AIナレーションの設定と仕上がり確認画面" />
+            <audio
+              controls
+              preload="metadata"
+              onPlay={() => {
+                if (trackedPlayback.current) return;
+                trackedPlayback.current = true;
+                trackClientEvent("guide_demo_started", { guide: demo.id });
+              }}
+            >
+              <source src={demo.audioPath} type="audio/wav" />
+            </audio>
+          </div>
+        ) : null}
+        {demo.imagePath ? (
+          <img
+            className="guideProofStill"
+            src={demo.imagePath}
+            alt={demo.videoDescription}
+          />
+        ) : null}
         <figcaption>{demo.videoDescription}</figcaption>
       </figure>
 

@@ -9376,6 +9376,36 @@ a {
   box-shadow: 0 18px 45px rgba(14, 23, 40, 0.18);
 }
 
+.guideProofStill,
+.guideProofAudio > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 20px;
+  background: #f4f0e8;
+  object-fit: cover;
+  object-position: top;
+  box-shadow: 0 18px 45px rgba(14, 23, 40, 0.12);
+}
+
+.guideProofAudio {
+  overflow: hidden;
+  border-radius: 20px;
+  background: #101827;
+  box-shadow: 0 18px 45px rgba(14, 23, 40, 0.16);
+}
+
+.guideProofAudio > img {
+  border-radius: 20px 20px 0 0;
+  box-shadow: none;
+}
+
+.guideProofAudio audio {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 12px;
+}
+
 .guideProofVideo figcaption {
   margin-top: 11px;
   color: var(--muted);
@@ -9441,6 +9471,87 @@ a {
   line-height: 1.7;
 }
 
+.guideScreens {
+  margin: 42px 0 26px;
+  padding: clamp(22px, 4vw, 38px);
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: #fff;
+}
+
+.guideScreensHeading {
+  max-width: 700px;
+}
+
+.guideScreensHeading h2 {
+  margin: 0;
+  font-size: clamp(24px, 4vw, 36px);
+  letter-spacing: -0.04em;
+}
+
+.guideScreensHeading > p:last-child {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.guideScreensGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.guideScreensGrid figure {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #f8f5ef;
+}
+
+.guideScreensGrid figure > span {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(16, 24, 39, 0.9);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.guideScreensGrid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border-bottom: 1px solid var(--line);
+  object-fit: cover;
+  object-position: top;
+}
+
+.guideScreensGrid figcaption {
+  display: grid;
+  gap: 7px;
+  padding: 16px;
+}
+
+.guideScreensGrid figcaption strong {
+  font-size: 14px;
+}
+
+.guideScreensGrid figcaption small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 @media (max-width: 720px) {
   .guideProof {
     grid-template-columns: minmax(0, 1fr);
@@ -9453,8 +9564,13 @@ a {
   }
 
   .guideProofFacts,
-  .guideProofDetails {
+  .guideProofDetails,
+  .guideScreensGrid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guideScreens {
+    border-radius: 22px;
   }
 }
 

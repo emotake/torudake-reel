@@ -31,6 +31,13 @@ export default function ShopIntroductionPage() {
     videoDescription: "複数の素材を選び、投稿用の1本へまとめる流れの試作実演です。",
     ctaHref: "/video-mix",
     ctaLabel: "複数動画で無料プレビュー",
+    verification: [
+      { label: "素材", value: "外観・店内・商品を撮った複数の縦動画" },
+      { label: "設定", value: "撮影順を維持し、場面ごとの見せ方を確認" },
+      { label: "公開例", value: "約10秒・縦型MP4" },
+      { label: "人が確認した所", value: "場面の順番、冒頭コピー、商品が見える構図" },
+      { label: "制約", value: "写真と動画の同時編集は未対応で、それぞれ別の作り方です" },
+    ],
     fit: [
       "お店の外観、店内、商品を別々の動画で撮っている",
       "紹介したい場面はあるが、並べ方を考えるところで止まる",

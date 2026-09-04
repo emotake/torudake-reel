@@ -19,6 +19,13 @@
 .steps li { min-height: 150px; padding: 22px; border-radius: 22px; background: white; border: 1px solid #e3ddd5; }
 .steps li span { color: #f25a3c; font-weight: 900; }
 .steps li p { margin: 30px 0 0; font-weight: 800; line-height: 1.65; }
+.verification { max-width: 1160px; margin: 0 auto; padding: 0 28px 72px; display: grid; grid-template-columns: minmax(240px, .72fr) minmax(0, 1.28fr); gap: 28px; align-items: start; }
+.verification h2 { margin: 10px 0 14px; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.04em; }
+.verification > div > p:last-child { color: #596273; line-height: 1.8; }
+.verification dl { display: grid; gap: 10px; margin: 0; }
+.verification dl > div { display: grid; grid-template-columns: minmax(100px, .35fr) minmax(0, 1fr); gap: 18px; padding: 17px 18px; border: 1px solid #ded8cf; border-radius: 16px; background: rgba(255,255,255,.78); }
+.verification dt { color: #d9482c; font-size: .76rem; font-weight: 900; }
+.verification dd { margin: 0; color: #303a49; font-size: .9rem; font-weight: 750; line-height: 1.6; }
 .guide { max-width: 1160px; margin: 0 auto; padding: 20px 28px 72px; display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
 .fitCard, .choiceList { padding: 28px; border: 1px solid #ded8cf; border-radius: 26px; background: rgba(255,255,255,.78); }
 .fitCard h2 { margin: 10px 0 20px; font-size: clamp(1.7rem, 3vw, 2.4rem); letter-spacing: -.035em; }
@@ -44,7 +51,7 @@
 @media (max-width: 780px) {
   .hero { padding-top: 42px; grid-template-columns: 1fr; gap: 42px; }
   .problemSolution, .steps ol { grid-template-columns: 1fr; }
-  .guide, .faq > div { grid-template-columns: 1fr; }
+  .guide, .faq > div, .verification { grid-template-columns: 1fr; }
   .guide { padding-top: 0; }
   .videoCard { max-width: 430px; justify-self: center; box-shadow: 10px 12px 0 #f25a3c; }
 }

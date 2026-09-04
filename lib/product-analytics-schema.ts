@@ -100,6 +100,9 @@ const STRING_PROPERTY_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     "automatic_captions",
     "instagram_reels",
     "youtube_shorts",
+    "ai_narration",
+    "iphone_mov",
+    "japanese_reading",
   ]),
   offer_version: new Set(["monthly_primary_rescue_v1"]),
   transition: new Set([

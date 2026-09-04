@@ -31,6 +31,13 @@ export default function TalkingVideoPage() {
     videoDescription: "元音声を活かしながら、テロップと編集方法を選ぶ流れの試作実演です。",
     ctaHref: "/video-edit",
     ctaLabel: "自動テロップを無料で試す",
+    verification: [
+      { label: "素材", value: "日本語の会話・解説を含む縦動画" },
+      { label: "設定", value: "元音声を活かす・自動テロップあり" },
+      { label: "公開例", value: "約10秒・縦型MP4" },
+      { label: "人が確認した所", value: "文字、文の区切り、表示タイミング" },
+      { label: "制約", value: "声が小さい、音楽と重なる、同時発話では認識精度が下がる場合があります" },
+    ],
     fit: [
       "解説、レビュー、会話など、話し声の入った動画を投稿したい",
       "字幕起こしや無言部分の確認に時間を取られている",

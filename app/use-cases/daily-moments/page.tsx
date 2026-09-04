@@ -31,6 +31,13 @@ export default function DailyMomentsPage() {
     videoDescription: "日常の風景を選び、短いショート動画として見せる試作実演です。",
     ctaHref: "/video-edit",
     ctaLabel: "動画1本で無料プレビュー",
+    verification: [
+      { label: "素材", value: "日常・お出かけの縦動画" },
+      { label: "設定", value: "元の流れを維持し、必要な場面とテロップを確認" },
+      { label: "公開例", value: "約10秒・縦型MP4" },
+      { label: "人が確認した所", value: "冒頭コピー、構図、テロップの読みやすさ" },
+      { label: "制約", value: "元動画の画質や明るさ以上に高精細になるわけではありません" },
+    ],
     fit: [
       "旅行、散歩、休日などの日常動画を撮ったままにしている",
       "細かなタイムライン編集はせず、投稿できる形まで進めたい",

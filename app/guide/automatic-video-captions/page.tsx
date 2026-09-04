@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../../lib/site-metadata";
 import { GuideArticle } from "../guide-article";
+import { EDITOR_SCREENSHOTS } from "../guide-proof-assets";
 
 const title = "動画にテロップを自動生成する方法";
 const description =
@@ -26,6 +27,7 @@ export default function AutomaticVideoCaptionsGuide() {
       description={description}
       path="/guide/automatic-video-captions"
       imagePath={imagePath}
+      screenshots={EDITOR_SCREENSHOTS}
       demo={{
         id: "automatic_captions",
         title: "日本語の話し声から、テロップ付きの完成形まで確認できます。",

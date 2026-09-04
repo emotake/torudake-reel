@@ -38,6 +38,8 @@ const FOOTER_GROUPS = [
     id: "legal",
     title: "サービス情報",
     links: [
+      { href: "/case-studies", label: "運営検証事例" },
+      { href: "/compare/video-editing-methods", label: "作り方の違いを比較" },
       { href: "/privacy", label: "プライバシーポリシー" },
       { href: "/terms", label: "利用規約" },
       { href: "/commercial-disclosure", label: "特定商取引法に基づく表記" },

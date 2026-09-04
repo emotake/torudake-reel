@@ -71,6 +71,8 @@ test("lists only canonical public pages in the sitemap", () => {
     `${SITE_ORIGIN}/guide/iphone-mov-reel`,
     `${SITE_ORIGIN}/guide/silent-video-narration`,
     `${SITE_ORIGIN}/guide/japanese-reading`,
+    `${SITE_ORIGIN}/case-studies`,
+    `${SITE_ORIGIN}/compare/video-editing-methods`,
     `${SITE_ORIGIN}/support`,
     `${SITE_ORIGIN}/privacy`,
     `${SITE_ORIGIN}/terms`,
@@ -298,7 +300,21 @@ test("publishes useful, canonical guides without invented capability claims", as
   assert.match(guides[1], /path: "\/guide\/iphone-mov-reel"/);
   assert.match(guides[2], /元の映像をそのまま使う/);
   assert.match(guides[3], /画面に出す文字と、声の読み方を分けて/);
+  assert.ok(guides.every((source) => /demo=\{\{/.test(source)));
+  assert.ok(guides.every((source) => /screenshots=/.test(source)));
   assert.ok(guides.every((source) => !/完全無料|無制限|必ず/.test(source)));
+});
+
+test("publishes transparent operator evidence and comparison pages", async () => {
+  const [caseStudies, comparison, useCase] = await Promise.all([
+    readProjectFile("app/case-studies/page.tsx"),
+    readProjectFile("app/compare/video-editing-methods/page.tsx"),
+    readProjectFile("app/use-cases/use-case-page.tsx"),
+  ]);
+  assert.match(caseStudies, /実利用者の成果を装った事例ではなく/);
+  assert.match(comparison, /根拠のない平均値は掲載していません/);
+  assert.match(useCase, /運営側で確認した条件と制約/);
+  assert.doesNotMatch(caseStudies + comparison, /導入企業|利用者の声|満足度/);
 });
 
 test("publishes a Japanese web app manifest", () => {

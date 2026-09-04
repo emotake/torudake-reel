@@ -3,6 +3,7 @@ import { buildGuideStructuredData } from "../../lib/seo";
 import SiteFooter from "../site-footer";
 import StructuredData from "../structured-data";
 import GuideDemo, { type GuideDemoContent } from "./guide-demo";
+import GuideScreenshots, { type GuideScreenshot } from "./guide-screenshots";
 
 export function GuideArticle({
   title,
@@ -10,6 +11,7 @@ export function GuideArticle({
   path,
   imagePath,
   demo,
+  screenshots,
   children,
 }: {
   title: string;
@@ -17,6 +19,7 @@ export function GuideArticle({
   path: string;
   imagePath?: string;
   demo?: GuideDemoContent;
+  screenshots?: readonly GuideScreenshot[];
   children: React.ReactNode;
 }) {
   const structuredData = buildGuideStructuredData({
@@ -24,7 +27,7 @@ export function GuideArticle({
     description,
     path,
     imagePath,
-    video: demo
+    video: demo?.videoPath
       ? {
           name: demo.title,
           description: demo.videoDescription,
@@ -50,6 +53,7 @@ export function GuideArticle({
         <p>{description}</p>
       </header>
       {demo ? <GuideDemo demo={demo} /> : null}
+      {screenshots?.length ? <GuideScreenshots screenshots={screenshots} /> : null}
       {children}
       <article>
         <h2>まずは無料で仕上がりを確認</h2>

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buildPublicPageMetadata } from "../../../lib/site-metadata";
 import { GuideArticle } from "../guide-article";
+import { EDITOR_SCREENSHOTS } from "../guide-proof-assets";
 
 const title = "Instagramリール用の動画をスマホで編集する方法";
 const description =
@@ -26,6 +27,7 @@ export default function InstagramReelsEditingGuide() {
       description={description}
       path="/guide/instagram-reels-editing"
       imagePath={imagePath}
+      screenshots={EDITOR_SCREENSHOTS}
       demo={{
         id: "instagram_reels",
         title: "編集で止まっていた日常の動画を、投稿できる縦型の1本へ進められます。",

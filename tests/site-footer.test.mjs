@@ -60,6 +60,8 @@ const expectedLinks = [
   ["/guide/japanese-reading", "読み方を修正する"],
   ["/pricing", "料金を見る"],
   ["/support", "よくある質問・お問い合わせ"],
+  ["/case-studies", "運営検証事例"],
+  ["/compare/video-editing-methods", "作り方の違いを比較"],
   ["/privacy", "プライバシーポリシー"],
   ["/terms", "利用規約"],
   ["/commercial-disclosure", "特定商取引法に基づく表記"],
