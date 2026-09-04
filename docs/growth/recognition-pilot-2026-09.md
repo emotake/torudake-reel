@@ -91,7 +91,7 @@
 
 ## 公開前に必要な設定
 
-- `NEXT_PUBLIC_INSTAGRAM_URL`: 公式InstagramプロフィールのHTTPS URL
+- `NEXT_PUBLIC_INSTAGRAM_URL`: `https://www.instagram.com/torudake_reel/`（設定済み）
 - `NEXT_PUBLIC_YOUTUBE_URL`: 公式YouTubeチャンネルのHTTPS URL
 
-設定するとフッターの公式リンクと、Organization構造化データの`sameAs`へ同時に反映される。未設定時は誤ったリンクを出さない。
+Instagramはソースコードにも公開既定値を保持し、環境を復旧した直後からフッターとOrganization構造化データの`sameAs`へ反映する。YouTubeは設定すると同じ2か所へ反映され、未設定時は誤ったリンクを出さない。

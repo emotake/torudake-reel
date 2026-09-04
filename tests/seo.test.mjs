@@ -131,6 +131,9 @@ test("describes the real web application without invented ratings", () => {
   assert.ok(application);
   assert.equal(organization.url, `${SITE_ORIGIN}/`);
   assert.equal(organization.logo.url, `${SITE_ORIGIN}/icon-512-v2.png`);
+  assert.deepEqual(organization.sameAs, [
+    "https://www.instagram.com/torudake_reel/",
+  ]);
   assert.equal(website.publisher["@id"], `${SITE_ORIGIN}/#organization`);
   assert.equal(application.provider["@id"], `${SITE_ORIGIN}/#organization`);
   assert.equal(application.url, `${SITE_ORIGIN}/`);

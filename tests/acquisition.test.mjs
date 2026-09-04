@@ -51,6 +51,13 @@ test("builds consistent Instagram and YouTube campaign URLs", () => {
 });
 
 test("accepts only canonical official social profile URLs", () => {
+  assert.deepEqual(getPublicSocialLinks({}), [
+    {
+      id: "instagram",
+      label: "Instagram",
+      href: "https://www.instagram.com/torudake_reel/",
+    },
+  ]);
   assert.deepEqual(
     getPublicSocialLinks({
       NEXT_PUBLIC_INSTAGRAM_URL: "https://www.instagram.com/torudake.reel/?utm_source=test",

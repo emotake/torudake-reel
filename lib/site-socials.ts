@@ -4,6 +4,9 @@ export type PublicSocialLink = {
   href: string;
 };
 
+export const OFFICIAL_INSTAGRAM_URL =
+  "https://www.instagram.com/torudake_reel/";
+
 function normalizeSocialUrl(
   value: string | undefined,
   hostname: string,
@@ -27,7 +30,7 @@ export function getPublicSocialLinks(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): PublicSocialLink[] {
   const instagram = normalizeSocialUrl(
-    environment.NEXT_PUBLIC_INSTAGRAM_URL,
+    environment.NEXT_PUBLIC_INSTAGRAM_URL?.trim() || OFFICIAL_INSTAGRAM_URL,
     "instagram.com",
   );
   const youtube = normalizeSocialUrl(
